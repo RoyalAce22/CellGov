@@ -28,6 +28,7 @@
 )]
 
 pub mod assertions;
+pub mod console_cases;
 pub mod fixtures;
 pub mod golden;
 pub mod param_sfo;

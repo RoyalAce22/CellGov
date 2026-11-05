@@ -239,7 +239,7 @@ dependencies are intentionally absent. The workspace compiles under
 | `cellgov_trace`        | num_enum, strum, thiserror                                                 |
 | `cellgov_core`         | strum, thiserror                                                           |
 | `cellgov_lv2`          | num_enum, strum, thiserror                                                 |
-| `cellgov_testkit`      | tempfile                                                                   |
+| `cellgov_testkit`      | tempfile, thiserror                                                        |
 | `cellgov_ppu`          | derive_more, strum, thiserror                                              |
 | `cellgov_compare`      | serde, serde_json, strum, thiserror, toml                                  |
 | `cellgov_observation`  | serde, serde_json, sha2, strum, thiserror, toml                            |

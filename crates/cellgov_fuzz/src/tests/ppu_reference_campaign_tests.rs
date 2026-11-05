@@ -39,7 +39,12 @@ fn the_reference_directory_replays_clean_and_names_every_unit() {
     let c = &campaign.completeness;
     assert!(c.is_complete(), "{c:#?}");
     assert_eq!(c.covered + c.pending, c.units);
-    assert_eq!(campaign.vectors(), campaign.files.len());
+    assert!(
+        campaign.vectors() > campaign.files.len(),
+        "{} vectors in {} files",
+        campaign.vectors(),
+        campaign.files.len()
+    );
 }
 
 #[test]
@@ -82,9 +87,9 @@ fn a_one_bit_change_to_each_vectors_expected_pc_fails_its_replay() {
                 );
             };
             *value ^= 4;
-            let replays = replay_reference_set(&mutated).expect("replays");
+            let replay = replay_reference(&mutated.vectors[index].to_artifact()).expect("replays");
             assert!(
-                !replays[index].replay.is_match(),
+                !replay.is_match(),
                 "{} {}: the changed PC still matches",
                 run.file,
                 set.vectors[index].name

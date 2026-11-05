@@ -3,7 +3,7 @@
 use super::table::{probe_dir, PROFILE, SLOTS};
 
 /// Bytes one run of one case takes in the frame.
-pub(super) const RUN_BYTES: usize = 64;
+pub const RUN_BYTES: usize = 64;
 
 /// The frame's header bytes.
 const HEADER_BYTES: usize = 16;
@@ -58,7 +58,12 @@ fn dword(p: &[u8], at: usize) -> u64 {
     u64::from_be_bytes(p[at..at + 8].try_into().expect("8 bytes"))
 }
 
-/// Read the probe's committed capture.
+/// Reads the probe's committed capture.
+///
+/// # Panics
+///
+/// Panics if the frame cannot be read, or if its magic, size, case count
+/// or status disagrees with a capture of `cases` cases.
 pub fn capture(probe: &str, cases: usize) -> Capture {
     let p = payload(probe);
     assert_eq!(

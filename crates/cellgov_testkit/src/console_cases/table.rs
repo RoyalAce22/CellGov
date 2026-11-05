@@ -23,10 +23,10 @@ const VRS: std::ops::RangeInclusive<u8> = 1..=13;
 pub(super) const SLOTS: usize = 4;
 
 /// Bytes of the memory buffer a case may name: two reservation granules.
-pub(super) const MEM_BYTES: usize = 256;
+pub const MEM_BYTES: usize = 256;
 
 /// The GPR that holds the memory buffer's address.
-pub(super) const MEM_BASE_GPR: u8 = 10;
+pub const MEM_BASE_GPR: u8 = 10;
 
 /// A register or memory doubleword a case loads or records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,7 +57,7 @@ impl Reg {
     }
 
     /// The record slots the register takes.
-    pub(super) fn width(self) -> usize {
+    pub fn width(self) -> usize {
         match self {
             Reg::Vr(_) => 2,
             _ => 1,
@@ -66,7 +66,7 @@ impl Reg {
 
     /// Writes `v` into `s`; does nothing for a memory doubleword, which
     /// `s` does not hold.
-    pub(super) fn write(self, s: &mut PpuStateSnapshot, v: u128) {
+    pub fn write(self, s: &mut PpuStateSnapshot, v: u128) {
         match self {
             Reg::Gpr(n) => s.gpr[usize::from(n)] = v as u64,
             Reg::Fpr(n) => s.fpr[usize::from(n)] = v as u64,
@@ -132,7 +132,7 @@ impl Case {
 
     /// Every register loaded before the words: the inputs, then a preset
     /// for each recorded GPR, FPR or VR that no input names.
-    pub(super) fn loads(&self, index: usize) -> Vec<(Reg, u128)> {
+    pub fn loads(&self, index: usize) -> Vec<(Reg, u128)> {
         let mut out = self.inputs.clone();
         for &r in &self.record {
             if !matches!(r, Reg::Mem(_)) && !out.iter().any(|&(i, _)| i == r) {
@@ -145,7 +145,7 @@ impl Case {
     /// Each recorded register and its first record slot.
     ///
     /// A VR starts on an even slot, so `stvx` stores it 16-byte aligned.
-    pub(super) fn slots(&self) -> Vec<(Reg, usize)> {
+    pub fn slots(&self) -> Vec<(Reg, usize)> {
         let mut next = 0;
         self.record
             .iter()
@@ -204,8 +204,23 @@ fn list(field: &str) -> impl Iterator<Item = &str> {
     field.split(',').filter(|s| !s.is_empty() && *s != "-")
 }
 
-/// Parse a case table.
-pub fn parse_table(text: &str) -> Result<Vec<Case>, String> {
+/// A case table [`parse_table`] refuses: the reason, and the row at fault
+/// when one row breaks a rule.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
+pub struct CaseTableError(String);
+
+/// Parses a case table.
+///
+/// # Errors
+///
+/// Returns [`CaseTableError`] when the header, a row, or the set of cases
+/// breaks a rule of the table.
+pub fn parse_table(text: &str) -> Result<Vec<Case>, CaseTableError> {
+    parse_rows(text).map_err(CaseTableError)
+}
+
+fn parse_rows(text: &str) -> Result<Vec<Case>, String> {
     let mut lines = text.lines();
     let header = lines.next().ok_or("empty table")?;
     if header != "id\tasm\twords\tinputs\trecord\tmay_end_process" {
@@ -214,90 +229,7 @@ pub fn parse_table(text: &str) -> Result<Vec<Case>, String> {
     let mut cases: Vec<Case> = Vec::new();
     for (n, line) in lines.enumerate() {
         let at = |e: String| format!("row {}: {e}", n + 1);
-        let fields: Vec<&str> = line.split('\t').collect();
-        let [id, asm, words, inputs, record, fatal] = fields[..] else {
-            return Err(at(format!("{} fields", fields.len())));
-        };
-        let words = list(words)
-            .map(|w| hex(w).and_then(|v| u32::try_from(v).map_err(|e| e.to_string())))
-            .collect::<Result<Vec<u32>, String>>()
-            .map_err(at)?;
-        if words.is_empty() {
-            return Err(at("no words".into()));
-        }
-        let mut case = Case {
-            id: id.to_string(),
-            asm: asm.to_string(),
-            words,
-            inputs: Vec::new(),
-            cr: 0,
-            xer: 0,
-            fpscr: 0,
-            mem: None,
-            record: Vec::new(),
-            may_end_process: match fatal {
-                "0" => false,
-                "1" => true,
-                other => return Err(at(format!("may_end_process {other:?}"))),
-            },
-        };
-        for item in list(inputs) {
-            let (key, value) = item
-                .split_once('=')
-                .ok_or_else(|| at(format!("input {item:?}")))?;
-            if key == "mem" {
-                if case.mem.is_some() {
-                    return Err(at("mem loaded twice".into()));
-                }
-                let mut bytes = hex_bytes(value).map_err(at)?;
-                bytes.resize(MEM_BYTES, 0);
-                case.mem = Some(bytes);
-                continue;
-            }
-            let value = hex(value).map_err(at)?;
-            let narrow32 = |v: u128| u32::try_from(v).map_err(|_| at(format!("{key} {v:#x}")));
-            let narrow64 = |v: u128| u64::try_from(v).map_err(|_| at(format!("{key} {v:#x}")));
-            match key {
-                "cr" => case.cr = narrow32(value)?,
-                "xer" => case.xer = narrow64(value)?,
-                "fpscr" => case.fpscr = narrow32(value)?,
-                reg => {
-                    let reg = Reg::parse(reg).map_err(at)?;
-                    if matches!(reg, Reg::Mem(_)) {
-                        return Err(at(format!("{key}: memory is loaded with mem=")));
-                    }
-                    if !matches!(reg, Reg::Vr(_)) {
-                        narrow64(value)?;
-                    }
-                    if case.inputs.iter().any(|&(r, _)| r == reg) {
-                        return Err(at(format!("{reg:?} loaded twice")));
-                    }
-                    case.inputs.push((reg, value));
-                }
-            }
-        }
-        for item in list(record) {
-            let reg = Reg::parse(item).map_err(at)?;
-            if case.record.contains(&reg) {
-                return Err(at(format!("{reg:?} recorded twice")));
-            }
-            case.record.push(reg);
-        }
-        if case.mem.is_none() && case.record.iter().any(|r| matches!(r, Reg::Mem(_))) {
-            return Err(at("a memory record needs mem=".into()));
-        }
-        let base = Reg::Gpr(MEM_BASE_GPR);
-        if case.mem.is_some()
-            && (case.record.contains(&base) || case.inputs.iter().any(|&(r, _)| r == base))
-        {
-            return Err(at(format!(
-                "r{MEM_BASE_GPR} holds the memory buffer's address"
-            )));
-        }
-        let used = case.slots().last().map_or(0, |&(r, at)| at + r.width());
-        if used > SLOTS {
-            return Err(at(format!("the records take {used} slots")));
-        }
+        let case = parse_row(line).map_err(at)?;
         if cases.iter().any(|c| c.id == case.id) {
             return Err(at(format!("duplicate id {:?}", case.id)));
         }
@@ -309,6 +241,111 @@ pub fn parse_table(text: &str) -> Result<Vec<Case>, String> {
     Ok(cases)
 }
 
+/// One row as a case, checked on its own.
+fn parse_row(line: &str) -> Result<Case, String> {
+    let fields: Vec<&str> = line.split('\t').collect();
+    let [id, asm, words, inputs, record, fatal] = fields[..] else {
+        return Err(format!("{} fields", fields.len()));
+    };
+    let words = list(words)
+        .map(|w| hex(w).and_then(|v| u32::try_from(v).map_err(|e| e.to_string())))
+        .collect::<Result<Vec<u32>, String>>()?;
+    if words.is_empty() {
+        return Err("no words".into());
+    }
+    let mut case = Case {
+        id: id.to_string(),
+        asm: asm.to_string(),
+        words,
+        inputs: Vec::new(),
+        cr: 0,
+        xer: 0,
+        fpscr: 0,
+        mem: None,
+        record: Vec::new(),
+        may_end_process: match fatal {
+            "0" => false,
+            "1" => true,
+            other => return Err(format!("may_end_process {other:?}")),
+        },
+    };
+    for item in list(inputs) {
+        load_input(&mut case, item)?;
+    }
+    for item in list(record) {
+        let reg = Reg::parse(item)?;
+        if case.record.contains(&reg) {
+            return Err(format!("{reg:?} recorded twice"));
+        }
+        case.record.push(reg);
+    }
+    check_layout(&case)?;
+    Ok(case)
+}
+
+/// Applies one `key=value` input to the case.
+fn load_input(case: &mut Case, item: &str) -> Result<(), String> {
+    let (key, value) = item
+        .split_once('=')
+        .ok_or_else(|| format!("input {item:?}"))?;
+    if key == "mem" {
+        if case.mem.is_some() {
+            return Err("mem loaded twice".into());
+        }
+        let mut bytes = hex_bytes(value)?;
+        bytes.resize(MEM_BYTES, 0);
+        case.mem = Some(bytes);
+        return Ok(());
+    }
+    let value = hex(value)?;
+    match key {
+        "cr" => case.cr = narrow(key, value)?,
+        "xer" => case.xer = narrow(key, value)?,
+        "fpscr" => case.fpscr = narrow(key, value)?,
+        reg => load_reg(case, reg, value)?,
+    }
+    Ok(())
+}
+
+/// Applies one register input to the case.
+fn load_reg(case: &mut Case, key: &str, value: u128) -> Result<(), String> {
+    let reg = Reg::parse(key)?;
+    if matches!(reg, Reg::Mem(_)) {
+        return Err(format!("{key}: memory is loaded with mem="));
+    }
+    if !matches!(reg, Reg::Vr(_)) {
+        narrow::<u64>(key, value)?;
+    }
+    if case.inputs.iter().any(|&(r, _)| r == reg) {
+        return Err(format!("{reg:?} loaded twice"));
+    }
+    case.inputs.push((reg, value));
+    Ok(())
+}
+
+/// `value` as the input `key`'s width, or the refusal naming both.
+fn narrow<T: TryFrom<u128>>(key: &str, value: u128) -> Result<T, String> {
+    T::try_from(value).map_err(|_| format!("{key} {value:#x}"))
+}
+
+/// Refuses a case whose memory or records the probe routine cannot place.
+fn check_layout(case: &Case) -> Result<(), String> {
+    if case.mem.is_none() && case.record.iter().any(|r| matches!(r, Reg::Mem(_))) {
+        return Err("a memory record needs mem=".into());
+    }
+    let base = Reg::Gpr(MEM_BASE_GPR);
+    if case.mem.is_some()
+        && (case.record.contains(&base) || case.inputs.iter().any(|&(r, _)| r == base))
+    {
+        return Err(format!("r{MEM_BASE_GPR} holds the memory buffer's address"));
+    }
+    let used = case.slots().last().map_or(0, |&(r, at)| at + r.width());
+    if used > SLOTS {
+        return Err(format!("the records take {used} slots"));
+    }
+    Ok(())
+}
+
 /// `tests/micro/<probe>/`.
 pub fn probe_dir(probe: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -317,8 +354,16 @@ pub fn probe_dir(probe: &str) -> PathBuf {
 }
 
 /// The probe's parsed case table.
+///
+/// # Panics
+///
+/// Panics if the probe's `cases.tsv` cannot be read or does not parse.
 pub fn table(probe: &str) -> Vec<Case> {
     let path = probe_dir(probe).join("cases.tsv");
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     parse_table(&text).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
+
+#[cfg(test)]
+#[path = "tests/table_tests.rs"]
+mod tests;

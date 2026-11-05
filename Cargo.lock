@@ -512,6 +512,7 @@ dependencies = [
  "proc-macro2",
  "syn",
  "tempfile",
+ "thiserror",
 ]
 
 [[package]]

@@ -36,6 +36,7 @@ cellgov_trace = { path = "../cellgov_trace" }
 # 3.20 is the floor: `TempDir::into_path` became `TempDir::keep` there,
 # and the retain path calls `keep`.
 tempfile = { version = "3.20", optional = true }
+thiserror = "2"
 
 [dev-dependencies]
 # This crate's own tests, on itself: without it the `scratch` feature is

@@ -23,3 +23,15 @@ mod tests;
 #[cfg(test)]
 #[path = "../tests/ppu_reference_campaign_tests.rs"]
 mod campaign_tests;
+
+#[cfg(test)]
+#[path = "../tests/ppu_reference_capture.rs"]
+mod capture;
+
+#[cfg(test)]
+#[path = "../tests/ppu_reference_floor.rs"]
+mod floor;
+
+#[cfg(test)]
+#[path = "../tests/ppu_reference_capture_tests.rs"]
+mod capture_tests;

@@ -1,7 +1,6 @@
 //! The generator: a probe's `ppu/cases.h` from its case table.
 
-use super::frame::RUN_BYTES;
-use super::table::{Case, Reg, MEM_BASE_GPR, MEM_BYTES};
+use cellgov_testkit::console_cases::{Case, Reg, MEM_BASE_GPR, MEM_BYTES, RUN_BYTES};
 
 /// One line of the routine's assembly string.
 fn line(asm: &mut Vec<String>, text: String) {

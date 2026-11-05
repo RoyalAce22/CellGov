@@ -84,7 +84,9 @@ fn refusal(inputs: &str, record: &str) -> String {
     let text = format!(
         "id\tasm\twords\tinputs\trecord\tmay_end_process\na\tnop\t0x60000000\t{inputs}\t{record}\t0\n"
     );
-    parse_table(&text).expect_err(&format!("{inputs} / {record}"))
+    parse_table(&text)
+        .expect_err(&format!("{inputs} / {record}"))
+        .to_string()
 }
 
 #[test]
@@ -92,7 +94,9 @@ fn a_table_refuses_a_fatal_case_beside_another() {
     let text = "id\tasm\twords\tinputs\trecord\tmay_end_process\n\
                 a\tnop\t0x60000000\t-\t-\t1\n\
                 b\tnop\t0x60000000\t-\t-\t0\n";
-    let err = parse_table(text).expect_err("two cases, one fatal");
+    let err = parse_table(text)
+        .expect_err("two cases, one fatal")
+        .to_string();
     assert!(err.contains("only case"), "{err}");
 }
 

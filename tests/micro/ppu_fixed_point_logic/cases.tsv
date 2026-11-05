@@ -1,0 +1,921 @@
+id	asm	words	inputs	record	may_end_process
+and_p0	and r5, r3, r4	0x7c652038	r3=0x0,r4=0x7fffffff,xer=0x0	r5	0
+and_p1	and r5, r3, r4	0x7c652038	r3=0x1,r4=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+and_p2	and r5, r3, r4	0x7c652038	r3=0xffffffffffffffff,r4=0x7fffffffffffffff,xer=0x0	r5	0
+and_p3	and r5, r3, r4	0x7c652038	r3=0x7fffffff,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+and_p4	and r5, r3, r4	0x7c652038	r3=0x80000000,r4=0x123456789abcdef,xer=0x0	r5	0
+and_p5	and r5, r3, r4	0x7c652038	r3=0x7fffffffffffffff,r4=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+and_p6	and r5, r3, r4	0x7c652038	r3=0x8000000000000000,r4=0x1,xer=0x0	r5	0
+and_p7	and r5, r3, r4	0x7c652038	r3=0x123456789abcdef,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+and_p8	and r5, r3, r4	0x7c652038	r3=0x8000000000000000,r4=0xffffffffffffffff,xer=0x0	r5	0
+and_p9	and r5, r3, r4	0x7c652038	r3=0x80000000,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+and_p10	and r5, r3, r4	0x7c652038	r3=0xffffffffffffffff,r4=0xffffffffffffffff,xer=0x0	r5	0
+and_p11	and r5, r3, r4	0x7c652038	r3=0x1,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+and_p12	and r5, r3, r4	0x7c652038	r3=0x7fffffffffffffff,r4=0x1,xer=0x0	r5	0
+and_p13	and r5, r3, r4	0x7c652038	r3=0x8000000000000000,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+and_p14	and r5, r3, r4	0x7c652038	r3=0x123456789abcdef,r4=0xffffffff80000000,xer=0x0	r5	0
+and_p15	and r5, r3, r4	0x7c652038	r3=0xffffffff80000000,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+anddot_p0	and. r5, r3, r4	0x7c652039	r3=0x0,r4=0x7fffffff,xer=0x0	r5	0
+anddot_p1	and. r5, r3, r4	0x7c652039	r3=0x1,r4=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+anddot_p2	and. r5, r3, r4	0x7c652039	r3=0xffffffffffffffff,r4=0x7fffffffffffffff,xer=0x0	r5	0
+anddot_p3	and. r5, r3, r4	0x7c652039	r3=0x7fffffff,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+anddot_p4	and. r5, r3, r4	0x7c652039	r3=0x80000000,r4=0x123456789abcdef,xer=0x0	r5	0
+anddot_p5	and. r5, r3, r4	0x7c652039	r3=0x7fffffffffffffff,r4=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+anddot_p6	and. r5, r3, r4	0x7c652039	r3=0x8000000000000000,r4=0x1,xer=0x0	r5	0
+anddot_p7	and. r5, r3, r4	0x7c652039	r3=0x123456789abcdef,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+anddot_p8	and. r5, r3, r4	0x7c652039	r3=0x8000000000000000,r4=0xffffffffffffffff,xer=0x0	r5	0
+anddot_p9	and. r5, r3, r4	0x7c652039	r3=0x80000000,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+anddot_p10	and. r5, r3, r4	0x7c652039	r3=0xffffffffffffffff,r4=0xffffffffffffffff,xer=0x0	r5	0
+anddot_p11	and. r5, r3, r4	0x7c652039	r3=0x1,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+anddot_p12	and. r5, r3, r4	0x7c652039	r3=0x7fffffffffffffff,r4=0x1,xer=0x0	r5	0
+anddot_p13	and. r5, r3, r4	0x7c652039	r3=0x8000000000000000,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+anddot_p14	and. r5, r3, r4	0x7c652039	r3=0x123456789abcdef,r4=0xffffffff80000000,xer=0x0	r5	0
+anddot_p15	and. r5, r3, r4	0x7c652039	r3=0xffffffff80000000,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andc_p0	andc r5, r3, r4	0x7c652078	r3=0x0,r4=0x7fffffff,xer=0x0	r5	0
+andc_p1	andc r5, r3, r4	0x7c652078	r3=0x1,r4=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andc_p2	andc r5, r3, r4	0x7c652078	r3=0xffffffffffffffff,r4=0x7fffffffffffffff,xer=0x0	r5	0
+andc_p3	andc r5, r3, r4	0x7c652078	r3=0x7fffffff,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andc_p4	andc r5, r3, r4	0x7c652078	r3=0x80000000,r4=0x123456789abcdef,xer=0x0	r5	0
+andc_p5	andc r5, r3, r4	0x7c652078	r3=0x7fffffffffffffff,r4=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andc_p6	andc r5, r3, r4	0x7c652078	r3=0x8000000000000000,r4=0x1,xer=0x0	r5	0
+andc_p7	andc r5, r3, r4	0x7c652078	r3=0x123456789abcdef,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andc_p8	andc r5, r3, r4	0x7c652078	r3=0x8000000000000000,r4=0xffffffffffffffff,xer=0x0	r5	0
+andc_p9	andc r5, r3, r4	0x7c652078	r3=0x80000000,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andc_p10	andc r5, r3, r4	0x7c652078	r3=0xffffffffffffffff,r4=0xffffffffffffffff,xer=0x0	r5	0
+andc_p11	andc r5, r3, r4	0x7c652078	r3=0x1,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andc_p12	andc r5, r3, r4	0x7c652078	r3=0x7fffffffffffffff,r4=0x1,xer=0x0	r5	0
+andc_p13	andc r5, r3, r4	0x7c652078	r3=0x8000000000000000,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andc_p14	andc r5, r3, r4	0x7c652078	r3=0x123456789abcdef,r4=0xffffffff80000000,xer=0x0	r5	0
+andc_p15	andc r5, r3, r4	0x7c652078	r3=0xffffffff80000000,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andcdot_p0	andc. r5, r3, r4	0x7c652079	r3=0x0,r4=0x7fffffff,xer=0x0	r5	0
+andcdot_p1	andc. r5, r3, r4	0x7c652079	r3=0x1,r4=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andcdot_p2	andc. r5, r3, r4	0x7c652079	r3=0xffffffffffffffff,r4=0x7fffffffffffffff,xer=0x0	r5	0
+andcdot_p3	andc. r5, r3, r4	0x7c652079	r3=0x7fffffff,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andcdot_p4	andc. r5, r3, r4	0x7c652079	r3=0x80000000,r4=0x123456789abcdef,xer=0x0	r5	0
+andcdot_p5	andc. r5, r3, r4	0x7c652079	r3=0x7fffffffffffffff,r4=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andcdot_p6	andc. r5, r3, r4	0x7c652079	r3=0x8000000000000000,r4=0x1,xer=0x0	r5	0
+andcdot_p7	andc. r5, r3, r4	0x7c652079	r3=0x123456789abcdef,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andcdot_p8	andc. r5, r3, r4	0x7c652079	r3=0x8000000000000000,r4=0xffffffffffffffff,xer=0x0	r5	0
+andcdot_p9	andc. r5, r3, r4	0x7c652079	r3=0x80000000,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andcdot_p10	andc. r5, r3, r4	0x7c652079	r3=0xffffffffffffffff,r4=0xffffffffffffffff,xer=0x0	r5	0
+andcdot_p11	andc. r5, r3, r4	0x7c652079	r3=0x1,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andcdot_p12	andc. r5, r3, r4	0x7c652079	r3=0x7fffffffffffffff,r4=0x1,xer=0x0	r5	0
+andcdot_p13	andc. r5, r3, r4	0x7c652079	r3=0x8000000000000000,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andcdot_p14	andc. r5, r3, r4	0x7c652079	r3=0x123456789abcdef,r4=0xffffffff80000000,xer=0x0	r5	0
+andcdot_p15	andc. r5, r3, r4	0x7c652079	r3=0xffffffff80000000,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+eqv_p0	eqv r5, r3, r4	0x7c652238	r3=0x0,r4=0x7fffffff,xer=0x0	r5	0
+eqv_p1	eqv r5, r3, r4	0x7c652238	r3=0x1,r4=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+eqv_p2	eqv r5, r3, r4	0x7c652238	r3=0xffffffffffffffff,r4=0x7fffffffffffffff,xer=0x0	r5	0
+eqv_p3	eqv r5, r3, r4	0x7c652238	r3=0x7fffffff,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+eqv_p4	eqv r5, r3, r4	0x7c652238	r3=0x80000000,r4=0x123456789abcdef,xer=0x0	r5	0
+eqv_p5	eqv r5, r3, r4	0x7c652238	r3=0x7fffffffffffffff,r4=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+eqv_p6	eqv r5, r3, r4	0x7c652238	r3=0x8000000000000000,r4=0x1,xer=0x0	r5	0
+eqv_p7	eqv r5, r3, r4	0x7c652238	r3=0x123456789abcdef,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+eqv_p8	eqv r5, r3, r4	0x7c652238	r3=0x8000000000000000,r4=0xffffffffffffffff,xer=0x0	r5	0
+eqv_p9	eqv r5, r3, r4	0x7c652238	r3=0x80000000,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+eqv_p10	eqv r5, r3, r4	0x7c652238	r3=0xffffffffffffffff,r4=0xffffffffffffffff,xer=0x0	r5	0
+eqv_p11	eqv r5, r3, r4	0x7c652238	r3=0x1,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+eqv_p12	eqv r5, r3, r4	0x7c652238	r3=0x7fffffffffffffff,r4=0x1,xer=0x0	r5	0
+eqv_p13	eqv r5, r3, r4	0x7c652238	r3=0x8000000000000000,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+eqv_p14	eqv r5, r3, r4	0x7c652238	r3=0x123456789abcdef,r4=0xffffffff80000000,xer=0x0	r5	0
+eqv_p15	eqv r5, r3, r4	0x7c652238	r3=0xffffffff80000000,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+eqvdot_p0	eqv. r5, r3, r4	0x7c652239	r3=0x0,r4=0x7fffffff,xer=0x0	r5	0
+eqvdot_p1	eqv. r5, r3, r4	0x7c652239	r3=0x1,r4=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+eqvdot_p2	eqv. r5, r3, r4	0x7c652239	r3=0xffffffffffffffff,r4=0x7fffffffffffffff,xer=0x0	r5	0
+eqvdot_p3	eqv. r5, r3, r4	0x7c652239	r3=0x7fffffff,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+eqvdot_p4	eqv. r5, r3, r4	0x7c652239	r3=0x80000000,r4=0x123456789abcdef,xer=0x0	r5	0
+eqvdot_p5	eqv. r5, r3, r4	0x7c652239	r3=0x7fffffffffffffff,r4=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+eqvdot_p6	eqv. r5, r3, r4	0x7c652239	r3=0x8000000000000000,r4=0x1,xer=0x0	r5	0
+eqvdot_p7	eqv. r5, r3, r4	0x7c652239	r3=0x123456789abcdef,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+eqvdot_p8	eqv. r5, r3, r4	0x7c652239	r3=0x8000000000000000,r4=0xffffffffffffffff,xer=0x0	r5	0
+eqvdot_p9	eqv. r5, r3, r4	0x7c652239	r3=0x80000000,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+eqvdot_p10	eqv. r5, r3, r4	0x7c652239	r3=0xffffffffffffffff,r4=0xffffffffffffffff,xer=0x0	r5	0
+eqvdot_p11	eqv. r5, r3, r4	0x7c652239	r3=0x1,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+eqvdot_p12	eqv. r5, r3, r4	0x7c652239	r3=0x7fffffffffffffff,r4=0x1,xer=0x0	r5	0
+eqvdot_p13	eqv. r5, r3, r4	0x7c652239	r3=0x8000000000000000,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+eqvdot_p14	eqv. r5, r3, r4	0x7c652239	r3=0x123456789abcdef,r4=0xffffffff80000000,xer=0x0	r5	0
+eqvdot_p15	eqv. r5, r3, r4	0x7c652239	r3=0xffffffff80000000,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nand_p0	nand r5, r3, r4	0x7c6523b8	r3=0x0,r4=0x7fffffff,xer=0x0	r5	0
+nand_p1	nand r5, r3, r4	0x7c6523b8	r3=0x1,r4=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nand_p2	nand r5, r3, r4	0x7c6523b8	r3=0xffffffffffffffff,r4=0x7fffffffffffffff,xer=0x0	r5	0
+nand_p3	nand r5, r3, r4	0x7c6523b8	r3=0x7fffffff,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nand_p4	nand r5, r3, r4	0x7c6523b8	r3=0x80000000,r4=0x123456789abcdef,xer=0x0	r5	0
+nand_p5	nand r5, r3, r4	0x7c6523b8	r3=0x7fffffffffffffff,r4=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nand_p6	nand r5, r3, r4	0x7c6523b8	r3=0x8000000000000000,r4=0x1,xer=0x0	r5	0
+nand_p7	nand r5, r3, r4	0x7c6523b8	r3=0x123456789abcdef,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nand_p8	nand r5, r3, r4	0x7c6523b8	r3=0x8000000000000000,r4=0xffffffffffffffff,xer=0x0	r5	0
+nand_p9	nand r5, r3, r4	0x7c6523b8	r3=0x80000000,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nand_p10	nand r5, r3, r4	0x7c6523b8	r3=0xffffffffffffffff,r4=0xffffffffffffffff,xer=0x0	r5	0
+nand_p11	nand r5, r3, r4	0x7c6523b8	r3=0x1,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nand_p12	nand r5, r3, r4	0x7c6523b8	r3=0x7fffffffffffffff,r4=0x1,xer=0x0	r5	0
+nand_p13	nand r5, r3, r4	0x7c6523b8	r3=0x8000000000000000,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nand_p14	nand r5, r3, r4	0x7c6523b8	r3=0x123456789abcdef,r4=0xffffffff80000000,xer=0x0	r5	0
+nand_p15	nand r5, r3, r4	0x7c6523b8	r3=0xffffffff80000000,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nanddot_p0	nand. r5, r3, r4	0x7c6523b9	r3=0x0,r4=0x7fffffff,xer=0x0	r5	0
+nanddot_p1	nand. r5, r3, r4	0x7c6523b9	r3=0x1,r4=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nanddot_p2	nand. r5, r3, r4	0x7c6523b9	r3=0xffffffffffffffff,r4=0x7fffffffffffffff,xer=0x0	r5	0
+nanddot_p3	nand. r5, r3, r4	0x7c6523b9	r3=0x7fffffff,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nanddot_p4	nand. r5, r3, r4	0x7c6523b9	r3=0x80000000,r4=0x123456789abcdef,xer=0x0	r5	0
+nanddot_p5	nand. r5, r3, r4	0x7c6523b9	r3=0x7fffffffffffffff,r4=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nanddot_p6	nand. r5, r3, r4	0x7c6523b9	r3=0x8000000000000000,r4=0x1,xer=0x0	r5	0
+nanddot_p7	nand. r5, r3, r4	0x7c6523b9	r3=0x123456789abcdef,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nanddot_p8	nand. r5, r3, r4	0x7c6523b9	r3=0x8000000000000000,r4=0xffffffffffffffff,xer=0x0	r5	0
+nanddot_p9	nand. r5, r3, r4	0x7c6523b9	r3=0x80000000,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nanddot_p10	nand. r5, r3, r4	0x7c6523b9	r3=0xffffffffffffffff,r4=0xffffffffffffffff,xer=0x0	r5	0
+nanddot_p11	nand. r5, r3, r4	0x7c6523b9	r3=0x1,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nanddot_p12	nand. r5, r3, r4	0x7c6523b9	r3=0x7fffffffffffffff,r4=0x1,xer=0x0	r5	0
+nanddot_p13	nand. r5, r3, r4	0x7c6523b9	r3=0x8000000000000000,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nanddot_p14	nand. r5, r3, r4	0x7c6523b9	r3=0x123456789abcdef,r4=0xffffffff80000000,xer=0x0	r5	0
+nanddot_p15	nand. r5, r3, r4	0x7c6523b9	r3=0xffffffff80000000,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nor_p0	nor r5, r3, r4	0x7c6520f8	r3=0x0,r4=0x7fffffff,xer=0x0	r5	0
+nor_p1	nor r5, r3, r4	0x7c6520f8	r3=0x1,r4=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nor_p2	nor r5, r3, r4	0x7c6520f8	r3=0xffffffffffffffff,r4=0x7fffffffffffffff,xer=0x0	r5	0
+nor_p3	nor r5, r3, r4	0x7c6520f8	r3=0x7fffffff,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nor_p4	nor r5, r3, r4	0x7c6520f8	r3=0x80000000,r4=0x123456789abcdef,xer=0x0	r5	0
+nor_p5	nor r5, r3, r4	0x7c6520f8	r3=0x7fffffffffffffff,r4=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nor_p6	nor r5, r3, r4	0x7c6520f8	r3=0x8000000000000000,r4=0x1,xer=0x0	r5	0
+nor_p7	nor r5, r3, r4	0x7c6520f8	r3=0x123456789abcdef,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nor_p8	nor r5, r3, r4	0x7c6520f8	r3=0x8000000000000000,r4=0xffffffffffffffff,xer=0x0	r5	0
+nor_p9	nor r5, r3, r4	0x7c6520f8	r3=0x80000000,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nor_p10	nor r5, r3, r4	0x7c6520f8	r3=0xffffffffffffffff,r4=0xffffffffffffffff,xer=0x0	r5	0
+nor_p11	nor r5, r3, r4	0x7c6520f8	r3=0x1,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nor_p12	nor r5, r3, r4	0x7c6520f8	r3=0x7fffffffffffffff,r4=0x1,xer=0x0	r5	0
+nor_p13	nor r5, r3, r4	0x7c6520f8	r3=0x8000000000000000,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nor_p14	nor r5, r3, r4	0x7c6520f8	r3=0x123456789abcdef,r4=0xffffffff80000000,xer=0x0	r5	0
+nor_p15	nor r5, r3, r4	0x7c6520f8	r3=0xffffffff80000000,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nordot_p0	nor. r5, r3, r4	0x7c6520f9	r3=0x0,r4=0x7fffffff,xer=0x0	r5	0
+nordot_p1	nor. r5, r3, r4	0x7c6520f9	r3=0x1,r4=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nordot_p2	nor. r5, r3, r4	0x7c6520f9	r3=0xffffffffffffffff,r4=0x7fffffffffffffff,xer=0x0	r5	0
+nordot_p3	nor. r5, r3, r4	0x7c6520f9	r3=0x7fffffff,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nordot_p4	nor. r5, r3, r4	0x7c6520f9	r3=0x80000000,r4=0x123456789abcdef,xer=0x0	r5	0
+nordot_p5	nor. r5, r3, r4	0x7c6520f9	r3=0x7fffffffffffffff,r4=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nordot_p6	nor. r5, r3, r4	0x7c6520f9	r3=0x8000000000000000,r4=0x1,xer=0x0	r5	0
+nordot_p7	nor. r5, r3, r4	0x7c6520f9	r3=0x123456789abcdef,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nordot_p8	nor. r5, r3, r4	0x7c6520f9	r3=0x8000000000000000,r4=0xffffffffffffffff,xer=0x0	r5	0
+nordot_p9	nor. r5, r3, r4	0x7c6520f9	r3=0x80000000,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nordot_p10	nor. r5, r3, r4	0x7c6520f9	r3=0xffffffffffffffff,r4=0xffffffffffffffff,xer=0x0	r5	0
+nordot_p11	nor. r5, r3, r4	0x7c6520f9	r3=0x1,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nordot_p12	nor. r5, r3, r4	0x7c6520f9	r3=0x7fffffffffffffff,r4=0x1,xer=0x0	r5	0
+nordot_p13	nor. r5, r3, r4	0x7c6520f9	r3=0x8000000000000000,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+nordot_p14	nor. r5, r3, r4	0x7c6520f9	r3=0x123456789abcdef,r4=0xffffffff80000000,xer=0x0	r5	0
+nordot_p15	nor. r5, r3, r4	0x7c6520f9	r3=0xffffffff80000000,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+or_p0	or r5, r3, r4	0x7c652378	r3=0x0,r4=0x7fffffff,xer=0x0	r5	0
+or_p1	or r5, r3, r4	0x7c652378	r3=0x1,r4=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+or_p2	or r5, r3, r4	0x7c652378	r3=0xffffffffffffffff,r4=0x7fffffffffffffff,xer=0x0	r5	0
+or_p3	or r5, r3, r4	0x7c652378	r3=0x7fffffff,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+or_p4	or r5, r3, r4	0x7c652378	r3=0x80000000,r4=0x123456789abcdef,xer=0x0	r5	0
+or_p5	or r5, r3, r4	0x7c652378	r3=0x7fffffffffffffff,r4=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+or_p6	or r5, r3, r4	0x7c652378	r3=0x8000000000000000,r4=0x1,xer=0x0	r5	0
+or_p7	or r5, r3, r4	0x7c652378	r3=0x123456789abcdef,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+or_p8	or r5, r3, r4	0x7c652378	r3=0x8000000000000000,r4=0xffffffffffffffff,xer=0x0	r5	0
+or_p9	or r5, r3, r4	0x7c652378	r3=0x80000000,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+or_p10	or r5, r3, r4	0x7c652378	r3=0xffffffffffffffff,r4=0xffffffffffffffff,xer=0x0	r5	0
+or_p11	or r5, r3, r4	0x7c652378	r3=0x1,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+or_p12	or r5, r3, r4	0x7c652378	r3=0x7fffffffffffffff,r4=0x1,xer=0x0	r5	0
+or_p13	or r5, r3, r4	0x7c652378	r3=0x8000000000000000,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+or_p14	or r5, r3, r4	0x7c652378	r3=0x123456789abcdef,r4=0xffffffff80000000,xer=0x0	r5	0
+or_p15	or r5, r3, r4	0x7c652378	r3=0xffffffff80000000,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ordot_p0	or. r5, r3, r4	0x7c652379	r3=0x0,r4=0x7fffffff,xer=0x0	r5	0
+ordot_p1	or. r5, r3, r4	0x7c652379	r3=0x1,r4=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ordot_p2	or. r5, r3, r4	0x7c652379	r3=0xffffffffffffffff,r4=0x7fffffffffffffff,xer=0x0	r5	0
+ordot_p3	or. r5, r3, r4	0x7c652379	r3=0x7fffffff,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ordot_p4	or. r5, r3, r4	0x7c652379	r3=0x80000000,r4=0x123456789abcdef,xer=0x0	r5	0
+ordot_p5	or. r5, r3, r4	0x7c652379	r3=0x7fffffffffffffff,r4=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ordot_p6	or. r5, r3, r4	0x7c652379	r3=0x8000000000000000,r4=0x1,xer=0x0	r5	0
+ordot_p7	or. r5, r3, r4	0x7c652379	r3=0x123456789abcdef,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ordot_p8	or. r5, r3, r4	0x7c652379	r3=0x8000000000000000,r4=0xffffffffffffffff,xer=0x0	r5	0
+ordot_p9	or. r5, r3, r4	0x7c652379	r3=0x80000000,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ordot_p10	or. r5, r3, r4	0x7c652379	r3=0xffffffffffffffff,r4=0xffffffffffffffff,xer=0x0	r5	0
+ordot_p11	or. r5, r3, r4	0x7c652379	r3=0x1,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ordot_p12	or. r5, r3, r4	0x7c652379	r3=0x7fffffffffffffff,r4=0x1,xer=0x0	r5	0
+ordot_p13	or. r5, r3, r4	0x7c652379	r3=0x8000000000000000,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ordot_p14	or. r5, r3, r4	0x7c652379	r3=0x123456789abcdef,r4=0xffffffff80000000,xer=0x0	r5	0
+ordot_p15	or. r5, r3, r4	0x7c652379	r3=0xffffffff80000000,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+orc_p0	orc r5, r3, r4	0x7c652338	r3=0x0,r4=0x7fffffff,xer=0x0	r5	0
+orc_p1	orc r5, r3, r4	0x7c652338	r3=0x1,r4=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+orc_p2	orc r5, r3, r4	0x7c652338	r3=0xffffffffffffffff,r4=0x7fffffffffffffff,xer=0x0	r5	0
+orc_p3	orc r5, r3, r4	0x7c652338	r3=0x7fffffff,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+orc_p4	orc r5, r3, r4	0x7c652338	r3=0x80000000,r4=0x123456789abcdef,xer=0x0	r5	0
+orc_p5	orc r5, r3, r4	0x7c652338	r3=0x7fffffffffffffff,r4=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+orc_p6	orc r5, r3, r4	0x7c652338	r3=0x8000000000000000,r4=0x1,xer=0x0	r5	0
+orc_p7	orc r5, r3, r4	0x7c652338	r3=0x123456789abcdef,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+orc_p8	orc r5, r3, r4	0x7c652338	r3=0x8000000000000000,r4=0xffffffffffffffff,xer=0x0	r5	0
+orc_p9	orc r5, r3, r4	0x7c652338	r3=0x80000000,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+orc_p10	orc r5, r3, r4	0x7c652338	r3=0xffffffffffffffff,r4=0xffffffffffffffff,xer=0x0	r5	0
+orc_p11	orc r5, r3, r4	0x7c652338	r3=0x1,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+orc_p12	orc r5, r3, r4	0x7c652338	r3=0x7fffffffffffffff,r4=0x1,xer=0x0	r5	0
+orc_p13	orc r5, r3, r4	0x7c652338	r3=0x8000000000000000,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+orc_p14	orc r5, r3, r4	0x7c652338	r3=0x123456789abcdef,r4=0xffffffff80000000,xer=0x0	r5	0
+orc_p15	orc r5, r3, r4	0x7c652338	r3=0xffffffff80000000,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+orcdot_p0	orc. r5, r3, r4	0x7c652339	r3=0x0,r4=0x7fffffff,xer=0x0	r5	0
+orcdot_p1	orc. r5, r3, r4	0x7c652339	r3=0x1,r4=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+orcdot_p2	orc. r5, r3, r4	0x7c652339	r3=0xffffffffffffffff,r4=0x7fffffffffffffff,xer=0x0	r5	0
+orcdot_p3	orc. r5, r3, r4	0x7c652339	r3=0x7fffffff,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+orcdot_p4	orc. r5, r3, r4	0x7c652339	r3=0x80000000,r4=0x123456789abcdef,xer=0x0	r5	0
+orcdot_p5	orc. r5, r3, r4	0x7c652339	r3=0x7fffffffffffffff,r4=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+orcdot_p6	orc. r5, r3, r4	0x7c652339	r3=0x8000000000000000,r4=0x1,xer=0x0	r5	0
+orcdot_p7	orc. r5, r3, r4	0x7c652339	r3=0x123456789abcdef,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+orcdot_p8	orc. r5, r3, r4	0x7c652339	r3=0x8000000000000000,r4=0xffffffffffffffff,xer=0x0	r5	0
+orcdot_p9	orc. r5, r3, r4	0x7c652339	r3=0x80000000,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+orcdot_p10	orc. r5, r3, r4	0x7c652339	r3=0xffffffffffffffff,r4=0xffffffffffffffff,xer=0x0	r5	0
+orcdot_p11	orc. r5, r3, r4	0x7c652339	r3=0x1,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+orcdot_p12	orc. r5, r3, r4	0x7c652339	r3=0x7fffffffffffffff,r4=0x1,xer=0x0	r5	0
+orcdot_p13	orc. r5, r3, r4	0x7c652339	r3=0x8000000000000000,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+orcdot_p14	orc. r5, r3, r4	0x7c652339	r3=0x123456789abcdef,r4=0xffffffff80000000,xer=0x0	r5	0
+orcdot_p15	orc. r5, r3, r4	0x7c652339	r3=0xffffffff80000000,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xor_p0	xor r5, r3, r4	0x7c652278	r3=0x0,r4=0x7fffffff,xer=0x0	r5	0
+xor_p1	xor r5, r3, r4	0x7c652278	r3=0x1,r4=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xor_p2	xor r5, r3, r4	0x7c652278	r3=0xffffffffffffffff,r4=0x7fffffffffffffff,xer=0x0	r5	0
+xor_p3	xor r5, r3, r4	0x7c652278	r3=0x7fffffff,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xor_p4	xor r5, r3, r4	0x7c652278	r3=0x80000000,r4=0x123456789abcdef,xer=0x0	r5	0
+xor_p5	xor r5, r3, r4	0x7c652278	r3=0x7fffffffffffffff,r4=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xor_p6	xor r5, r3, r4	0x7c652278	r3=0x8000000000000000,r4=0x1,xer=0x0	r5	0
+xor_p7	xor r5, r3, r4	0x7c652278	r3=0x123456789abcdef,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xor_p8	xor r5, r3, r4	0x7c652278	r3=0x8000000000000000,r4=0xffffffffffffffff,xer=0x0	r5	0
+xor_p9	xor r5, r3, r4	0x7c652278	r3=0x80000000,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xor_p10	xor r5, r3, r4	0x7c652278	r3=0xffffffffffffffff,r4=0xffffffffffffffff,xer=0x0	r5	0
+xor_p11	xor r5, r3, r4	0x7c652278	r3=0x1,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xor_p12	xor r5, r3, r4	0x7c652278	r3=0x7fffffffffffffff,r4=0x1,xer=0x0	r5	0
+xor_p13	xor r5, r3, r4	0x7c652278	r3=0x8000000000000000,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xor_p14	xor r5, r3, r4	0x7c652278	r3=0x123456789abcdef,r4=0xffffffff80000000,xer=0x0	r5	0
+xor_p15	xor r5, r3, r4	0x7c652278	r3=0xffffffff80000000,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xordot_p0	xor. r5, r3, r4	0x7c652279	r3=0x0,r4=0x7fffffff,xer=0x0	r5	0
+xordot_p1	xor. r5, r3, r4	0x7c652279	r3=0x1,r4=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xordot_p2	xor. r5, r3, r4	0x7c652279	r3=0xffffffffffffffff,r4=0x7fffffffffffffff,xer=0x0	r5	0
+xordot_p3	xor. r5, r3, r4	0x7c652279	r3=0x7fffffff,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xordot_p4	xor. r5, r3, r4	0x7c652279	r3=0x80000000,r4=0x123456789abcdef,xer=0x0	r5	0
+xordot_p5	xor. r5, r3, r4	0x7c652279	r3=0x7fffffffffffffff,r4=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xordot_p6	xor. r5, r3, r4	0x7c652279	r3=0x8000000000000000,r4=0x1,xer=0x0	r5	0
+xordot_p7	xor. r5, r3, r4	0x7c652279	r3=0x123456789abcdef,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xordot_p8	xor. r5, r3, r4	0x7c652279	r3=0x8000000000000000,r4=0xffffffffffffffff,xer=0x0	r5	0
+xordot_p9	xor. r5, r3, r4	0x7c652279	r3=0x80000000,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xordot_p10	xor. r5, r3, r4	0x7c652279	r3=0xffffffffffffffff,r4=0xffffffffffffffff,xer=0x0	r5	0
+xordot_p11	xor. r5, r3, r4	0x7c652279	r3=0x1,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xordot_p12	xor. r5, r3, r4	0x7c652279	r3=0x7fffffffffffffff,r4=0x1,xer=0x0	r5	0
+xordot_p13	xor. r5, r3, r4	0x7c652279	r3=0x8000000000000000,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xordot_p14	xor. r5, r3, r4	0x7c652279	r3=0x123456789abcdef,r4=0xffffffff80000000,xer=0x0	r5	0
+xordot_p15	xor. r5, r3, r4	0x7c652279	r3=0xffffffff80000000,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzw_v0	cntlzw r5, r3	0x7c650034	r3=0x0,xer=0x0	r5	0
+cntlzw_v1	cntlzw r5, r3	0x7c650034	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzw_v2	cntlzw r5, r3	0x7c650034	r3=0xffffffffffffffff,xer=0x0	r5	0
+cntlzw_v3	cntlzw r5, r3	0x7c650034	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzw_v4	cntlzw r5, r3	0x7c650034	r3=0x80000000,xer=0x0	r5	0
+cntlzw_v5	cntlzw r5, r3	0x7c650034	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzw_v6	cntlzw r5, r3	0x7c650034	r3=0x8000000000000000,xer=0x0	r5	0
+cntlzw_v7	cntlzw r5, r3	0x7c650034	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzw_v8	cntlzw r5, r3	0x7c650034	r3=0xffffffff80000000,xer=0x0	r5	0
+cntlzw_v9	cntlzw r5, r3	0x7c650034	r3=0x80,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzw_v10	cntlzw r5, r3	0x7c650034	r3=0x7f,xer=0x0	r5	0
+cntlzw_v11	cntlzw r5, r3	0x7c650034	r3=0x8000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzw_v12	cntlzw r5, r3	0x7c650034	r3=0x7fff,xer=0x0	r5	0
+cntlzw_v13	cntlzw r5, r3	0x7c650034	r3=0xffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzw_v14	cntlzw r5, r3	0x7c650034	r3=0x100000000,xer=0x0	r5	0
+cntlzwdot_v0	cntlzw. r5, r3	0x7c650035	r3=0x0,xer=0x0	r5	0
+cntlzwdot_v1	cntlzw. r5, r3	0x7c650035	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzwdot_v2	cntlzw. r5, r3	0x7c650035	r3=0xffffffffffffffff,xer=0x0	r5	0
+cntlzwdot_v3	cntlzw. r5, r3	0x7c650035	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzwdot_v4	cntlzw. r5, r3	0x7c650035	r3=0x80000000,xer=0x0	r5	0
+cntlzwdot_v5	cntlzw. r5, r3	0x7c650035	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzwdot_v6	cntlzw. r5, r3	0x7c650035	r3=0x8000000000000000,xer=0x0	r5	0
+cntlzwdot_v7	cntlzw. r5, r3	0x7c650035	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzwdot_v8	cntlzw. r5, r3	0x7c650035	r3=0xffffffff80000000,xer=0x0	r5	0
+cntlzwdot_v9	cntlzw. r5, r3	0x7c650035	r3=0x80,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzwdot_v10	cntlzw. r5, r3	0x7c650035	r3=0x7f,xer=0x0	r5	0
+cntlzwdot_v11	cntlzw. r5, r3	0x7c650035	r3=0x8000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzwdot_v12	cntlzw. r5, r3	0x7c650035	r3=0x7fff,xer=0x0	r5	0
+cntlzwdot_v13	cntlzw. r5, r3	0x7c650035	r3=0xffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzwdot_v14	cntlzw. r5, r3	0x7c650035	r3=0x100000000,xer=0x0	r5	0
+cntlzd_v0	cntlzd r5, r3	0x7c650074	r3=0x0,xer=0x0	r5	0
+cntlzd_v1	cntlzd r5, r3	0x7c650074	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzd_v2	cntlzd r5, r3	0x7c650074	r3=0xffffffffffffffff,xer=0x0	r5	0
+cntlzd_v3	cntlzd r5, r3	0x7c650074	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzd_v4	cntlzd r5, r3	0x7c650074	r3=0x80000000,xer=0x0	r5	0
+cntlzd_v5	cntlzd r5, r3	0x7c650074	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzd_v6	cntlzd r5, r3	0x7c650074	r3=0x8000000000000000,xer=0x0	r5	0
+cntlzd_v7	cntlzd r5, r3	0x7c650074	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzd_v8	cntlzd r5, r3	0x7c650074	r3=0xffffffff80000000,xer=0x0	r5	0
+cntlzd_v9	cntlzd r5, r3	0x7c650074	r3=0x80,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzd_v10	cntlzd r5, r3	0x7c650074	r3=0x7f,xer=0x0	r5	0
+cntlzd_v11	cntlzd r5, r3	0x7c650074	r3=0x8000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzd_v12	cntlzd r5, r3	0x7c650074	r3=0x7fff,xer=0x0	r5	0
+cntlzd_v13	cntlzd r5, r3	0x7c650074	r3=0xffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzd_v14	cntlzd r5, r3	0x7c650074	r3=0x100000000,xer=0x0	r5	0
+cntlzddot_v0	cntlzd. r5, r3	0x7c650075	r3=0x0,xer=0x0	r5	0
+cntlzddot_v1	cntlzd. r5, r3	0x7c650075	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzddot_v2	cntlzd. r5, r3	0x7c650075	r3=0xffffffffffffffff,xer=0x0	r5	0
+cntlzddot_v3	cntlzd. r5, r3	0x7c650075	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzddot_v4	cntlzd. r5, r3	0x7c650075	r3=0x80000000,xer=0x0	r5	0
+cntlzddot_v5	cntlzd. r5, r3	0x7c650075	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzddot_v6	cntlzd. r5, r3	0x7c650075	r3=0x8000000000000000,xer=0x0	r5	0
+cntlzddot_v7	cntlzd. r5, r3	0x7c650075	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzddot_v8	cntlzd. r5, r3	0x7c650075	r3=0xffffffff80000000,xer=0x0	r5	0
+cntlzddot_v9	cntlzd. r5, r3	0x7c650075	r3=0x80,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzddot_v10	cntlzd. r5, r3	0x7c650075	r3=0x7f,xer=0x0	r5	0
+cntlzddot_v11	cntlzd. r5, r3	0x7c650075	r3=0x8000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzddot_v12	cntlzd. r5, r3	0x7c650075	r3=0x7fff,xer=0x0	r5	0
+cntlzddot_v13	cntlzd. r5, r3	0x7c650075	r3=0xffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+cntlzddot_v14	cntlzd. r5, r3	0x7c650075	r3=0x100000000,xer=0x0	r5	0
+extsb_v0	extsb r5, r3	0x7c650774	r3=0x0,xer=0x0	r5	0
+extsb_v1	extsb r5, r3	0x7c650774	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsb_v2	extsb r5, r3	0x7c650774	r3=0xffffffffffffffff,xer=0x0	r5	0
+extsb_v3	extsb r5, r3	0x7c650774	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsb_v4	extsb r5, r3	0x7c650774	r3=0x80000000,xer=0x0	r5	0
+extsb_v5	extsb r5, r3	0x7c650774	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsb_v6	extsb r5, r3	0x7c650774	r3=0x8000000000000000,xer=0x0	r5	0
+extsb_v7	extsb r5, r3	0x7c650774	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsb_v8	extsb r5, r3	0x7c650774	r3=0xffffffff80000000,xer=0x0	r5	0
+extsb_v9	extsb r5, r3	0x7c650774	r3=0x80,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsb_v10	extsb r5, r3	0x7c650774	r3=0x7f,xer=0x0	r5	0
+extsb_v11	extsb r5, r3	0x7c650774	r3=0x8000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsb_v12	extsb r5, r3	0x7c650774	r3=0x7fff,xer=0x0	r5	0
+extsb_v13	extsb r5, r3	0x7c650774	r3=0xffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsb_v14	extsb r5, r3	0x7c650774	r3=0x100000000,xer=0x0	r5	0
+extsbdot_v0	extsb. r5, r3	0x7c650775	r3=0x0,xer=0x0	r5	0
+extsbdot_v1	extsb. r5, r3	0x7c650775	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsbdot_v2	extsb. r5, r3	0x7c650775	r3=0xffffffffffffffff,xer=0x0	r5	0
+extsbdot_v3	extsb. r5, r3	0x7c650775	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsbdot_v4	extsb. r5, r3	0x7c650775	r3=0x80000000,xer=0x0	r5	0
+extsbdot_v5	extsb. r5, r3	0x7c650775	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsbdot_v6	extsb. r5, r3	0x7c650775	r3=0x8000000000000000,xer=0x0	r5	0
+extsbdot_v7	extsb. r5, r3	0x7c650775	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsbdot_v8	extsb. r5, r3	0x7c650775	r3=0xffffffff80000000,xer=0x0	r5	0
+extsbdot_v9	extsb. r5, r3	0x7c650775	r3=0x80,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsbdot_v10	extsb. r5, r3	0x7c650775	r3=0x7f,xer=0x0	r5	0
+extsbdot_v11	extsb. r5, r3	0x7c650775	r3=0x8000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsbdot_v12	extsb. r5, r3	0x7c650775	r3=0x7fff,xer=0x0	r5	0
+extsbdot_v13	extsb. r5, r3	0x7c650775	r3=0xffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsbdot_v14	extsb. r5, r3	0x7c650775	r3=0x100000000,xer=0x0	r5	0
+extsh_v0	extsh r5, r3	0x7c650734	r3=0x0,xer=0x0	r5	0
+extsh_v1	extsh r5, r3	0x7c650734	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsh_v2	extsh r5, r3	0x7c650734	r3=0xffffffffffffffff,xer=0x0	r5	0
+extsh_v3	extsh r5, r3	0x7c650734	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsh_v4	extsh r5, r3	0x7c650734	r3=0x80000000,xer=0x0	r5	0
+extsh_v5	extsh r5, r3	0x7c650734	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsh_v6	extsh r5, r3	0x7c650734	r3=0x8000000000000000,xer=0x0	r5	0
+extsh_v7	extsh r5, r3	0x7c650734	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsh_v8	extsh r5, r3	0x7c650734	r3=0xffffffff80000000,xer=0x0	r5	0
+extsh_v9	extsh r5, r3	0x7c650734	r3=0x80,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsh_v10	extsh r5, r3	0x7c650734	r3=0x7f,xer=0x0	r5	0
+extsh_v11	extsh r5, r3	0x7c650734	r3=0x8000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsh_v12	extsh r5, r3	0x7c650734	r3=0x7fff,xer=0x0	r5	0
+extsh_v13	extsh r5, r3	0x7c650734	r3=0xffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsh_v14	extsh r5, r3	0x7c650734	r3=0x100000000,xer=0x0	r5	0
+extshdot_v0	extsh. r5, r3	0x7c650735	r3=0x0,xer=0x0	r5	0
+extshdot_v1	extsh. r5, r3	0x7c650735	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extshdot_v2	extsh. r5, r3	0x7c650735	r3=0xffffffffffffffff,xer=0x0	r5	0
+extshdot_v3	extsh. r5, r3	0x7c650735	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extshdot_v4	extsh. r5, r3	0x7c650735	r3=0x80000000,xer=0x0	r5	0
+extshdot_v5	extsh. r5, r3	0x7c650735	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extshdot_v6	extsh. r5, r3	0x7c650735	r3=0x8000000000000000,xer=0x0	r5	0
+extshdot_v7	extsh. r5, r3	0x7c650735	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extshdot_v8	extsh. r5, r3	0x7c650735	r3=0xffffffff80000000,xer=0x0	r5	0
+extshdot_v9	extsh. r5, r3	0x7c650735	r3=0x80,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extshdot_v10	extsh. r5, r3	0x7c650735	r3=0x7f,xer=0x0	r5	0
+extshdot_v11	extsh. r5, r3	0x7c650735	r3=0x8000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extshdot_v12	extsh. r5, r3	0x7c650735	r3=0x7fff,xer=0x0	r5	0
+extshdot_v13	extsh. r5, r3	0x7c650735	r3=0xffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extshdot_v14	extsh. r5, r3	0x7c650735	r3=0x100000000,xer=0x0	r5	0
+extsw_v0	extsw r5, r3	0x7c6507b4	r3=0x0,xer=0x0	r5	0
+extsw_v1	extsw r5, r3	0x7c6507b4	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsw_v2	extsw r5, r3	0x7c6507b4	r3=0xffffffffffffffff,xer=0x0	r5	0
+extsw_v3	extsw r5, r3	0x7c6507b4	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsw_v4	extsw r5, r3	0x7c6507b4	r3=0x80000000,xer=0x0	r5	0
+extsw_v5	extsw r5, r3	0x7c6507b4	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsw_v6	extsw r5, r3	0x7c6507b4	r3=0x8000000000000000,xer=0x0	r5	0
+extsw_v7	extsw r5, r3	0x7c6507b4	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsw_v8	extsw r5, r3	0x7c6507b4	r3=0xffffffff80000000,xer=0x0	r5	0
+extsw_v9	extsw r5, r3	0x7c6507b4	r3=0x80,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsw_v10	extsw r5, r3	0x7c6507b4	r3=0x7f,xer=0x0	r5	0
+extsw_v11	extsw r5, r3	0x7c6507b4	r3=0x8000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsw_v12	extsw r5, r3	0x7c6507b4	r3=0x7fff,xer=0x0	r5	0
+extsw_v13	extsw r5, r3	0x7c6507b4	r3=0xffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extsw_v14	extsw r5, r3	0x7c6507b4	r3=0x100000000,xer=0x0	r5	0
+extswdot_v0	extsw. r5, r3	0x7c6507b5	r3=0x0,xer=0x0	r5	0
+extswdot_v1	extsw. r5, r3	0x7c6507b5	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extswdot_v2	extsw. r5, r3	0x7c6507b5	r3=0xffffffffffffffff,xer=0x0	r5	0
+extswdot_v3	extsw. r5, r3	0x7c6507b5	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extswdot_v4	extsw. r5, r3	0x7c6507b5	r3=0x80000000,xer=0x0	r5	0
+extswdot_v5	extsw. r5, r3	0x7c6507b5	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extswdot_v6	extsw. r5, r3	0x7c6507b5	r3=0x8000000000000000,xer=0x0	r5	0
+extswdot_v7	extsw. r5, r3	0x7c6507b5	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extswdot_v8	extsw. r5, r3	0x7c6507b5	r3=0xffffffff80000000,xer=0x0	r5	0
+extswdot_v9	extsw. r5, r3	0x7c6507b5	r3=0x80,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extswdot_v10	extsw. r5, r3	0x7c6507b5	r3=0x7f,xer=0x0	r5	0
+extswdot_v11	extsw. r5, r3	0x7c6507b5	r3=0x8000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extswdot_v12	extsw. r5, r3	0x7c6507b5	r3=0x7fff,xer=0x0	r5	0
+extswdot_v13	extsw. r5, r3	0x7c6507b5	r3=0xffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+extswdot_v14	extsw. r5, r3	0x7c6507b5	r3=0x100000000,xer=0x0	r5	0
+andidot_i0_v0	andi. r5, r3, 0x0	0x70650000	r3=0x0,xer=0x0	r5	0
+andidot_i0_v1	andi. r5, r3, 0x0	0x70650000	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_i0_v2	andi. r5, r3, 0x0	0x70650000	r3=0xffffffffffffffff,xer=0x0	r5	0
+andidot_i0_v3	andi. r5, r3, 0x0	0x70650000	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_i0_v4	andi. r5, r3, 0x0	0x70650000	r3=0x80000000,xer=0x0	r5	0
+andidot_i0_v5	andi. r5, r3, 0x0	0x70650000	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_i0_v6	andi. r5, r3, 0x0	0x70650000	r3=0x8000000000000000,xer=0x0	r5	0
+andidot_i0_v7	andi. r5, r3, 0x0	0x70650000	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_i0_v8	andi. r5, r3, 0x0	0x70650000	r3=0xffffffff80000000,xer=0x0	r5	0
+andidot_i1_v9	andi. r5, r3, 0x1	0x70650001	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_i1_v10	andi. r5, r3, 0x1	0x70650001	r3=0x1,xer=0x0	r5	0
+andidot_i1_v11	andi. r5, r3, 0x1	0x70650001	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_i1_v12	andi. r5, r3, 0x1	0x70650001	r3=0x7fffffff,xer=0x0	r5	0
+andidot_i1_v13	andi. r5, r3, 0x1	0x70650001	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_i1_v14	andi. r5, r3, 0x1	0x70650001	r3=0x7fffffffffffffff,xer=0x0	r5	0
+andidot_i1_v15	andi. r5, r3, 0x1	0x70650001	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_i1_v16	andi. r5, r3, 0x1	0x70650001	r3=0x123456789abcdef,xer=0x0	r5	0
+andidot_i1_v17	andi. r5, r3, 0x1	0x70650001	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_i7fff_v18	andi. r5, r3, 0x7fff	0x70657fff	r3=0x0,xer=0x0	r5	0
+andidot_i7fff_v19	andi. r5, r3, 0x7fff	0x70657fff	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_i7fff_v20	andi. r5, r3, 0x7fff	0x70657fff	r3=0xffffffffffffffff,xer=0x0	r5	0
+andidot_i7fff_v21	andi. r5, r3, 0x7fff	0x70657fff	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_i7fff_v22	andi. r5, r3, 0x7fff	0x70657fff	r3=0x80000000,xer=0x0	r5	0
+andidot_i7fff_v23	andi. r5, r3, 0x7fff	0x70657fff	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_i7fff_v24	andi. r5, r3, 0x7fff	0x70657fff	r3=0x8000000000000000,xer=0x0	r5	0
+andidot_i7fff_v25	andi. r5, r3, 0x7fff	0x70657fff	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_i7fff_v26	andi. r5, r3, 0x7fff	0x70657fff	r3=0xffffffff80000000,xer=0x0	r5	0
+andidot_i8000_v27	andi. r5, r3, 0x8000	0x70658000	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_i8000_v28	andi. r5, r3, 0x8000	0x70658000	r3=0x1,xer=0x0	r5	0
+andidot_i8000_v29	andi. r5, r3, 0x8000	0x70658000	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_i8000_v30	andi. r5, r3, 0x8000	0x70658000	r3=0x7fffffff,xer=0x0	r5	0
+andidot_i8000_v31	andi. r5, r3, 0x8000	0x70658000	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_i8000_v32	andi. r5, r3, 0x8000	0x70658000	r3=0x7fffffffffffffff,xer=0x0	r5	0
+andidot_i8000_v33	andi. r5, r3, 0x8000	0x70658000	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_i8000_v34	andi. r5, r3, 0x8000	0x70658000	r3=0x123456789abcdef,xer=0x0	r5	0
+andidot_i8000_v35	andi. r5, r3, 0x8000	0x70658000	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_iffff_v36	andi. r5, r3, 0xffff	0x7065ffff	r3=0x0,xer=0x0	r5	0
+andidot_iffff_v37	andi. r5, r3, 0xffff	0x7065ffff	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_iffff_v38	andi. r5, r3, 0xffff	0x7065ffff	r3=0xffffffffffffffff,xer=0x0	r5	0
+andidot_iffff_v39	andi. r5, r3, 0xffff	0x7065ffff	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_iffff_v40	andi. r5, r3, 0xffff	0x7065ffff	r3=0x80000000,xer=0x0	r5	0
+andidot_iffff_v41	andi. r5, r3, 0xffff	0x7065ffff	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_iffff_v42	andi. r5, r3, 0xffff	0x7065ffff	r3=0x8000000000000000,xer=0x0	r5	0
+andidot_iffff_v43	andi. r5, r3, 0xffff	0x7065ffff	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andidot_iffff_v44	andi. r5, r3, 0xffff	0x7065ffff	r3=0xffffffff80000000,xer=0x0	r5	0
+andisdot_i0_v0	andis. r5, r3, 0x0	0x74650000	r3=0x0,xer=0x0	r5	0
+andisdot_i0_v1	andis. r5, r3, 0x0	0x74650000	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_i0_v2	andis. r5, r3, 0x0	0x74650000	r3=0xffffffffffffffff,xer=0x0	r5	0
+andisdot_i0_v3	andis. r5, r3, 0x0	0x74650000	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_i0_v4	andis. r5, r3, 0x0	0x74650000	r3=0x80000000,xer=0x0	r5	0
+andisdot_i0_v5	andis. r5, r3, 0x0	0x74650000	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_i0_v6	andis. r5, r3, 0x0	0x74650000	r3=0x8000000000000000,xer=0x0	r5	0
+andisdot_i0_v7	andis. r5, r3, 0x0	0x74650000	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_i0_v8	andis. r5, r3, 0x0	0x74650000	r3=0xffffffff80000000,xer=0x0	r5	0
+andisdot_i1_v9	andis. r5, r3, 0x1	0x74650001	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_i1_v10	andis. r5, r3, 0x1	0x74650001	r3=0x1,xer=0x0	r5	0
+andisdot_i1_v11	andis. r5, r3, 0x1	0x74650001	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_i1_v12	andis. r5, r3, 0x1	0x74650001	r3=0x7fffffff,xer=0x0	r5	0
+andisdot_i1_v13	andis. r5, r3, 0x1	0x74650001	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_i1_v14	andis. r5, r3, 0x1	0x74650001	r3=0x7fffffffffffffff,xer=0x0	r5	0
+andisdot_i1_v15	andis. r5, r3, 0x1	0x74650001	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_i1_v16	andis. r5, r3, 0x1	0x74650001	r3=0x123456789abcdef,xer=0x0	r5	0
+andisdot_i1_v17	andis. r5, r3, 0x1	0x74650001	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_i7fff_v18	andis. r5, r3, 0x7fff	0x74657fff	r3=0x0,xer=0x0	r5	0
+andisdot_i7fff_v19	andis. r5, r3, 0x7fff	0x74657fff	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_i7fff_v20	andis. r5, r3, 0x7fff	0x74657fff	r3=0xffffffffffffffff,xer=0x0	r5	0
+andisdot_i7fff_v21	andis. r5, r3, 0x7fff	0x74657fff	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_i7fff_v22	andis. r5, r3, 0x7fff	0x74657fff	r3=0x80000000,xer=0x0	r5	0
+andisdot_i7fff_v23	andis. r5, r3, 0x7fff	0x74657fff	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_i7fff_v24	andis. r5, r3, 0x7fff	0x74657fff	r3=0x8000000000000000,xer=0x0	r5	0
+andisdot_i7fff_v25	andis. r5, r3, 0x7fff	0x74657fff	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_i7fff_v26	andis. r5, r3, 0x7fff	0x74657fff	r3=0xffffffff80000000,xer=0x0	r5	0
+andisdot_i8000_v27	andis. r5, r3, 0x8000	0x74658000	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_i8000_v28	andis. r5, r3, 0x8000	0x74658000	r3=0x1,xer=0x0	r5	0
+andisdot_i8000_v29	andis. r5, r3, 0x8000	0x74658000	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_i8000_v30	andis. r5, r3, 0x8000	0x74658000	r3=0x7fffffff,xer=0x0	r5	0
+andisdot_i8000_v31	andis. r5, r3, 0x8000	0x74658000	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_i8000_v32	andis. r5, r3, 0x8000	0x74658000	r3=0x7fffffffffffffff,xer=0x0	r5	0
+andisdot_i8000_v33	andis. r5, r3, 0x8000	0x74658000	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_i8000_v34	andis. r5, r3, 0x8000	0x74658000	r3=0x123456789abcdef,xer=0x0	r5	0
+andisdot_i8000_v35	andis. r5, r3, 0x8000	0x74658000	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_iffff_v36	andis. r5, r3, 0xffff	0x7465ffff	r3=0x0,xer=0x0	r5	0
+andisdot_iffff_v37	andis. r5, r3, 0xffff	0x7465ffff	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_iffff_v38	andis. r5, r3, 0xffff	0x7465ffff	r3=0xffffffffffffffff,xer=0x0	r5	0
+andisdot_iffff_v39	andis. r5, r3, 0xffff	0x7465ffff	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_iffff_v40	andis. r5, r3, 0xffff	0x7465ffff	r3=0x80000000,xer=0x0	r5	0
+andisdot_iffff_v41	andis. r5, r3, 0xffff	0x7465ffff	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_iffff_v42	andis. r5, r3, 0xffff	0x7465ffff	r3=0x8000000000000000,xer=0x0	r5	0
+andisdot_iffff_v43	andis. r5, r3, 0xffff	0x7465ffff	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+andisdot_iffff_v44	andis. r5, r3, 0xffff	0x7465ffff	r3=0xffffffff80000000,xer=0x0	r5	0
+ori_i0_v0	ori r5, r3, 0x0	0x60650000	r3=0x0,xer=0x0	r5	0
+ori_i0_v1	ori r5, r3, 0x0	0x60650000	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_i0_v2	ori r5, r3, 0x0	0x60650000	r3=0xffffffffffffffff,xer=0x0	r5	0
+ori_i0_v3	ori r5, r3, 0x0	0x60650000	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_i0_v4	ori r5, r3, 0x0	0x60650000	r3=0x80000000,xer=0x0	r5	0
+ori_i0_v5	ori r5, r3, 0x0	0x60650000	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_i0_v6	ori r5, r3, 0x0	0x60650000	r3=0x8000000000000000,xer=0x0	r5	0
+ori_i0_v7	ori r5, r3, 0x0	0x60650000	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_i0_v8	ori r5, r3, 0x0	0x60650000	r3=0xffffffff80000000,xer=0x0	r5	0
+ori_i1_v9	ori r5, r3, 0x1	0x60650001	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_i1_v10	ori r5, r3, 0x1	0x60650001	r3=0x1,xer=0x0	r5	0
+ori_i1_v11	ori r5, r3, 0x1	0x60650001	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_i1_v12	ori r5, r3, 0x1	0x60650001	r3=0x7fffffff,xer=0x0	r5	0
+ori_i1_v13	ori r5, r3, 0x1	0x60650001	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_i1_v14	ori r5, r3, 0x1	0x60650001	r3=0x7fffffffffffffff,xer=0x0	r5	0
+ori_i1_v15	ori r5, r3, 0x1	0x60650001	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_i1_v16	ori r5, r3, 0x1	0x60650001	r3=0x123456789abcdef,xer=0x0	r5	0
+ori_i1_v17	ori r5, r3, 0x1	0x60650001	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_i7fff_v18	ori r5, r3, 0x7fff	0x60657fff	r3=0x0,xer=0x0	r5	0
+ori_i7fff_v19	ori r5, r3, 0x7fff	0x60657fff	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_i7fff_v20	ori r5, r3, 0x7fff	0x60657fff	r3=0xffffffffffffffff,xer=0x0	r5	0
+ori_i7fff_v21	ori r5, r3, 0x7fff	0x60657fff	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_i7fff_v22	ori r5, r3, 0x7fff	0x60657fff	r3=0x80000000,xer=0x0	r5	0
+ori_i7fff_v23	ori r5, r3, 0x7fff	0x60657fff	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_i7fff_v24	ori r5, r3, 0x7fff	0x60657fff	r3=0x8000000000000000,xer=0x0	r5	0
+ori_i7fff_v25	ori r5, r3, 0x7fff	0x60657fff	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_i7fff_v26	ori r5, r3, 0x7fff	0x60657fff	r3=0xffffffff80000000,xer=0x0	r5	0
+ori_i8000_v27	ori r5, r3, 0x8000	0x60658000	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_i8000_v28	ori r5, r3, 0x8000	0x60658000	r3=0x1,xer=0x0	r5	0
+ori_i8000_v29	ori r5, r3, 0x8000	0x60658000	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_i8000_v30	ori r5, r3, 0x8000	0x60658000	r3=0x7fffffff,xer=0x0	r5	0
+ori_i8000_v31	ori r5, r3, 0x8000	0x60658000	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_i8000_v32	ori r5, r3, 0x8000	0x60658000	r3=0x7fffffffffffffff,xer=0x0	r5	0
+ori_i8000_v33	ori r5, r3, 0x8000	0x60658000	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_i8000_v34	ori r5, r3, 0x8000	0x60658000	r3=0x123456789abcdef,xer=0x0	r5	0
+ori_i8000_v35	ori r5, r3, 0x8000	0x60658000	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_iffff_v36	ori r5, r3, 0xffff	0x6065ffff	r3=0x0,xer=0x0	r5	0
+ori_iffff_v37	ori r5, r3, 0xffff	0x6065ffff	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_iffff_v38	ori r5, r3, 0xffff	0x6065ffff	r3=0xffffffffffffffff,xer=0x0	r5	0
+ori_iffff_v39	ori r5, r3, 0xffff	0x6065ffff	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_iffff_v40	ori r5, r3, 0xffff	0x6065ffff	r3=0x80000000,xer=0x0	r5	0
+ori_iffff_v41	ori r5, r3, 0xffff	0x6065ffff	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_iffff_v42	ori r5, r3, 0xffff	0x6065ffff	r3=0x8000000000000000,xer=0x0	r5	0
+ori_iffff_v43	ori r5, r3, 0xffff	0x6065ffff	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+ori_iffff_v44	ori r5, r3, 0xffff	0x6065ffff	r3=0xffffffff80000000,xer=0x0	r5	0
+oris_i0_v0	oris r5, r3, 0x0	0x64650000	r3=0x0,xer=0x0	r5	0
+oris_i0_v1	oris r5, r3, 0x0	0x64650000	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_i0_v2	oris r5, r3, 0x0	0x64650000	r3=0xffffffffffffffff,xer=0x0	r5	0
+oris_i0_v3	oris r5, r3, 0x0	0x64650000	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_i0_v4	oris r5, r3, 0x0	0x64650000	r3=0x80000000,xer=0x0	r5	0
+oris_i0_v5	oris r5, r3, 0x0	0x64650000	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_i0_v6	oris r5, r3, 0x0	0x64650000	r3=0x8000000000000000,xer=0x0	r5	0
+oris_i0_v7	oris r5, r3, 0x0	0x64650000	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_i0_v8	oris r5, r3, 0x0	0x64650000	r3=0xffffffff80000000,xer=0x0	r5	0
+oris_i1_v9	oris r5, r3, 0x1	0x64650001	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_i1_v10	oris r5, r3, 0x1	0x64650001	r3=0x1,xer=0x0	r5	0
+oris_i1_v11	oris r5, r3, 0x1	0x64650001	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_i1_v12	oris r5, r3, 0x1	0x64650001	r3=0x7fffffff,xer=0x0	r5	0
+oris_i1_v13	oris r5, r3, 0x1	0x64650001	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_i1_v14	oris r5, r3, 0x1	0x64650001	r3=0x7fffffffffffffff,xer=0x0	r5	0
+oris_i1_v15	oris r5, r3, 0x1	0x64650001	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_i1_v16	oris r5, r3, 0x1	0x64650001	r3=0x123456789abcdef,xer=0x0	r5	0
+oris_i1_v17	oris r5, r3, 0x1	0x64650001	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_i7fff_v18	oris r5, r3, 0x7fff	0x64657fff	r3=0x0,xer=0x0	r5	0
+oris_i7fff_v19	oris r5, r3, 0x7fff	0x64657fff	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_i7fff_v20	oris r5, r3, 0x7fff	0x64657fff	r3=0xffffffffffffffff,xer=0x0	r5	0
+oris_i7fff_v21	oris r5, r3, 0x7fff	0x64657fff	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_i7fff_v22	oris r5, r3, 0x7fff	0x64657fff	r3=0x80000000,xer=0x0	r5	0
+oris_i7fff_v23	oris r5, r3, 0x7fff	0x64657fff	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_i7fff_v24	oris r5, r3, 0x7fff	0x64657fff	r3=0x8000000000000000,xer=0x0	r5	0
+oris_i7fff_v25	oris r5, r3, 0x7fff	0x64657fff	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_i7fff_v26	oris r5, r3, 0x7fff	0x64657fff	r3=0xffffffff80000000,xer=0x0	r5	0
+oris_i8000_v27	oris r5, r3, 0x8000	0x64658000	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_i8000_v28	oris r5, r3, 0x8000	0x64658000	r3=0x1,xer=0x0	r5	0
+oris_i8000_v29	oris r5, r3, 0x8000	0x64658000	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_i8000_v30	oris r5, r3, 0x8000	0x64658000	r3=0x7fffffff,xer=0x0	r5	0
+oris_i8000_v31	oris r5, r3, 0x8000	0x64658000	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_i8000_v32	oris r5, r3, 0x8000	0x64658000	r3=0x7fffffffffffffff,xer=0x0	r5	0
+oris_i8000_v33	oris r5, r3, 0x8000	0x64658000	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_i8000_v34	oris r5, r3, 0x8000	0x64658000	r3=0x123456789abcdef,xer=0x0	r5	0
+oris_i8000_v35	oris r5, r3, 0x8000	0x64658000	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_iffff_v36	oris r5, r3, 0xffff	0x6465ffff	r3=0x0,xer=0x0	r5	0
+oris_iffff_v37	oris r5, r3, 0xffff	0x6465ffff	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_iffff_v38	oris r5, r3, 0xffff	0x6465ffff	r3=0xffffffffffffffff,xer=0x0	r5	0
+oris_iffff_v39	oris r5, r3, 0xffff	0x6465ffff	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_iffff_v40	oris r5, r3, 0xffff	0x6465ffff	r3=0x80000000,xer=0x0	r5	0
+oris_iffff_v41	oris r5, r3, 0xffff	0x6465ffff	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_iffff_v42	oris r5, r3, 0xffff	0x6465ffff	r3=0x8000000000000000,xer=0x0	r5	0
+oris_iffff_v43	oris r5, r3, 0xffff	0x6465ffff	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+oris_iffff_v44	oris r5, r3, 0xffff	0x6465ffff	r3=0xffffffff80000000,xer=0x0	r5	0
+xori_i0_v0	xori r5, r3, 0x0	0x68650000	r3=0x0,xer=0x0	r5	0
+xori_i0_v1	xori r5, r3, 0x0	0x68650000	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_i0_v2	xori r5, r3, 0x0	0x68650000	r3=0xffffffffffffffff,xer=0x0	r5	0
+xori_i0_v3	xori r5, r3, 0x0	0x68650000	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_i0_v4	xori r5, r3, 0x0	0x68650000	r3=0x80000000,xer=0x0	r5	0
+xori_i0_v5	xori r5, r3, 0x0	0x68650000	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_i0_v6	xori r5, r3, 0x0	0x68650000	r3=0x8000000000000000,xer=0x0	r5	0
+xori_i0_v7	xori r5, r3, 0x0	0x68650000	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_i0_v8	xori r5, r3, 0x0	0x68650000	r3=0xffffffff80000000,xer=0x0	r5	0
+xori_i1_v9	xori r5, r3, 0x1	0x68650001	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_i1_v10	xori r5, r3, 0x1	0x68650001	r3=0x1,xer=0x0	r5	0
+xori_i1_v11	xori r5, r3, 0x1	0x68650001	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_i1_v12	xori r5, r3, 0x1	0x68650001	r3=0x7fffffff,xer=0x0	r5	0
+xori_i1_v13	xori r5, r3, 0x1	0x68650001	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_i1_v14	xori r5, r3, 0x1	0x68650001	r3=0x7fffffffffffffff,xer=0x0	r5	0
+xori_i1_v15	xori r5, r3, 0x1	0x68650001	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_i1_v16	xori r5, r3, 0x1	0x68650001	r3=0x123456789abcdef,xer=0x0	r5	0
+xori_i1_v17	xori r5, r3, 0x1	0x68650001	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_i7fff_v18	xori r5, r3, 0x7fff	0x68657fff	r3=0x0,xer=0x0	r5	0
+xori_i7fff_v19	xori r5, r3, 0x7fff	0x68657fff	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_i7fff_v20	xori r5, r3, 0x7fff	0x68657fff	r3=0xffffffffffffffff,xer=0x0	r5	0
+xori_i7fff_v21	xori r5, r3, 0x7fff	0x68657fff	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_i7fff_v22	xori r5, r3, 0x7fff	0x68657fff	r3=0x80000000,xer=0x0	r5	0
+xori_i7fff_v23	xori r5, r3, 0x7fff	0x68657fff	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_i7fff_v24	xori r5, r3, 0x7fff	0x68657fff	r3=0x8000000000000000,xer=0x0	r5	0
+xori_i7fff_v25	xori r5, r3, 0x7fff	0x68657fff	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_i7fff_v26	xori r5, r3, 0x7fff	0x68657fff	r3=0xffffffff80000000,xer=0x0	r5	0
+xori_i8000_v27	xori r5, r3, 0x8000	0x68658000	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_i8000_v28	xori r5, r3, 0x8000	0x68658000	r3=0x1,xer=0x0	r5	0
+xori_i8000_v29	xori r5, r3, 0x8000	0x68658000	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_i8000_v30	xori r5, r3, 0x8000	0x68658000	r3=0x7fffffff,xer=0x0	r5	0
+xori_i8000_v31	xori r5, r3, 0x8000	0x68658000	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_i8000_v32	xori r5, r3, 0x8000	0x68658000	r3=0x7fffffffffffffff,xer=0x0	r5	0
+xori_i8000_v33	xori r5, r3, 0x8000	0x68658000	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_i8000_v34	xori r5, r3, 0x8000	0x68658000	r3=0x123456789abcdef,xer=0x0	r5	0
+xori_i8000_v35	xori r5, r3, 0x8000	0x68658000	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_iffff_v36	xori r5, r3, 0xffff	0x6865ffff	r3=0x0,xer=0x0	r5	0
+xori_iffff_v37	xori r5, r3, 0xffff	0x6865ffff	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_iffff_v38	xori r5, r3, 0xffff	0x6865ffff	r3=0xffffffffffffffff,xer=0x0	r5	0
+xori_iffff_v39	xori r5, r3, 0xffff	0x6865ffff	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_iffff_v40	xori r5, r3, 0xffff	0x6865ffff	r3=0x80000000,xer=0x0	r5	0
+xori_iffff_v41	xori r5, r3, 0xffff	0x6865ffff	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_iffff_v42	xori r5, r3, 0xffff	0x6865ffff	r3=0x8000000000000000,xer=0x0	r5	0
+xori_iffff_v43	xori r5, r3, 0xffff	0x6865ffff	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xori_iffff_v44	xori r5, r3, 0xffff	0x6865ffff	r3=0xffffffff80000000,xer=0x0	r5	0
+xoris_i0_v0	xoris r5, r3, 0x0	0x6c650000	r3=0x0,xer=0x0	r5	0
+xoris_i0_v1	xoris r5, r3, 0x0	0x6c650000	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_i0_v2	xoris r5, r3, 0x0	0x6c650000	r3=0xffffffffffffffff,xer=0x0	r5	0
+xoris_i0_v3	xoris r5, r3, 0x0	0x6c650000	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_i0_v4	xoris r5, r3, 0x0	0x6c650000	r3=0x80000000,xer=0x0	r5	0
+xoris_i0_v5	xoris r5, r3, 0x0	0x6c650000	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_i0_v6	xoris r5, r3, 0x0	0x6c650000	r3=0x8000000000000000,xer=0x0	r5	0
+xoris_i0_v7	xoris r5, r3, 0x0	0x6c650000	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_i0_v8	xoris r5, r3, 0x0	0x6c650000	r3=0xffffffff80000000,xer=0x0	r5	0
+xoris_i1_v9	xoris r5, r3, 0x1	0x6c650001	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_i1_v10	xoris r5, r3, 0x1	0x6c650001	r3=0x1,xer=0x0	r5	0
+xoris_i1_v11	xoris r5, r3, 0x1	0x6c650001	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_i1_v12	xoris r5, r3, 0x1	0x6c650001	r3=0x7fffffff,xer=0x0	r5	0
+xoris_i1_v13	xoris r5, r3, 0x1	0x6c650001	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_i1_v14	xoris r5, r3, 0x1	0x6c650001	r3=0x7fffffffffffffff,xer=0x0	r5	0
+xoris_i1_v15	xoris r5, r3, 0x1	0x6c650001	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_i1_v16	xoris r5, r3, 0x1	0x6c650001	r3=0x123456789abcdef,xer=0x0	r5	0
+xoris_i1_v17	xoris r5, r3, 0x1	0x6c650001	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_i7fff_v18	xoris r5, r3, 0x7fff	0x6c657fff	r3=0x0,xer=0x0	r5	0
+xoris_i7fff_v19	xoris r5, r3, 0x7fff	0x6c657fff	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_i7fff_v20	xoris r5, r3, 0x7fff	0x6c657fff	r3=0xffffffffffffffff,xer=0x0	r5	0
+xoris_i7fff_v21	xoris r5, r3, 0x7fff	0x6c657fff	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_i7fff_v22	xoris r5, r3, 0x7fff	0x6c657fff	r3=0x80000000,xer=0x0	r5	0
+xoris_i7fff_v23	xoris r5, r3, 0x7fff	0x6c657fff	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_i7fff_v24	xoris r5, r3, 0x7fff	0x6c657fff	r3=0x8000000000000000,xer=0x0	r5	0
+xoris_i7fff_v25	xoris r5, r3, 0x7fff	0x6c657fff	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_i7fff_v26	xoris r5, r3, 0x7fff	0x6c657fff	r3=0xffffffff80000000,xer=0x0	r5	0
+xoris_i8000_v27	xoris r5, r3, 0x8000	0x6c658000	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_i8000_v28	xoris r5, r3, 0x8000	0x6c658000	r3=0x1,xer=0x0	r5	0
+xoris_i8000_v29	xoris r5, r3, 0x8000	0x6c658000	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_i8000_v30	xoris r5, r3, 0x8000	0x6c658000	r3=0x7fffffff,xer=0x0	r5	0
+xoris_i8000_v31	xoris r5, r3, 0x8000	0x6c658000	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_i8000_v32	xoris r5, r3, 0x8000	0x6c658000	r3=0x7fffffffffffffff,xer=0x0	r5	0
+xoris_i8000_v33	xoris r5, r3, 0x8000	0x6c658000	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_i8000_v34	xoris r5, r3, 0x8000	0x6c658000	r3=0x123456789abcdef,xer=0x0	r5	0
+xoris_i8000_v35	xoris r5, r3, 0x8000	0x6c658000	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_iffff_v36	xoris r5, r3, 0xffff	0x6c65ffff	r3=0x0,xer=0x0	r5	0
+xoris_iffff_v37	xoris r5, r3, 0xffff	0x6c65ffff	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_iffff_v38	xoris r5, r3, 0xffff	0x6c65ffff	r3=0xffffffffffffffff,xer=0x0	r5	0
+xoris_iffff_v39	xoris r5, r3, 0xffff	0x6c65ffff	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_iffff_v40	xoris r5, r3, 0xffff	0x6c65ffff	r3=0x80000000,xer=0x0	r5	0
+xoris_iffff_v41	xoris r5, r3, 0xffff	0x6c65ffff	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_iffff_v42	xoris r5, r3, 0xffff	0x6c65ffff	r3=0x8000000000000000,xer=0x0	r5	0
+xoris_iffff_v43	xoris r5, r3, 0xffff	0x6c65ffff	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	r5	0
+xoris_iffff_v44	xoris r5, r3, 0xffff	0x6c65ffff	r3=0xffffffff80000000,xer=0x0	r5	0
+cmp_l0_p0	cmpw r3, r4	0x7c032000	r3=0x0,r4=0x7fffffff,xer=0x0	-	0
+cmp_l0_p1	cmpw cr6, r3, r4	0x7f032000	r3=0x1,r4=0x80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmp_l0_p2	cmpw r3, r4	0x7c032000	r3=0xffffffffffffffff,r4=0x7fffffffffffffff,xer=0x0	-	0
+cmp_l0_p3	cmpw cr6, r3, r4	0x7f032000	r3=0x7fffffff,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmp_l0_p4	cmpw r3, r4	0x7c032000	r3=0x80000000,r4=0x123456789abcdef,xer=0x0	-	0
+cmp_l0_p5	cmpw cr6, r3, r4	0x7f032000	r3=0x7fffffffffffffff,r4=0x0,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmp_l0_p6	cmpw r3, r4	0x7c032000	r3=0x8000000000000000,r4=0x1,xer=0x0	-	0
+cmp_l0_p7	cmpw cr6, r3, r4	0x7f032000	r3=0x123456789abcdef,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmp_l0_p8	cmpw r3, r4	0x7c032000	r3=0x8000000000000000,r4=0xffffffffffffffff,xer=0x0	-	0
+cmp_l0_p9	cmpw cr6, r3, r4	0x7f032000	r3=0x80000000,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmp_l0_p10	cmpw r3, r4	0x7c032000	r3=0xffffffffffffffff,r4=0xffffffffffffffff,xer=0x0	-	0
+cmp_l0_p11	cmpw cr6, r3, r4	0x7f032000	r3=0x1,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmp_l0_p12	cmpw r3, r4	0x7c032000	r3=0x7fffffffffffffff,r4=0x1,xer=0x0	-	0
+cmp_l0_p13	cmpw cr6, r3, r4	0x7f032000	r3=0x8000000000000000,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmp_l0_p14	cmpw r3, r4	0x7c032000	r3=0x123456789abcdef,r4=0xffffffff80000000,xer=0x0	-	0
+cmp_l0_p15	cmpw cr6, r3, r4	0x7f032000	r3=0xffffffff80000000,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmp_l1_p0	cmpd r3, r4	0x7c232000	r3=0x0,r4=0x7fffffff,xer=0x0	-	0
+cmp_l1_p1	cmpd cr6, r3, r4	0x7f232000	r3=0x1,r4=0x80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmp_l1_p2	cmpd r3, r4	0x7c232000	r3=0xffffffffffffffff,r4=0x7fffffffffffffff,xer=0x0	-	0
+cmp_l1_p3	cmpd cr6, r3, r4	0x7f232000	r3=0x7fffffff,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmp_l1_p4	cmpd r3, r4	0x7c232000	r3=0x80000000,r4=0x123456789abcdef,xer=0x0	-	0
+cmp_l1_p5	cmpd cr6, r3, r4	0x7f232000	r3=0x7fffffffffffffff,r4=0x0,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmp_l1_p6	cmpd r3, r4	0x7c232000	r3=0x8000000000000000,r4=0x1,xer=0x0	-	0
+cmp_l1_p7	cmpd cr6, r3, r4	0x7f232000	r3=0x123456789abcdef,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmp_l1_p8	cmpd r3, r4	0x7c232000	r3=0x8000000000000000,r4=0xffffffffffffffff,xer=0x0	-	0
+cmp_l1_p9	cmpd cr6, r3, r4	0x7f232000	r3=0x80000000,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmp_l1_p10	cmpd r3, r4	0x7c232000	r3=0xffffffffffffffff,r4=0xffffffffffffffff,xer=0x0	-	0
+cmp_l1_p11	cmpd cr6, r3, r4	0x7f232000	r3=0x1,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmp_l1_p12	cmpd r3, r4	0x7c232000	r3=0x7fffffffffffffff,r4=0x1,xer=0x0	-	0
+cmp_l1_p13	cmpd cr6, r3, r4	0x7f232000	r3=0x8000000000000000,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmp_l1_p14	cmpd r3, r4	0x7c232000	r3=0x123456789abcdef,r4=0xffffffff80000000,xer=0x0	-	0
+cmp_l1_p15	cmpd cr6, r3, r4	0x7f232000	r3=0xffffffff80000000,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpl_l0_p0	cmplw r3, r4	0x7c032040	r3=0x0,r4=0x7fffffff,xer=0x0	-	0
+cmpl_l0_p1	cmplw cr6, r3, r4	0x7f032040	r3=0x1,r4=0x80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpl_l0_p2	cmplw r3, r4	0x7c032040	r3=0xffffffffffffffff,r4=0x7fffffffffffffff,xer=0x0	-	0
+cmpl_l0_p3	cmplw cr6, r3, r4	0x7f032040	r3=0x7fffffff,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpl_l0_p4	cmplw r3, r4	0x7c032040	r3=0x80000000,r4=0x123456789abcdef,xer=0x0	-	0
+cmpl_l0_p5	cmplw cr6, r3, r4	0x7f032040	r3=0x7fffffffffffffff,r4=0x0,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpl_l0_p6	cmplw r3, r4	0x7c032040	r3=0x8000000000000000,r4=0x1,xer=0x0	-	0
+cmpl_l0_p7	cmplw cr6, r3, r4	0x7f032040	r3=0x123456789abcdef,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpl_l0_p8	cmplw r3, r4	0x7c032040	r3=0x8000000000000000,r4=0xffffffffffffffff,xer=0x0	-	0
+cmpl_l0_p9	cmplw cr6, r3, r4	0x7f032040	r3=0x80000000,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpl_l0_p10	cmplw r3, r4	0x7c032040	r3=0xffffffffffffffff,r4=0xffffffffffffffff,xer=0x0	-	0
+cmpl_l0_p11	cmplw cr6, r3, r4	0x7f032040	r3=0x1,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpl_l0_p12	cmplw r3, r4	0x7c032040	r3=0x7fffffffffffffff,r4=0x1,xer=0x0	-	0
+cmpl_l0_p13	cmplw cr6, r3, r4	0x7f032040	r3=0x8000000000000000,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpl_l0_p14	cmplw r3, r4	0x7c032040	r3=0x123456789abcdef,r4=0xffffffff80000000,xer=0x0	-	0
+cmpl_l0_p15	cmplw cr6, r3, r4	0x7f032040	r3=0xffffffff80000000,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpl_l1_p0	cmpld r3, r4	0x7c232040	r3=0x0,r4=0x7fffffff,xer=0x0	-	0
+cmpl_l1_p1	cmpld cr6, r3, r4	0x7f232040	r3=0x1,r4=0x80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpl_l1_p2	cmpld r3, r4	0x7c232040	r3=0xffffffffffffffff,r4=0x7fffffffffffffff,xer=0x0	-	0
+cmpl_l1_p3	cmpld cr6, r3, r4	0x7f232040	r3=0x7fffffff,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpl_l1_p4	cmpld r3, r4	0x7c232040	r3=0x80000000,r4=0x123456789abcdef,xer=0x0	-	0
+cmpl_l1_p5	cmpld cr6, r3, r4	0x7f232040	r3=0x7fffffffffffffff,r4=0x0,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpl_l1_p6	cmpld r3, r4	0x7c232040	r3=0x8000000000000000,r4=0x1,xer=0x0	-	0
+cmpl_l1_p7	cmpld cr6, r3, r4	0x7f232040	r3=0x123456789abcdef,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpl_l1_p8	cmpld r3, r4	0x7c232040	r3=0x8000000000000000,r4=0xffffffffffffffff,xer=0x0	-	0
+cmpl_l1_p9	cmpld cr6, r3, r4	0x7f232040	r3=0x80000000,r4=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpl_l1_p10	cmpld r3, r4	0x7c232040	r3=0xffffffffffffffff,r4=0xffffffffffffffff,xer=0x0	-	0
+cmpl_l1_p11	cmpld cr6, r3, r4	0x7f232040	r3=0x1,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpl_l1_p12	cmpld r3, r4	0x7c232040	r3=0x7fffffffffffffff,r4=0x1,xer=0x0	-	0
+cmpl_l1_p13	cmpld cr6, r3, r4	0x7f232040	r3=0x8000000000000000,r4=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpl_l1_p14	cmpld r3, r4	0x7c232040	r3=0x123456789abcdef,r4=0xffffffff80000000,xer=0x0	-	0
+cmpl_l1_p15	cmpld cr6, r3, r4	0x7f232040	r3=0xffffffff80000000,r4=0x1,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_i0_v0	cmpwi r3, 0	0x2c030000	r3=0x0,xer=0x0	-	0
+cmpi_l0_i0_v1	cmpwi cr6, r3, 0	0x2f030000	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_i0_v2	cmpwi r3, 0	0x2c030000	r3=0xffffffffffffffff,xer=0x0	-	0
+cmpi_l0_i0_v3	cmpwi cr6, r3, 0	0x2f030000	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_i0_v4	cmpwi r3, 0	0x2c030000	r3=0x80000000,xer=0x0	-	0
+cmpi_l0_i0_v5	cmpwi cr6, r3, 0	0x2f030000	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_i0_v6	cmpwi r3, 0	0x2c030000	r3=0x8000000000000000,xer=0x0	-	0
+cmpi_l0_i0_v7	cmpwi cr6, r3, 0	0x2f030000	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_i0_v8	cmpwi r3, 0	0x2c030000	r3=0xffffffff80000000,xer=0x0	-	0
+cmpi_l0_i1_v9	cmpwi cr6, r3, 1	0x2f030001	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_i1_v10	cmpwi r3, 1	0x2c030001	r3=0x1,xer=0x0	-	0
+cmpi_l0_i1_v11	cmpwi cr6, r3, 1	0x2f030001	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_i1_v12	cmpwi r3, 1	0x2c030001	r3=0x7fffffff,xer=0x0	-	0
+cmpi_l0_i1_v13	cmpwi cr6, r3, 1	0x2f030001	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_i1_v14	cmpwi r3, 1	0x2c030001	r3=0x7fffffffffffffff,xer=0x0	-	0
+cmpi_l0_i1_v15	cmpwi cr6, r3, 1	0x2f030001	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_i1_v16	cmpwi r3, 1	0x2c030001	r3=0x123456789abcdef,xer=0x0	-	0
+cmpi_l0_i1_v17	cmpwi cr6, r3, 1	0x2f030001	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_i7fff_v18	cmpwi r3, 32767	0x2c037fff	r3=0x0,xer=0x0	-	0
+cmpi_l0_i7fff_v19	cmpwi cr6, r3, 32767	0x2f037fff	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_i7fff_v20	cmpwi r3, 32767	0x2c037fff	r3=0xffffffffffffffff,xer=0x0	-	0
+cmpi_l0_i7fff_v21	cmpwi cr6, r3, 32767	0x2f037fff	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_i7fff_v22	cmpwi r3, 32767	0x2c037fff	r3=0x80000000,xer=0x0	-	0
+cmpi_l0_i7fff_v23	cmpwi cr6, r3, 32767	0x2f037fff	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_i7fff_v24	cmpwi r3, 32767	0x2c037fff	r3=0x8000000000000000,xer=0x0	-	0
+cmpi_l0_i7fff_v25	cmpwi cr6, r3, 32767	0x2f037fff	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_i7fff_v26	cmpwi r3, 32767	0x2c037fff	r3=0xffffffff80000000,xer=0x0	-	0
+cmpi_l0_i8000_v27	cmpwi cr6, r3, -32768	0x2f038000	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_i8000_v28	cmpwi r3, -32768	0x2c038000	r3=0x1,xer=0x0	-	0
+cmpi_l0_i8000_v29	cmpwi cr6, r3, -32768	0x2f038000	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_i8000_v30	cmpwi r3, -32768	0x2c038000	r3=0x7fffffff,xer=0x0	-	0
+cmpi_l0_i8000_v31	cmpwi cr6, r3, -32768	0x2f038000	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_i8000_v32	cmpwi r3, -32768	0x2c038000	r3=0x7fffffffffffffff,xer=0x0	-	0
+cmpi_l0_i8000_v33	cmpwi cr6, r3, -32768	0x2f038000	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_i8000_v34	cmpwi r3, -32768	0x2c038000	r3=0x123456789abcdef,xer=0x0	-	0
+cmpi_l0_i8000_v35	cmpwi cr6, r3, -32768	0x2f038000	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_iffff_v36	cmpwi r3, -1	0x2c03ffff	r3=0x0,xer=0x0	-	0
+cmpi_l0_iffff_v37	cmpwi cr6, r3, -1	0x2f03ffff	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_iffff_v38	cmpwi r3, -1	0x2c03ffff	r3=0xffffffffffffffff,xer=0x0	-	0
+cmpi_l0_iffff_v39	cmpwi cr6, r3, -1	0x2f03ffff	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_iffff_v40	cmpwi r3, -1	0x2c03ffff	r3=0x80000000,xer=0x0	-	0
+cmpi_l0_iffff_v41	cmpwi cr6, r3, -1	0x2f03ffff	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_iffff_v42	cmpwi r3, -1	0x2c03ffff	r3=0x8000000000000000,xer=0x0	-	0
+cmpi_l0_iffff_v43	cmpwi cr6, r3, -1	0x2f03ffff	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l0_iffff_v44	cmpwi r3, -1	0x2c03ffff	r3=0xffffffff80000000,xer=0x0	-	0
+cmpi_l1_i0_v45	cmpdi cr6, r3, 0	0x2f230000	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_i0_v46	cmpdi r3, 0	0x2c230000	r3=0x1,xer=0x0	-	0
+cmpi_l1_i0_v47	cmpdi cr6, r3, 0	0x2f230000	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_i0_v48	cmpdi r3, 0	0x2c230000	r3=0x7fffffff,xer=0x0	-	0
+cmpi_l1_i0_v49	cmpdi cr6, r3, 0	0x2f230000	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_i0_v50	cmpdi r3, 0	0x2c230000	r3=0x7fffffffffffffff,xer=0x0	-	0
+cmpi_l1_i0_v51	cmpdi cr6, r3, 0	0x2f230000	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_i0_v52	cmpdi r3, 0	0x2c230000	r3=0x123456789abcdef,xer=0x0	-	0
+cmpi_l1_i0_v53	cmpdi cr6, r3, 0	0x2f230000	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_i1_v54	cmpdi r3, 1	0x2c230001	r3=0x0,xer=0x0	-	0
+cmpi_l1_i1_v55	cmpdi cr6, r3, 1	0x2f230001	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_i1_v56	cmpdi r3, 1	0x2c230001	r3=0xffffffffffffffff,xer=0x0	-	0
+cmpi_l1_i1_v57	cmpdi cr6, r3, 1	0x2f230001	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_i1_v58	cmpdi r3, 1	0x2c230001	r3=0x80000000,xer=0x0	-	0
+cmpi_l1_i1_v59	cmpdi cr6, r3, 1	0x2f230001	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_i1_v60	cmpdi r3, 1	0x2c230001	r3=0x8000000000000000,xer=0x0	-	0
+cmpi_l1_i1_v61	cmpdi cr6, r3, 1	0x2f230001	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_i1_v62	cmpdi r3, 1	0x2c230001	r3=0xffffffff80000000,xer=0x0	-	0
+cmpi_l1_i7fff_v63	cmpdi cr6, r3, 32767	0x2f237fff	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_i7fff_v64	cmpdi r3, 32767	0x2c237fff	r3=0x1,xer=0x0	-	0
+cmpi_l1_i7fff_v65	cmpdi cr6, r3, 32767	0x2f237fff	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_i7fff_v66	cmpdi r3, 32767	0x2c237fff	r3=0x7fffffff,xer=0x0	-	0
+cmpi_l1_i7fff_v67	cmpdi cr6, r3, 32767	0x2f237fff	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_i7fff_v68	cmpdi r3, 32767	0x2c237fff	r3=0x7fffffffffffffff,xer=0x0	-	0
+cmpi_l1_i7fff_v69	cmpdi cr6, r3, 32767	0x2f237fff	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_i7fff_v70	cmpdi r3, 32767	0x2c237fff	r3=0x123456789abcdef,xer=0x0	-	0
+cmpi_l1_i7fff_v71	cmpdi cr6, r3, 32767	0x2f237fff	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_i8000_v72	cmpdi r3, -32768	0x2c238000	r3=0x0,xer=0x0	-	0
+cmpi_l1_i8000_v73	cmpdi cr6, r3, -32768	0x2f238000	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_i8000_v74	cmpdi r3, -32768	0x2c238000	r3=0xffffffffffffffff,xer=0x0	-	0
+cmpi_l1_i8000_v75	cmpdi cr6, r3, -32768	0x2f238000	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_i8000_v76	cmpdi r3, -32768	0x2c238000	r3=0x80000000,xer=0x0	-	0
+cmpi_l1_i8000_v77	cmpdi cr6, r3, -32768	0x2f238000	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_i8000_v78	cmpdi r3, -32768	0x2c238000	r3=0x8000000000000000,xer=0x0	-	0
+cmpi_l1_i8000_v79	cmpdi cr6, r3, -32768	0x2f238000	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_i8000_v80	cmpdi r3, -32768	0x2c238000	r3=0xffffffff80000000,xer=0x0	-	0
+cmpi_l1_iffff_v81	cmpdi cr6, r3, -1	0x2f23ffff	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_iffff_v82	cmpdi r3, -1	0x2c23ffff	r3=0x1,xer=0x0	-	0
+cmpi_l1_iffff_v83	cmpdi cr6, r3, -1	0x2f23ffff	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_iffff_v84	cmpdi r3, -1	0x2c23ffff	r3=0x7fffffff,xer=0x0	-	0
+cmpi_l1_iffff_v85	cmpdi cr6, r3, -1	0x2f23ffff	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_iffff_v86	cmpdi r3, -1	0x2c23ffff	r3=0x7fffffffffffffff,xer=0x0	-	0
+cmpi_l1_iffff_v87	cmpdi cr6, r3, -1	0x2f23ffff	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpi_l1_iffff_v88	cmpdi r3, -1	0x2c23ffff	r3=0x123456789abcdef,xer=0x0	-	0
+cmpi_l1_iffff_v89	cmpdi cr6, r3, -1	0x2f23ffff	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_i0_v0	cmplwi r3, 0x0	0x28030000	r3=0x0,xer=0x0	-	0
+cmpli_l0_i0_v1	cmplwi cr6, r3, 0x0	0x2b030000	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_i0_v2	cmplwi r3, 0x0	0x28030000	r3=0xffffffffffffffff,xer=0x0	-	0
+cmpli_l0_i0_v3	cmplwi cr6, r3, 0x0	0x2b030000	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_i0_v4	cmplwi r3, 0x0	0x28030000	r3=0x80000000,xer=0x0	-	0
+cmpli_l0_i0_v5	cmplwi cr6, r3, 0x0	0x2b030000	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_i0_v6	cmplwi r3, 0x0	0x28030000	r3=0x8000000000000000,xer=0x0	-	0
+cmpli_l0_i0_v7	cmplwi cr6, r3, 0x0	0x2b030000	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_i0_v8	cmplwi r3, 0x0	0x28030000	r3=0xffffffff80000000,xer=0x0	-	0
+cmpli_l0_i1_v9	cmplwi cr6, r3, 0x1	0x2b030001	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_i1_v10	cmplwi r3, 0x1	0x28030001	r3=0x1,xer=0x0	-	0
+cmpli_l0_i1_v11	cmplwi cr6, r3, 0x1	0x2b030001	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_i1_v12	cmplwi r3, 0x1	0x28030001	r3=0x7fffffff,xer=0x0	-	0
+cmpli_l0_i1_v13	cmplwi cr6, r3, 0x1	0x2b030001	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_i1_v14	cmplwi r3, 0x1	0x28030001	r3=0x7fffffffffffffff,xer=0x0	-	0
+cmpli_l0_i1_v15	cmplwi cr6, r3, 0x1	0x2b030001	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_i1_v16	cmplwi r3, 0x1	0x28030001	r3=0x123456789abcdef,xer=0x0	-	0
+cmpli_l0_i1_v17	cmplwi cr6, r3, 0x1	0x2b030001	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_i7fff_v18	cmplwi r3, 0x7fff	0x28037fff	r3=0x0,xer=0x0	-	0
+cmpli_l0_i7fff_v19	cmplwi cr6, r3, 0x7fff	0x2b037fff	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_i7fff_v20	cmplwi r3, 0x7fff	0x28037fff	r3=0xffffffffffffffff,xer=0x0	-	0
+cmpli_l0_i7fff_v21	cmplwi cr6, r3, 0x7fff	0x2b037fff	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_i7fff_v22	cmplwi r3, 0x7fff	0x28037fff	r3=0x80000000,xer=0x0	-	0
+cmpli_l0_i7fff_v23	cmplwi cr6, r3, 0x7fff	0x2b037fff	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_i7fff_v24	cmplwi r3, 0x7fff	0x28037fff	r3=0x8000000000000000,xer=0x0	-	0
+cmpli_l0_i7fff_v25	cmplwi cr6, r3, 0x7fff	0x2b037fff	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_i7fff_v26	cmplwi r3, 0x7fff	0x28037fff	r3=0xffffffff80000000,xer=0x0	-	0
+cmpli_l0_i8000_v27	cmplwi cr6, r3, 0x8000	0x2b038000	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_i8000_v28	cmplwi r3, 0x8000	0x28038000	r3=0x1,xer=0x0	-	0
+cmpli_l0_i8000_v29	cmplwi cr6, r3, 0x8000	0x2b038000	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_i8000_v30	cmplwi r3, 0x8000	0x28038000	r3=0x7fffffff,xer=0x0	-	0
+cmpli_l0_i8000_v31	cmplwi cr6, r3, 0x8000	0x2b038000	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_i8000_v32	cmplwi r3, 0x8000	0x28038000	r3=0x7fffffffffffffff,xer=0x0	-	0
+cmpli_l0_i8000_v33	cmplwi cr6, r3, 0x8000	0x2b038000	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_i8000_v34	cmplwi r3, 0x8000	0x28038000	r3=0x123456789abcdef,xer=0x0	-	0
+cmpli_l0_i8000_v35	cmplwi cr6, r3, 0x8000	0x2b038000	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_iffff_v36	cmplwi r3, 0xffff	0x2803ffff	r3=0x0,xer=0x0	-	0
+cmpli_l0_iffff_v37	cmplwi cr6, r3, 0xffff	0x2b03ffff	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_iffff_v38	cmplwi r3, 0xffff	0x2803ffff	r3=0xffffffffffffffff,xer=0x0	-	0
+cmpli_l0_iffff_v39	cmplwi cr6, r3, 0xffff	0x2b03ffff	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_iffff_v40	cmplwi r3, 0xffff	0x2803ffff	r3=0x80000000,xer=0x0	-	0
+cmpli_l0_iffff_v41	cmplwi cr6, r3, 0xffff	0x2b03ffff	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_iffff_v42	cmplwi r3, 0xffff	0x2803ffff	r3=0x8000000000000000,xer=0x0	-	0
+cmpli_l0_iffff_v43	cmplwi cr6, r3, 0xffff	0x2b03ffff	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l0_iffff_v44	cmplwi r3, 0xffff	0x2803ffff	r3=0xffffffff80000000,xer=0x0	-	0
+cmpli_l1_i0_v45	cmpldi cr6, r3, 0x0	0x2b230000	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_i0_v46	cmpldi r3, 0x0	0x28230000	r3=0x1,xer=0x0	-	0
+cmpli_l1_i0_v47	cmpldi cr6, r3, 0x0	0x2b230000	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_i0_v48	cmpldi r3, 0x0	0x28230000	r3=0x7fffffff,xer=0x0	-	0
+cmpli_l1_i0_v49	cmpldi cr6, r3, 0x0	0x2b230000	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_i0_v50	cmpldi r3, 0x0	0x28230000	r3=0x7fffffffffffffff,xer=0x0	-	0
+cmpli_l1_i0_v51	cmpldi cr6, r3, 0x0	0x2b230000	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_i0_v52	cmpldi r3, 0x0	0x28230000	r3=0x123456789abcdef,xer=0x0	-	0
+cmpli_l1_i0_v53	cmpldi cr6, r3, 0x0	0x2b230000	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_i1_v54	cmpldi r3, 0x1	0x28230001	r3=0x0,xer=0x0	-	0
+cmpli_l1_i1_v55	cmpldi cr6, r3, 0x1	0x2b230001	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_i1_v56	cmpldi r3, 0x1	0x28230001	r3=0xffffffffffffffff,xer=0x0	-	0
+cmpli_l1_i1_v57	cmpldi cr6, r3, 0x1	0x2b230001	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_i1_v58	cmpldi r3, 0x1	0x28230001	r3=0x80000000,xer=0x0	-	0
+cmpli_l1_i1_v59	cmpldi cr6, r3, 0x1	0x2b230001	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_i1_v60	cmpldi r3, 0x1	0x28230001	r3=0x8000000000000000,xer=0x0	-	0
+cmpli_l1_i1_v61	cmpldi cr6, r3, 0x1	0x2b230001	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_i1_v62	cmpldi r3, 0x1	0x28230001	r3=0xffffffff80000000,xer=0x0	-	0
+cmpli_l1_i7fff_v63	cmpldi cr6, r3, 0x7fff	0x2b237fff	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_i7fff_v64	cmpldi r3, 0x7fff	0x28237fff	r3=0x1,xer=0x0	-	0
+cmpli_l1_i7fff_v65	cmpldi cr6, r3, 0x7fff	0x2b237fff	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_i7fff_v66	cmpldi r3, 0x7fff	0x28237fff	r3=0x7fffffff,xer=0x0	-	0
+cmpli_l1_i7fff_v67	cmpldi cr6, r3, 0x7fff	0x2b237fff	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_i7fff_v68	cmpldi r3, 0x7fff	0x28237fff	r3=0x7fffffffffffffff,xer=0x0	-	0
+cmpli_l1_i7fff_v69	cmpldi cr6, r3, 0x7fff	0x2b237fff	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_i7fff_v70	cmpldi r3, 0x7fff	0x28237fff	r3=0x123456789abcdef,xer=0x0	-	0
+cmpli_l1_i7fff_v71	cmpldi cr6, r3, 0x7fff	0x2b237fff	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_i8000_v72	cmpldi r3, 0x8000	0x28238000	r3=0x0,xer=0x0	-	0
+cmpli_l1_i8000_v73	cmpldi cr6, r3, 0x8000	0x2b238000	r3=0x1,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_i8000_v74	cmpldi r3, 0x8000	0x28238000	r3=0xffffffffffffffff,xer=0x0	-	0
+cmpli_l1_i8000_v75	cmpldi cr6, r3, 0x8000	0x2b238000	r3=0x7fffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_i8000_v76	cmpldi r3, 0x8000	0x28238000	r3=0x80000000,xer=0x0	-	0
+cmpli_l1_i8000_v77	cmpldi cr6, r3, 0x8000	0x2b238000	r3=0x7fffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_i8000_v78	cmpldi r3, 0x8000	0x28238000	r3=0x8000000000000000,xer=0x0	-	0
+cmpli_l1_i8000_v79	cmpldi cr6, r3, 0x8000	0x2b238000	r3=0x123456789abcdef,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_i8000_v80	cmpldi r3, 0x8000	0x28238000	r3=0xffffffff80000000,xer=0x0	-	0
+cmpli_l1_iffff_v81	cmpldi cr6, r3, 0xffff	0x2b23ffff	r3=0x0,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_iffff_v82	cmpldi r3, 0xffff	0x2823ffff	r3=0x1,xer=0x0	-	0
+cmpli_l1_iffff_v83	cmpldi cr6, r3, 0xffff	0x2b23ffff	r3=0xffffffffffffffff,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_iffff_v84	cmpldi r3, 0xffff	0x2823ffff	r3=0x7fffffff,xer=0x0	-	0
+cmpli_l1_iffff_v85	cmpldi cr6, r3, 0xffff	0x2b23ffff	r3=0x80000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_iffff_v86	cmpldi r3, 0xffff	0x2823ffff	r3=0x7fffffffffffffff,xer=0x0	-	0
+cmpli_l1_iffff_v87	cmpldi cr6, r3, 0xffff	0x2b23ffff	r3=0x8000000000000000,xer=0xe0000000,cr=0x9abcdef0	-	0
+cmpli_l1_iffff_v88	cmpldi r3, 0xffff	0x2823ffff	r3=0x123456789abcdef,xer=0x0	-	0
+cmpli_l1_iffff_v89	cmpldi cr6, r3, 0xffff	0x2b23ffff	r3=0xffffffff80000000,xer=0xe0000000,cr=0x9abcdef0	-	0

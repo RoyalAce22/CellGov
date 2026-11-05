@@ -6,8 +6,7 @@ use cellgov_ppu::differential::{
     PpuStateSnapshot,
 };
 
-use super::frame::Run;
-use super::table::{Case, Reg, PROFILE};
+use cellgov_testkit::console_cases::{Case, Reg, Run, PROFILE};
 
 /// `<probe>/<profile>`, the capture id the differential report prints.
 fn capture_id(probe: &str) -> &'static str {

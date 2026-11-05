@@ -56,5 +56,17 @@ single-vector artifact: `provenance`, `words`, `initial_state`,
 `expected` is a `value`, `undefined` or `unsupported`, each omission with
 its reason.
 
+## Converted capture sets
+
+The fixed-point instruction files are generated from the PPU table-probe
+captures by the `ppu_reference::capture_tests` drift test; regenerate
+them with `CELLGOV_REGENERATE=1`, never by hand. Each vector is one
+captured case: it starts from the state the case loads, and each
+recorded register, CR, XER and FPSCR it ends with is the console's.
+Every other GPR keeps its start value. A case whose words write a GPR
+the case does not record is left out. A set takes up to 64 cases: first
+a cover of the forms, operand boundaries and XER bits its unit's floor
+names, then cases spread across the rest.
+
 The single-vector artifacts the other tests load live in
 `../ppu_reference_single/`, outside this directory.
