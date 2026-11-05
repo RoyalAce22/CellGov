@@ -6,7 +6,56 @@ use cellgov_fuzz::ppu_reference::{
     PpuReferenceError, PpuReferenceFieldStatus,
 };
 
-const LI_REFERENCE: &str = include_str!("../fixtures/ppu_reference/li_r3_7_v1.json");
+const LI_REFERENCE: &str = include_str!("../fixtures/ppu_reference/li_r3_7_v2.json");
+
+/// `mtfsb1 3` on a zero FPSCR sets OX and FX.
+const MTFSB1_REFERENCE: &str = include_str!("../fixtures/ppu_reference/mtfsb1_ox_v2.json");
+
+/// `vaddsws v3, v1, v2` clamps every word and sets `VSCR[SAT]`.
+const VADDSWS_REFERENCE: &str = include_str!("../fixtures/ppu_reference/vaddsws_sat_v2.json");
+
+#[test]
+fn committed_fpscr_and_vscr_vectors_round_trip_and_replay_clean() {
+    for (json, component) in [
+        (MTFSB1_REFERENCE, PpuReferenceComponent::StateFpscr),
+        (VADDSWS_REFERENCE, PpuReferenceComponent::StateVscr),
+    ] {
+        let artifact = parse_reference_json(json).expect("committed reference must parse");
+        let written = serde_json::to_string(&artifact).expect("serializes");
+        assert_eq!(
+            parse_reference_json(&written).expect("round trip"),
+            artifact
+        );
+
+        let replay = replay_reference(&artifact).expect("committed reference must replay");
+        assert!(replay.internal_divergence.is_none(), "{replay:#?}");
+        assert_eq!(replay.comparisons.len(), 4);
+        for comparison in &replay.comparisons {
+            assert!(comparison.is_match(), "{:?}", comparison.differences);
+            assert!(comparison.compared.contains(&component), "{component:?}");
+        }
+    }
+}
+
+#[test]
+fn a_wrong_fpscr_or_vscr_expectation_names_that_register_alone() {
+    for (json, field, component) in [
+        (MTFSB1_REFERENCE, "fpscr", PpuReferenceComponent::StateFpscr),
+        (VADDSWS_REFERENCE, "vscr", PpuReferenceComponent::StateVscr),
+    ] {
+        let mut altered: serde_json::Value = serde_json::from_str(json).expect("JSON");
+        altered["expected"]["state"][field]["value"] = 0.into();
+        let artifact = parse_reference_json(&altered.to_string()).expect("still parses");
+
+        let replay = replay_reference(&artifact).expect("still replays");
+
+        assert_eq!(replay.comparisons.len(), 4);
+        for comparison in &replay.comparisons {
+            let fields: Vec<_> = comparison.differences.iter().map(|d| d.field).collect();
+            assert_eq!(fields, [component]);
+        }
+    }
+}
 
 #[test]
 fn a_committed_documented_vector_replays_offline_on_every_path() {
@@ -72,15 +121,15 @@ fn a_common_mode_internal_defect_still_fails_the_independent_reference() {
 fn schema_drift_is_a_typed_refusal() {
     let mut json: serde_json::Value =
         serde_json::from_str(LI_REFERENCE).expect("committed reference must be JSON");
-    json["schema_version"] = 2.into();
+    json["schema_version"] = 3.into();
 
-    let error = parse_reference_json(&json.to_string()).expect_err("version two must be refused");
+    let error = parse_reference_json(&json.to_string()).expect_err("version three must be refused");
 
     assert!(matches!(
         error,
         PpuReferenceError::Version {
-            found: 2,
-            supported: 1
+            found: 3,
+            supported: 2
         }
     ));
 }

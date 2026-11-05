@@ -718,7 +718,9 @@ fn ppu_state_reference(gpr: Vec<u64>) -> PpuReferenceState {
         lr: unsupported(),
         ctr: unsupported(),
         xer: unsupported(),
+        fpscr: unsupported(),
         vrsave: unsupported(),
+        vscr: unsupported(),
         tb: unsupported(),
         reservation: unsupported(),
     }

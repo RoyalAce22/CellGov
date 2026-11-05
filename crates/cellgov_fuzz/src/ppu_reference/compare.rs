@@ -188,74 +188,43 @@ fn compare_state(
     observed: &PpuArchitecturalState,
     comparison: &mut PpuReferenceComparison,
 ) {
-    compare_value(
-        PpuReferenceComponent::StateGpr,
-        &expected.gpr,
-        &observed.gpr.to_vec(),
-        comparison,
-    );
-    compare_value(
-        PpuReferenceComponent::StateFpr,
-        &expected.fpr,
-        &observed.fpr.to_vec(),
-        comparison,
-    );
-    let vr_hex = observed
-        .vr
+    // The pattern names every field, so a new architected field is a
+    // compile error here until the comparison uses it.
+    let PpuArchitecturalState {
+        gpr,
+        fpr,
+        vr,
+        pc,
+        cr,
+        lr,
+        ctr,
+        xer,
+        fpscr,
+        vrsave,
+        vscr,
+        tb,
+        reservation,
+    } = observed;
+    use PpuReferenceComponent as C;
+    compare_value(C::StateGpr, &expected.gpr, &gpr.to_vec(), comparison);
+    compare_value(C::StateFpr, &expected.fpr, &fpr.to_vec(), comparison);
+    let vr_hex = vr
         .iter()
         .map(|value| format!("{value:032x}"))
         .collect::<Vec<_>>();
+    compare_value(C::StateVr, &expected.vr_hex, &vr_hex, comparison);
+    compare_value(C::StatePc, &expected.pc, pc, comparison);
+    compare_value(C::StateCr, &expected.cr, cr, comparison);
+    compare_value(C::StateLr, &expected.lr, lr, comparison);
+    compare_value(C::StateCtr, &expected.ctr, ctr, comparison);
+    compare_value(C::StateXer, &expected.xer, xer, comparison);
+    compare_value(C::StateFpscr, &expected.fpscr, fpscr, comparison);
+    compare_value(C::StateVrsave, &expected.vrsave, vrsave, comparison);
+    compare_value(C::StateVscr, &expected.vscr, vscr, comparison);
+    compare_value(C::StateTb, &expected.tb, tb, comparison);
+    let reservation = reservation.map(|line| line.addr());
     compare_value(
-        PpuReferenceComponent::StateVr,
-        &expected.vr_hex,
-        &vr_hex,
-        comparison,
-    );
-    compare_value(
-        PpuReferenceComponent::StatePc,
-        &expected.pc,
-        &observed.pc,
-        comparison,
-    );
-    compare_value(
-        PpuReferenceComponent::StateCr,
-        &expected.cr,
-        &observed.cr,
-        comparison,
-    );
-    compare_value(
-        PpuReferenceComponent::StateLr,
-        &expected.lr,
-        &observed.lr,
-        comparison,
-    );
-    compare_value(
-        PpuReferenceComponent::StateCtr,
-        &expected.ctr,
-        &observed.ctr,
-        comparison,
-    );
-    compare_value(
-        PpuReferenceComponent::StateXer,
-        &expected.xer,
-        &observed.xer,
-        comparison,
-    );
-    compare_value(
-        PpuReferenceComponent::StateVrsave,
-        &expected.vrsave,
-        &observed.vrsave,
-        comparison,
-    );
-    compare_value(
-        PpuReferenceComponent::StateTb,
-        &expected.tb,
-        &observed.tb,
-        comparison,
-    );
-    let reservation = observed.reservation.map(|line| line.addr());
-    compare_value(
-        PpuReferenceComponent::StateReservation,
+        C::StateReservation,
         &expected.reservation,
         &reservation,
         comparison,

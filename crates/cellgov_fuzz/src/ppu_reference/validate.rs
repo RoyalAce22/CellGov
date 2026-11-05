@@ -1,12 +1,14 @@
 //! Parsing and validation of a PPU reference artifact, and its initial state.
 
+use cellgov_ppu::observation::PpuArchitecturalState;
 use cellgov_ppu::state::PpuState;
+use cellgov_ps3_abi::hw::ppu::VSCR_DEFINED_BITS;
 
 use crate::reference::{is_lower_hex, ProvenanceFault, ReferenceField};
 
 use super::types::{
-    PpuReferenceArtifact, PpuReferenceError, PpuReferenceInputState, PpuReferenceObservation,
-    PpuReferenceStateBase, PPU_REFERENCE_SCHEMA_VERSION,
+    is_schema_v1_field, PpuReferenceArtifact, PpuReferenceError, PpuReferenceInputState,
+    PpuReferenceObservation, PpuReferenceStateBase, PPU_REFERENCE_SCHEMA_VERSION,
 };
 
 const REFERENCE_DATA_BASE: u64 = 0x1000_0000;
@@ -22,12 +24,13 @@ pub fn parse_reference_json(json: &str) -> Result<PpuReferenceArtifact, PpuRefer
 
 impl PpuReferenceArtifact {
     pub(super) fn validate(&self) -> Result<(), PpuReferenceError> {
-        if self.schema_version != PPU_REFERENCE_SCHEMA_VERSION {
+        if !(1..=PPU_REFERENCE_SCHEMA_VERSION).contains(&self.schema_version) {
             return Err(PpuReferenceError::Version {
                 found: self.schema_version,
                 supported: PPU_REFERENCE_SCHEMA_VERSION,
             });
         }
+        self.validate_version_fields()?;
         if self.memory_base != REFERENCE_DATA_BASE {
             return Err(PpuReferenceError::MemoryBase {
                 found: self.memory_base,
@@ -99,35 +102,72 @@ impl PpuReferenceArtifact {
                 ProvenanceFault::Digest => PpuReferenceError::CaptureDigest,
             })
     }
+
+    /// A version 2 artifact writes the FPSCR and the VSCR in the initial
+    /// state and in the expected state. A version 1 artifact writes
+    /// neither. An initial VSCR sets no reserved bit.
+    fn validate_version_fields(&self) -> Result<(), PpuReferenceError> {
+        let version = self.schema_version;
+        let v1 = version == 1;
+        let input = &self.initial_state;
+        let expected = &self.expected.state;
+        let fields = [
+            ("initial_state.fpscr", input.fpscr.is_none()),
+            ("initial_state.vscr", input.vscr.is_none()),
+            ("state.fpscr", is_schema_v1_field(&expected.fpscr)),
+            ("state.vscr", is_schema_v1_field(&expected.vscr)),
+        ];
+        if let Some((field, _)) = fields.iter().find(|(_, absent)| *absent != v1) {
+            return Err(PpuReferenceError::FieldVersion { field, version });
+        }
+        if let Some(value) = input.vscr {
+            if value & !VSCR_DEFINED_BITS != 0 {
+                return Err(PpuReferenceError::VscrReserved { value });
+            }
+        }
+        Ok(())
+    }
 }
 
 impl PpuReferenceInputState {
+    /// The base state with every field the artifact writes applied over it.
     pub(super) fn to_state(&self) -> Result<PpuState, PpuReferenceError> {
-        let mut state = match self.base {
-            PpuReferenceStateBase::Zeroed => PpuState::new(),
+        let base = match self.base {
+            PpuReferenceStateBase::Zeroed => PpuArchitecturalState::capture(&PpuState::new()),
         };
+        let mut gpr = base.gpr;
         for (&index, &value) in &self.gpr {
             if index >= 32 {
                 return Err(PpuReferenceError::RegisterIndex { bank: "GPR", index });
             }
-            state.set_gpr(usize::from(index), value);
+            gpr[usize::from(index)] = value;
         }
+        let mut fpr = base.fpr;
         for (&index, &value) in &self.fpr {
-            state.set_fpr(usize::from(index), value);
+            fpr[usize::from(index)] = value;
         }
+        let mut vr = base.vr;
         for (&index, value) in &self.vr_hex {
-            let parsed = u128::from_str_radix(value, 16)
+            vr[usize::from(index)] = u128::from_str_radix(value, 16)
                 .map_err(|_| PpuReferenceError::VectorValue { index })?;
-            state.set_vr(usize::from(index), parsed);
         }
-        state.pc = self.pc;
-        state.set_cr(self.cr);
-        state.set_lr(self.lr);
-        state.set_ctr(self.ctr);
-        state.set_xer(self.xer);
-        state.set_vrsave(self.vrsave);
-        state.tb = self.tb;
-        state.set_reservation(self.reservation.map(cellgov_sync::ReservedLine::containing));
+        let input = PpuArchitecturalState {
+            gpr,
+            fpr,
+            vr,
+            pc: self.pc,
+            cr: self.cr,
+            lr: self.lr,
+            ctr: self.ctr,
+            xer: self.xer,
+            fpscr: self.fpscr.unwrap_or(base.fpscr),
+            vrsave: self.vrsave,
+            vscr: self.vscr.unwrap_or(base.vscr),
+            tb: self.tb,
+            reservation: self.reservation.map(cellgov_sync::ReservedLine::containing),
+        };
+        let mut state = PpuState::new();
+        input.apply(&mut state);
         Ok(state)
     }
 }
@@ -192,7 +232,9 @@ fn validate_observation_reasons(
     validate_reason("state.lr", &state.lr)?;
     validate_reason("state.ctr", &state.ctr)?;
     validate_reason("state.xer", &state.xer)?;
+    validate_reason("state.fpscr", &state.fpscr)?;
     validate_reason("state.vrsave", &state.vrsave)?;
+    validate_reason("state.vscr", &state.vscr)?;
     validate_reason("state.tb", &state.tb)?;
     validate_reason("state.reservation", &state.reservation)?;
     validate_reason("memory", &observation.memory)?;

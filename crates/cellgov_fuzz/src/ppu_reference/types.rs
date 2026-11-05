@@ -7,8 +7,25 @@ use serde::{Deserialize, Serialize};
 use crate::ppu_paths::{PpuPathDivergence, PpuPathRun};
 use crate::reference::{ReferenceField, ReferenceOmission, ReferenceProvenance};
 
-/// Current repository-data schema version.
-pub const PPU_REFERENCE_SCHEMA_VERSION: u32 = 1;
+/// Current repository-data schema version. Version 2 adds the FPSCR and
+/// the VSCR; a version 1 artifact still loads.
+pub const PPU_REFERENCE_SCHEMA_VERSION: u32 = 2;
+
+/// The reason a version 1 artifact gives for each field version 2 added.
+pub(super) const SCHEMA_V1_REASON: &str = "schema version 1";
+
+/// What a version 1 artifact reads for a field version 2 added.
+fn schema_v1_field<T>() -> ReferenceField<T> {
+    ReferenceField::Unsupported {
+        reason: SCHEMA_V1_REASON.to_owned(),
+    }
+}
+
+/// Whether `field` is what a version 1 artifact reads for a field
+/// version 2 added.
+pub(super) fn is_schema_v1_field<T>(field: &ReferenceField<T>) -> bool {
+    matches!(field, ReferenceField::Unsupported { reason } if reason == SCHEMA_V1_REASON)
+}
 
 /// Provenance for an independent PPU observation.
 pub type PpuReferenceProvenance = ReferenceProvenance;
@@ -35,8 +52,16 @@ pub struct PpuReferenceInputState {
     pub ctr: u64,
     /// Initial fixed-point exception register.
     pub xer: u64,
+    /// Initial floating-point status and control register. Version 2
+    /// writes it; a version 1 artifact leaves the base value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fpscr: Option<u32>,
     /// Initial AltiVec usage mask.
     pub vrsave: u32,
+    /// Initial vector status and control register. Version 2 writes it;
+    /// a version 1 artifact leaves the base value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vscr: Option<u32>,
     /// Initial time-base value.
     pub tb: u64,
     /// Initial reserved-line address.
@@ -72,8 +97,20 @@ pub struct PpuReferenceState {
     pub ctr: ReferenceField<u64>,
     /// Fixed-point exception register.
     pub xer: ReferenceField<u64>,
+    /// Floating-point status and control register. A version 1 artifact
+    /// reads it as unsupported.
+    ///
+    /// [PPC-Book1 p:87 s:4.2.2] The FPSCR holds the floating-point status bits and the control bits.
+    #[serde(default = "schema_v1_field")]
+    pub fpscr: ReferenceField<u32>,
     /// AltiVec usage mask.
     pub vrsave: ReferenceField<u32>,
+    /// Vector status and control register. A version 1 artifact reads it
+    /// as unsupported.
+    ///
+    /// [AltiVec-PEM p:2-5 s:2.3.2] The VSCR defines two bits: NJ is VSCR bit 15 and SAT is VSCR bit 31.
+    #[serde(default = "schema_v1_field")]
+    pub vscr: ReferenceField<u32>,
     /// Time-base value.
     pub tb: ReferenceField<u64>,
     /// Reserved-line address.
@@ -251,8 +288,12 @@ pub enum PpuReferenceComponent {
     StateCtr,
     /// Fixed-point exception register.
     StateXer,
+    /// Floating-point status and control register.
+    StateFpscr,
     /// AltiVec usage mask.
     StateVrsave,
+    /// Vector status and control register.
+    StateVscr,
     /// Time-base value.
     StateTb,
     /// Local reservation.
@@ -358,6 +399,20 @@ pub enum PpuReferenceError {
         /// Register index.
         index: u8,
     },
+    /// A field's presence disagrees with the artifact's schema version.
+    #[error("PPU reference field {field} disagrees with schema version {version}")]
+    FieldVersion {
+        /// Field path.
+        field: &'static str,
+        /// Artifact version.
+        version: u32,
+    },
+    /// An initial VSCR sets a reserved bit, which the PPE does not store.
+    #[error("PPU reference initial VSCR 0x{value:08x} sets a reserved bit")]
+    VscrReserved {
+        /// Rejected value.
+        value: u32,
+    },
     /// A reserved-line address is not 128-byte aligned.
     #[error("PPU reference reservation 0x{address:016x} is not 128-byte aligned")]
     ReservationAlignment {
@@ -397,7 +452,7 @@ pub enum PpuReferenceError {
         /// Field name.
         field: &'static str,
     },
-    /// Schema version one cannot normalize a represented value for this field.
+    /// The schema cannot normalize a represented value for this field.
     #[error("PPU reference schema version one cannot represent non-empty field {field}; mark it unsupported")]
     UnsupportedValue {
         /// Field path.

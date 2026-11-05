@@ -12,10 +12,16 @@ use crate::ppu_paths::PpuPathRun;
 
 const FIXTURE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/ppu_reference/li_r3_7_v2.json"
+));
+
+/// The same case in schema version 1, which records no FPSCR or VSCR.
+const FIXTURE_V1: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
     "/tests/fixtures/ppu_reference/li_r3_7_v1.json"
 ));
 
-const ALL_COMPONENTS: [PpuReferenceComponent; 27] = [
+const ALL_COMPONENTS: [PpuReferenceComponent; 29] = [
     PpuReferenceComponent::StateGpr,
     PpuReferenceComponent::StateFpr,
     PpuReferenceComponent::StateVr,
@@ -24,7 +30,9 @@ const ALL_COMPONENTS: [PpuReferenceComponent; 27] = [
     PpuReferenceComponent::StateLr,
     PpuReferenceComponent::StateCtr,
     PpuReferenceComponent::StateXer,
+    PpuReferenceComponent::StateFpscr,
     PpuReferenceComponent::StateVrsave,
+    PpuReferenceComponent::StateVscr,
     PpuReferenceComponent::StateTb,
     PpuReferenceComponent::StateReservation,
     PpuReferenceComponent::Memory,
@@ -46,6 +54,8 @@ const ALL_COMPONENTS: [PpuReferenceComponent; 27] = [
 ];
 
 type Mutation = fn(&mut PpuReferenceObservation, &mut PpuPathRun);
+
+type JsonEdit = fn(&mut serde_json::Value);
 
 fn fixture() -> serde_json::Value {
     serde_json::from_str(FIXTURE).expect("fixture is JSON")
@@ -103,7 +113,9 @@ fn observation_of(run: &PpuPathRun) -> PpuReferenceObservation {
             lr: value(state.lr),
             ctr: value(state.ctr),
             xer: value(state.xer),
+            fpscr: value(state.fpscr),
             vrsave: value(state.vrsave),
+            vscr: value(state.vscr),
             tb: value(state.tb),
             reservation: value(state.reservation.map(|line| line.addr())),
         },
@@ -441,7 +453,9 @@ fn parse_refuses_a_blank_omission_reason_on_every_field() {
         ("/expected/state/lr", "state.lr"),
         ("/expected/state/ctr", "state.ctr"),
         ("/expected/state/xer", "state.xer"),
+        ("/expected/state/fpscr", "state.fpscr"),
         ("/expected/state/vrsave", "state.vrsave"),
+        ("/expected/state/vscr", "state.vscr"),
         ("/expected/state/tb", "state.tb"),
         ("/expected/state/reservation", "state.reservation"),
         ("/expected/memory", "memory"),
@@ -585,6 +599,17 @@ fn error_display_text_is_pinned() {
         (
             PpuReferenceError::VectorValue { index: 5 },
             "PPU reference vector register 5 must contain 32 lowercase hexadecimal digits",
+        ),
+        (
+            PpuReferenceError::FieldVersion {
+                field: "state.vscr",
+                version: 1,
+            },
+            "PPU reference field state.vscr disagrees with schema version 1",
+        ),
+        (
+            PpuReferenceError::VscrReserved { value: 0x0001_0002 },
+            "PPU reference initial VSCR 0x00010002 sets a reserved bit",
         ),
         (
             PpuReferenceError::ReservationAlignment { address: 0x81 },
@@ -765,7 +790,7 @@ fn a_complete_value_observation_compares_every_component() {
 
 #[test]
 fn each_state_component_is_named_when_it_differs() {
-    let cases: [(PpuReferenceComponent, Mutation); 11] = [
+    let cases: [(PpuReferenceComponent, Mutation); 13] = [
         (PpuReferenceComponent::StateGpr, |_, run| {
             run.observation.state.gpr[3] ^= 1;
         }),
@@ -790,8 +815,14 @@ fn each_state_component_is_named_when_it_differs() {
         (PpuReferenceComponent::StateXer, |_, run| {
             run.observation.state.xer ^= 1;
         }),
+        (PpuReferenceComponent::StateFpscr, |_, run| {
+            run.observation.state.fpscr ^= 0x1000_0000;
+        }),
         (PpuReferenceComponent::StateVrsave, |_, run| {
             run.observation.state.vrsave ^= 1;
+        }),
+        (PpuReferenceComponent::StateVscr, |_, run| {
+            run.observation.state.vscr ^= 1;
         }),
         (PpuReferenceComponent::StateTb, |_, run| {
             run.observation.state.tb ^= 1;
@@ -1150,14 +1181,14 @@ fn is_match_ignores_unrepresented_fields_but_not_differences() {
 }
 
 #[test]
-fn replay_of_the_committed_fixture_compares_eighteen_fields_on_four_paths() {
+fn replay_of_the_committed_fixture_compares_twenty_fields_on_four_paths() {
     let replay = replay_reference(&artifact()).expect("fixture replays");
     assert!(replay.internal_divergence.is_none());
     assert_eq!(replay.runs.len(), 4);
     assert_eq!(replay.comparisons.len(), 4);
     for comparison in &replay.comparisons {
         assert!(comparison.is_match(), "{:?}", comparison.differences);
-        assert_eq!(comparison.compared.len(), 18);
+        assert_eq!(comparison.compared.len(), 20);
         assert_eq!(comparison.unrepresented.len(), 9);
     }
     assert_eq!(replay.runs[0].observation.state.gpr[3], 7);
@@ -1198,12 +1229,12 @@ fn replay_names_the_mismatch_of_an_altered_fixture() {
 #[test]
 fn replay_validates_the_artifact_before_running() {
     let mut altered = artifact();
-    altered.schema_version = 2;
+    altered.schema_version = 3;
     assert!(matches!(
         replay_reference(&altered),
         Err(PpuReferenceError::Version {
-            found: 2,
-            supported: 1
+            found: 3,
+            supported: 2
         })
     ));
     let mut altered = artifact();
@@ -1253,7 +1284,15 @@ fn initial_state_overrides_reach_every_replayed_path() {
     altered.initial_state.ctr = 3;
     altered.initial_state.xer = 0x2000_0000;
     altered.initial_state.vrsave = 0xffff_ffff;
+    altered.initial_state.fpscr = Some(0x0000_00f8);
+    altered.initial_state.vscr = Some(0x0000_0001);
     altered.initial_state.reservation = Some(0x80);
+    altered.expected.state.fpscr = ReferenceField::Unsupported {
+        reason: "checked directly".into(),
+    };
+    altered.expected.state.vscr = ReferenceField::Unsupported {
+        reason: "checked directly".into(),
+    };
     altered.expected.state.cr = ReferenceField::Unsupported {
         reason: "checked directly".into(),
     };
@@ -1286,11 +1325,96 @@ fn initial_state_overrides_reach_every_replayed_path() {
         assert_eq!(state.ctr, 3);
         assert_eq!(state.xer, 0x2000_0000);
         assert_eq!(state.vrsave, 0xffff_ffff);
+        assert_eq!(state.fpscr, 0x0000_00f8);
+        assert_eq!(state.vscr, 0x0000_0001);
         assert_eq!(state.reservation, Some(ReservedLine::containing(0x80)));
     }
     for comparison in &replay.comparisons {
         assert!(comparison.is_match(), "{:?}", comparison.differences);
     }
+}
+
+#[test]
+fn a_version_one_artifact_loads_with_the_fpscr_and_vscr_unsupported() {
+    let v1 = parse_reference_json(FIXTURE_V1).expect("version 1 still parses");
+    assert_eq!(v1.schema_version, 1);
+    assert_eq!(
+        (v1.initial_state.fpscr, v1.initial_state.vscr),
+        (None, None)
+    );
+    let reason = ReferenceField::Unsupported {
+        reason: SCHEMA_V1_REASON.to_owned(),
+    };
+    assert_eq!(v1.expected.state.fpscr, reason);
+    assert_eq!(v1.expected.state.vscr, reason);
+
+    let replay = replay_reference(&v1).expect("version 1 replays");
+    assert_eq!(replay.comparisons.len(), 4);
+    for comparison in &replay.comparisons {
+        assert!(comparison.is_match(), "{:?}", comparison.differences);
+        for component in [
+            PpuReferenceComponent::StateFpscr,
+            PpuReferenceComponent::StateVscr,
+        ] {
+            assert!(!comparison.compared.contains(&component), "{component:?}");
+            assert!(
+                comparison.unrepresented.contains(&PpuUnrepresentedField {
+                    field: component,
+                    status: PpuReferenceFieldStatus::Unsupported,
+                    reason: SCHEMA_V1_REASON.to_owned(),
+                }),
+                "{component:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_field_that_disagrees_with_the_schema_version_is_refused() {
+    let cases: [(&str, &str, u32, JsonEdit); 4] = [
+        ("initial_state.fpscr", FIXTURE, 2, |json| {
+            json["initial_state"]
+                .as_object_mut()
+                .expect("object")
+                .remove("fpscr");
+        }),
+        ("state.vscr", FIXTURE, 2, |json| {
+            json["expected"]["state"]
+                .as_object_mut()
+                .expect("object")
+                .remove("vscr");
+        }),
+        ("initial_state.vscr", FIXTURE_V1, 1, |json| {
+            json["initial_state"]["vscr"] = 65536.into();
+        }),
+        ("state.fpscr", FIXTURE_V1, 1, |json| {
+            json["expected"]["state"]["fpscr"] = serde_json::json!({"status": "value", "value": 0});
+        }),
+    ];
+    for (field, fixture, version, mutate) in cases {
+        let mut json: serde_json::Value = serde_json::from_str(fixture).expect("JSON");
+        mutate(&mut json);
+        assert!(
+            matches!(
+                parse(&json),
+                Err(PpuReferenceError::FieldVersion { field: found, version: seen })
+                    if found == field && seen == version
+            ),
+            "{field}"
+        );
+    }
+}
+
+#[test]
+fn an_initial_vscr_with_a_reserved_bit_is_refused() {
+    let mut json = fixture();
+    json["initial_state"]["vscr"] = 0x0001_0002.into();
+    assert!(matches!(
+        parse(&json),
+        Err(PpuReferenceError::VscrReserved { value: 0x0001_0002 })
+    ));
+    json["initial_state"]["vscr"] = 0x0001_0001.into();
+    parse(&json).expect("NJ and SAT are the defined bits");
 }
 
 #[test]
