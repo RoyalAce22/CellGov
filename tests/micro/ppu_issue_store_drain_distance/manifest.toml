@@ -1,0 +1,20 @@
+[test]
+name = "ppu_issue_store_drain_distance"
+
+# A hardware probe of how long a drain after a store waits for it: an
+# mfvscr after each store form at the end of the work an earlier mfvscr
+# held, an mfvscr after an std or stfd with up to 48 li between them, and
+# an mffs after a run of li with and without a store, each loop timed
+# with mftb. ppu/main.c's header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 440 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 440 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 120000

@@ -22,7 +22,7 @@ pub(in crate::timing) const fn is_fpr(r: Reg) -> bool {
 pub(super) const fn vr(n: u8) -> Reg {
     64 + n
 }
-const fn is_vr(r: Reg) -> bool {
+pub(in crate::timing) const fn is_vr(r: Reg) -> bool {
     r >= 64 && r < 96
 }
 pub(super) const fn crf(n: u8) -> Reg {

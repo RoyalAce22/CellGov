@@ -909,6 +909,42 @@ pub const PPU_MFVSCR_LATENCY_CYCLES: u64 = 40;
 /// The `li` issue one a cycle, from about 20 cycles after the `mfvscr`.
 pub const PPU_MFVSCR_YOUNGER_HOLD_CYCLES: u64 = 20;
 
+/// The cycles from the cycle a fixed-point store issues to the cycle it
+/// completes, for a younger `mfvscr`.
+///
+/// [CBE-Handbook p:742 s:A.3.2] `mfvscr` stalls at issue until every
+/// older instruction completes.
+///
+/// In the `ppu_issue_store_drain_distance` capture an `mfvscr`, 16 `li`
+/// and an `std`, `stw` or `stb` take 48.00 cycles an iteration, 8 more
+/// than with no store. With 4 or 8 `li` after the `std` the loop still
+/// takes 48.00; with 16 or 32 it costs what the `li` cost.
+pub const PPU_MFVSCR_STORE_WAIT_CYCLES: u64 = 12;
+
+/// The cycles from the cycle a vector store issues to the cycle it
+/// completes, for a younger `mfvscr`.
+///
+/// In the `ppu_issue_store_drain_distance` capture an `mfvscr`, 16 `li`
+/// and an `stvx` take 56.00 cycles an iteration. The model gives 56.
+pub const PPU_MFVSCR_VECTOR_STORE_WAIT_CYCLES: u64 = 21;
+
+/// The cycles from the cycle a floating-point store issues to the cycle
+/// it completes, for a younger `mfvscr`.
+///
+/// In the `ppu_issue_store_drain_distance` capture an `mfvscr`, 16 `li`
+/// and an `stfd`, `stfs` or `stfiwx` take 67.00 to 67.23 cycles an
+/// iteration; the model gives 67. In the `ppu_issue_fp_store_vscr`
+/// capture an `mfvscr`, 8, 16 or 32 `li` and an `stfd` take 59.05, 67.00
+/// and 83.33.
+pub const PPU_MFVSCR_FP_STORE_WAIT_CYCLES: u64 = 32;
+
+/// The fewest cycles between two stores completing, for a younger
+/// `mfvscr`. Stores complete in order.
+///
+/// In the `ppu_issue_store_drain_distance` capture an `mfvscr`, 16 `li`
+/// and two `std` take 52.39 cycles an iteration, 4.39 more than with one.
+pub const PPU_MFVSCR_STORE_GAP_CYCLES: u64 = 4;
+
 /// The cycles an `mtvscr` holds its unit, so the next `mtvscr` waits
 /// that long.
 ///

@@ -36,7 +36,7 @@
 //! [`PPU_FETCH_AHEAD_INSTRUCTIONS`]: k::PPU_FETCH_AHEAD_INSTRUCTIONS
 
 use super::cache::{Caches, Level};
-use super::op::{is_fpr, unit, Barrier, Kind, LoadClass, Op, Target, NO_REG, REGS};
+use super::op::{is_fpr, is_vr, unit, Barrier, Kind, LoadClass, Op, Target, NO_REG, REGS};
 use super::predictor::Predictor;
 use cellgov_exec::PpeIssuePressure;
 use cellgov_ps3_abi::hw::ppc_isa::PPC_BO_ALWAYS;
@@ -116,6 +116,9 @@ pub(crate) struct Core {
     /// The cycle the last floating-point store completes. A drain that
     /// does not use the VSU issues no earlier.
     fp_store_done: u64,
+    /// The cycle the last store completes, for a younger `mfvscr`. Stores
+    /// complete in order.
+    store_done: u64,
     /// The cycle the last `mfvscr` result is ready. A younger VSU op
     /// other than a load or store runs no earlier. A younger
     /// floating-point store sends its data no earlier.
@@ -355,6 +358,7 @@ impl PpeTiming {
                 vsu_queue: 0,
                 fp_store_data: 0,
                 fp_store_done: 0,
+                store_done: 0,
                 vscr_read: 0,
                 vscr_hold: 0,
                 in_order_writes: 0,
@@ -559,7 +563,14 @@ impl PpeTiming {
             } else {
                 c.fp_store_done
             };
-            let drained = t.max(all.unwrap_or(0)).max(after_queue).max(fp_store);
+            // [CBE-Handbook p:742 s:A.3.2] an `mfvscr` waits at issue for
+            // older stores to complete as well.
+            let store = if op.is_vscr_read() { c.store_done } else { 0 };
+            let drained = t
+                .max(all.unwrap_or(0))
+                .max(after_queue)
+                .max(fp_store)
+                .max(store);
             if c.vsu_queue > floor {
                 queued = drained - floor;
             }
@@ -751,6 +762,10 @@ impl PpeTiming {
             let sent = exec.max(c.vscr_read);
             c.fp_store_data = c.fp_store_data.max(sent + k::PPU_FP_STORE_DATA_CYCLES);
             c.fp_store_done = c.fp_store_done.max(sent + k::PPU_FP_STORE_COMPLETE_CYCLES);
+        }
+        if matches!(op.kind, Kind::Store { .. }) {
+            c.store_done =
+                (last + store_wait(op)).max(c.store_done + k::PPU_MFVSCR_STORE_GAP_CYCLES);
         }
         if op.is_vscr_read() {
             c.vscr_read = exec + k::PPU_MFVSCR_LATENCY_CYCLES;
@@ -1052,6 +1067,18 @@ fn issues_to_vsu(op: &Op) -> bool {
 /// through the VSU issue queue.
 fn uses_vsu(op: &Op) -> bool {
     op.units & (unit::VSU1 | unit::VSU2) != 0
+}
+
+/// The cycles from the last cycle the store `op` issues in to the cycle it
+/// completes, for a younger `mfvscr`.
+fn store_wait(op: &Op) -> u64 {
+    if op.reads().any(|(r, _)| is_fpr(r)) {
+        k::PPU_MFVSCR_FP_STORE_WAIT_CYCLES
+    } else if op.reads().any(|(r, _)| is_vr(r)) {
+        k::PPU_MFVSCR_VECTOR_STORE_WAIT_CYCLES
+    } else {
+        k::PPU_MFVSCR_STORE_WAIT_CYCLES
+    }
 }
 
 /// The cycles a multiply holds the FXU, or `None` for any other

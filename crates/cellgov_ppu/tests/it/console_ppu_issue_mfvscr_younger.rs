@@ -155,6 +155,12 @@ fn each_held_loop_lies_within_the_band() {
 /// - 48 `li` to one register after an `mfvscr`;
 /// - four `vaddubm` after an `mfvscr`;
 /// - each run of `li` with a store after an `mfvscr`.
+///
+/// A second run of the probe took 71.13 and 46.85 cycles an iteration for
+/// the first two loops, within the band of the model's 69 and 47. Loop 10
+/// has the words of loop 3 of the `ppu_issue_store_drain_distance` probe
+/// at a different address. That loop takes 67.00 cycles an iteration, and
+/// the model holds it.
 const DIFFERENT: [usize; 5] = [8, 9, 10, 11, 12];
 
 /// The test fails when the model comes within the band of the console.

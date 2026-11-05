@@ -57,6 +57,7 @@ mod console_ppu_issue_stall_release;
 mod console_ppu_issue_stmw_barrier_words;
 mod console_ppu_issue_stmw_words;
 mod console_ppu_issue_store_data_wait;
+mod console_ppu_issue_store_drain_distance;
 mod console_ppu_issue_store_gather_hit;
 mod console_ppu_issue_store_queue_drain;
 mod console_ppu_issue_store_queue_full;

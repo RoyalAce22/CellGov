@@ -124,34 +124,7 @@ fn each_fp_store_form_before_an_mfvscr_lies_within_the_band() {
     assert_within_band(0..7);
 }
 
-/// The loop with `li` between the `mfvscr` and the store that the model
-/// holds: eight `li` before an `std`.
-const SPACED_HELD: [usize; 1] = [7];
-
 #[test]
-fn each_held_loop_with_li_before_its_store_lies_within_the_band() {
-    assert_within_band(SPACED_HELD);
-}
-
-/// The loops with `li` between the `mfvscr` and the store that the model
-/// does not hold. On the console the next `mfvscr` waits longer for a
-/// store at the end of the `li` than the model gives. There, 16 and 32 `li`
-/// before an `std` take 48 and 64 cycles an iteration; the model gives 40
-/// and 54. An `stfd` costs the console about 19 cycles more than an `std`
-/// at each distance.
-const SPACED_DIFFERENT: [usize; 5] = [8, 9, 10, 11, 12];
-
-/// The test fails when the model comes within the band of the console.
-/// Then move the loop into `SPACED_HELD`.
-#[test]
-fn each_other_loop_with_li_before_its_store_is_a_known_difference() {
-    let w = console_words();
-    for k in SPACED_DIFFERENT {
-        let (cellgov, console) = (cellgov_cycles(k), console_cycles(&w, k));
-        assert!(
-            cellgov < (1.0 - BAND) * console,
-            "loop {k}: CellGov {cellgov:.2} cycles an iteration now lies near the console's \
-             {console:.2}; move the loop into SPACED_HELD",
-        );
-    }
+fn each_loop_with_li_before_its_store_lies_within_the_band() {
+    assert_within_band(7..13);
 }
