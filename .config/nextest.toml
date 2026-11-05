@@ -62,15 +62,23 @@ final-status-level = "slow"
 [profile.ci-data.junit]
 path = "junit.xml"
 
-# The CLI boot suite's three table walks each boot their cases as many at
-# a time as the host's free memory allows. Each sizes that count to the
-# whole host, so each takes every test thread and runs with no other test
-# beside it.
+# The CLI boot suite's table walks each boot every microtest one or more
+# times, as many boots at a time as the host's free memory allows. Each
+# walk sizes that count to the whole host, so every test in the suite
+# takes every test thread and runs with no other test beside it. The
+# suite's other tests take under a second each.
+#
+# A walk's time grows with its boots and with the microtest count, so the
+# walks get a budget of their own: SLOW at 40 s, killed at 120 s. Run
+# alone, the walk that boots each microtest seven times took 48 s in a
+# 4-CPU Linux container, and the two-boot walk 12 s there against 7.5 s
+# on the GitHub runner.
 
 [[profile.ci-microtests.overrides]]
-filter = 'binary_id(cellgov_cli::microtests) & test(/^(tests::every_microtest_(reports_its_documented_payload|boots_bit_identically_twice)|hardware_match_tests::every_microtest_matches_its_hardware_capture)$/)'
+filter = 'binary_id(cellgov_cli::microtests)'
 threads-required = "num-test-threads"
+slow-timeout = { period = "40s", terminate-after = 3 }
 
 [[profile.ci-data.overrides]]
-filter = 'binary_id(cellgov_cli::microtests) & test(/^(tests::every_microtest_(reports_its_documented_payload|boots_bit_identically_twice)|hardware_match_tests::every_microtest_matches_its_hardware_capture)$/)'
+filter = 'binary_id(cellgov_cli::microtests)'
 threads-required = "num-test-threads"
