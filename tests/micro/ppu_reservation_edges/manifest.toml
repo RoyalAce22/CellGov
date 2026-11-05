@@ -1,0 +1,19 @@
+[test]
+name = "ppu_reservation_edges"
+
+# A hardware probe: the store-conditional results the architecture
+# leaves undefined (an address mismatch inside or outside the reserved
+# granule, mixed word and doubleword pairs, dcbf or dcbst on the reserved
+# granule by its holder, and dcbst, dcbf or dcbtst on it by another
+# thread). The console capture is the answer; no emulator runs it.
+
+[observe]
+# 57 big-endian u32 words (228 bytes): failed step, its return code,
+# TRIALS, then per case c in ppu/main.c's order the CR0[EQ] count, the
+# count of trials whose target held the stored value, and the timeouts.
+memory_regions = [
+  { name = "result", addr = 0, size = 228 },
+]
+
+[expect]
+outcome = "completed"

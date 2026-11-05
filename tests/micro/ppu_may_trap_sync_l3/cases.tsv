@@ -1,0 +1,2 @@
+id	asm	words	inputs	record	may_end_process
+sync_l3	sync 3	0x7c6004ac	r3=0x1234	r3	1

@@ -34,6 +34,8 @@ mod loads;
 mod read_intent;
 #[path = "mem_reservation_ea_tests.rs"]
 mod reservation_ea;
+#[path = "mem_reservation_edges_console_tests.rs"]
+mod reservation_edges_console;
 #[path = "mem_scalar_tests.rs"]
 mod scalar;
 #[path = "mem_store_conditional_unmapped_tests.rs"]

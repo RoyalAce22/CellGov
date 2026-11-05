@@ -25,6 +25,7 @@ pub enum BarrierKind {
     /// PPU `sync` with the reserved L value 3.
     ///
     /// [PPC-Book2 p:26 s:3.3.3] L=3 is reserved; the decoder accepts it and this kind names it.
+    /// The reference console runs it and the process continues (`ppu_may_trap_sync_l3`).
     SyncL3 = 3,
     /// PPU `eieio`.
     ///
