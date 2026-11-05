@@ -64,3 +64,7 @@ mod vsu_queue_pressure_tests;
 #[cfg(test)]
 #[path = "tests/mfvscr_younger_tests.rs"]
 mod mfvscr_younger_tests;
+
+#[cfg(test)]
+#[path = "tests/sector_cross_tests.rs"]
+mod sector_cross_tests;

@@ -42,6 +42,7 @@ mod console_ppu_issue_multiply;
 mod console_ppu_issue_priority;
 mod console_ppu_issue_quickened_forms;
 mod console_ppu_issue_range_registers;
+mod console_ppu_issue_sector_cross;
 mod console_ppu_issue_shared;
 mod console_ppu_issue_sibling_rate;
 mod console_ppu_issue_smt;

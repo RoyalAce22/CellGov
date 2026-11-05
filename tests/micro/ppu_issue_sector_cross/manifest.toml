@@ -1,0 +1,21 @@
+[test]
+name = "ppu_issue_sector_cross"
+
+# A hardware probe of what an integer load costs when its bytes cross
+# from one 32-byte L1 sector into the next inside one line: warm ldx,
+# lwzx and lhzx chases at an aligned offset, at offsets that end at a
+# sector's end, at offsets whose split halves each stay in one sector and
+# at offsets where a split half still crosses. The console capture is the
+# answer; ppu/main.c's header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 536 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 536 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 120000

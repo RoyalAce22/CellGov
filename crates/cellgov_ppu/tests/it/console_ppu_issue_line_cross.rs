@@ -262,8 +262,11 @@ fn rows() -> Vec<(f64, Console)> {
 /// The loops the model times outside the console's spread, each with the
 /// cycles an iteration it may stay apart by.
 ///
-/// - Loops 2, 3, 5 and 7: the console pays for an `ld` across two 32-byte
-///   sectors, and CellGov times it as an aligned `ld`.
+/// - Loops 5 and 7: each loop chases an `ld` across two 32-byte sectors
+///   into a flushed line. Over loop 6's trip to memory, the console adds
+///   120 cycles with the second line flushed and 80 with both lines
+///   flushed. CellGov adds `PPU_SECTOR_CROSS_LOAD_CYCLES` to its own trip,
+///   and loop 6 shows that this trip runs high.
 ///   [CBE-Handbook p:730 s:A.1.3.2] such a load is flushed, refetched and
 ///   split into microcode.
 /// - Loops 6 and 11: the model's trip to memory comes from a shuffled
@@ -271,12 +274,10 @@ fn rows() -> Vec<(f64, Console)> {
 /// - Loops 8, 10, 12 and 13: `lmw` and `stmw` take a few cycles more on
 ///   the console than the handbook's microword counts give, as in the
 ///   `ppu_issue_multiple` capture.
-const RESIDUALS: [(usize, f64); 10] = [
-    (2, 47.0),
-    (3, 47.0),
-    (5, 78.0),
+const RESIDUALS: [(usize, f64); 8] = [
+    (5, 31.0),
     (6, 43.0),
-    (7, 38.0),
+    (7, 14.0),
     (8, 3.0),
     (10, 4.0),
     (11, 30.0),

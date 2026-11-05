@@ -908,7 +908,15 @@ impl PpeTiming {
                 c.older = None;
             }
         }
-        let micro = u64::from(op.span);
+        // [CBE-Handbook p:730 s:A.1.3.2] an integer load across a 32-byte
+        // sector is flushed, refetched and split into microcode, so the
+        // instructions after it issue again behind it.
+        let split = sector_split_cycles(op, ea, len, class);
+        if split != 0 && start + split > c.floor {
+            c.floor = start + split;
+            c.older = None;
+        }
+        let micro = u64::from(op.span) + split;
         let targets = op
             .dsts
             .iter()
@@ -1396,4 +1404,29 @@ fn note_pressure(c: &mut Core, op: &Op, own: u64, queued: u64, head: (u64, u64))
 /// or `RA = RT`, so `RT = RB` is valid.
 fn is_update_target(op: &Op, r: u8) -> bool {
     op.units & unit::FXU != 0 && op.addr[0] == r && op.words == 0
+}
+
+/// The cycles of an integer load's split across an L1 sector, or 0.
+///
+/// A load multiple, and a load whose bytes stay inside one sector, cost 0.
+///
+/// [CBE-Handbook p:730 s:A.1.3.2] a misaligned integer load that stays
+/// inside one 32-byte sector performs as an aligned one.
+fn sector_split_cycles(op: &Op, ea: u64, len: u8, class: LoadClass) -> u64 {
+    let first = ea % k::PPU_L1_SECTOR_BYTES;
+    if class != LoadClass::Fixed
+        || op.words != 0
+        || first + u64::from(len) <= k::PPU_L1_SECTOR_BYTES
+    {
+        return 0;
+    }
+    match len {
+        // A word half crosses unless the sector ends between the halves.
+        8 if !first.is_multiple_of(4) => {
+            k::PPU_SECTOR_CROSS_LOAD_CYCLES + k::PPU_SECTOR_CROSS_BYTE_RETRY_CYCLES
+        }
+        4 => k::PPU_SECTOR_CROSS_WORD_LOAD_CYCLES,
+        2 => k::PPU_SECTOR_CROSS_HALFWORD_LOAD_CYCLES,
+        _ => k::PPU_SECTOR_CROSS_LOAD_CYCLES,
+    }
 }

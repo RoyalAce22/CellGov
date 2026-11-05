@@ -737,6 +737,61 @@ pub const PPU_LHA_MICROWORDS: u8 = 10;
 /// does.
 pub const PPU_STORE_SOURCE_LEAD_MICROWORDS: u8 = 2;
 
+/// The bytes of one L1 data-cache sector.
+///
+/// [CBE-Handbook p:730 s:A.1.3.2] the L1 data cache is physically
+/// implemented with 32-byte sectors.
+pub const PPU_L1_SECTOR_BYTES: u64 = 32;
+
+/// The cycles a doubleword integer load across an L1 sector costs.
+///
+/// The cost applies when each word half of the load stays inside one
+/// sector. It delays the load's result and the issue of the instructions
+/// after it. [CBE-Handbook p:730 s:A.1.3.2] the pipeline is flushed when such a
+/// load reaches EX7. The load is then refetched and split into microcode.
+///
+/// In the `ppu_issue_line_cross` capture, a warm chase of `ld` at offset
+/// 92 or 124 of a node takes 54 cycles an iteration. At offset 112 or 116
+/// it takes 8. The cost is the same whether or not the second sector is
+/// in the next line. The replay of that chase through the issue model
+/// takes the console's 54 cycles at this cost.
+pub const PPU_SECTOR_CROSS_LOAD_CYCLES: u64 = 49;
+
+/// The cycles a doubleword integer load across an L1 sector adds to
+/// [`PPU_SECTOR_CROSS_LOAD_CYCLES`] when one of its word halves also
+/// crosses the sector.
+///
+/// [CBE-Handbook p:730 s:A.1.3.2] when a word of the split load still
+/// crosses, the load is flushed again and tried at byte granularity.
+///
+/// In the `ppu_issue_sector_cross` capture, a warm chase of `ldx` at
+/// sector offset 25, 26, 29 or 31 takes 70 cycles an iteration. At
+/// sector offset 28 it takes 56. The replay of that chase through the
+/// issue model takes the console's 70 cycles at this cost.
+pub const PPU_SECTOR_CROSS_BYTE_RETRY_CYCLES: u64 = 16;
+
+/// The cycles a word integer load across an L1 sector costs.
+///
+/// The cost delays the load's result and the issue of the instructions
+/// after it.
+///
+/// In the `ppu_issue_sector_cross` capture, a warm chase of `lwzx` at
+/// sector offset 29, 30 or 31 takes 62 cycles an iteration, whether or
+/// not a halfword of the split crosses. The replay of that chase through
+/// the issue model takes the console's 62 cycles at this cost.
+pub const PPU_SECTOR_CROSS_WORD_LOAD_CYCLES: u64 = 57;
+
+/// The cycles a halfword integer load across an L1 sector costs.
+///
+/// The cost delays the load's result and the issue of the instructions
+/// after it.
+///
+/// In the `ppu_issue_sector_cross` capture, a warm chase of
+/// `lhzx; add` at sector offset 31 takes 58 cycles an iteration. The
+/// replay of that chase through the issue model takes the console's 58
+/// cycles at this cost.
+pub const PPU_SECTOR_CROSS_HALFWORD_LOAD_CYCLES: u64 = 54;
+
 /// The cycles before the first microword of a microcoded instruction
 /// issues.
 ///
