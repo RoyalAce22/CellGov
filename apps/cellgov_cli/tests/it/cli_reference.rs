@@ -84,24 +84,21 @@ fn verbs(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Every command path that takes arguments and does not dispatch to a
-/// verb, found by a walk over the binary's own help.
-fn leaf_paths() -> Vec<Vec<String>> {
+/// Every command path, `cellgov` itself first, with the help text it
+/// prints, found by one walk over the binary's own help.
+///
+/// One call starts the binary once for each path.
+fn help_tree() -> Vec<(Vec<String>, String)> {
     let mut out = Vec::new();
     walk(&[], &mut out);
     out
 }
 
-fn walk(path: &[String], out: &mut Vec<Vec<String>>) {
+fn walk(path: &[String], out: &mut Vec<(Vec<String>, String)>) {
     let borrowed: Vec<&str> = path.iter().map(String::as_str).collect();
     let text = help(&borrowed);
     let verbs = verbs(&text);
-    if verbs.is_empty() {
-        if !path.is_empty() {
-            out.push(path.to_vec());
-        }
-        return;
-    }
+    out.push((path.to_vec(), text));
     for verb in verbs {
         let mut child = path.to_vec();
         child.push(verb);
@@ -109,31 +106,26 @@ fn walk(path: &[String], out: &mut Vec<Vec<String>>) {
     }
 }
 
-/// Every command path below `cellgov` that only dispatches to verbs,
-/// found by a walk over the binary's own help.
-fn noun_paths() -> Vec<Vec<String>> {
-    let mut out = Vec::new();
-    walk_nouns(&[], &mut out);
-    out
+/// Every command path that takes arguments and does not dispatch to a
+/// verb, with its help.
+fn leaves() -> Vec<(Vec<String>, String)> {
+    help_tree()
+        .into_iter()
+        .filter(|(path, text)| !path.is_empty() && verbs(text).is_empty())
+        .collect()
 }
 
-fn walk_nouns(path: &[String], out: &mut Vec<Vec<String>>) {
-    let borrowed: Vec<&str> = path.iter().map(String::as_str).collect();
-    let text = help(&borrowed);
-    let verbs = verbs(&text);
-    if verbs.is_empty() {
-        return;
-    }
-    // `explore` carries a positional of its own alongside its verbs, so
-    // its help leads with examples the way a leaf's does.
-    if !path.is_empty() && !text.contains("\nArguments:\n") {
-        out.push(path.to_vec());
-    }
-    for verb in verbs {
-        let mut child = path.to_vec();
-        child.push(verb);
-        walk_nouns(&child, out);
-    }
+/// Every command path below `cellgov` that only dispatches to verbs,
+/// with its help.
+fn nouns() -> Vec<(Vec<String>, String)> {
+    help_tree()
+        .into_iter()
+        .filter(|(path, text)| {
+            // `explore` carries a positional of its own alongside its
+            // verbs, so its help leads with examples the way a leaf's does.
+            !path.is_empty() && !verbs(text).is_empty() && !text.contains("\nArguments:\n")
+        })
+        .collect()
 }
 
 /// Every command path the committed reference gives a section, as the
@@ -168,7 +160,7 @@ fn documented_leaves() -> Vec<Vec<String>> {
 
 #[test]
 fn the_help_walk_finds_exactly_the_leaves_the_reference_documents() {
-    let mut walked = leaf_paths();
+    let mut walked: Vec<Vec<String>> = leaves().into_iter().map(|(path, _)| path).collect();
     #[cfg(feature = "decrypt")]
     walked.retain(|path| {
         path.as_slice() != ["dev", "lv2-extract"] && path.as_slice() != ["dev", "caller-census"]
@@ -189,11 +181,9 @@ fn the_help_walk_finds_exactly_the_leaves_the_reference_documents() {
 
 #[test]
 fn a_noun_that_only_dispatches_verbs_prints_no_examples() {
-    let nouns = noun_paths();
+    let nouns = nouns();
     assert!(nouns.len() > 5, "the walk found {} nouns", nouns.len());
-    for noun in nouns {
-        let borrowed: Vec<&str> = noun.iter().map(String::as_str).collect();
-        let text = help(&borrowed);
+    for (noun, text) in nouns {
         assert!(
             !text.contains("\nExamples:\n"),
             "{noun:?} dispatches verbs and should lead with them:\n{text}"
@@ -221,11 +211,9 @@ fn a_command_with_both_a_positional_and_verbs_still_leads_with_examples() {
 
 #[test]
 fn every_leaf_help_leads_with_examples_before_the_flag_table() {
-    let leaves = leaf_paths();
+    let leaves = leaves();
     assert!(leaves.len() > 30, "the walk found {} leaves", leaves.len());
-    for leaf in leaves {
-        let borrowed: Vec<&str> = leaf.iter().map(String::as_str).collect();
-        let text = help(&borrowed);
+    for (leaf, text) in leaves {
         let examples = text
             .find("\nExamples:\n")
             .unwrap_or_else(|| panic!("{leaf:?} help has no examples block:\n{text}"));
@@ -247,11 +235,9 @@ fn every_leaf_help_leads_with_examples_before_the_flag_table() {
 
 #[test]
 fn every_example_the_help_prints_invokes_the_command_it_appears_under() {
-    let leaves = leaf_paths();
+    let leaves = leaves();
     assert!(leaves.len() > 30, "the walk found {} leaves", leaves.len());
-    for leaf in leaves {
-        let borrowed: Vec<&str> = leaf.iter().map(String::as_str).collect();
-        let text = help(&borrowed);
+    for (leaf, text) in leaves {
         let block = text
             .split("\nExamples:\n")
             .nth(1)

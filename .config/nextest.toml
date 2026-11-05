@@ -38,6 +38,20 @@ final-status-level = "slow"
 [profile.ci-release.junit]
 path = "junit.xml"
 
+# The CLI help walks start the `cellgov` binary once for each command
+# path. Run alone, each walk takes 1.2-1.5 s in the debug build. On a
+# loaded host the start-ups slow down together: walks that started the
+# binary twice for each leaf took 3 s alone and were killed at 20.5 s.
+# The help walks get SLOW at 20 s and a kill at 60 s.
+
+[[profile.ci.overrides]]
+filter = 'binary_id(cellgov_cli::it) & test(/^cli_reference::/)'
+slow-timeout = { period = "20s", terminate-after = 3 }
+
+[[profile.ci-release.overrides]]
+filter = 'binary_id(cellgov_cli::it) & test(/^cli_reference::/)'
+slow-timeout = { period = "20s", terminate-after = 3 }
+
 # The microtests job (.github/ci.sh microtests).
 [profile.ci-microtests]
 retries = 0
