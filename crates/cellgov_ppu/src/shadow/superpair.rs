@@ -368,6 +368,43 @@ fn fuse(a: PpuInstruction, b: PpuInstruction) -> Option<FusedPair> {
             bi,
             target_offset: offset,
         }),
+        // addi rT, rA, imm + bc (non-linking)
+        (
+            PpuInstruction::Addi { rt, ra, imm },
+            PpuInstruction::Bc {
+                bo,
+                bi,
+                offset,
+                aa: false,
+                link: false,
+            },
+        ) => Some(FusedPair::AddiBc {
+            rt,
+            ra,
+            imm,
+            bo,
+            bi,
+            target_offset: offset,
+        }),
+        // li rT, imm + bc: the shadow quickens addi rT, 0, imm to Li before
+        // pairing, so that shape fuses as an addi with RA = 0.
+        (
+            PpuInstruction::Li { rt, imm },
+            PpuInstruction::Bc {
+                bo,
+                bi,
+                offset,
+                aa: false,
+                link: false,
+            },
+        ) => Some(FusedPair::AddiBc {
+            rt,
+            ra: 0,
+            imm,
+            bo,
+            bi,
+            target_offset: offset,
+        }),
         _ => None,
     }
 }
@@ -429,3 +466,7 @@ mod ldu_tests;
 #[cfg(test)]
 #[path = "tests/superpair_cmpd_nor_tests.rs"]
 mod cmpd_nor_tests;
+
+#[cfg(test)]
+#[path = "tests/superpair_addi_bc_tests.rs"]
+mod addi_bc_tests;

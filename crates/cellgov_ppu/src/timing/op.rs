@@ -1476,6 +1476,13 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
                     branch(bo, bi, false, Target::Direct, taken),
                 )
             }
+            FusedPair::AddiBc { rt, ra, bo, bi, .. } => {
+                let add = fx(gpr(rt));
+                two(
+                    if ra == 0 { add } else { add.src(gpr(ra)) },
+                    branch(bo, bi, false, Target::Direct, branches(state, bo, bi)),
+                )
+            }
         },
         I::Consumed => ([none, none], 0),
         I::Dcbz { ra, rb } => one(Op::on(unit::LSU)

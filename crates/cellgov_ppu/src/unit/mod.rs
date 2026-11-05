@@ -118,6 +118,10 @@ mod fused_ldu_pair_tests;
 mod fused_cmpd_nor_tests;
 
 #[cfg(test)]
+#[path = "tests/fused_addi_bc_tests.rs"]
+mod fused_addi_bc_tests;
+
+#[cfg(test)]
 #[path = "tests/ld_ld_console_tests.rs"]
 mod ld_ld_console_tests;
 
@@ -140,6 +144,10 @@ mod or_add_console_tests;
 #[cfg(test)]
 #[path = "tests/cmpd_nor_console_tests.rs"]
 mod cmpd_nor_console_tests;
+
+#[cfg(test)]
+#[path = "tests/addi_bc_console_tests.rs"]
+mod addi_bc_console_tests;
 
 #[cfg(test)]
 #[path = "tests/store_fault_tests.rs"]

@@ -1915,6 +1915,16 @@ pub enum FusedPair {
         bi: u8,
         target_offset: i16,
     },
+    /// `addi rT, rA, imm` (or its quickened `li` when `ra` is 0) followed
+    /// by a non-linking relative `bc`.
+    AddiBc {
+        rt: u8,
+        ra: u8,
+        imm: i16,
+        bo: u8,
+        bi: u8,
+        target_offset: i16,
+    },
 }
 
 #[cfg(test)]

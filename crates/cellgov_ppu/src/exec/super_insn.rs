@@ -477,6 +477,21 @@ fn execute_pair(
             );
             take_bc(state, bo, bi, target_offset)
         }
+        // [PPC-Book1 p:51 s:3.3.8 Add Immediate] addi: RT <- (RA|0) + EXTS(SI).
+        // The addi writes no CR bit and no CTR, so the bc slot reads what it
+        // reads unfused.
+        FusedPair::AddiBc {
+            rt,
+            ra,
+            imm,
+            bo,
+            bi,
+            target_offset,
+        } => {
+            let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
+            state.set_gpr(rt as usize, base.wrapping_add(imm as i64 as u64));
+            take_bc(state, bo, bi, target_offset)
+        }
     }
 }
 

@@ -273,6 +273,18 @@ fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
                 PpuInstruction::Extsw { ra, rs, rc: false },
                 PpuInstruction::Blr { bo, bi },
             )),
+        // The shadow quickens `addi rT, 0, imm` to `li` before pairing, so
+        // this arm gives that shape as `Li`.
+        (reg(), reg(), any::<i16>(), reg(), reg(), branch_offset()).prop_map(
+            |(rt, ra, imm, bo, bi, off)| {
+                let addi = if ra == 0 {
+                    PpuInstruction::Li { rt, imm }
+                } else {
+                    PpuInstruction::Addi { rt, ra, imm }
+                };
+                (addi, bc(bo, bi, off))
+            }
+        ),
     ]
 }
 
@@ -356,7 +368,7 @@ fn aim_compare(
 }
 
 proptest! {
-    // Seven of the twenty-two arms are compares that need an aimed
+    // Seven of the twenty-three arms are compares that need an aimed
     // operand to show an off-by-one. Four times the default count
     // makes one such case near certain per run.
     #![proptest_config(ProptestConfig::with_cases(1024))]

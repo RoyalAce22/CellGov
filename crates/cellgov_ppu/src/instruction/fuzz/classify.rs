@@ -272,7 +272,7 @@ pub(super) fn fused_effect_and_outcome(
             (READ_EFFECTS, LOAD)
         }
         F::LiStw | F::MflrStw | F::MflrStd | F::StdStd => (WRITE_EFFECTS, STORE),
-        F::CmpwiBc | F::CmpwBc | F::CmpdiBc | F::CmpdBc | F::CmplwBc | F::ExtswBlr => {
+        F::CmpwiBc | F::CmpwBc | F::CmpdiBc | F::CmpdBc | F::CmplwBc | F::AddiBc | F::ExtswBlr => {
             (NO_EFFECTS, BRANCH)
         }
         F::OrAdd | F::LisOri | F::CmpdNor => (NO_EFFECTS, CONTINUE),

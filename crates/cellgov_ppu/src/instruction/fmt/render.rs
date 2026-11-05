@@ -876,6 +876,24 @@ pub(super) fn render(
                 let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
                 write!(f, "; bc {bo}, {bi}, 0x{target:x}")
             }
+            FusedPair::AddiBc {
+                rt,
+                ra,
+                imm,
+                bo,
+                bi,
+                target_offset,
+            } => {
+                // [PPC-Book1 p:162 s:B.9] li rX,v is addi rX,0,v, as the
+                // quickened `li` renders.
+                if ra == 0 {
+                    op(f, "li", format_args!("r{rt}, {imm}"))?;
+                } else {
+                    op(f, "addi", format_args!("r{rt}, r{ra}, {imm}"))?;
+                }
+                let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
+                write!(f, "; bc {bo}, {bi}, 0x{target:x}")
+            }
         },
         I::Consumed => op0(f, ".consumed"),
 

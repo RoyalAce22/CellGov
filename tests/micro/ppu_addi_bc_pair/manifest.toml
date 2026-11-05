@@ -1,0 +1,24 @@
+[test]
+name = "ppu_addi_bc_pair"
+
+# A hardware probe: the addi target, the CTR and a skipped register an
+# adjacent "addi rT,rA,SI ; bc" leaves, for a counted bdnz loop, an li
+# with r0 nonzero, an addi that wraps below 0 before a bc not taken, a
+# bdnz to its own address, and a branch into the bdnz. The console
+# capture is the answer; no emulator runs it.
+
+[observe]
+# 24 big-endian u32 words, as ppu/main.c lists: 96 bytes.
+#   0 failed step, 1 its return code; each register as a high word and
+#   a low word:
+#   2-3 r5, 4-5 CTR after the counted loop;
+#   6-7 r5, 8-9 r7 after "li 5,-3 ; bne" with r0 nonzero;
+#   10-11 r5, 12-13 r7 after "addi 5,6,-3 ; beq" not taken;
+#   14-15 r5, 16-17 CTR after a bdnz to its own address;
+#   18-19 r5, 20-21 r6, 22-23 CTR after a branch into the bdnz.
+memory_regions = [
+  { name = "result", addr = 0, size = 96 },
+]
+
+[expect]
+outcome = "completed"
