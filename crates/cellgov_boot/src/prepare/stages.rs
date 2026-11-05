@@ -80,6 +80,7 @@ pub fn prepare(opts: PrepareOptions<'_>) -> Result<PreparedBoot, BootError> {
         verified.as_ref(),
         host_link,
     );
+    rt.set_trivial_commit_fast_path(execution.engine.trivial_commit_fast_path);
     if let Some(tap) = services.taps.runtime() {
         rt.set_tap(tap);
     }
@@ -117,9 +118,16 @@ pub fn prepare(opts: PrepareOptions<'_>) -> Result<PreparedBoot, BootError> {
         },
     )?;
 
-    // 11. Predecode shadow over the entry state's executable code.
-    let shadow =
-        entry::build_instruction_shadow(&rt, &elf_data, &placement, image.code_floor, sink)?;
+    // 11. Predecode shadow over the entry state's executable code,
+    // with the passes the engine options name.
+    let shadow = entry::build_instruction_shadow(
+        &rt,
+        &elf_data,
+        &placement,
+        image.code_floor,
+        execution.engine.ppu_shadow,
+        sink,
+    )?;
     let entry_r1 = state.gpr[1];
 
     // 12. The primary unit, held non-runnable until module_start ends.

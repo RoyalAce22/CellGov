@@ -126,6 +126,40 @@ pub struct ExecutionOptions<'a> {
     pub guest_args: &'a [String],
     /// The boot applies these once every `module_start` completes.
     pub patch_bytes: &'a [(u64, u8)],
+    /// The interpreter and commit paths the run takes.
+    pub engine: EngineOptions,
+}
+
+/// The interpreter and commit paths a run takes.
+///
+/// Every choice must leave the guest-visible run unchanged. A test
+/// compares the choices to check this.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EngineOptions {
+    /// The predecode passes of the primary unit's instruction shadow.
+    pub ppu_shadow: PpuShadow,
+    /// Whether the runtime may take its trivial-commit fast path.
+    pub trivial_commit_fast_path: bool,
+}
+
+impl Default for EngineOptions {
+    fn default() -> Self {
+        Self {
+            ppu_shadow: PpuShadow::Fused,
+            trivial_commit_fast_path: true,
+        }
+    }
+}
+
+/// The predecode passes of the primary unit's instruction shadow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PpuShadow {
+    /// No shadow: the unit decodes each instruction it fetches.
+    Off,
+    /// Decode and quickening, without fused pairs.
+    Quickened,
+    /// Decode, quickening and fused pairs.
+    Fused,
 }
 
 /// What the boot reports about itself, and the debug toggles it applies.

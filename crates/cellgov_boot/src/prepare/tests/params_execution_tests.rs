@@ -30,6 +30,7 @@ fn execution(max_steps: usize, budget: Option<u64>) -> ExecutionOptions<'static>
         capture_state_trace: false,
         guest_args: &[],
         patch_bytes: &[],
+        engine: Default::default(),
     }
 }
 

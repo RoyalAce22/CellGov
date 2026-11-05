@@ -298,6 +298,9 @@ impl Runtime {
     /// for the slow path to commit, fire or advance. Trace is off in
     /// this mode.
     ///
+    /// The host can forbid the fast path with
+    /// [`Runtime::set_trivial_commit_fast_path`].
+    ///
     /// The RSX half of the predicate must be the exact negation of the
     /// slow-path advance trigger (`get != put || !call_stack.is_empty()`),
     /// or a mid-CALL state with `get == put` would skip the drain.
@@ -308,7 +311,8 @@ impl Runtime {
         result: &ExecutionStepResult,
         effects: &[Effect],
     ) -> bool {
-        self.mode == crate::runtime::types::RuntimeMode::FaultDriven
+        self.trivial_commit_fast_path
+            && self.mode == crate::runtime::types::RuntimeMode::FaultDriven
             && effects.is_empty()
             && result.fault.is_none()
             && result.yield_reason.allows_trivial_fast_path()
@@ -844,3 +848,7 @@ mod rsx_mirror_guard_tests;
 #[cfg(test)]
 #[path = "tests/stale_step_tests.rs"]
 mod stale_step_tests;
+
+#[cfg(test)]
+#[path = "tests/trivial_commit_switch_tests.rs"]
+mod trivial_commit_switch_tests;

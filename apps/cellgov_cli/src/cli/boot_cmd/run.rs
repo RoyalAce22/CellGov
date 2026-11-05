@@ -92,6 +92,7 @@ pub(crate) fn run_game(
                 capture_state_trace: args.save_state_trace.is_some(),
                 guest_args: &args.guest_arg,
                 patch_bytes: args.patch_byte.as_deref().unwrap_or(&[]),
+                engine: args.engine(),
             },
         },
         game::RunArtifacts {

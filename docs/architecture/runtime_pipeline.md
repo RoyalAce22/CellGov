@@ -319,6 +319,7 @@ bytes.
 `Runtime::commit_step` skips steps 4-8 and only advances the epoch
 (plus the scheduler `notify_yielded` call) when all of these hold:
 
+- the run leaves the fast path switched on,
 - the effects vec is empty,
 - `fault` is `None`,
 - `yield_reason` is neither `Syscall` nor `Finished`,

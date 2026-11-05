@@ -114,6 +114,7 @@ impl Runtime {
             effects_buf: Vec::new(),
             rsx_label_base: 0,
             mode: RuntimeMode::FullTrace,
+            trivial_commit_fast_path: true,
             per_step_index: 0,
             zoom_trace,
             scheduler_dirty_after_restore: false,

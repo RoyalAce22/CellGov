@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use super::value;
 use crate::cli::args::CliArgError;
 use cellgov_boot::manifest::CheckpointTrigger;
+use cellgov_boot::prepare::{EngineOptions, PpuShadow};
 use cellgov_compare::BootOverrides;
 
 /// Ceiling on `boot bench --runs`. Each run is a whole boot, and the
@@ -233,8 +234,47 @@ pub(crate) struct BootRunArgs {
     /// One guest argv entry; repeat for more. Values may spell a flag.
     #[arg(long, value_name = "VALUE", allow_hyphen_values = true, action = clap::ArgAction::Append)]
     pub guest_arg: Vec<String>,
+    /// The predecode passes of the primary PPU thread's instruction
+    /// shadow. Every choice must run the guest the same way.
+    #[arg(long, value_enum, value_name = "PASSES", default_value_t = PpuShadowArg::Fused)]
+    pub ppu_shadow: PpuShadowArg,
+    /// Commit every step through the full commit path. The guest must
+    /// run the same way.
+    #[arg(long)]
+    pub no_trivial_commit: bool,
     #[command(flatten)]
     pub overrides: BootOverrideArgs,
+}
+
+impl BootRunArgs {
+    /// The interpreter and commit paths the run takes.
+    pub(crate) fn engine(&self) -> EngineOptions {
+        EngineOptions {
+            ppu_shadow: self.ppu_shadow.into(),
+            trivial_commit_fast_path: !self.no_trivial_commit,
+        }
+    }
+}
+
+/// The predecode passes `--ppu-shadow` selects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum PpuShadowArg {
+    /// No shadow: the PPU decodes each instruction it fetches.
+    Off,
+    /// Decode and quickening, without fused pairs.
+    Quickened,
+    /// Decode, quickening and fused pairs.
+    Fused,
+}
+
+impl From<PpuShadowArg> for PpuShadow {
+    fn from(arg: PpuShadowArg) -> Self {
+        match arg {
+            PpuShadowArg::Off => Self::Off,
+            PpuShadowArg::Quickened => Self::Quickened,
+            PpuShadowArg::Fused => Self::Fused,
+        }
+    }
 }
 
 /// `cellgov boot bench` and `cellgov boot bench-once`.
@@ -300,3 +340,7 @@ pub(crate) struct BenchGateArgs {
     #[arg(long, help_heading = None::<&'static str>)]
     pub strict_perf: bool,
 }
+
+#[cfg(test)]
+#[path = "tests/boot_engine_parse_tests.rs"]
+mod engine_parse_tests;

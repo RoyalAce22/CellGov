@@ -54,6 +54,10 @@ mod top_of_address_space_tests;
 mod fused_resume_invalidation_tests;
 
 #[cfg(test)]
+#[path = "tests/fused_trace_hash_tests.rs"]
+mod fused_trace_hash_tests;
+
+#[cfg(test)]
 #[path = "tests/smc_branch_patch_tests.rs"]
 mod smc_branch_patch_tests;
 

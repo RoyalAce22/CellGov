@@ -174,14 +174,22 @@ impl PpuExecutionUnit {
             // `Consumed` slot only by a branch to it or after a split head.
             // The instruction stored there then runs [PPC-Book1 p:17 s:2.2].
             // A head splits and runs as its first instruction alone when:
-            // - the budget cannot retire both slots, or
-            // - a break is set on the second slot.
+            // - the budget cannot retire both slots,
+            // - a break is set on the second slot,
+            // - per-step tracing is on, or
+            // - a full-state window is set.
+            // The trace and the window record the state after each
+            // instruction, and a fused head has no state between its slots.
             // A head that faulted fused also runs split, so its first
             // instruction retires before the fault.
             let split = match insn {
                 instruction::PpuInstruction::Consumed => true,
                 _ if insn.is_super_pair() => {
-                    forced || remaining < 2 || self.break_pc == Some(step_pc + 4)
+                    forced
+                        || remaining < 2
+                        || self.break_pc == Some(step_pc + 4)
+                        || ctx.trace_per_step()
+                        || self.full_state_window.is_some()
                 }
                 _ => false,
             };
@@ -293,10 +301,6 @@ impl PpuExecutionUnit {
             let mut last_pc = step_pc;
             if pair {
                 last_pc = step_pc + 4;
-                if ctx.trace_per_step() {
-                    self.per_step_hashes
-                        .push((last_pc, self.state.state_hash()));
-                }
                 self.record_retirement(last_pc);
             }
 

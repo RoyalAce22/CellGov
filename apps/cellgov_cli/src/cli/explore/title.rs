@@ -174,6 +174,7 @@ fn prepared_runtime(
             capture_state_trace: false,
             guest_args: &[],
             patch_bytes: &[],
+            engine: Default::default(),
         },
         diagnostics: DiagnosticOptions {
             print_banner: true,

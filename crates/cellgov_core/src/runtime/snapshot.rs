@@ -129,6 +129,7 @@ fn snapshot_field_categories(rt: &Runtime) {
         // --- left alone by a restore ---
         dma_latency: _,                   // set once at construction
         rsx_window_access: _,             // set once by the host before the run
+        trivial_commit_fast_path: _,      // set once by the host before the run
         runnable_buf: _,                  // scratch; each step clears it before use
         observations: _,                  // cleared on restore, rewritten by the next step
         pending_commit: _,                // cleared on restore, set by the next step

@@ -2,11 +2,12 @@
 //! executable code, and the primary unit's registration.
 
 use cellgov_core::{AddressSpaceId, Runtime};
+use cellgov_ppu::shadow::PredecodedShadow;
 use cellgov_ppu::PpuExecutionUnit;
 
 use super::firmware::MemoryPlacement;
 use super::params::{primary_entry_sp, BootParams};
-use super::types::{BootDebugOptions, DiagnosticOptions, ExecutionOptions};
+use super::types::{BootDebugOptions, DiagnosticOptions, ExecutionOptions, PpuShadow};
 use crate::env::EnvBoolError;
 use crate::error::narrow_u32;
 use crate::guest_args::GuestArgsError;
@@ -179,8 +180,10 @@ fn shadow_extent(
     Ok(code_end.min(alloc_floor).min(memory_len))
 }
 
-/// Build the predecode shadow the primary unit registers with, over
-/// `[0, shadow_extent)`.
+/// Build the predecode shadow the primary unit registers with.
+///
+/// The shadow covers `[0, shadow_extent)` and runs the passes that
+/// `passes` names. [`PpuShadow::Off`] gives `None`.
 ///
 /// Built before `module_start`, which only mutates data segments
 /// (mutex tables, allocator state), so the shadow still holds for the
@@ -196,8 +199,14 @@ pub(super) fn build_instruction_shadow(
     elf_data: &[u8],
     placement: &MemoryPlacement,
     code_floor: u32,
+    passes: PpuShadow,
     sink: &dyn crate::BootSink,
-) -> Result<cellgov_ppu::shadow::PredecodedShadow, EntryError> {
+) -> Result<Option<PredecodedShadow>, EntryError> {
+    let build = match passes {
+        PpuShadow::Off => return Ok(None),
+        PpuShadow::Quickened => PredecodedShadow::build_quickened,
+        PpuShadow::Fused => PredecodedShadow::build,
+    };
     let alloc_floor = placement.alloc_floor;
     let shadow_extent = shadow_extent(
         elf_data,
@@ -206,19 +215,18 @@ pub(super) fn build_instruction_shadow(
         rt.memory().as_bytes().len(),
     )?;
     let t_shadow_start = std::time::Instant::now();
-    let shadow =
-        cellgov_ppu::shadow::PredecodedShadow::build(0, &rt.memory().as_bytes()[..shadow_extent]);
+    let shadow = build(0, &rt.memory().as_bytes()[..shadow_extent]);
     if crate::env::parse_bool("CELLGOV_RUNGAME_PROFILE")? {
         let user_region_end = placement.user_region_end;
         let prx_region_end = placement.prx_region_end;
         sink.warn(&format!(
-            "rungame_profile_shadow: PredecodedShadow::build over {shadow_extent} bytes took {:.2}ms \
+            "rungame_profile_shadow: {passes:?} shadow build over {shadow_extent} bytes took {:.2}ms \
              (alloc_floor=0x{alloc_floor:08x} user_region_end=0x{user_region_end:08x} \
              code_floor=0x{code_floor:08x} prx_region_end=0x{prx_region_end:08x})",
             t_shadow_start.elapsed().as_secs_f64() * 1000.0
         ));
     }
-    Ok(shadow)
+    Ok(Some(shadow))
 }
 
 /// Register the title's primary unit and seed its `PpuThreadId`.
@@ -238,7 +246,7 @@ pub(super) fn build_instruction_shadow(
 pub(super) fn register_primary_unit(
     rt: &mut Runtime,
     state: cellgov_ppu::state::PpuState,
-    shadow: cellgov_ppu::shadow::PredecodedShadow,
+    shadow: Option<PredecodedShadow>,
     debug_opts: BootDebugOptions,
     params: &BootParams,
     entry: u64,
@@ -246,7 +254,9 @@ pub(super) fn register_primary_unit(
     let primary_unit_id = rt.register_unit_with(|id| {
         let mut unit = PpuExecutionUnit::new(id);
         *unit.state_mut() = state;
-        unit.set_instruction_shadow(shadow);
+        if let Some(shadow) = shadow {
+            unit.set_instruction_shadow(shadow);
+        }
         debug_opts.apply(&mut unit);
         unit
     });
@@ -280,3 +290,7 @@ pub(super) fn register_primary_unit(
 #[cfg(test)]
 #[path = "tests/entry_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/shadow_choice_tests.rs"]
+mod shadow_choice_tests;

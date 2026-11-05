@@ -64,10 +64,51 @@ fn boot_slots() -> &'static BootSlots {
 /// When a boot does: [`run_observation`]'s panic prints from the worker,
 /// and the walk then fails.
 fn boot_each(cases: &[&'static Case], run_ids: &[&str]) -> Vec<Vec<Observation>> {
-    let jobs: Vec<(usize, usize)> = (0..cases.len())
-        .flat_map(|c| (0..run_ids.len()).map(move |r| (c, r)))
+    let runs: Vec<Run<'_>> = run_ids
+        .iter()
+        .map(|&id| Run {
+            id,
+            args: &[],
+            state_trace: false,
+        })
         .collect();
-    let results: Vec<Mutex<Option<Observation>>> = jobs.iter().map(|_| Mutex::new(None)).collect();
+    boot_runs(cases, &runs)
+        .into_iter()
+        .map(|row| row.into_iter().map(|boot| boot.observation).collect())
+        .collect()
+}
+
+/// One boot of a case: the run id that names its scratch directory, the
+/// `boot run` flags it adds, and whether it saves a state trace.
+#[derive(Debug, Clone, Copy)]
+struct Run<'a> {
+    id: &'a str,
+    args: &'a [&'a str],
+    state_trace: bool,
+}
+
+/// What one boot left: its observation, and the state trace file when
+/// the run saved one.
+struct Boot {
+    observation: Observation,
+    state_trace: Option<PathBuf>,
+}
+
+/// Boot each case once per run, as many at a time as [`boot_slots`]
+/// allows.
+///
+/// The result holds one row per case, in the order of `cases`, and each
+/// row holds one boot per run, in the order of `runs`.
+///
+/// # Panics
+///
+/// When a boot does: [`run_observation`]'s panic prints from the worker,
+/// and the walk then fails.
+fn boot_runs(cases: &[&'static Case], runs: &[Run<'_>]) -> Vec<Vec<Boot>> {
+    let jobs: Vec<(usize, usize)> = (0..cases.len())
+        .flat_map(|c| (0..runs.len()).map(move |r| (c, r)))
+        .collect();
+    let results: Vec<Mutex<Option<Boot>>> = jobs.iter().map(|_| Mutex::new(None)).collect();
     let next = AtomicUsize::new(0);
     let workers = boot_slots().limit().min(jobs.len()).max(1);
     std::thread::scope(|scope| {
@@ -78,19 +119,19 @@ fn boot_each(cases: &[&'static Case], run_ids: &[&str]) -> Vec<Vec<Observation>>
                     break;
                 };
                 let _slot = boot_slots().acquire();
-                let observation = run_observation(cases[c], run_ids[r]);
-                *results[i].lock().expect("result slot poisoned") = Some(observation);
+                let boot = run_observation(cases[c], runs[r]);
+                *results[i].lock().expect("result slot poisoned") = Some(boot);
             });
         }
     });
-    let mut observations = results.into_iter().map(|slot| {
+    let mut boots = results.into_iter().map(|slot| {
         slot.into_inner()
             .expect("result slot poisoned")
             .expect("every job ran")
     });
     cases
         .iter()
-        .map(|_| observations.by_ref().take(run_ids.len()).collect())
+        .map(|_| boots.by_ref().take(runs.len()).collect())
         .collect()
 }
 
@@ -167,11 +208,11 @@ fn manifest_path(name: &str) -> PathBuf {
         .join("manifest.toml")
 }
 
-/// Boot one microtest and return its observation.
+/// Boot one microtest as `run` says and return what the boot left.
 ///
-/// `run_id` discriminates re-runs of one case so the determinism pass
-/// cannot race the payload pass on the same scratch file.
-fn run_observation(case: &Case, run_id: &str) -> Observation {
+/// The run id gives each re-run of one case its own scratch directory,
+/// so the determinism pass cannot race the payload pass on one file.
+fn run_observation(case: &Case, run: Run<'_>) -> Boot {
     let manifest = manifest_path(case.name);
     assert!(
         manifest.is_file(),
@@ -185,10 +226,11 @@ fn run_observation(case: &Case, run_id: &str) -> Observation {
         .join("microtests_scratch")
         .join(std::process::id().to_string())
         .join(case.name)
-        .join(run_id);
+        .join(run.id);
     std::fs::create_dir_all(&scratch).expect("create scratch");
     let observation_path = scratch.join("observation.json");
     std::fs::remove_file(&observation_path).ok();
+    let state_trace = run.state_trace.then(|| scratch.join("state.trace"));
 
     let mut boot = Command::new(env!("CARGO_BIN_EXE_cellgov"));
     boot.args(["boot", "run"])
@@ -198,7 +240,11 @@ fn run_observation(case: &Case, run_id: &str) -> Observation {
         .arg(case.max_steps.to_string())
         .arg("--save-observation")
         .arg(&observation_path)
+        .args(run.args)
         .current_dir(workspace_root());
+    if let Some(path) = &state_trace {
+        boot.arg("--save-state-trace").arg(path);
+    }
     if FIRMWARE_CASES.contains(&case.name) {
         assert!(
             boots_here(case.name),
@@ -249,7 +295,10 @@ fn run_observation(case: &Case, run_id: &str) -> Observation {
             case.name,
         )
     });
-    serde_json::from_str(&json).expect("deserialize Observation")
+    Boot {
+        observation: serde_json::from_str(&json).expect("deserialize Observation"),
+        state_trace,
+    }
 }
 
 /// The `u32` words of the guest's `CGOV` frame.
@@ -374,3 +423,6 @@ mod hardware_match_tests;
 
 #[path = "microtests/capture_gaps.rs"]
 mod capture_gaps;
+
+#[path = "microtests/neutrality_tests.rs"]
+mod neutrality_tests;

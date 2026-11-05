@@ -75,6 +75,7 @@ fn bench_boot(
             capture_state_trace: trace_path.is_some(),
             guest_args: opts.guest_args,
             patch_bytes: &[],
+            engine: Default::default(),
         },
         diagnostics: DiagnosticOptions {
             print_banner: false,

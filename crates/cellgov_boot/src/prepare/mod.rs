@@ -29,6 +29,6 @@ pub use params::ParamsError;
 pub use providers::ProviderError;
 pub use stages::prepare;
 pub use types::{
-    AuthorityIdSource, BootServices, DiagnosticOptions, ExecutionOptions, PrepareOptions,
-    PreparedBoot, StartupTimings, StrictReservedConflict, TitleOptions,
+    AuthorityIdSource, BootServices, DiagnosticOptions, EngineOptions, ExecutionOptions, PpuShadow,
+    PrepareOptions, PreparedBoot, StartupTimings, StrictReservedConflict, TitleOptions,
 };

@@ -103,6 +103,8 @@ pub struct Runtime {
     pub(super) rsx_label_base: u32,
     pub(super) effects_buf: Vec<Effect>,
     pub(super) mode: RuntimeMode,
+    /// Whether a trivial step may take the commit fast path.
+    pub(super) trivial_commit_fast_path: bool,
     /// Monotonic over per-instruction state hashes; orthogonal to
     /// `steps_taken`, which counts `run_until_yield` invocations.
     pub(super) per_step_index: u64,

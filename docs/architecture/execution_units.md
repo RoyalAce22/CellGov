@@ -257,7 +257,8 @@ interpreters keep a flat, sequential layout of the decoded
 operations, like machine code. [Bala2000 p:2 s:2] The cache is keyed
 by the guest binary address of the code it stands for.
 
-Two optimization passes run at shadow build time:
+The run selects which of two optimization passes run at shadow build
+time:
 
 1. **Quickening.** Common idioms rewrite into specialized variants.
    See [Quickening](#quickening).

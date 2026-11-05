@@ -276,6 +276,14 @@ impl Runtime {
         self.mode
     }
 
+    /// Allow or forbid the trivial-step commit fast path.
+    ///
+    /// A new runtime allows it. The fast path also needs
+    /// [`RuntimeMode::FaultDriven`].
+    pub fn set_trivial_commit_fast_path(&mut self, allowed: bool) {
+        self.trivial_commit_fast_path = allowed;
+    }
+
     /// Takes effect on the next `step()` call. See
     /// [`super::default_budget_for_mode`] for per-mode defaults.
     pub fn set_budget(&mut self, budget: Budget) {
