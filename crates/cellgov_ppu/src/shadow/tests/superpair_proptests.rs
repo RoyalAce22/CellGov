@@ -6,6 +6,7 @@ use proptest::prelude::*;
 use super::make_super_pair;
 use crate::exec::ExecuteVerdict;
 use crate::instruction::{FusedPair, PpuInstruction};
+use crate::shadow::quicken::quicken_insn;
 use crate::shadow::semantics_support::{
     compare_immediate, cr_field, displacement, ds_displacement, reg, run_pair, run_sequence,
     state_seed, MEM_BASE,
@@ -285,6 +286,30 @@ fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
                 (addi, bc(bo, bi, off))
             }
         ),
+        // The second half takes the form the shadow gives it: quickened when
+        // a quickening matches, raw otherwise.
+        (
+            reg(),
+            ds_displacement(),
+            reg(),
+            reg(),
+            (0u8..32, 0u8..32, 0u8..32),
+            any::<bool>()
+        )
+            .prop_map(|(rt, imm, ra, rs, (sh, mb, me), rc)| {
+                let rlwinm = PpuInstruction::Rlwinm {
+                    ra,
+                    rs,
+                    sh,
+                    mb,
+                    me,
+                    rc,
+                };
+                (
+                    PpuInstruction::Ld { rt, ra: 1, imm },
+                    quicken_insn(rlwinm).unwrap_or(rlwinm),
+                )
+            }),
     ]
 }
 
@@ -368,7 +393,7 @@ fn aim_compare(
 }
 
 proptest! {
-    // Seven of the twenty-three arms are compares that need an aimed
+    // Seven of the twenty-four arms are compares that need an aimed
     // operand to show an off-by-one. Four times the default count
     // makes one such case near certain per run.
     #![proptest_config(ProptestConfig::with_cases(1024))]

@@ -876,6 +876,30 @@ pub(super) fn render(
                 let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
                 write!(f, "; bc {bo}, {bi}, 0x{target:x}")
             }
+            FusedPair::LdRlwinm {
+                rt,
+                offset,
+                ra,
+                rs,
+                sh,
+                mb,
+                me,
+                rc,
+            } => {
+                mem_d(f, "ld", 'r', rt, offset, 1)?;
+                f.write_str("; ")?;
+                // The rlwinm renders as it does unfused, as its extended
+                // mnemonic where one applies.
+                let rlwinm = I::Rlwinm {
+                    ra,
+                    rs,
+                    sh,
+                    mb,
+                    me,
+                    rc,
+                };
+                render(&rlwinm, addr.wrapping_add(4), symbols, f)
+            }
             FusedPair::AddiBc {
                 rt,
                 ra,

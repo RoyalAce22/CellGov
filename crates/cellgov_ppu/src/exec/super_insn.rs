@@ -9,6 +9,7 @@
 //! [Brunthaler2010 p:2 s:2] dispatch for quickened arms.
 //! [ErtlGregg2003 p:20 s:6.3] dispatch for super-instruction arms.
 
+use crate::exec::alu::{mask64, rotl32};
 use crate::exec::branch::branch_condition;
 use crate::exec::mem::store_prechecked;
 use crate::exec::memory_helpers::{buffer_store, load_ze, LoadPort, Width};
@@ -236,6 +237,34 @@ fn execute_pair(
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     state.set_lr(val);
+                    ExecuteVerdict::Continue
+                }
+                Err(ea) => ExecuteVerdict::MemFault(ea),
+            }
+        }
+        // [PPC-Book1 p:39 s:3.3.2 Load Doubleword] ld: RT <- MEM(EA,8); EA = (r1)+EXTS(DS||0b00).
+        // [PPC-Book1 p:73 s:3.3.12] rlwinm: ROTL32 of the low word of RS, ANDed with
+        // MASK(MB+32, ME+32); Rc = 1 sets CR0 from the result. The rlwinm reads RS
+        // after the load wrote RT.
+        FusedPair::LdRlwinm {
+            rt,
+            offset,
+            ra,
+            rs,
+            sh,
+            mb,
+            me,
+            rc,
+        } => {
+            let ea = state.ea_d_form(1, offset);
+            match load_ze(
+                &mut LoadPort::new(region_views, store_buf, effects, unit_id),
+                ea,
+                Width::B8,
+            ) {
+                Ok(val) => {
+                    state.set_gpr(rt as usize, val);
+                    rlwinm(state, ra, rs, sh, mb, me, rc);
                     ExecuteVerdict::Continue
                 }
                 Err(ea) => ExecuteVerdict::MemFault(ea),
@@ -501,6 +530,17 @@ fn execute_pair(
 #[inline]
 fn cmpw<T: Ord>(state: &mut PpuState, bf: u8, a: T, b: T) {
     state.set_cr_field(bf, cmp_cr_field(a < b, a > b, state.xer_so()));
+}
+
+/// `rlwinm rA, rS, sh, mb, me` into RA, and into CR0 when `rc` is set.
+#[inline]
+fn rlwinm(state: &mut PpuState, ra: u8, rs: u8, sh: u8, mb: u8, me: u8, rc: bool) {
+    let rotated = rotl32(state.gpr[rs as usize] as u32, u32::from(sh));
+    let result = rotated & mask64(mb + 32, me + 32);
+    state.set_gpr(ra as usize, result);
+    if rc {
+        state.set_cr0_from_result(result);
+    }
 }
 
 /// A quickened `bc` with AA = 0: branch to `offset` bytes past this

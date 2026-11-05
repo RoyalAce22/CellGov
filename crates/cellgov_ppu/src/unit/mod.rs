@@ -122,8 +122,16 @@ mod fused_cmpd_nor_tests;
 mod fused_addi_bc_tests;
 
 #[cfg(test)]
+#[path = "tests/fused_ld_rlwinm_tests.rs"]
+mod fused_ld_rlwinm_tests;
+
+#[cfg(test)]
 #[path = "tests/ld_ld_console_tests.rs"]
 mod ld_ld_console_tests;
+
+#[cfg(test)]
+#[path = "tests/ld_rlwinm_console_tests.rs"]
+mod ld_rlwinm_console_tests;
 
 #[cfg(test)]
 #[path = "tests/ldu_ldu_console_tests.rs"]

@@ -843,7 +843,7 @@ fn trap_condition_matches(
 }
 
 /// [PPC-Book1 p:71 s:3.3.12] ROTL32 duplicates the rotated word in both halves.
-fn rotl32(value: u32, shift: u32) -> u64 {
+pub(super) fn rotl32(value: u32, shift: u32) -> u64 {
     let rotated = u64::from(value.rotate_left(shift));
     rotated | (rotated << 32)
 }
@@ -852,7 +852,7 @@ fn rotl32(value: u32, shift: u32) -> u64 {
 /// to `[0..me]` and `[mb..63]`.
 ///
 /// [PPC-Book1 p:71 s:3.3.12] MD/MDS-form 64-bit MASK function: `bits[mb:me]` = 1, wrapping.
-fn mask64(mb: u8, me: u8) -> u64 {
+pub(super) fn mask64(mb: u8, me: u8) -> u64 {
     let all = 0xFFFF_FFFF_FFFF_FFFFu64;
     if mb <= me {
         let top = all >> mb;

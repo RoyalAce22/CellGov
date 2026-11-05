@@ -16,7 +16,7 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
 
 /// The fused pair of `a` then `b`, or `None` if no rule applies.
 fn fuse(a: PpuInstruction, b: PpuInstruction) -> Option<FusedPair> {
-    match (a, decoded_bc(b)) {
+    match (a, decoded_form(b)) {
         // lwz rT, off(rA) + cmpwi crF, rT, imm
         (
             PpuInstruction::Lwz { rt, ra, imm },
@@ -368,6 +368,27 @@ fn fuse(a: PpuInstruction, b: PpuInstruction) -> Option<FusedPair> {
             bi,
             target_offset: offset,
         }),
+        // ld rT, off(r1) + rlwinm in any form, recording or not.
+        (
+            PpuInstruction::Ld { rt, ra: 1, imm },
+            PpuInstruction::Rlwinm {
+                ra,
+                rs,
+                sh,
+                mb,
+                me,
+                rc,
+            },
+        ) => Some(FusedPair::LdRlwinm {
+            rt,
+            offset: imm,
+            ra,
+            rs,
+            sh,
+            mb,
+            me,
+            rc,
+        }),
         // addi rT, rA, imm + bc (non-linking)
         (
             PpuInstruction::Addi { rt, ra, imm },
@@ -409,10 +430,18 @@ fn fuse(a: PpuInstruction, b: PpuInstruction) -> Option<FusedPair> {
     }
 }
 
-/// The original `bc` of a quickened branch, or any other `insn` unchanged.
+/// The original form of a quickened branch or rotate, or any other `insn` unchanged.
 ///
-/// A quickened branch then pairs as its original `bc` does.
-fn decoded_bc(insn: PpuInstruction) -> PpuInstruction {
+/// A quickened second half then pairs as its original instruction does.
+fn decoded_form(insn: PpuInstruction) -> PpuInstruction {
+    let rlwinm = |ra, rs, sh, mb, me| PpuInstruction::Rlwinm {
+        ra,
+        rs,
+        sh,
+        mb,
+        me,
+        rc: false,
+    };
     match insn {
         PpuInstruction::Bdnz { bo, bi, offset }
         | PpuInstruction::BcTrue { bo, bi, offset }
@@ -423,6 +452,14 @@ fn decoded_bc(insn: PpuInstruction) -> PpuInstruction {
             aa: false,
             link: false,
         },
+        // [PPC-Book1 p:160 s:B.7.2 Table 10] slwi n is rlwinm n,0,31-n; srwi n
+        // is rlwinm 32-n,n,31; clrlwi n is rlwinm 0,n,31.
+        PpuInstruction::Slwi { ra, rs, n } => rlwinm(ra, rs, n, 0, 31 - n),
+        PpuInstruction::Srwi { ra, rs, n } => rlwinm(ra, rs, 32 - n, n, 31),
+        PpuInstruction::Clrlwi { ra, rs, n } => rlwinm(ra, rs, 0, n, 31),
+        PpuInstruction::RlwinmMask {
+            ra, rs, sh, mb, me, ..
+        } => rlwinm(ra, rs, sh, mb, me),
         other => other,
     }
 }
@@ -470,3 +507,7 @@ mod cmpd_nor_tests;
 #[cfg(test)]
 #[path = "tests/superpair_addi_bc_tests.rs"]
 mod addi_bc_tests;
+
+#[cfg(test)]
+#[path = "tests/superpair_ld_rlwinm_tests.rs"]
+mod ld_rlwinm_tests;

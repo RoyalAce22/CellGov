@@ -1476,6 +1476,17 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
                     branch(bo, bi, false, Target::Direct, taken),
                 )
             }
+            FusedPair::LdRlwinm {
+                rt,
+                offset,
+                ra,
+                rs,
+                rc,
+                ..
+            } => two(
+                int_load(ea_d(state, 1, offset), 8, rt).base(1),
+                logical(Op::on(unit::FXU).src(gpr(rs)), ra, rc),
+            ),
             FusedPair::AddiBc { rt, ra, bo, bi, .. } => {
                 let add = fx(gpr(rt));
                 two(

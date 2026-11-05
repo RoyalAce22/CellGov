@@ -1915,6 +1915,18 @@ pub enum FusedPair {
         bi: u8,
         target_offset: i16,
     },
+    /// `ld rT, offset(r1)` followed by `rlwinm rA, rS, sh, mb, me` (or a
+    /// quickened form of it), with `rc` the rlwinm's Rc bit.
+    LdRlwinm {
+        rt: u8,
+        offset: i16,
+        ra: u8,
+        rs: u8,
+        sh: u8,
+        mb: u8,
+        me: u8,
+        rc: bool,
+    },
     /// `addi rT, rA, imm` (or its quickened `li` when `ra` is 0) followed
     /// by a non-linking relative `bc`.
     AddiBc {
