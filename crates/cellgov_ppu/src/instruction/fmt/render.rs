@@ -982,6 +982,32 @@ pub(super) fn render(
                 f.write_str("; ")?;
                 mem_d(f, "ld", 'r', rt2, off2, ra2)
             }
+            FusedPair::OrB {
+                ra,
+                rs,
+                rb,
+                rc,
+                offset,
+            } => {
+                // [PPC-Book1 p:163 s:B.9] mr rX,rY is or rX,rY,rY, as the
+                // standalone `or` and the quickened `mr` both render.
+                if rs == rb {
+                    op(f, mn_rc("mr", rc).as_str(), format_args!("r{ra}, r{rs}"))?;
+                } else {
+                    op(
+                        f,
+                        mn_rc("or", rc).as_str(),
+                        format_args!("r{ra}, r{rs}, r{rb}"),
+                    )?;
+                }
+                f.write_str("; ")?;
+                let b = I::B {
+                    offset: offset.bytes(),
+                    aa: false,
+                    link: false,
+                };
+                render(&b, addr.wrapping_add(4), symbols, f)
+            }
         },
         I::Consumed => op0(f, ".consumed"),
 

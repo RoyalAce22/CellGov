@@ -631,6 +631,23 @@ fn execute_pair(
                 Err(ea) => ExecuteVerdict::MemFault(ea),
             }
         }
+        // [PPC-Book1 p:67 s:3.3.11 OR] or: RA <- (RS) | (RB); Rc = 1 sets CR0 from the result.
+        // [PPC-Book1 p:24 s:2.4 Branch] b with AA = 0: NIA <- CIA + EXTS(LI||0b00). Here CIA is the b slot (super + 4).
+        FusedPair::OrB {
+            ra,
+            rs,
+            rb,
+            rc,
+            offset,
+        } => {
+            let result = state.gpr[rs as usize] | state.gpr[rb as usize];
+            state.set_gpr(ra as usize, result);
+            if rc {
+                state.set_cr0_from_result(result);
+            }
+            state.pc = branch_target(state.pc.wrapping_add(4), offset.bytes(), false);
+            ExecuteVerdict::Branch
+        }
     }
 }
 

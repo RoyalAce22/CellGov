@@ -17,7 +17,7 @@ pub mod known_encodings;
 pub mod ops;
 mod refused_words;
 
-pub use branch::branch_target;
+pub use branch::{branch_target, BranchOffset};
 pub use decode_error::{Locator, PpuDecodeError};
 pub use fmt::AsmText;
 pub use insn::{FusedPair, FusedPairKind, PpuInstruction, PpuInstructionKind};

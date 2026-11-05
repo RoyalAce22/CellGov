@@ -7,7 +7,7 @@
 //! [ErtlGregg2003 p:20 s:6.3] super-instruction fusion eliminates one dispatch per pair.
 //! [ErtlGregg2003 p:19 s:5.2.7] empirical effectiveness of super-instructions.
 
-use crate::instruction::{FusedPair, PpuInstruction};
+use crate::instruction::{BranchOffset, FusedPair, PpuInstruction};
 
 /// Fuse two adjacent instructions, or `None` if no rule applies.
 pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<PpuInstruction> {
@@ -539,6 +539,37 @@ fn fuse(a: PpuInstruction, b: PpuInstruction) -> Option<FusedPair> {
             ra2,
             off2,
         }),
+        // or rA, rS, rB in any form (or mr rA, rS) + b with AA = 0 and LK = 0.
+        // The or neither faults nor branches, so it runs as it does when the
+        // pair stays split.
+        (
+            PpuInstruction::Or { ra, rs, rb, rc },
+            PpuInstruction::B {
+                offset,
+                aa: false,
+                link: false,
+            },
+        ) => BranchOffset::new(offset).map(|offset| FusedPair::OrB {
+            ra,
+            rs,
+            rb,
+            rc,
+            offset,
+        }),
+        (
+            PpuInstruction::Mr { ra, rs },
+            PpuInstruction::B {
+                offset,
+                aa: false,
+                link: false,
+            },
+        ) => BranchOffset::new(offset).map(|offset| FusedPair::OrB {
+            ra,
+            rs,
+            rb: rs,
+            rc: false,
+            offset,
+        }),
         _ => None,
     }
 }
@@ -640,3 +671,7 @@ mod std_lwz_tests;
 #[cfg(test)]
 #[path = "tests/superpair_ld_any_tests.rs"]
 mod ld_any_tests;
+
+#[cfg(test)]
+#[path = "tests/superpair_or_b_tests.rs"]
+mod or_b_tests;

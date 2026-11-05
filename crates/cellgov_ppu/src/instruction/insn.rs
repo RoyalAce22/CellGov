@@ -1987,6 +1987,16 @@ pub enum FusedPair {
         ra2: u8,
         off2: i16,
     },
+    /// `or rA, rS, rB` (or its quickened `mr`), with `rc` its Rc bit,
+    /// followed by a relative `b` with LK = 0. `offset` is the branch
+    /// displacement from the second slot.
+    OrB {
+        ra: u8,
+        rs: u8,
+        rb: u8,
+        rc: bool,
+        offset: super::BranchOffset,
+    },
 }
 
 #[cfg(test)]

@@ -436,6 +436,32 @@ fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
                     },
                 )
             }),
+        // The or takes the form the shadow gives it; half the cases are
+        // `mr` shapes. The b reaches the whole I-form range.
+        (
+            reg(),
+            reg(),
+            reg(),
+            any::<bool>(),
+            any::<bool>(),
+            -(1i32 << 23)..(1 << 23)
+        )
+            .prop_map(|(ra, rs, rb, rc, mr, words)| {
+                let or = PpuInstruction::Or {
+                    ra,
+                    rs,
+                    rb: if mr { rs } else { rb },
+                    rc,
+                };
+                (
+                    quicken_insn(or).unwrap_or(or),
+                    PpuInstruction::B {
+                        offset: words * 4,
+                        aa: false,
+                        link: false,
+                    },
+                )
+            }),
     ]
 }
 
@@ -519,7 +545,7 @@ fn aim_compare(
 }
 
 proptest! {
-    // Seven of the twenty-eight arms are compares that need an aimed
+    // Seven of the twenty-nine arms are compares that need an aimed
     // operand to show an off-by-one. Four times the default count
     // makes one such case near certain per run.
     #![proptest_config(ProptestConfig::with_cases(1024))]

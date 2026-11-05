@@ -1540,6 +1540,10 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
                 int_load(ea_d(state, ra1, off1), 8, rt1).base(ra1),
                 int_load(ea_d(state, ra2, off2), 8, rt2).base(ra2),
             ),
+            FusedPair::OrB { ra, rs, rb, rc, .. } => two(
+                logical(Op::on(unit::FXU).src(gpr(rs)).src(gpr(rb)), ra, rc),
+                branch(PPC_BO_ALWAYS, 0, false, Target::Direct, true),
+            ),
         },
         I::Consumed => ([none, none], 0),
         I::Dcbz { ra, rb } => one(Op::on(unit::LSU)
