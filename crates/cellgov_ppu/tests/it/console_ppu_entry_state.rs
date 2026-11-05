@@ -85,20 +85,15 @@ fn a_created_thread_starts_with_the_console_cr() {
     assert_eq!(cellgov()[1].cr(), child.cr);
 }
 
-/// LV2's process start code runs before the entry and leaves CR set;
-/// a new unit starts at CR 0.
 #[test]
-fn the_main_thread_cr_is_the_one_value_cellgov_does_not_start_with() {
+fn the_main_thread_starts_at_the_primary_entry_cr_and_a_new_unit_at_cr_0() {
     let [main, _] = console();
-    assert_ne!(main.cr, 0, "the console's main thread starts at CR 0 now");
+    assert_eq!(main.cr, cellgov_ps3_abi::lv2::process::PRIMARY_ENTRY_CR);
     assert_eq!(cellgov()[0].cr(), 0);
 }
 
-/// Every FPR of a thread holds one value at entry, and the two threads'
-/// values differ: what LV2 leaves there is unspecified. A new unit starts
-/// with every FPR at 0.
 #[test]
-fn the_fprs_hold_an_unspecified_leftover_on_the_console_and_zero_in_cellgov() {
+fn the_fprs_hold_an_unspecified_leftover_on_the_console_and_the_declared_value_in_cellgov() {
     let [main, child] = console();
     for (thread, e) in [("main", &main), ("child", &child)] {
         assert!(
@@ -109,6 +104,10 @@ fn the_fprs_hold_an_unspecified_leftover_on_the_console_and_zero_in_cellgov() {
     }
     assert_ne!(main.fpr[0], child.fpr[0]);
     for s in cellgov() {
-        assert!(s.fpr.as_array().iter().all(|&f| f == 0));
+        assert!(s
+            .fpr
+            .as_array()
+            .iter()
+            .all(|&f| f == cellgov_ps3_abi::hw::ppu::PPU_THREAD_ENTRY_FPR));
     }
 }

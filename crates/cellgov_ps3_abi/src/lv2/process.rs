@@ -30,6 +30,12 @@ pub const BOOT_PROCESS_PPID: u32 = 0x0100_0300;
 // value.
 pub const PRIMARY_ENTRY_R11: u64 = 0x80;
 
+/// CR at a process's primary entry.
+// The ppu_entry_state and ppu_entry_tls captures both read 0x2200_0082
+// on the main thread, which LV2's process start code leaves behind. A
+// thread from sys_ppu_thread_create starts at CR 0.
+pub const PRIMARY_ENTRY_CR: u32 = 0x2200_0082;
+
 /// `sys_process_get_status` return value for a live process.
 // The lv2_process_queries capture reads 2 for the calling process and
 // for its parent.

@@ -50,6 +50,10 @@ fn seed_process_start_registers(
     state.set_gpr(10, 0);
     state.set_gpr(11, cellgov_ps3_abi::lv2::process::PRIMARY_ENTRY_R11);
     state.set_gpr(12, malloc_pagesize as u64);
+    state.set_cr(cellgov_ps3_abi::lv2::process::PRIMARY_ENTRY_CR);
+    // The code that calls the entry branches through CTR, from r0.
+    state.set_gpr(0, state.pc);
+    state.set_ctr(state.pc);
     // The code that calls the entry keeps argv, argc and envp in these.
     state.set_gpr(28, state.gpr[4]);
     state.set_gpr(29, state.gpr[3]);
@@ -327,3 +331,7 @@ mod entry_argv_console_tests;
 #[cfg(test)]
 #[path = "tests/entry_registers_console_tests.rs"]
 mod entry_registers_console_tests;
+
+#[cfg(test)]
+#[path = "tests/entry_process_state_console_tests.rs"]
+mod entry_process_state_console_tests;

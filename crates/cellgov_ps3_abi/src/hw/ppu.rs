@@ -92,6 +92,14 @@ pub const VSCR_DEFINED_BITS: u32 = VSCR_NJ | VSCR_SAT;
 /// at this value, and a created thread does not take its creator's NJ.
 pub const PPU_THREAD_ENTRY_VSCR: u32 = VSCR_NJ;
 
+/// Every FPR of a PPU thread at its first instruction: CellGov's choice.
+///
+/// The reference console leaves one value in all 32 FPRs at a thread's
+/// first instruction, and the value differs from thread to thread
+/// (`ppu_entry_state`). No document names it, so CellGov starts each FPR
+/// at 0.
+pub const PPU_THREAD_ENTRY_FPR: u64 = 0;
+
 /// Highest guest address that can be backed by real storage (2^42 - 1).
 ///
 /// Not a bound on address arithmetic: a program's effective addresses

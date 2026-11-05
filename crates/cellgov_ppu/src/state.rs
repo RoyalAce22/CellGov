@@ -1,7 +1,8 @@
 //! PPU architectural state: the register banks and SPRs.
 
 use cellgov_ps3_abi::hw::ppu::{
-    FPR_COUNT, GPR_COUNT, PPU_THREAD_ENTRY_VSCR, VR_COUNT, VSCR_DEFINED_BITS, VSCR_SAT,
+    FPR_COUNT, GPR_COUNT, PPU_THREAD_ENTRY_FPR, PPU_THREAD_ENTRY_VSCR, VR_COUNT, VSCR_DEFINED_BITS,
+    VSCR_SAT,
 };
 use cellgov_ps3_abi::hw::ppu_spr::PS3_PROCESS_CTRL;
 use cellgov_sync::ReservedLine;
@@ -316,7 +317,12 @@ impl PpuState {
 
     /// Construct a PPU state at a thread's first instruction: every
     /// register zero except the VSCR, and no active reservation.
+    ///
+    /// Each thread starts here. The boot then seeds the registers LV2
+    /// passes, and seeds more of them for the title's primary thread.
     pub fn new() -> Self {
+        // The FPR bank starts at its zero default.
+        const _: () = assert!(PPU_THREAD_ENTRY_FPR == 0);
         Self {
             gpr: LaneBank::new(),
             fpr: LaneBank::new(),
