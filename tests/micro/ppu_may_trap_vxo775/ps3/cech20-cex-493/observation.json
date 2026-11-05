@@ -1,0 +1,24 @@
+{
+  "outcome": "Completed",
+  "memory_regions": [
+    {
+      "name": "result",
+      "addr": 0,
+      "data_hex": [
+        "43415345 00000001 00000000 10010200 bcdef123 456789ab cdef0200 00000000",
+        "12345678 9abcdef1 23456789 abcdef02 00000000 00000000 00000000 00000000",
+        "fff80000 00000000 00000000 00000000 bcdef123 456789ab cdef0200 00000000",
+        "12345678 9abcdef1 23456789 abcdef02 00000000 00000000 00000000 00000000",
+        "fff80000 00000000 00000000 00000000"
+      ]
+    }
+  ],
+  "events": [],
+  "state_hashes": null,
+  "metadata": {
+    "runner": "ps3-cex",
+    "steps": null
+  },
+  "tty_log": [],
+  "runner_firmware": "4.93"
+}
