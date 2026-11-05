@@ -40,3 +40,7 @@ mod fused_retire_tests;
 #[cfg(test)]
 #[path = "tests/fused_or_add_tests.rs"]
 mod fused_or_add_tests;
+
+#[cfg(test)]
+#[path = "tests/touch_flush_tests.rs"]
+mod touch_flush_tests;

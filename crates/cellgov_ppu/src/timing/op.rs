@@ -92,6 +92,12 @@ pub(crate) enum Kind {
     Store { ea: u64, len: u8, conditional: bool },
     /// Zeroes the line at `ea` in the L2 and drops it from the L1.
     ZeroLine { ea: u64 },
+    /// Reloads the line at `ea` into the L2 and the L1.
+    Touch { ea: u64 },
+    /// Drops the line at `ea` from the L1 and the L2.
+    Flush { ea: u64 },
+    /// Writes the line at `ea` back and keeps it valid.
+    StoreBack { ea: u64 },
     /// A branch with this `BO` field.
     ///
     /// `taken` is its direction from the state it executes from. A fused
@@ -1711,11 +1717,41 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
             .index(rb)),
         // [CBE-Handbook p:145 s:6.1.6.1] the load-store unit translates the icbi address; the model
         // issues every cache-block instruction there.
-        I::Dcbst { ra, rb }
-        | I::Dcbf { ra, rb, .. }
-        | I::Icbi { ra, rb }
+        // [CBE-Handbook p:146 s:6.1.6.2] a TH(0) = '0' form other than
+        // '0000' is implemented as '0000'; the TH(0) = '1' forms set up
+        // or stop a data stream, which the model leaves out. In the
+        // `ppu_issue_touch_forms` capture, a dcbt with TH = '1000' or
+        // '1010' touches no line. A dcbt with TH = '0001' touches its line
+        // as TH = '0000' does.
+        I::Dcbt { ra, rb, th } if th & 0b1000 == 0 => one(Op::on(unit::LSU)
+            .kind(Kind::Touch {
+                ea: ea_x(state, ra, rb),
+            })
+            .base(ra)
+            .index(rb)),
+        // [CBE-Handbook p:145 s:6.1.6.2] dcbtst behaves as dcbt with TH = '0000'.
+        // In the `ppu_issue_touch_forms` capture, a dcbtst with TH = '1010'
+        // touches its line as TH = '0000' does.
+        I::Dcbtst { ra, rb, .. } => one(Op::on(unit::LSU)
+            .kind(Kind::Touch {
+                ea: ea_x(state, ra, rb),
+            })
+            .base(ra)
+            .index(rb)),
+        I::Dcbf { ra, rb, .. } => one(Op::on(unit::LSU)
+            .kind(Kind::Flush {
+                ea: ea_x(state, ra, rb),
+            })
+            .base(ra)
+            .index(rb)),
+        I::Dcbst { ra, rb } => one(Op::on(unit::LSU)
+            .kind(Kind::StoreBack {
+                ea: ea_x(state, ra, rb),
+            })
+            .base(ra)
+            .index(rb)),
+        I::Icbi { ra, rb }
         | I::Dcbt { ra, rb, .. }
-        | I::Dcbtst { ra, rb, .. }
         | I::Dst { ra, rb, .. }
         | I::Dstst { ra, rb, .. } => one(Op::on(unit::LSU).base(ra).index(rb)),
         I::Dss { .. } => one(Op::on(unit::LSU)),

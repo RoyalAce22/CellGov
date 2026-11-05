@@ -31,6 +31,8 @@ mod console_ppu_issue_shared;
 mod console_ppu_issue_sibling_rate;
 mod console_ppu_issue_smt;
 mod console_ppu_issue_timing;
+mod console_ppu_issue_touch_flush;
+mod console_ppu_issue_touch_forms;
 mod console_ppu_issue_units;
 mod console_ppu_issue_vscr;
 mod console_ppu_issue_vscr_mem;

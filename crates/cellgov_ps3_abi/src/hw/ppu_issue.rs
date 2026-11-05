@@ -85,6 +85,58 @@ pub const PPU_L2_LOAD_USE_CYCLES: u64 = 41;
 /// which neither cache can hold.
 pub const PPU_MEMORY_LOAD_USE_CYCLES: u64 = 443;
 
+/// The fewest cycles between two touches' requests to memory.
+///
+/// [CBE-Handbook p:146 s:6.1.6.2] the data-prefetch engine requests one
+/// cache line at a time.
+///
+/// In the `ppu_issue_touch_flush` capture a chase through an 8 MB ring
+/// that touches each line eight lines ahead takes 279.0 cycles for four
+/// loads. With `dcbtst` it takes 285.0: about 70 cycles a line. The chase
+/// alone takes 403 cycles a load.
+pub const PPU_TOUCH_INTERVAL_CYCLES: u64 = 70;
+
+/// The fewest cycles between a touch of a line the L2 holds and the next
+/// touch's request.
+///
+/// In the `ppu_issue_touch_forms` capture a chase through a 256 KB ring
+/// that touches each line eight lines ahead takes 9.2 cycles a load. The
+/// chase alone takes [`PPU_L2_LOAD_USE_CYCLES`].
+pub const PPU_TOUCH_L2_INTERVAL_CYCLES: u64 = 9;
+
+/// The cycles from a `dcbf` to a load of the same line that can start.
+///
+/// [CBE-Handbook p:147 s:6.1.6.5] `dcbf` can complete before the
+/// operation it causes completes.
+///
+/// In the `ppu_issue_touch_flush` capture a chase through a 16 KB ring
+/// that flushes each line before its load takes 471 cycles a load. A load
+/// from memory takes [`PPU_MEMORY_LOAD_USE_CYCLES`].
+pub const PPU_DCBF_LINE_BUSY_CYCLES: u64 = 28;
+
+/// The cycles from a `dcbst` to a load of the same line that can start.
+///
+/// In the `ppu_issue_touch_flush` capture a chase through a 16 KB ring
+/// that stores each line back before its load takes 8 cycles a load. The
+/// chase alone takes [`PPU_L1_LOAD_USE_CYCLES`].
+pub const PPU_DCBST_LINE_BUSY_CYCLES: u64 = 3;
+
+/// The cycles from a `dcbf` of a line a store modified to a load of the
+/// same line that can start.
+///
+/// In the `ppu_issue_touch_forms` capture a chase through a 16 KB ring
+/// that stores to each line and then flushes it before its load takes
+/// 785 cycles a load.
+pub const PPU_DCBF_MODIFIED_LINE_BUSY_CYCLES: u64 = 341;
+
+/// The cycles from a `dcbst` of a line a store modified to a load of the
+/// same line that can start.
+///
+/// In the `ppu_issue_touch_forms` capture a chase through a 16 KB ring
+/// that stores to each line and then stores it back before its load
+/// takes 58 cycles a load. With no `dcbst` it takes 14.
+pub const PPU_DCBST_MODIFIED_LINE_BUSY_CYCLES: u64 = 52;
+
 /// The cycles from a store to the load of the same bytes after it,
 /// while the store is still in the store queue.
 ///

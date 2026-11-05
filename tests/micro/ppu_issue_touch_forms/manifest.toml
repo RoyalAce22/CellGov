@@ -1,0 +1,21 @@
+[test]
+name = "ppu_issue_touch_forms"
+
+# A hardware probe of what the dcbt and dcbtst forms the
+# ppu_issue_touch_flush probe leaves out do to a later load: the
+# data-stream forms, a TH form other than '0000', two touches a load, a
+# touch of a line the L2 holds, and dcbst or dcbf of a modified line,
+# timed with mftb. The console capture is the answer; ppu/main.c's header
+# lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 208 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 208 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

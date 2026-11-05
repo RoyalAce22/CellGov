@@ -550,6 +550,9 @@ impl PpeTiming {
             Kind::Load { ea, len, class } => self.load(t, op, ea, len, class),
             Kind::Store { ea, len, .. } => queue_store(&mut self.tables, t, op, ea, len),
             Kind::ZeroLine { ea } => self.tables.caches.zero(ea),
+            Kind::Touch { ea } => self.tables.caches.touch(t, ea),
+            Kind::Flush { ea } => self.tables.caches.flush(t, ea),
+            Kind::StoreBack { ea } => self.tables.caches.store_back(t, ea),
             Kind::Branch {
                 bo,
                 link,
@@ -587,11 +590,21 @@ impl PpeTiming {
         self.core.next_block = next_block;
     }
 
-    /// A load's result latency from where it found its line, and from a
-    /// store to the same bytes still in the store queue.
+    /// Sets the ready cycles of a load's targets from:
+    /// - the level where the load found its line;
+    /// - a touch of the line still on its way;
+    /// - a flush or store-back still busy with the line;
+    /// - a store to the same bytes still in the store queue.
     fn load(&mut self, t: u64, op: &Op, ea: u64, len: u8, class: LoadClass) {
         let tables = &mut *self.tables;
         let level = tables.caches.load(ea, class == LoadClass::Reserve);
+        let arrival = match level {
+            Level::Memory => 0,
+            Level::L1 | Level::L2 => tables.caches.arrival(t, ea),
+        };
+        // The load starts when a flush or store-back still busy with its
+        // line finishes.
+        let start = t.max(tables.caches.busy(t, ea));
         let hit_lat = match class {
             LoadClass::Fixed | LoadClass::Reserve => k::PPU_LOAD_FX_USE_CYCLES,
             LoadClass::Float => k::PPU_FP_LOAD_LATENCY_CYCLES,
@@ -638,10 +651,19 @@ impl PpeTiming {
                 } else {
                     hit_lat
                 };
-                (t + micro + hit_lat, t + micro + addr)
+                (start + micro + hit_lat, start + micro + addr)
             }
-            Some(lat) => (t + micro + lat, t + micro + lat),
+            Some(lat) => (start + micro + lat, start + micro + lat),
         };
+        // The load can find a touched line in the cache before the line
+        // arrives from memory. The load then waits for the line, but no
+        // longer than its own trip to memory.
+        //
+        // [CBE-Handbook p:146 s:6.1.6.2] by default, data prefetch has the
+        // lowest priority of any queue in the load subunit.
+        let arrival = arrival.min(start + micro + k::PPU_MEMORY_LOAD_USE_CYCLES);
+        let waits = arrival > data;
+        let (data, addr) = (data.max(arrival), addr.max(arrival));
         let (data, addr) = match forwarded {
             Some(f) => (data.max(f), addr.max(f)),
             None => (data, addr),
@@ -649,7 +671,7 @@ impl PpeTiming {
         for r in targets {
             c.ready[r as usize] = data;
             c.addr_ready[r as usize] = addr;
-            if miss_lat.is_some() {
+            if miss_lat.is_some() || waits {
                 c.miss[r as usize] = data;
             }
         }

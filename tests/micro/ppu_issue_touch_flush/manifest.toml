@@ -1,0 +1,20 @@
+[test]
+name = "ppu_issue_touch_flush"
+
+# A hardware probe of what dcbt, dcbtst and dcbf do to a later load: a
+# pointer chase through an 8 MB ring with and without a touch eight lines
+# ahead, and through a 16 KB ring with each line flushed or stored back
+# before its load, timed with mftb. The console capture is the answer;
+# ppu/main.c's header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 144 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 144 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
