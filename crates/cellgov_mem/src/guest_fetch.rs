@@ -83,7 +83,9 @@ impl GuestMemory {
     ///   region, or in a region that refuses reads.
     /// - [`FetchRefusal::NoExecute`] when a region maps `pc` but a fetch
     ///   cannot read it:
-    ///   - the region is zero-readable, or is a window onto another unit;
+    ///   - the region is zero-readable, or is a window onto another unit
+    ///     (the capture `ppu_code_call_raw_spu` shows that the console
+    ///     ends the thread at a branch into a Raw SPU's window);
     ///   - the memory is restricted and no code span holds `pc`.
     pub fn fetch_code(&self, pc: u64) -> Result<FetchCode<'_>, FetchRefusal> {
         let region = self

@@ -1,0 +1,28 @@
+[test]
+name = "ppu_code_call_raw_spu"
+
+# A hardware probe: a PPU branch into a Raw SPU's local-store window,
+# beside a branch to the same two instructions in the probe's own code,
+# each in a child thread so a fault ends only that thread.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 24 big-endian u32 words, as ppu/main.c lists: 96 bytes. Word 0 is the
+# done or progress marker, word 1 the step a progress record names,
+# words 2..5 the initialize, create (with the id in word 4) and destroy
+# return codes, words 6 and 7 the local store words read back. Words
+# 8..15 and 16..23 are cases 1 and 2, each: child create and start
+# return codes, the reached and passed flags, r3 after the call, the
+# get-priority answer for the child, and the join return code and exit
+# value.
+memory_regions = [
+  { name = "result", addr = 0, size = 96 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+volatile = [
+  { region = "result", offset = 16, size = 4, reason = "w4: a Raw SPU id is the lowest the whole system leaves free" },
+]
