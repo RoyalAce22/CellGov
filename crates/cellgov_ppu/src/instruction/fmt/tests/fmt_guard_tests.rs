@@ -37,6 +37,7 @@ fn expected_mnemonic(kind: PpuFuzzKind, raw: u32) -> String {
         PpuFuzzKind::Va(op) => op.into(),
         PpuFuzzKind::Fp59(op) => op.into(),
         PpuFuzzKind::Fp63(op) => op.into(),
+        PpuFuzzKind::Fused(pair) => pair.into(),
     };
     // A record-form kind (`AddicDot`) spells its dot as a suffix.
     let name = name.to_lowercase();

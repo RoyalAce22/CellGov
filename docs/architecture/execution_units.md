@@ -61,10 +61,10 @@ The variant count also includes:
 - the shadow's quickening rewrites (`Mr`, `Li`, `Lis`,
   `Slwi`/`Srwi`/`Sldi`/`Srdi`, `Clrlwi`/`Clrldi`, `RlwinmMask`, `Nop`,
   `CmpwZero`, `CmpdZero`, `Bdnz`, `BcTrue`, `BcFalse`, `Blr`);
-- the super-pair fusions (`LwzCmpwi`, `LwzMtlr`, `MflrStw`,
-  `MflrStd`, `LiStw`, `CmpwiBc`, `CmpwBc`, `CmpdiBc`, `CmpdBc`,
-  `CmplwBc`, `LdMtlr`, `LdLd`, `StdStd`, `LbzuCmpwi`, `OrAdd`,
-  `LisOri`);
+- the `Fused` variant, whose `FusedPair` holds the super-pair
+  fusions (`LwzCmpwi`, `LwzMtlr`, `MflrStw`, `MflrStd`, `LiStw`,
+  `CmpwiBc`, `CmpwBc`, `CmpdiBc`, `CmpdBc`, `CmplwBc`, `LdMtlr`,
+  `LdLd`, `StdStd`, `LbzuCmpwi`, `OrAdd`, `LisOri`);
 - the `Consumed` placeholder.
 
 ### PPU loaders

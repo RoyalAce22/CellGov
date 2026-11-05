@@ -5,7 +5,7 @@
 use crate::console_cases::{capture, table, Capture};
 use cellgov_event::UnitId;
 use cellgov_ppu::exec::{execute, ExecuteVerdict};
-use cellgov_ppu::instruction::PpuInstruction;
+use cellgov_ppu::instruction::{FusedPair, PpuInstruction};
 use cellgov_ppu::shadow::PredecodedShadow;
 use cellgov_ppu::state::PpuState;
 use cellgov_ppu::store_buffer::StoreBuffer;
@@ -37,9 +37,9 @@ fn fused_kind(id: &str) -> Option<&'static str> {
 
 fn kind_of(insn: &PpuInstruction) -> &'static str {
     match insn {
-        PpuInstruction::CmpdiBc { .. } => "CmpdiBc",
-        PpuInstruction::CmpdBc { .. } => "CmpdBc",
-        PpuInstruction::CmplwBc { .. } => "CmplwBc",
+        PpuInstruction::Fused(FusedPair::CmpdiBc { .. }) => "CmpdiBc",
+        PpuInstruction::Fused(FusedPair::CmpdBc { .. }) => "CmpdBc",
+        PpuInstruction::Fused(FusedPair::CmplwBc { .. }) => "CmplwBc",
         _ => "unfused",
     }
 }

@@ -17,7 +17,7 @@ use cellgov_exec::{ExecutionContext, ExecutionUnit};
 use cellgov_mem::GuestMemory;
 use cellgov_ppu::decode::decode;
 use cellgov_ppu::exec::execute;
-use cellgov_ppu::instruction::PpuInstruction;
+use cellgov_ppu::instruction::{FusedPair, PpuInstruction};
 use cellgov_ppu::shadow::PredecodedShadow;
 use cellgov_ppu::state::PpuState;
 use cellgov_ppu::store_buffer::StoreBuffer;
@@ -580,7 +580,10 @@ fn bench_run_until_yield_shadowed_off_mixed100(c: &mut Criterion) {
     let shadow_bytes = shadow_bytes_for(&pattern);
     let shadow = PredecodedShadow::build(0, &shadow_bytes);
     assert!(
-        matches!(shadow.get(0), Some(PpuInstruction::LiStw { .. })),
+        matches!(
+            shadow.get(0),
+            Some(PpuInstruction::Fused(FusedPair::LiStw { .. }))
+        ),
         "mixed100 shadow slot 0 should fuse to LiStw; got {:?}",
         shadow.get(0)
     );
@@ -647,7 +650,10 @@ fn bench_run_until_yield_shadowed_hashes_mixed100(c: &mut Criterion) {
     let shadow_bytes = shadow_bytes_for(&pattern);
     let shadow = PredecodedShadow::build(0, &shadow_bytes);
     assert!(
-        matches!(shadow.get(0), Some(PpuInstruction::LiStw { .. })),
+        matches!(
+            shadow.get(0),
+            Some(PpuInstruction::Fused(FusedPair::LiStw { .. }))
+        ),
         "mixed100 shadow slot 0 should fuse to LiStw; got {:?}",
         shadow.get(0)
     );

@@ -1,12 +1,12 @@
 //! The fuzz contract on each decoded instruction and the metamorphic relations it admits.
 
 use crate::instruction::ops::Fp63Op;
-use crate::instruction::{PpuInstruction, PpuInstructionKind};
+use crate::instruction::{FusedPairKind, PpuInstruction, PpuInstructionKind};
 use crate::state::PpuState;
 
 use super::classify::{
-    classify_kind, effect_and_outcome, fault_classes, form_for_word, fuzz_kind, instruction_faults,
-    instruction_outcomes,
+    classify_kind, effect_and_outcome, fault_classes, form_for_word, fused_effect_and_outcome,
+    fuzz_kind, instruction_faults, instruction_outcomes,
 };
 use super::fields::generation_operands_are_valid;
 use super::types::{
@@ -39,14 +39,20 @@ impl PpuInstruction {
         let instruction_kind = PpuInstructionKind::from(*self);
         classify_kind(instruction_kind);
         let valid_form = generation_operands_are_valid(*self);
-        let (effects, outcomes) = effect_and_outcome(instruction_kind, valid_form);
+        let (effects, outcomes) = match self {
+            PpuInstruction::Fused(pair) => fused_effect_and_outcome(FusedPairKind::from(pair)),
+            _ => effect_and_outcome(instruction_kind, valid_form),
+        };
         PpuFuzzDescriptor {
             kind: fuzz_kind(*self),
             form: form_for_word(instruction_kind, raw),
             observable_state: PpuObservableState::Complete,
             effects,
             outcomes: instruction_outcomes(*self, outcomes),
-            faults: instruction_faults(*self, fault_classes(instruction_kind, valid_form)),
+            faults: instruction_faults(
+                *self,
+                fault_classes(instruction_kind, valid_form, outcomes),
+            ),
             relations: relations_for_instruction(*self),
         }
     }

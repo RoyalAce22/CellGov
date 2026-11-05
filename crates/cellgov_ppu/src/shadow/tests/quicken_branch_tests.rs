@@ -3,7 +3,7 @@
 
 use super::quicken_insn;
 use crate::exec::{execute, ExecuteVerdict};
-use crate::instruction::PpuInstruction as I;
+use crate::instruction::{FusedPair, PpuInstruction as I};
 use crate::shadow::test_support::{bc_raw, build_from_words, cmpw_raw, cmpwi_raw};
 use crate::state::PpuState;
 use crate::store_buffer::StoreBuffer;
@@ -171,14 +171,14 @@ fn a_hinted_bne_after_cmpwi_still_fuses() {
     let shadow = build_from_words(0, &[cmpwi_raw(0, 3, 5), bc_raw(0b00111, 2, 8)]);
     assert_eq!(
         shadow.get(0),
-        Some(I::CmpwiBc {
+        Some(I::Fused(FusedPair::CmpwiBc {
             bf: 0,
             ra: 3,
             imm: 5,
             bo: 0b00111,
             bi: 2,
             target_offset: 8,
-        })
+        }))
     );
     assert_eq!(shadow.get(4), Some(I::Consumed));
 }
@@ -188,14 +188,14 @@ fn a_hinted_bdnz_after_cmpwi_still_fuses() {
     let shadow = build_from_words(0, &[cmpwi_raw(1, 3, -1), bc_raw(0b11001, 0, -16)]);
     assert_eq!(
         shadow.get(0),
-        Some(I::CmpwiBc {
+        Some(I::Fused(FusedPair::CmpwiBc {
             bf: 1,
             ra: 3,
             imm: -1,
             bo: 0b11001,
             bi: 0,
             target_offset: -16,
-        })
+        }))
     );
     assert_eq!(shadow.get(4), Some(I::Consumed));
 }
@@ -205,14 +205,14 @@ fn a_hinted_beq_after_cmpw_still_fuses() {
     let shadow = build_from_words(0, &[cmpw_raw(0, 3, 4), bc_raw(0b01111, 2, 12)]);
     assert_eq!(
         shadow.get(0),
-        Some(I::CmpwBc {
+        Some(I::Fused(FusedPair::CmpwBc {
             bf: 0,
             ra: 3,
             rb: 4,
             bo: 0b01111,
             bi: 2,
             target_offset: 12,
-        })
+        }))
     );
     assert_eq!(shadow.get(4), Some(I::Consumed));
 }

@@ -5,7 +5,7 @@ use cellgov_ps3_abi::hw::ppc_isa::{PPC_EIEIO_XO, PPC_ISYNC_XO, PPC_SYNC_XO};
 use super::{alias, encode, reserved_bits, Alias, EncodeError};
 use crate::decode::decode;
 use crate::instruction::fuzz::generation_descriptors;
-use crate::instruction::{Fp63Op, PpuInstruction as I, PpuInstructionKind};
+use crate::instruction::{Fp63Op, FusedPair, PpuInstruction as I};
 
 const NOP: I = I::Ori {
     ra: 0,
@@ -255,25 +255,25 @@ fn quickened_forms_encode_as_the_base_instruction_their_mnemonic_names() {
 }
 
 #[test]
-fn a_super_pair_and_its_consumed_slot_are_refused_by_kind() {
-    let pair = I::LwzCmpwi {
+fn a_super_pair_and_its_consumed_slot_are_refused_by_name() {
+    let pair = I::Fused(FusedPair::LwzCmpwi {
         rt: 3,
         ra_load: 1,
         offset: 8,
         bf: 0,
         cmp_imm: 0,
-    };
+    });
     assert_eq!(
         encode(&pair),
-        Err(EncodeError::NoStandaloneEncoding {
-            kind: PpuInstructionKind::LwzCmpwi
-        })
+        Err(EncodeError::NoStandaloneEncoding { name: "LwzCmpwi" })
     );
     assert_eq!(
         encode(&I::Consumed),
-        Err(EncodeError::NoStandaloneEncoding {
-            kind: PpuInstructionKind::Consumed
-        })
+        Err(EncodeError::NoStandaloneEncoding { name: "Consumed" })
+    );
+    assert_eq!(
+        encode(&pair).unwrap_err().to_string(),
+        "PPU instruction LwzCmpwi has no standalone encoding"
     );
 }
 

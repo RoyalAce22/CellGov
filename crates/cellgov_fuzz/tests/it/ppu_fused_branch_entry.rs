@@ -2,7 +2,7 @@
 //! stored there, on every internal path.
 
 use cellgov_fuzz::ppu_paths::{first_path_divergence, run_all_paths, PpuExecutionPath};
-use cellgov_ppu::instruction::PpuInstruction;
+use cellgov_ppu::instruction::{FusedPair, PpuInstruction};
 use cellgov_ppu::shadow::PredecodedShadow;
 use cellgov_ppu::state::PpuState;
 
@@ -131,7 +131,7 @@ fn a_branch_into_a_fused_compare_and_branch_takes_the_stored_branch() {
     let words = [b(8), cmpwi(3, 5), bc_always(8), li(6, 1), NOP];
     assert!(matches!(
         shadow_of(&words).get(4),
-        Some(PpuInstruction::CmpwiBc { .. })
+        Some(PpuInstruction::Fused(FusedPair::CmpwiBc { .. }))
     ));
 
     assert_entry_matches(&words, 8, &seeded_state());

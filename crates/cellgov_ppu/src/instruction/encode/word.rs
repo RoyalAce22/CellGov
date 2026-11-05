@@ -6,16 +6,16 @@ use super::fields::{
     a_form, d, ds, m, md, mds, p, ra, rb, rt, slot_6, stream_field, x, xfx_spr, xl, xo, xo_10,
 };
 use crate::instruction::ops::{VaOp, VxOp};
-use crate::instruction::{PpuInstruction, PpuInstructionKind};
+use crate::instruction::PpuInstruction;
 
 /// Refusal to encode a variant that has no standalone 32-bit word.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum EncodeError {
     /// The variant is a predecoded super-pair or its consumed slot.
-    #[error("PPU instruction {kind:?} has no standalone encoding")]
+    #[error("PPU instruction {name} has no standalone encoding")]
     NoStandaloneEncoding {
-        /// Variant that has no word of its own.
-        kind: PpuInstructionKind,
+        /// Name of the variant that has no word of its own.
+        name: &'static str,
     },
 }
 
@@ -712,25 +712,9 @@ pub fn encode(insn: &PpuInstruction) -> Result<u32, EncodeError> {
         I::CmpwZero { bf, ra: a } => d(11, bf << 2, a, 0),
         I::CmpdZero { bf, ra: a } => d(11, (bf << 2) | 1, a, 0),
 
-        I::LwzCmpwi { .. }
-        | I::LiStw { .. }
-        | I::MflrStw { .. }
-        | I::LwzMtlr { .. }
-        | I::MflrStd { .. }
-        | I::LdMtlr { .. }
-        | I::StdStd { .. }
-        | I::LdLd { .. }
-        | I::LbzuCmpwi { .. }
-        | I::OrAdd { .. }
-        | I::LisOri { .. }
-        | I::CmpwiBc { .. }
-        | I::CmpwBc { .. }
-        | I::CmpdiBc { .. }
-        | I::CmpdBc { .. }
-        | I::CmplwBc { .. }
-        | I::Consumed => {
+        I::Fused(_) | I::Consumed => {
             return Err(EncodeError::NoStandaloneEncoding {
-                kind: PpuInstructionKind::from(*insn),
+                name: <&'static str>::from(insn),
             })
         }
     })

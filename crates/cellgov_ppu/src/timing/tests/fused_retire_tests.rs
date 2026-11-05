@@ -3,7 +3,7 @@
 //! the fetch block and the dispatch group of the compare.
 
 use super::{classify, PpeTiming};
-use crate::instruction::PpuInstruction as I;
+use crate::instruction::{FusedPair, PpuInstruction as I};
 use crate::state::PpuState;
 
 const PC: u64 = 0x1000;
@@ -49,14 +49,14 @@ fn fused(taken: bool) -> Vec<u64> {
     let mut state = PpuState::new();
     state.set_gpr(3, u64::from(!taken));
     let next_pc = next_pc(taken);
-    let pair = I::CmpwiBc {
+    let pair = I::Fused(FusedPair::CmpwiBc {
         bf: 0,
         ra: 3,
         imm: 0,
         bo: BO,
         bi: BI,
         target_offset: OFFSET,
-    };
+    });
     let mut cycles = retire(&mut timing, &state, PC, &pair, next_pc);
     cycles.extend(retire(&mut timing, &state, next_pc, &addi(), next_pc + 4));
     cycles

@@ -255,22 +255,7 @@ pub fn reserved_bits(insn: &PpuInstruction) -> u32 {
         | I::BcFalse { .. }
         | I::Blr { .. }
         | I::RlwinmMask { .. }
-        | I::LwzCmpwi { .. }
-        | I::LiStw { .. }
-        | I::MflrStw { .. }
-        | I::LwzMtlr { .. }
-        | I::MflrStd { .. }
-        | I::LdMtlr { .. }
-        | I::StdStd { .. }
-        | I::LdLd { .. }
-        | I::LbzuCmpwi { .. }
-        | I::OrAdd { .. }
-        | I::LisOri { .. }
-        | I::CmpwiBc { .. }
-        | I::CmpwBc { .. }
-        | I::CmpdiBc { .. }
-        | I::CmpdBc { .. }
-        | I::CmplwBc { .. }
+        | I::Fused(_)
         | I::Consumed => 0,
     }
 }

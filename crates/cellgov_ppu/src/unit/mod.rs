@@ -97,11 +97,13 @@ mod fused_lis_entry_tests;
 #[path = "tests/fused_ld_pair_tests.rs"]
 mod fused_ld_pair_tests;
 
-#[path = "tests/fused_lbzu_cmpwi_tests.rs"]
-mod fused_lbzu_cmpwi_tests;
 #[cfg(test)]
 #[path = "tests/fused_ld_provisional_tests.rs"]
 mod fused_ld_provisional_tests;
+
+#[cfg(test)]
+#[path = "tests/fused_lbzu_cmpwi_tests.rs"]
+mod fused_lbzu_cmpwi_tests;
 
 #[cfg(test)]
 #[path = "tests/ld_ld_console_tests.rs"]

@@ -299,22 +299,7 @@ pub fn execute(
         | PpuInstruction::BcFalse { .. }
         | PpuInstruction::Blr { .. }
         | PpuInstruction::RlwinmMask { .. }
-        | PpuInstruction::LwzCmpwi { .. }
-        | PpuInstruction::LiStw { .. }
-        | PpuInstruction::MflrStw { .. }
-        | PpuInstruction::LwzMtlr { .. }
-        | PpuInstruction::MflrStd { .. }
-        | PpuInstruction::LdMtlr { .. }
-        | PpuInstruction::StdStd { .. }
-        | PpuInstruction::LdLd { .. }
-        | PpuInstruction::LbzuCmpwi { .. }
-        | PpuInstruction::OrAdd { .. }
-        | PpuInstruction::LisOri { .. }
-        | PpuInstruction::CmpwiBc { .. }
-        | PpuInstruction::CmpwBc { .. }
-        | PpuInstruction::CmpdiBc { .. }
-        | PpuInstruction::CmpdBc { .. }
-        | PpuInstruction::CmplwBc { .. }
+        | PpuInstruction::Fused(_)
         | PpuInstruction::Consumed => {
             super_insn::execute(insn, state, unit_id, region_views, effects, store_buf)
         }

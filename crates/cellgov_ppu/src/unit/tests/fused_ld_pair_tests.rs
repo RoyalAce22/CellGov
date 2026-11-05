@@ -10,7 +10,7 @@ use cellgov_exec::{ExecutionContext, ExecutionUnit, YieldReason};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize, Region};
 use cellgov_time::Budget;
 
-use crate::instruction::PpuInstruction;
+use crate::instruction::{FusedPair, PpuInstruction};
 use crate::state::PpuState;
 
 /// The end of the one region, which starts at 0.
@@ -109,7 +109,10 @@ fn a_second_load_off_the_region_faults_after_the_first_retires() {
             .collect::<Vec<_>>(),
     );
     assert!(
-        matches!(shadow.get(4), Some(PpuInstruction::LdLd { .. })),
+        matches!(
+            shadow.get(4),
+            Some(PpuInstruction::Fused(FusedPair::LdLd { .. }))
+        ),
         "precondition: the loads fuse"
     );
     for budget in [1, 2, 3, 256] {

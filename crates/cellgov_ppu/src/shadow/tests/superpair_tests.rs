@@ -1,6 +1,6 @@
 //! Super-pair fusion of adjacent instructions and its no-fuse guard conditions.
 
-use crate::instruction::PpuInstruction;
+use crate::instruction::{FusedPair, PpuInstruction};
 use crate::shadow::test_support::{
     b_raw, bc_raw, build_from_words, cmpw_raw, cmpwi_raw, ld_raw, li_raw, lwz_raw, mflr_raw,
     mtlr_raw, std_raw, stw_raw,
@@ -12,13 +12,13 @@ fn super_pair_lwz_cmpwi() {
     let shadow = build_from_words(0, &[lwz_raw(3, 1, 8), cmpwi_raw(0, 3, 42)]);
     assert_eq!(
         shadow.get(0),
-        Some(PpuInstruction::LwzCmpwi {
+        Some(PpuInstruction::Fused(FusedPair::LwzCmpwi {
             rt: 3,
             ra_load: 1,
             offset: 8,
             bf: 0,
             cmp_imm: 42,
-        })
+        }))
     );
     assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
 }
@@ -36,12 +36,12 @@ fn super_pair_li_stw() {
     let shadow = build_from_words(0, &[li_raw(3, 99), stw_raw(3, 1, 0)]);
     assert_eq!(
         shadow.get(0),
-        Some(PpuInstruction::LiStw {
+        Some(PpuInstruction::Fused(FusedPair::LiStw {
             rt: 3,
             imm: 99,
             ra_store: 1,
             store_offset: 0,
-        })
+        }))
     );
     assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
 }
@@ -59,11 +59,11 @@ fn super_pair_mflr_stw() {
     let shadow = build_from_words(0, &[mflr_raw(0), stw_raw(0, 1, 4)]);
     assert_eq!(
         shadow.get(0),
-        Some(PpuInstruction::MflrStw {
+        Some(PpuInstruction::Fused(FusedPair::MflrStw {
             rt: 0,
             ra_store: 1,
             store_offset: 4,
-        })
+        }))
     );
     assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
 }
@@ -74,11 +74,11 @@ fn super_pair_lwz_mtlr() {
     let shadow = build_from_words(0, &[lwz_raw(0, 1, 4), mtlr_raw(0)]);
     assert_eq!(
         shadow.get(0),
-        Some(PpuInstruction::LwzMtlr {
+        Some(PpuInstruction::Fused(FusedPair::LwzMtlr {
             rt: 0,
             ra_load: 1,
             offset: 4,
-        })
+        }))
     );
     assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
 }
@@ -96,11 +96,11 @@ fn super_pair_mflr_std() {
     let shadow = build_from_words(0, &[mflr_raw(0), std_raw(0, 1, 16)]);
     assert_eq!(
         shadow.get(0),
-        Some(PpuInstruction::MflrStd {
+        Some(PpuInstruction::Fused(FusedPair::MflrStd {
             rt: 0,
             ra_store: 1,
             store_offset: 16,
-        })
+        }))
     );
     assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
 }
@@ -111,11 +111,11 @@ fn super_pair_ld_mtlr() {
     let shadow = build_from_words(0, &[ld_raw(0, 1, 16), mtlr_raw(0)]);
     assert_eq!(
         shadow.get(0),
-        Some(PpuInstruction::LdMtlr {
+        Some(PpuInstruction::Fused(FusedPair::LdMtlr {
             rt: 0,
             ra_load: 1,
             offset: 16,
-        })
+        }))
     );
     assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
 }
@@ -126,12 +126,12 @@ fn super_pair_std_std_adjacent() {
     let shadow = build_from_words(0, &[std_raw(3, 1, 0), std_raw(4, 1, 8)]);
     assert_eq!(
         shadow.get(0),
-        Some(PpuInstruction::StdStd {
+        Some(PpuInstruction::Fused(FusedPair::StdStd {
             rs1: 3,
             rs2: 4,
             ra: 1,
             offset1: 0,
-        })
+        }))
     );
     assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
 }
@@ -157,7 +157,10 @@ fn super_pair_consumed_not_chained() {
     // Three lis: only the first pair fuses; the resulting Consumed
     // must not chain with the third instruction.
     let shadow = build_from_words(0, &[li_raw(3, 1), stw_raw(3, 1, 0), li_raw(4, 2)]);
-    assert!(matches!(shadow.get(0), Some(PpuInstruction::LiStw { .. })));
+    assert!(matches!(
+        shadow.get(0),
+        Some(PpuInstruction::Fused(FusedPair::LiStw { .. }))
+    ));
     assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
     assert_eq!(shadow.get(8), Some(PpuInstruction::Li { rt: 4, imm: 2 }));
 }
@@ -175,7 +178,7 @@ fn super_pair_branch_blocks_fusion() {
     // must not block fusion of subsequent pairs).
     assert!(matches!(
         shadow.get(8),
-        Some(PpuInstruction::LwzCmpwi { .. })
+        Some(PpuInstruction::Fused(FusedPair::LwzCmpwi { .. }))
     ));
     assert_eq!(shadow.get(12), Some(PpuInstruction::Consumed));
 }
@@ -204,9 +207,15 @@ fn super_pair_multiple_pairs() {
             stw_raw(4, 1, 8),
         ],
     );
-    assert!(matches!(shadow.get(0), Some(PpuInstruction::LiStw { .. })));
+    assert!(matches!(
+        shadow.get(0),
+        Some(PpuInstruction::Fused(FusedPair::LiStw { .. }))
+    ));
     assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
-    assert!(matches!(shadow.get(8), Some(PpuInstruction::LiStw { .. })));
+    assert!(matches!(
+        shadow.get(8),
+        Some(PpuInstruction::Fused(FusedPair::LiStw { .. }))
+    ));
     assert_eq!(shadow.get(12), Some(PpuInstruction::Consumed));
 }
 
@@ -230,14 +239,14 @@ fn super_pair_cmpwi_bc() {
     let shadow = build_from_words(0, &[cmpwi_raw(0, 3, 42), bc_raw(0x0C, 2, 8)]);
     assert_eq!(
         shadow.get(0),
-        Some(PpuInstruction::CmpwiBc {
+        Some(PpuInstruction::Fused(FusedPair::CmpwiBc {
             bf: 0,
             ra: 3,
             imm: 42,
             bo: 0x0C,
             bi: 2,
             target_offset: 8,
-        })
+        }))
     );
     assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
 }
@@ -248,14 +257,14 @@ fn super_pair_cmpwi_zero_bc() {
     let shadow = build_from_words(0, &[cmpwi_raw(0, 3, 0), bc_raw(0x0C, 2, 8)]);
     assert_eq!(
         shadow.get(0),
-        Some(PpuInstruction::CmpwiBc {
+        Some(PpuInstruction::Fused(FusedPair::CmpwiBc {
             bf: 0,
             ra: 3,
             imm: 0,
             bo: 0x0C,
             bi: 2,
             target_offset: 8,
-        })
+        }))
     );
     assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
 }
@@ -266,14 +275,14 @@ fn super_pair_cmpw_bc() {
     let shadow = build_from_words(0, &[cmpw_raw(0, 3, 4), bc_raw(0x0C, 2, 12)]);
     assert_eq!(
         shadow.get(0),
-        Some(PpuInstruction::CmpwBc {
+        Some(PpuInstruction::Fused(FusedPair::CmpwBc {
             bf: 0,
             ra: 3,
             rb: 4,
             bo: 0x0C,
             bi: 2,
             target_offset: 12,
-        })
+        }))
     );
     assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
 }
@@ -292,7 +301,7 @@ fn super_pair_cmpwi_bc_fuses_after_a_leading_li() {
     assert!(matches!(shadow.get(0), Some(PpuInstruction::Li { .. })));
     assert!(matches!(
         shadow.get(4),
-        Some(PpuInstruction::CmpwiBc { .. })
+        Some(PpuInstruction::Fused(FusedPair::CmpwiBc { .. }))
     ));
     assert_eq!(shadow.get(8), Some(PpuInstruction::Consumed));
 }
@@ -375,7 +384,7 @@ fn super_pair_cmpwi_bc_fuses_mid_sequence() {
     assert!(matches!(shadow.get(8), Some(PpuInstruction::Li { .. })));
     assert!(matches!(
         shadow.get(12),
-        Some(PpuInstruction::CmpwiBc { .. })
+        Some(PpuInstruction::Fused(FusedPair::CmpwiBc { .. }))
     ));
     assert_eq!(shadow.get(16), Some(PpuInstruction::Consumed));
 }

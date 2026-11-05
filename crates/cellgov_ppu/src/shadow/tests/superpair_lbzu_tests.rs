@@ -1,7 +1,7 @@
 //! `lbzu` fuses with a following `cmpwi crF, rC, 0`; an invalid `lbzu`
 //! does not.
 
-use crate::instruction::{AsmText, PpuInstruction as I};
+use crate::instruction::{AsmText, FusedPair, PpuInstruction as I};
 use crate::shadow::test_support::{build_from_words, cmpwi_raw};
 
 /// `lbzu rT, off(rA)` (opcode 35).
@@ -14,13 +14,13 @@ fn lbzu_fuses_with_a_compare_against_zero() {
     let shadow = build_from_words(0, &[lbzu_raw(4, 5, 1), cmpwi_raw(7, 4, 0)]);
     assert_eq!(
         shadow.get(0),
-        Some(I::LbzuCmpwi {
+        Some(I::Fused(FusedPair::LbzuCmpwi {
             rt: 4,
             ra: 5,
             offset: 1,
             bf: 7,
             cmp_ra: 4,
-        })
+        }))
     );
     assert_eq!(shadow.get(4), Some(I::Consumed));
 }
@@ -30,13 +30,13 @@ fn a_compare_of_the_base_fuses() {
     let shadow = build_from_words(0, &[lbzu_raw(4, 5, -1), cmpwi_raw(0, 5, 0)]);
     assert_eq!(
         shadow.get(0),
-        Some(I::LbzuCmpwi {
+        Some(I::Fused(FusedPair::LbzuCmpwi {
             rt: 4,
             ra: 5,
             offset: -1,
             bf: 0,
             cmp_ra: 5,
-        })
+        }))
     );
 }
 
@@ -73,12 +73,14 @@ fn text(insn: &I) -> String {
 
 #[test]
 fn a_fused_lbzu_cmpwi_disassembles_as_its_halves() {
-    let pair = |bf| I::LbzuCmpwi {
-        rt: 4,
-        ra: 5,
-        offset: -1,
-        bf,
-        cmp_ra: 6,
+    let pair = |bf| {
+        I::Fused(FusedPair::LbzuCmpwi {
+            rt: 4,
+            ra: 5,
+            offset: -1,
+            bf,
+            cmp_ra: 6,
+        })
     };
     assert_eq!(text(&pair(0)), "lbzu r4, -1(r5); cmpwi r6, 0");
     assert_eq!(text(&pair(7)), "lbzu r4, -1(r5); cmpwi cr7, r6, 0");

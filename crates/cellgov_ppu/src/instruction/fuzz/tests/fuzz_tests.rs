@@ -3,7 +3,7 @@ use super::classify::*;
 use super::registry::*;
 use super::types::*;
 use crate::instruction::ops::*;
-use crate::instruction::{PpuInstruction, PpuInstructionKind};
+use crate::instruction::{FusedPair, PpuInstruction, PpuInstructionKind};
 use cellgov_effects::EffectKind;
 use cellgov_exec::operand::extract_bits;
 use std::collections::BTreeSet;
@@ -497,26 +497,26 @@ fn load_reserve_descriptors_allow_both_emitted_effects() {
 
 #[test]
 fn synthetic_memory_descriptors_match_their_fused_operations() {
-    for instruction in [
-        PpuInstruction::LwzCmpwi {
+    for pair in [
+        FusedPair::LwzCmpwi {
             rt: 3,
             ra_load: 4,
             offset: 0,
             bf: 0,
             cmp_imm: 0,
         },
-        PpuInstruction::LwzMtlr {
+        FusedPair::LwzMtlr {
             rt: 3,
             ra_load: 4,
             offset: 0,
         },
-        PpuInstruction::LdMtlr {
+        FusedPair::LdMtlr {
             rt: 3,
             ra_load: 4,
             offset: 0,
         },
     ] {
-        let descriptor = instruction.fuzz_descriptor(0);
+        let descriptor = PpuInstruction::Fused(pair).fuzz_descriptor(0);
         assert_eq!(descriptor.effects, &[EffectKind::SharedReadIntent]);
         assert_eq!(
             descriptor.outcomes,
@@ -524,31 +524,31 @@ fn synthetic_memory_descriptors_match_their_fused_operations() {
         );
     }
 
-    for instruction in [
-        PpuInstruction::LiStw {
+    for pair in [
+        FusedPair::LiStw {
             rt: 3,
             imm: 1,
             ra_store: 4,
             store_offset: 0,
         },
-        PpuInstruction::MflrStw {
+        FusedPair::MflrStw {
             rt: 3,
             ra_store: 4,
             store_offset: 0,
         },
-        PpuInstruction::MflrStd {
+        FusedPair::MflrStd {
             rt: 3,
             ra_store: 4,
             store_offset: 0,
         },
-        PpuInstruction::StdStd {
+        FusedPair::StdStd {
             rs1: 3,
             rs2: 4,
             ra: 5,
             offset1: 0,
         },
     ] {
-        let descriptor = instruction.fuzz_descriptor(0);
+        let descriptor = PpuInstruction::Fused(pair).fuzz_descriptor(0);
         assert_eq!(descriptor.effects, &[EffectKind::SharedWriteIntent]);
         assert_eq!(
             descriptor.outcomes,

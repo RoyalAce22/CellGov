@@ -7,7 +7,7 @@
 //! issue-to-issue latency to a dependent instruction.
 
 use crate::instruction::ops::{Fp59Op, Fp63Op, VaOp, VxOp};
-use crate::instruction::PpuInstruction as I;
+use crate::instruction::{FusedPair, PpuInstruction as I};
 use crate::state::{cmp_cr_field, PpuState};
 use cellgov_ps3_abi::hw::ppc_isa::PPC_BO_ALWAYS;
 use cellgov_ps3_abi::hw::ppu_issue as k;
@@ -1251,191 +1251,195 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
         | I::Sldi { ra, rs, .. }
         | I::Srdi { ra, rs, .. } => one(fx(gpr(ra)).src(gpr(rs))),
         I::Nop => one(Op::on(unit::FXU)),
-        I::LwzCmpwi {
-            rt,
-            ra_load,
-            offset,
-            bf,
-            ..
-        } => two(
-            int_load(ea_d(state, ra_load, offset), 4, rt).base(ra_load),
-            cmp(bf, rt, None),
-        ),
-        I::LiStw {
-            rt,
-            imm,
-            ra_store,
-            store_offset,
-        } => {
-            let base = if ra_store == rt {
-                imm as i64 as u64
-            } else {
-                g(ra_store)
-            };
-            let ea = if ra_store == 0 { 0 } else { base }.wrapping_add(store_offset as i64 as u64);
-            two(
-                fx(gpr(rt)),
-                store(INT_STORE, ea, 4).src(gpr(rt)).base(ra_store),
-            )
-        }
-        I::MflrStw {
-            rt,
-            ra_store,
-            store_offset,
-        }
-        | I::MflrStd {
-            rt,
-            ra_store,
-            store_offset,
-        } => {
-            let len = if matches!(insn, I::MflrStd { .. }) {
-                8
-            } else {
-                4
-            };
-            let base = if ra_store == rt {
-                state.lr()
-            } else {
-                g(ra_store)
-            };
-            let ea = if ra_store == 0 { 0 } else { base }.wrapping_add(store_offset as i64 as u64);
-            two(
-                Op::on(unit::BRU)
-                    .src(LR)
-                    .dst(gpr(rt), k::PPU_BRANCH_UNIT_LATENCY_CYCLES),
-                store(INT_STORE, ea, len).src(gpr(rt)).base(ra_store),
-            )
-        }
-        I::LwzMtlr {
-            rt,
-            ra_load,
-            offset,
-        }
-        | I::LdMtlr {
-            rt,
-            ra_load,
-            offset,
-        } => {
-            let len = if matches!(insn, I::LdMtlr { .. }) {
-                8
-            } else {
-                4
-            };
-            two(
-                int_load(ea_d(state, ra_load, offset), len, rt).base(ra_load),
-                Op::on(unit::BRU)
-                    .src(gpr(rt))
-                    .dst(LR, k::PPU_BRANCH_UNIT_LATENCY_CYCLES),
-            )
-        }
-        I::StdStd {
-            rs1,
-            rs2,
-            ra,
-            offset1,
-        } => {
-            let ea = ea_d(state, ra, offset1);
-            two(
-                store(INT_STORE, ea, 8).src(gpr(rs1)).base(ra),
-                store(INT_STORE, ea.wrapping_add(8), 8)
-                    .src(gpr(rs2))
-                    .base(ra),
-            )
-        }
-        I::LdLd {
-            rt1,
-            rt2,
-            ra,
-            offset1,
-        } => {
-            let ea = ea_d(state, ra, offset1);
-            two(
-                int_load(ea, 8, rt1).base(ra),
-                int_load(ea.wrapping_add(8), 8, rt2).base(ra),
-            )
-        }
-        I::LbzuCmpwi {
-            rt,
-            ra,
-            offset,
-            bf,
-            cmp_ra,
-        } => two(
-            update(int_load(ea_d(state, ra, offset), 1, rt).base(ra), ra),
-            cmp(bf, cmp_ra, None),
-        ),
-        I::LisOri { rt, .. } => two(fx(gpr(rt)), fx(gpr(rt)).src(gpr(rt))),
-        I::OrAdd {
-            ra,
-            rs,
-            rb,
-            rt,
-            add_ra,
-            add_rb,
-        } => two(
-            logical(Op::on(unit::FXU).src(gpr(rs)).src(gpr(rb)), ra, false),
-            add_form(rt, &[add_ra, add_rb], false, false),
-        ),
-        I::CmpwiBc {
-            bf,
-            ra,
-            imm,
-            bo,
-            bi,
-            ..
-        } => {
-            let operands = (g(ra) as i32, i32::from(imm));
-            let taken = fused_branches(state, bf, operands, bo, bi);
-            two(
-                cmp(bf, ra, None),
-                branch(bo, bi, false, Target::Direct, taken),
-            )
-        }
-        I::CmpwBc {
-            bf, ra, rb, bo, bi, ..
-        } => {
-            let operands = (g(ra) as i32, g(rb) as i32);
-            let taken = fused_branches(state, bf, operands, bo, bi);
-            two(
-                cmp(bf, ra, Some(rb)),
-                branch(bo, bi, false, Target::Direct, taken),
-            )
-        }
-        I::CmpdiBc {
-            bf,
-            ra,
-            imm,
-            bo,
-            bi,
-            ..
-        } => {
-            let operands = (g(ra) as i64, i64::from(imm));
-            let taken = fused_branches(state, bf, operands, bo, bi);
-            two(
-                cmp(bf, ra, None),
-                branch(bo, bi, false, Target::Direct, taken),
-            )
-        }
-        I::CmpdBc {
-            bf, ra, rb, bo, bi, ..
-        } => {
-            let operands = (g(ra) as i64, g(rb) as i64);
-            let taken = fused_branches(state, bf, operands, bo, bi);
-            two(
-                cmp(bf, ra, Some(rb)),
-                branch(bo, bi, false, Target::Direct, taken),
-            )
-        }
-        I::CmplwBc {
-            bf, ra, rb, bo, bi, ..
-        } => {
-            let operands = (g(ra) as u32, g(rb) as u32);
-            let taken = fused_branches(state, bf, operands, bo, bi);
-            two(
-                cmp(bf, ra, Some(rb)),
-                branch(bo, bi, false, Target::Direct, taken),
-            )
-        }
+        I::Fused(pair) => match pair {
+            FusedPair::LwzCmpwi {
+                rt,
+                ra_load,
+                offset,
+                bf,
+                ..
+            } => two(
+                int_load(ea_d(state, ra_load, offset), 4, rt).base(ra_load),
+                cmp(bf, rt, None),
+            ),
+            FusedPair::LiStw {
+                rt,
+                imm,
+                ra_store,
+                store_offset,
+            } => {
+                let base = if ra_store == rt {
+                    imm as i64 as u64
+                } else {
+                    g(ra_store)
+                };
+                let ea =
+                    if ra_store == 0 { 0 } else { base }.wrapping_add(store_offset as i64 as u64);
+                two(
+                    fx(gpr(rt)),
+                    store(INT_STORE, ea, 4).src(gpr(rt)).base(ra_store),
+                )
+            }
+            FusedPair::MflrStw {
+                rt,
+                ra_store,
+                store_offset,
+            }
+            | FusedPair::MflrStd {
+                rt,
+                ra_store,
+                store_offset,
+            } => {
+                let len = if matches!(pair, FusedPair::MflrStd { .. }) {
+                    8
+                } else {
+                    4
+                };
+                let base = if ra_store == rt {
+                    state.lr()
+                } else {
+                    g(ra_store)
+                };
+                let ea =
+                    if ra_store == 0 { 0 } else { base }.wrapping_add(store_offset as i64 as u64);
+                two(
+                    Op::on(unit::BRU)
+                        .src(LR)
+                        .dst(gpr(rt), k::PPU_BRANCH_UNIT_LATENCY_CYCLES),
+                    store(INT_STORE, ea, len).src(gpr(rt)).base(ra_store),
+                )
+            }
+            FusedPair::LwzMtlr {
+                rt,
+                ra_load,
+                offset,
+            }
+            | FusedPair::LdMtlr {
+                rt,
+                ra_load,
+                offset,
+            } => {
+                let len = if matches!(pair, FusedPair::LdMtlr { .. }) {
+                    8
+                } else {
+                    4
+                };
+                two(
+                    int_load(ea_d(state, ra_load, offset), len, rt).base(ra_load),
+                    Op::on(unit::BRU)
+                        .src(gpr(rt))
+                        .dst(LR, k::PPU_BRANCH_UNIT_LATENCY_CYCLES),
+                )
+            }
+            FusedPair::StdStd {
+                rs1,
+                rs2,
+                ra,
+                offset1,
+            } => {
+                let ea = ea_d(state, ra, offset1);
+                two(
+                    store(INT_STORE, ea, 8).src(gpr(rs1)).base(ra),
+                    store(INT_STORE, ea.wrapping_add(8), 8)
+                        .src(gpr(rs2))
+                        .base(ra),
+                )
+            }
+            FusedPair::LdLd {
+                rt1,
+                rt2,
+                ra,
+                offset1,
+            } => {
+                let ea = ea_d(state, ra, offset1);
+                two(
+                    int_load(ea, 8, rt1).base(ra),
+                    int_load(ea.wrapping_add(8), 8, rt2).base(ra),
+                )
+            }
+            FusedPair::LbzuCmpwi {
+                rt,
+                ra,
+                offset,
+                bf,
+                cmp_ra,
+            } => two(
+                update(int_load(ea_d(state, ra, offset), 1, rt).base(ra), ra),
+                cmp(bf, cmp_ra, None),
+            ),
+            FusedPair::LisOri { rt, .. } => two(fx(gpr(rt)), fx(gpr(rt)).src(gpr(rt))),
+            FusedPair::OrAdd {
+                ra,
+                rs,
+                rb,
+                rt,
+                add_ra,
+                add_rb,
+            } => two(
+                logical(Op::on(unit::FXU).src(gpr(rs)).src(gpr(rb)), ra, false),
+                add_form(rt, &[add_ra, add_rb], false, false),
+            ),
+            FusedPair::CmpwiBc {
+                bf,
+                ra,
+                imm,
+                bo,
+                bi,
+                ..
+            } => {
+                let operands = (g(ra) as i32, i32::from(imm));
+                let taken = fused_branches(state, bf, operands, bo, bi);
+                two(
+                    cmp(bf, ra, None),
+                    branch(bo, bi, false, Target::Direct, taken),
+                )
+            }
+            FusedPair::CmpwBc {
+                bf, ra, rb, bo, bi, ..
+            } => {
+                let operands = (g(ra) as i32, g(rb) as i32);
+                let taken = fused_branches(state, bf, operands, bo, bi);
+                two(
+                    cmp(bf, ra, Some(rb)),
+                    branch(bo, bi, false, Target::Direct, taken),
+                )
+            }
+            FusedPair::CmpdiBc {
+                bf,
+                ra,
+                imm,
+                bo,
+                bi,
+                ..
+            } => {
+                let operands = (g(ra) as i64, i64::from(imm));
+                let taken = fused_branches(state, bf, operands, bo, bi);
+                two(
+                    cmp(bf, ra, None),
+                    branch(bo, bi, false, Target::Direct, taken),
+                )
+            }
+            FusedPair::CmpdBc {
+                bf, ra, rb, bo, bi, ..
+            } => {
+                let operands = (g(ra) as i64, g(rb) as i64);
+                let taken = fused_branches(state, bf, operands, bo, bi);
+                two(
+                    cmp(bf, ra, Some(rb)),
+                    branch(bo, bi, false, Target::Direct, taken),
+                )
+            }
+            FusedPair::CmplwBc {
+                bf, ra, rb, bo, bi, ..
+            } => {
+                let operands = (g(ra) as u32, g(rb) as u32);
+                let taken = fused_branches(state, bf, operands, bo, bi);
+                two(
+                    cmp(bf, ra, Some(rb)),
+                    branch(bo, bi, false, Target::Direct, taken),
+                )
+            }
+        },
         I::Consumed => ([none, none], 0),
         I::Dcbz { ra, rb } => one(Op::on(unit::LSU)
             .kind(Kind::ZeroLine {

@@ -5,7 +5,7 @@
 //! - an `addi`
 
 use crate::exec::{execute, ExecuteVerdict};
-use crate::instruction::{AsmText, PpuInstruction as I};
+use crate::instruction::{AsmText, FusedPair, PpuInstruction as I};
 use crate::shadow::test_support::{build_from_words, ori_raw};
 use crate::state::PpuState;
 use crate::store_buffer::StoreBuffer;
@@ -23,10 +23,11 @@ fn lis_fuses_with_a_same_register_ori() {
     let shadow = build_from_words(0, &[lis_raw(3, 0x1234), ori_raw(3, 3, 0xBEEF)]);
     assert_eq!(
         shadow.get(0),
-        Some(I::LisOri {
+        Some(I::Fused(FusedPair::LisOri {
             rt: 3,
-            value: 0x1234_BEEF
-        })
+            hi: 0x1234,
+            lo: 0xBEEF,
+        }))
     );
     assert_eq!(shadow.get(4), Some(I::Consumed));
 }

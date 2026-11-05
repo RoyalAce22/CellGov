@@ -141,6 +141,7 @@ pub fn kind_unit(kind: PpuFuzzKind) -> PpuReferenceUnit {
         PpuFuzzKind::Va(op) => named(format!("{op:?}")),
         PpuFuzzKind::Fp59(op) => named(format!("{op:?}")),
         PpuFuzzKind::Fp63(op) => named(format!("{op:?}")),
+        PpuFuzzKind::Fused(pair) => named(format!("{pair:?}")),
         PpuFuzzKind::Ordinary(kind) => {
             ordinary_unit(kind).unwrap_or_else(|| named(format!("{kind:?}")))
         }

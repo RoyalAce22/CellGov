@@ -6,7 +6,7 @@ use cellgov_exec::{ExecutionContext, ExecutionUnit, YieldReason};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize, Region};
 use cellgov_time::Budget;
 
-use crate::instruction::PpuInstruction;
+use crate::instruction::{FusedPair, PpuInstruction};
 use crate::state::PpuState;
 
 /// The end of the one region, which starts at 0.
@@ -107,7 +107,7 @@ fn a_string_scan_stops_on_the_terminating_zero() {
     assert!(
         matches!(
             shadow_of(&code).get(0),
-            Some(PpuInstruction::LbzuCmpwi { .. })
+            Some(PpuInstruction::Fused(FusedPair::LbzuCmpwi { .. }))
         ),
         "precondition: the lbzu and the cmpwi fuse"
     );
@@ -134,7 +134,7 @@ fn a_load_off_the_region_faults_with_ra_unchanged() {
     assert!(
         matches!(
             shadow_of(&code).get(4),
-            Some(PpuInstruction::LbzuCmpwi { .. })
+            Some(PpuInstruction::Fused(FusedPair::LbzuCmpwi { .. }))
         ),
         "precondition: the lbzu and the cmpwi fuse"
     );

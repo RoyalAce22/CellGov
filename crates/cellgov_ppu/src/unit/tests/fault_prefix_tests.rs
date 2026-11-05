@@ -9,6 +9,8 @@ use cellgov_exec::{ExecutionContext, ExecutionStepResult, ExecutionUnit, UnitSta
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_time::Budget;
 
+use crate::instruction::FusedPair;
+
 const UNMAPPED_EA: u64 = 0xFFFF_0000;
 
 fn place(mem: &mut GuestMemory, offset: usize, raw: u32) {
@@ -280,7 +282,7 @@ fn a_fused_pair_whose_store_faults_retires_its_first_instruction() {
     assert!(
         matches!(
             shadow.get(4),
-            Some(instruction::PpuInstruction::LiStw { .. })
+            Some(instruction::PpuInstruction::Fused(FusedPair::LiStw { .. }))
         ),
         "precondition: li and stw fuse"
     );
@@ -312,7 +314,9 @@ fn a_fused_pair_whose_load_faults_faults_at_its_first_slot() {
     assert!(
         matches!(
             shadow.get(4),
-            Some(instruction::PpuInstruction::LwzMtlr { .. })
+            Some(instruction::PpuInstruction::Fused(
+                FusedPair::LwzMtlr { .. }
+            ))
         ),
         "precondition: lwz and mtlr fuse"
     );

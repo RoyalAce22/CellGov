@@ -9,6 +9,8 @@ use cellgov_exec::{ExecutionStepResult, ExecutionUnit, UnitStatus, YieldReason};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_time::{Budget, InstructionCost};
 
+use crate::instruction::FusedPair;
+
 use std::cell::RefCell;
 
 // One `GuestMemory` of the LV2-driven microtest size (~256 MiB)
@@ -1673,7 +1675,9 @@ fn fetch_loop_advances_past_consumed_after_super_pair() {
     let mut unit = unit_with_shadow_for_pair(&mem, lwz, cmpwi);
     assert!(matches!(
         unit.instruction_shadow.as_ref().unwrap().get(0),
-        Some(instruction::PpuInstruction::LwzCmpwi { .. })
+        Some(instruction::PpuInstruction::Fused(
+            FusedPair::LwzCmpwi { .. }
+        ))
     ));
 
     let ctx = ExecutionContext::new(&mem);
@@ -1695,7 +1699,9 @@ fn a_fused_pair_whose_branch_is_taken_lands_on_the_target() {
     let mut unit = unit_with_shadow_for_pair(&mem, cmpwi, bc);
     assert!(matches!(
         unit.instruction_shadow.as_ref().unwrap().get(0),
-        Some(instruction::PpuInstruction::CmpwiBc { .. })
+        Some(instruction::PpuInstruction::Fused(
+            FusedPair::CmpwiBc { .. }
+        ))
     ));
     unit.state_mut().set_gpr(3, 5);
 

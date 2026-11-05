@@ -7,10 +7,15 @@
 //! [ErtlGregg2003 p:20 s:6.3] super-instruction fusion eliminates one dispatch per pair.
 //! [ErtlGregg2003 p:19 s:5.2.7] empirical effectiveness of super-instructions.
 
-use crate::instruction::PpuInstruction;
+use crate::instruction::{FusedPair, PpuInstruction};
 
 /// Fuse two adjacent instructions, or `None` if no rule applies.
 pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<PpuInstruction> {
+    fuse(a, b).map(PpuInstruction::Fused)
+}
+
+/// The fused pair of `a` then `b`, or `None` if no rule applies.
+fn fuse(a: PpuInstruction, b: PpuInstruction) -> Option<FusedPair> {
     match (a, decoded_bc(b)) {
         // lwz rT, off(rA) + cmpwi crF, rT, imm
         (
@@ -20,7 +25,7 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
                 ra: cmp_ra,
                 imm: cmp_imm,
             },
-        ) if rt == cmp_ra => Some(PpuInstruction::LwzCmpwi {
+        ) if rt == cmp_ra => Some(FusedPair::LwzCmpwi {
             rt,
             ra_load: ra,
             offset: imm,
@@ -35,7 +40,7 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
                 ra,
                 imm: st_off,
             },
-        ) if rt == rs => Some(PpuInstruction::LiStw {
+        ) if rt == rs => Some(FusedPair::LiStw {
             rt,
             imm,
             ra_store: ra,
@@ -43,7 +48,7 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
         }),
         // mflr rT + stw rT, off(rA)
         (PpuInstruction::Mflr { rt }, PpuInstruction::Stw { rs, ra, imm }) if rt == rs => {
-            Some(PpuInstruction::MflrStw {
+            Some(FusedPair::MflrStw {
                 rt,
                 ra_store: ra,
                 store_offset: imm,
@@ -51,7 +56,7 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
         }
         // lwz rT, off(rA) + mtlr rT
         (PpuInstruction::Lwz { rt, ra, imm }, PpuInstruction::Mtlr { rs }) if rt == rs => {
-            Some(PpuInstruction::LwzMtlr {
+            Some(FusedPair::LwzMtlr {
                 rt,
                 ra_load: ra,
                 offset: imm,
@@ -59,7 +64,7 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
         }
         // mflr rT + std rT, off(rA) (PPC64 prologue)
         (PpuInstruction::Mflr { rt }, PpuInstruction::Std { rs, ra, imm }) if rt == rs => {
-            Some(PpuInstruction::MflrStd {
+            Some(FusedPair::MflrStd {
                 rt,
                 ra_store: ra,
                 store_offset: imm,
@@ -67,7 +72,7 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
         }
         // ld rT, off(rA) + mtlr rT (PPC64 epilogue)
         (PpuInstruction::Ld { rt, ra, imm }, PpuInstruction::Mtlr { rs }) if rt == rs => {
-            Some(PpuInstruction::LdMtlr {
+            Some(FusedPair::LdMtlr {
                 rt,
                 ra_load: ra,
                 offset: imm,
@@ -89,7 +94,7 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
                 ra: ra2,
                 imm: off2,
             },
-        ) if ra1 == ra2 && off1.checked_add(8) == Some(off2) => Some(PpuInstruction::StdStd {
+        ) if ra1 == ra2 && off1.checked_add(8) == Some(off2) => Some(FusedPair::StdStd {
             rs1,
             rs2,
             ra: ra1,
@@ -109,7 +114,7 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
                 imm: off2,
             },
         ) if ra1 == ra2 && (rt1 != ra1 || ra1 == 0) && off1.checked_add(8) == Some(off2) => {
-            Some(PpuInstruction::LdLd {
+            Some(FusedPair::LdLd {
                 rt1,
                 rt2,
                 ra: ra1,
@@ -121,7 +126,7 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
         (PpuInstruction::Lbzu { rt, ra, imm }, PpuInstruction::CmpwZero { bf, ra: cmp_ra })
             if ra != 0 && ra != rt =>
         {
-            Some(PpuInstruction::LbzuCmpwi {
+            Some(FusedPair::LbzuCmpwi {
                 rt,
                 ra,
                 offset: imm,
@@ -147,7 +152,7 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
                 oe: false,
                 rc: false,
             },
-        ) if !(ra == rs && rs == rb) => Some(PpuInstruction::OrAdd {
+        ) if !(ra == rs && rs == rb) => Some(FusedPair::OrAdd {
             ra,
             rs,
             rb,
@@ -164,7 +169,7 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
                 oe: false,
                 rc: false,
             },
-        ) => Some(PpuInstruction::OrAdd {
+        ) => Some(FusedPair::OrAdd {
             ra,
             rs,
             rb: rs,
@@ -177,16 +182,13 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
         (PpuInstruction::Lis { rt, imm: hi }, PpuInstruction::Ori { ra, rs, imm: lo })
             if ra == rt && rs == rt && !(rt == 0 && lo == 0) =>
         {
-            Some(PpuInstruction::LisOri {
-                rt,
-                value: (i32::from(hi) << 16) | i32::from(lo),
-            })
+            Some(FusedPair::LisOri { rt, hi, lo })
         }
         // lwz rT, off(rA) + CmpwZero crF, rT (quickened cmpwi-zero)
         (PpuInstruction::Lwz { rt, ra, imm }, PpuInstruction::CmpwZero { bf, ra: cmp_ra })
             if rt == cmp_ra =>
         {
-            Some(PpuInstruction::LwzCmpwi {
+            Some(FusedPair::LwzCmpwi {
                 rt,
                 ra_load: ra,
                 offset: imm,
@@ -204,7 +206,7 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
                 aa: false,
                 link: false,
             },
-        ) => Some(PpuInstruction::CmpwiBc {
+        ) => Some(FusedPair::CmpwiBc {
             bf,
             ra,
             imm,
@@ -222,7 +224,7 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
                 aa: false,
                 link: false,
             },
-        ) => Some(PpuInstruction::CmpwiBc {
+        ) => Some(FusedPair::CmpwiBc {
             bf,
             ra,
             imm: 0,
@@ -240,7 +242,7 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
                 aa: false,
                 link: false,
             },
-        ) => Some(PpuInstruction::CmpwBc {
+        ) => Some(FusedPair::CmpwBc {
             bf,
             ra,
             rb,
@@ -258,7 +260,7 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
                 aa: false,
                 link: false,
             },
-        ) => Some(PpuInstruction::CmpdiBc {
+        ) => Some(FusedPair::CmpdiBc {
             bf,
             ra,
             imm,
@@ -276,7 +278,7 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
                 aa: false,
                 link: false,
             },
-        ) => Some(PpuInstruction::CmpdiBc {
+        ) => Some(FusedPair::CmpdiBc {
             bf,
             ra,
             imm: 0,
@@ -294,7 +296,7 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
                 aa: false,
                 link: false,
             },
-        ) => Some(PpuInstruction::CmpdBc {
+        ) => Some(FusedPair::CmpdBc {
             bf,
             ra,
             rb,
@@ -312,7 +314,7 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
                 aa: false,
                 link: false,
             },
-        ) => Some(PpuInstruction::CmplwBc {
+        ) => Some(FusedPair::CmplwBc {
             bf,
             ra,
             rb,

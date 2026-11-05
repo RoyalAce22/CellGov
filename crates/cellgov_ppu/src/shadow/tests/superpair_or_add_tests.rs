@@ -2,7 +2,7 @@
 //! `or.` or `add.`, or an `addo`, does not.
 
 use crate::exec::{execute, ExecuteVerdict};
-use crate::instruction::{AsmText, PpuInstruction as I};
+use crate::instruction::{AsmText, FusedPair, PpuInstruction as I};
 use crate::shadow::test_support::{build_from_words, or_raw};
 use crate::state::PpuState;
 use crate::store_buffer::StoreBuffer;
@@ -23,27 +23,27 @@ fn or_and_its_mr_form_fuse_with_add() {
     let or = build_from_words(0, &[or_raw(4, 3, 5), add_raw(6, 3, 7, false, false)]);
     assert_eq!(
         or.get(0),
-        Some(I::OrAdd {
+        Some(I::Fused(FusedPair::OrAdd {
             ra: 3,
             rs: 4,
             rb: 5,
             rt: 6,
             add_ra: 3,
             add_rb: 7,
-        })
+        }))
     );
     assert_eq!(or.get(4), Some(I::Consumed));
     let mr = build_from_words(0, &[or_raw(4, 3, 4), add_raw(6, 3, 7, false, false)]);
     assert_eq!(
         mr.get(0),
-        Some(I::OrAdd {
+        Some(I::Fused(FusedPair::OrAdd {
             ra: 3,
             rs: 4,
             rb: 4,
             rt: 6,
             add_ra: 3,
             add_rb: 7,
-        })
+        }))
     );
 }
 
@@ -102,27 +102,27 @@ fn r6_after(insn: &I) -> (u64, ExecuteVerdict) {
 /// [PPC-Book1 p:17 s:2.2] the add reads the RA the or just wrote.
 #[test]
 fn the_add_reads_the_or_result() {
-    let pair = I::OrAdd {
+    let pair = I::Fused(FusedPair::OrAdd {
         ra: 3,
         rs: 4,
         rb: 5,
         rt: 6,
         add_ra: 3,
         add_rb: 7,
-    };
+    });
     assert_eq!(r6_after(&pair), (0x1FF, ExecuteVerdict::Continue));
 }
 
 #[test]
 fn a_fused_or_add_disassembles_as_its_halves() {
-    let pair = I::OrAdd {
+    let pair = I::Fused(FusedPair::OrAdd {
         ra: 3,
         rs: 4,
         rb: 5,
         rt: 6,
         add_ra: 3,
         add_rb: 7,
-    };
+    });
     let text = AsmText {
         insn: &pair,
         addr: 0,
@@ -139,14 +139,14 @@ fn a_fused_or_add_disassembles_as_its_halves() {
 /// the standalone `or rA, rS, rS` and the quickened `mr` both render.
 #[test]
 fn a_fused_mr_add_disassembles_its_first_half_as_mr() {
-    let pair = I::OrAdd {
+    let pair = I::Fused(FusedPair::OrAdd {
         ra: 3,
         rs: 4,
         rb: 4,
         rt: 6,
         add_ra: 3,
         add_rb: 7,
-    };
+    });
     let text = AsmText {
         insn: &pair,
         addr: 0,

@@ -2,7 +2,7 @@
 //! quickened `mr` when RS equals RB, then the `add`.
 
 use super::classify;
-use crate::instruction::PpuInstruction as I;
+use crate::instruction::{FusedPair, PpuInstruction as I};
 use crate::state::PpuState;
 
 /// The single op `insn` classifies to.
@@ -15,14 +15,14 @@ fn one_op(insn: &I) -> super::Op {
 /// The ops a fused `or r3, rS, rB; add r6, r8, r7` classifies to. Every
 /// operand field names its own register, so a swapped field changes an op.
 fn fused(rs: u8, rb: u8) -> Vec<super::Op> {
-    let pair = I::OrAdd {
+    let pair = I::Fused(FusedPair::OrAdd {
         ra: 3,
         rs,
         rb,
         rt: 6,
         add_ra: 8,
         add_rb: 7,
-    };
+    });
     let (ops, n) = classify(&pair, &PpuState::new());
     ops[..n].to_vec()
 }

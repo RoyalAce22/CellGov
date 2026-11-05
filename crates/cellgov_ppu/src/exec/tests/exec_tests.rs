@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::exec::test_support::{exec_no_mem, exec_with_mem, uid};
-use crate::instruction::PpuInstruction;
+use crate::instruction::{FusedPair, PpuInstruction};
 use crate::state::PpuState;
 
 #[test]
@@ -221,13 +221,13 @@ fn lwz_cmpwi_matches_separate_execution() {
     s2.set_gpr(1, 0x1000);
     let mut effects2 = Vec::new();
     exec_with_mem(
-        &PpuInstruction::LwzCmpwi {
+        &PpuInstruction::Fused(FusedPair::LwzCmpwi {
             rt: 3,
             ra_load: 1,
             offset: 8,
             bf: 0,
             cmp_imm: 42,
-        },
+        }),
         &mut s2,
         0,
         &mem,
@@ -268,12 +268,12 @@ fn li_stw_matches_separate_execution() {
     s2.set_gpr(1, 0x1000);
     let mut effects2 = Vec::new();
     exec_with_mem(
-        &PpuInstruction::LiStw {
+        &PpuInstruction::Fused(FusedPair::LiStw {
             rt: 5,
             imm: 99,
             ra_store: 1,
             store_offset: 0,
-        },
+        }),
         &mut s2,
         0,
         &[0u8; 0x2000],
@@ -316,11 +316,11 @@ fn mflr_stw_matches_separate_execution() {
     s2.set_gpr(1, 0x1000);
     let mut effects2 = Vec::new();
     exec_with_mem(
-        &PpuInstruction::MflrStw {
+        &PpuInstruction::Fused(FusedPair::MflrStw {
             rt: 0,
             ra_store: 1,
             store_offset: 16,
-        },
+        }),
         &mut s2,
         0,
         &[0u8; 0x2000],
@@ -357,11 +357,11 @@ fn lwz_mtlr_matches_separate_execution() {
     s2.set_gpr(1, 0x1000);
     let mut effects2 = Vec::new();
     exec_with_mem(
-        &PpuInstruction::LwzMtlr {
+        &PpuInstruction::Fused(FusedPair::LwzMtlr {
             rt: 0,
             ra_load: 1,
             offset: 16,
-        },
+        }),
         &mut s2,
         0,
         &mem,
@@ -404,14 +404,14 @@ fn cmpwi_bc_taken_matches_separate() {
     s2.pc = 0x1000;
     s2.set_gpr(3, 10);
     let v2 = exec_no_mem(
-        &PpuInstruction::CmpwiBc {
+        &PpuInstruction::Fused(FusedPair::CmpwiBc {
             bf: 0,
             ra: 3,
             imm: 10,
             bo: 0x0C,
             bi: 2,
             target_offset: 16,
-        },
+        }),
         &mut s2,
     );
 
@@ -453,14 +453,14 @@ fn cmpw_bc_taken_matches_separate() {
     s2.set_gpr(3, 42);
     s2.set_gpr(4, 42);
     let v2 = exec_no_mem(
-        &PpuInstruction::CmpwBc {
+        &PpuInstruction::Fused(FusedPair::CmpwBc {
             bf: 0,
             ra: 3,
             rb: 4,
             bo: 0x0C,
             bi: 2,
             target_offset: 16,
-        },
+        }),
         &mut s2,
     );
 

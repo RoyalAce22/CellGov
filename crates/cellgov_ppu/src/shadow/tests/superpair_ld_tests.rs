@@ -1,6 +1,6 @@
 //! Two `ld` loads from one base, the second 8 bytes past the first, fuse.
 
-use crate::instruction::PpuInstruction as I;
+use crate::instruction::{FusedPair, PpuInstruction as I};
 use crate::shadow::test_support::{build_from_words, ld_raw, lwz_raw};
 
 #[test]
@@ -8,12 +8,12 @@ fn adjacent_same_base_lds_fuse() {
     let shadow = build_from_words(0, &[ld_raw(30, 1, 16), ld_raw(31, 1, 24)]);
     assert_eq!(
         shadow.get(0),
-        Some(I::LdLd {
+        Some(I::Fused(FusedPair::LdLd {
             rt1: 30,
             rt2: 31,
             ra: 1,
             offset1: 16,
-        })
+        }))
     );
     assert_eq!(shadow.get(4), Some(I::Consumed));
 }
@@ -34,12 +34,12 @@ fn a_load_into_r0_from_the_zero_base_fuses() {
     let shadow = build_from_words(0, &[ld_raw(0, 0, 0x100), ld_raw(3, 0, 0x108)]);
     assert_eq!(
         shadow.get(0),
-        Some(I::LdLd {
+        Some(I::Fused(FusedPair::LdLd {
             rt1: 0,
             rt2: 3,
             ra: 0,
             offset1: 0x100,
-        })
+        }))
     );
 }
 
@@ -61,12 +61,12 @@ fn a_gap_an_overflow_or_another_base_does_not_fuse() {
 
 #[test]
 fn a_fused_ld_pair_disassembles_as_its_halves() {
-    let pair = I::LdLd {
+    let pair = I::Fused(FusedPair::LdLd {
         rt1: 30,
         rt2: 31,
         ra: 1,
         offset1: -16,
-    };
+    });
     let text = crate::instruction::AsmText {
         insn: &pair,
         addr: 0,

@@ -68,22 +68,7 @@ fn is_synthetic_kind(kind: PpuInstructionKind) -> bool {
             | K::BcFalse
             | K::Blr
             | K::RlwinmMask
-            | K::LwzCmpwi
-            | K::LiStw
-            | K::MflrStw
-            | K::LwzMtlr
-            | K::MflrStd
-            | K::LdMtlr
-            | K::StdStd
-            | K::LdLd
-            | K::LbzuCmpwi
-            | K::OrAdd
-            | K::LisOri
-            | K::CmpwiBc
-            | K::CmpwBc
-            | K::CmpdiBc
-            | K::CmpdBc
-            | K::CmplwBc
+            | K::Fused
             | K::Consumed
     )
 }

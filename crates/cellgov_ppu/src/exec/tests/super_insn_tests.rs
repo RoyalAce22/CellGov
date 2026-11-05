@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::exec::test_support::{exec_no_mem, exec_with_mem};
+use crate::instruction::FusedPair;
 use cellgov_effects::Effect;
 
 #[test]
@@ -133,13 +134,13 @@ fn lwz_cmpwi_lt_and_gt() {
     s.set_gpr(1, 0x100);
     let mut effects = Vec::new();
     exec_with_mem(
-        &PpuInstruction::LwzCmpwi {
+        &PpuInstruction::Fused(FusedPair::LwzCmpwi {
             rt: 3,
             ra_load: 1,
             offset: 0,
             bf: 2,
             cmp_imm: 10,
-        },
+        }),
         &mut s,
         0,
         &mem,
@@ -153,13 +154,13 @@ fn lwz_cmpwi_lt_and_gt() {
     s2.set_gpr(1, 0x100);
     let mut effects2 = Vec::new();
     exec_with_mem(
-        &PpuInstruction::LwzCmpwi {
+        &PpuInstruction::Fused(FusedPair::LwzCmpwi {
             rt: 3,
             ra_load: 1,
             offset: 0,
             bf: 2,
             cmp_imm: 10,
-        },
+        }),
         &mut s2,
         0,
         &mem,
@@ -174,13 +175,13 @@ fn lwz_cmpwi_mem_fault() {
     let mut s = PpuState::new();
     s.set_gpr(1, 0xFFFF_FFFF);
     let result = exec_no_mem(
-        &PpuInstruction::LwzCmpwi {
+        &PpuInstruction::Fused(FusedPair::LwzCmpwi {
             rt: 3,
             ra_load: 1,
             offset: 0,
             bf: 0,
             cmp_imm: 0,
-        },
+        }),
         &mut s,
     );
     assert!(matches!(result, ExecuteVerdict::MemFault(_)));
@@ -192,12 +193,12 @@ fn li_stw_negative_imm() {
     s.set_gpr(1, 0x1000);
     let mut effects = Vec::new();
     exec_with_mem(
-        &PpuInstruction::LiStw {
+        &PpuInstruction::Fused(FusedPair::LiStw {
             rt: 3,
             imm: -1,
             ra_store: 1,
             store_offset: 0,
-        },
+        }),
         &mut s,
         0,
         &[0u8; 0x2000],
@@ -211,11 +212,11 @@ fn lwz_mtlr_mem_fault() {
     let mut s = PpuState::new();
     s.set_gpr(1, 0xFFFF_FFFF);
     let result = exec_no_mem(
-        &PpuInstruction::LwzMtlr {
+        &PpuInstruction::Fused(FusedPair::LwzMtlr {
             rt: 0,
             ra_load: 1,
             offset: 0,
-        },
+        }),
         &mut s,
     );
     assert!(matches!(result, ExecuteVerdict::MemFault(_)));
@@ -227,14 +228,14 @@ fn cmpwi_bc_not_taken() {
     s.pc = 0x1000;
     s.set_gpr(3, 5);
     let v = exec_no_mem(
-        &PpuInstruction::CmpwiBc {
+        &PpuInstruction::Fused(FusedPair::CmpwiBc {
             bf: 0,
             ra: 3,
             imm: 10,
             bo: 0x0C,
             bi: 2,
             target_offset: 16,
-        },
+        }),
         &mut s,
     );
     assert_eq!(v, ExecuteVerdict::Continue);
@@ -248,14 +249,14 @@ fn cmpwi_bc_gt_taken() {
     s.pc = 0x2000;
     s.set_gpr(3, 10);
     let v = exec_no_mem(
-        &PpuInstruction::CmpwiBc {
+        &PpuInstruction::Fused(FusedPair::CmpwiBc {
             bf: 0,
             ra: 3,
             imm: 5,
             bo: 0x0C,
             bi: 1, // GT bit of cr0
             target_offset: 20,
-        },
+        }),
         &mut s,
     );
     assert_eq!(v, ExecuteVerdict::Branch);
@@ -270,14 +271,14 @@ fn cmpw_bc_not_taken() {
     s.set_gpr(3, 5);
     s.set_gpr(4, 10);
     let v = exec_no_mem(
-        &PpuInstruction::CmpwBc {
+        &PpuInstruction::Fused(FusedPair::CmpwBc {
             bf: 0,
             ra: 3,
             rb: 4,
             bo: 0x0C,
             bi: 2,
             target_offset: 16,
-        },
+        }),
         &mut s,
     );
     assert_eq!(v, ExecuteVerdict::Continue);
@@ -290,12 +291,12 @@ fn li_stw_emits_store_effect() {
     s.set_gpr(1, 0x1000);
     let mut effects = Vec::new();
     exec_with_mem(
-        &PpuInstruction::LiStw {
+        &PpuInstruction::Fused(FusedPair::LiStw {
             rt: 5,
             imm: 99,
             ra_store: 1,
             store_offset: 0,
-        },
+        }),
         &mut s,
         0,
         &[0u8; 0x2000],
@@ -318,12 +319,12 @@ fn li_stw_stores_low_32_bits_only() {
     s.set_gpr(1, 0x1000);
     let mut effects = Vec::new();
     exec_with_mem(
-        &PpuInstruction::LiStw {
+        &PpuInstruction::Fused(FusedPair::LiStw {
             rt: 3,
             imm: -1,
             ra_store: 1,
             store_offset: 0,
-        },
+        }),
         &mut s,
         0,
         &[0u8; 0x2000],
@@ -370,13 +371,13 @@ fn lwz_cmpwi_propagates_xer_so() {
     s.set_xer_ov(true);
     let mut effects = Vec::new();
     exec_with_mem(
-        &PpuInstruction::LwzCmpwi {
+        &PpuInstruction::Fused(FusedPair::LwzCmpwi {
             rt: 3,
             ra_load: 1,
             offset: 0,
             bf: 2,
             cmp_imm: 10,
-        },
+        }),
         &mut s,
         0,
         &mem,
@@ -397,13 +398,13 @@ fn lwz_cmpwi_loaded_value_negative_as_i32() {
     s.set_gpr(1, 0x100);
     let mut effects = Vec::new();
     exec_with_mem(
-        &PpuInstruction::LwzCmpwi {
+        &PpuInstruction::Fused(FusedPair::LwzCmpwi {
             rt: 3,
             ra_load: 1,
             offset: 0,
             bf: 0,
             cmp_imm: 1,
-        },
+        }),
         &mut s,
         0,
         &mem,
@@ -420,14 +421,14 @@ fn cmpwi_bc_propagates_xer_so_when_not_taken() {
     s.set_gpr(3, 5);
     s.set_xer_ov(true);
     let v = exec_no_mem(
-        &PpuInstruction::CmpwiBc {
+        &PpuInstruction::Fused(FusedPair::CmpwiBc {
             bf: 0,
             ra: 3,
             imm: 10,
             bo: 0x0C,
             bi: 1, // GT bit -- compare result is LT, so not taken
             target_offset: 16,
-        },
+        }),
         &mut s,
     );
     assert_eq!(v, ExecuteVerdict::Continue);
@@ -440,14 +441,14 @@ fn cmpwi_bc_negative_target_offset_branches_backward() {
     s.pc = 0x2000;
     s.set_gpr(3, 0);
     let v = exec_no_mem(
-        &PpuInstruction::CmpwiBc {
+        &PpuInstruction::Fused(FusedPair::CmpwiBc {
             bf: 0,
             ra: 3,
             imm: 0,
             bo: 0x0C,
             bi: 2, // EQ
             target_offset: -16,
-        },
+        }),
         &mut s,
     );
     assert_eq!(v, ExecuteVerdict::Branch);
@@ -462,11 +463,11 @@ fn mflr_std_writes_lr_then_stores_64_bits() {
     s.set_gpr(1, 0x1000);
     let mut effects = Vec::new();
     exec_with_mem(
-        &PpuInstruction::MflrStd {
+        &PpuInstruction::Fused(FusedPair::MflrStd {
             rt: 3,
             ra_store: 1,
             store_offset: 0,
-        },
+        }),
         &mut s,
         0,
         &[0u8; 0x2000],
@@ -497,11 +498,11 @@ fn ld_mtlr_loads_into_rt_and_lr() {
     s.set_gpr(1, 0x100);
     let mut effects = Vec::new();
     let v = exec_with_mem(
-        &PpuInstruction::LdMtlr {
+        &PpuInstruction::Fused(FusedPair::LdMtlr {
             rt: 3,
             ra_load: 1,
             offset: 0,
-        },
+        }),
         &mut s,
         0,
         &mem,
@@ -674,11 +675,11 @@ fn mflr_stw_writes_lr_then_stores_low_32_bits() {
     s.set_gpr(1, 0x1000);
     let mut effects = Vec::new();
     exec_with_mem(
-        &PpuInstruction::MflrStw {
+        &PpuInstruction::Fused(FusedPair::MflrStw {
             rt: 3,
             ra_store: 1,
             store_offset: 4,
-        },
+        }),
         &mut s,
         0,
         &[0u8; 0x2000],
@@ -708,12 +709,12 @@ fn stdstd_writes_both_doublewords_at_consecutive_eas() {
     s.set_gpr(6, 0x99AA_BBCC_DDEE_FF00);
     let mut effects = Vec::new();
     let v = exec_with_mem(
-        &PpuInstruction::StdStd {
+        &PpuInstruction::Fused(FusedPair::StdStd {
             rs1: 5,
             rs2: 6,
             ra: 1,
             offset1: 0x10,
-        },
+        }),
         &mut s,
         0,
         &[0u8; 0x2000],
@@ -762,12 +763,12 @@ fn stdstd_negative_offset1_still_uses_ea2_eq_ea1_plus_8() {
     s.set_gpr(6, 0xBBBB_BBBB_BBBB_BBBB);
     let mut effects = Vec::new();
     let v = exec_with_mem(
-        &PpuInstruction::StdStd {
+        &PpuInstruction::Fused(FusedPair::StdStd {
             rs1: 5,
             rs2: 6,
             ra: 1,
             offset1: -0x10,
-        },
+        }),
         &mut s,
         0,
         &[0u8; 0x2000],
@@ -799,13 +800,13 @@ fn lwz_cmpwi_preserves_xer_and_lr() {
     let lr_before = s.lr();
     let mut effects = Vec::new();
     exec_with_mem(
-        &PpuInstruction::LwzCmpwi {
+        &PpuInstruction::Fused(FusedPair::LwzCmpwi {
             rt: 3,
             ra_load: 1,
             offset: 0,
             bf: 2,
             cmp_imm: 10,
-        },
+        }),
         &mut s,
         0,
         &mem,
@@ -829,11 +830,11 @@ fn mflr_stw_does_not_touch_cr_or_xer() {
     let xer_before = s.xer();
     let mut effects = Vec::new();
     exec_with_mem(
-        &PpuInstruction::MflrStw {
+        &PpuInstruction::Fused(FusedPair::MflrStw {
             rt: 3,
             ra_store: 1,
             store_offset: 0,
-        },
+        }),
         &mut s,
         0,
         &[0u8; 0x2000],
@@ -856,14 +857,14 @@ fn cmpwi_bc_not_taken_does_not_touch_lr_or_ctr() {
     let lr_before = s.lr();
     let ctr_before = s.ctr();
     let v = exec_no_mem(
-        &PpuInstruction::CmpwiBc {
+        &PpuInstruction::Fused(FusedPair::CmpwiBc {
             bf: 0,
             ra: 3,
             imm: 10,
             bo: 0x0C, // CR test, no CTR decrement
             bi: 1,    // GT, but compare is LT -> not taken
             target_offset: 16,
-        },
+        }),
         &mut s,
     );
     assert_eq!(v, ExecuteVerdict::Continue);
@@ -883,14 +884,14 @@ fn cmpw_bc_taken_with_ctr_decrement_does_decrement_ctr() {
     s.set_gpr(4, 7);
     s.set_ctr(2);
     let v = exec_no_mem(
-        &PpuInstruction::CmpwBc {
+        &PpuInstruction::Fused(FusedPair::CmpwBc {
             bf: 0,
             ra: 3,
             rb: 4,
             bo: 0x10, // BO_0=1 skip CR test; BO_2=0 decrement CTR; BO_3=0 branch on CTR!=0
             bi: 0,
             target_offset: 32,
-        },
+        }),
         &mut s,
     );
     assert_eq!(v, ExecuteVerdict::Branch);
@@ -917,12 +918,12 @@ fn stdstd_refuses_the_pair_whole_when_one_slot_is_free() {
     }
     let mut effects = Vec::new();
     let v = crate::exec::execute(
-        &PpuInstruction::StdStd {
+        &PpuInstruction::Fused(FusedPair::StdStd {
             rs1: 5,
             rs2: 6,
             ra: 1,
             offset1: 0,
-        },
+        }),
         &mut s,
         uid(),
         &[cellgov_mem::RegionView::plain(0u64, &[0u8; 0x2000][..])],

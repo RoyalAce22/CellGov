@@ -1,5 +1,5 @@
 use super::{classify, PpeTiming};
-use crate::instruction::PpuInstruction as I;
+use crate::instruction::{FusedPair, PpuInstruction as I};
 use crate::state::PpuState;
 
 /// Retire `insns` from `pc` up as straight-line code, and return the
@@ -177,13 +177,13 @@ fn a_fused_pair_times_both_of_its_instructions() {
     let mut state = PpuState::new();
     state.set_gpr(1, 0x3000);
     let (_, n) = classify(
-        &I::LwzCmpwi {
+        &I::Fused(FusedPair::LwzCmpwi {
             rt: 3,
             ra_load: 1,
             offset: 0,
             bf: 0,
             cmp_imm: 0,
-        },
+        }),
         &state,
     );
     assert_eq!(n, 2);

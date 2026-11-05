@@ -4,7 +4,7 @@ use cellgov_effects::EffectKind;
 use cellgov_exec::operand::{OperandClass, OperandField};
 
 use crate::instruction::ops::{Fp59Op, Fp63Op, VaOp, VxOp};
-use crate::instruction::PpuInstructionKind;
+use crate::instruction::{FusedPairKind, PpuInstructionKind};
 
 /// Encoding form used by a decoded PPU instruction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +48,8 @@ pub enum PpuFuzzKind {
     Fp59(Fp59Op),
     /// One operation in the generic primary-63 floating-point family.
     Fp63(Fp63Op),
+    /// One shadow-built fused pair.
+    Fused(FusedPairKind),
 }
 
 impl PartialOrd for PpuFuzzKind {
@@ -69,6 +71,7 @@ fn fuzz_kind_order(kind: PpuFuzzKind) -> (u8, u16) {
         PpuFuzzKind::Va(op) => (2, op as u16),
         PpuFuzzKind::Fp59(op) => (3, op as u16),
         PpuFuzzKind::Fp63(op) => (4, op as u16),
+        PpuFuzzKind::Fused(pair) => (5, pair as u16),
     }
 }
 

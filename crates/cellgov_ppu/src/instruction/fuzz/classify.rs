@@ -2,7 +2,7 @@
 
 use cellgov_effects::EffectKind;
 
-use crate::instruction::{PpuInstruction, PpuInstructionKind};
+use crate::instruction::{FusedPairKind, PpuInstruction, PpuInstructionKind};
 use crate::PpuFaultClass as Class;
 
 use super::types::{
@@ -100,6 +100,7 @@ pub(super) fn fuzz_kind(instruction: PpuInstruction) -> PpuFuzzKind {
         PpuInstruction::Va { op, .. } => PpuFuzzKind::Va(op),
         PpuInstruction::Fp59 { op, .. } => PpuFuzzKind::Fp59(op),
         PpuInstruction::Fp63 { op, .. } => PpuFuzzKind::Fp63(op),
+        PpuInstruction::Fused(pair) => PpuFuzzKind::Fused(FusedPairKind::from(pair)),
         ordinary => PpuFuzzKind::Ordinary(PpuInstructionKind::from(ordinary)),
     }
 }
@@ -125,22 +126,7 @@ pub(super) fn form_for_word(kind: PpuInstructionKind, raw: u32) -> PpuEncodingFo
             | K::BcFalse
             | K::Blr
             | K::RlwinmMask
-            | K::LwzCmpwi
-            | K::LiStw
-            | K::MflrStw
-            | K::LwzMtlr
-            | K::MflrStd
-            | K::LdMtlr
-            | K::StdStd
-            | K::LdLd
-            | K::LbzuCmpwi
-            | K::OrAdd
-            | K::LisOri
-            | K::CmpwiBc
-            | K::CmpwBc
-            | K::CmpdiBc
-            | K::CmpdBc
-            | K::CmplwBc
+            | K::Fused
             | K::Consumed
     ) {
         return PpuEncodingForm::Synthetic;
@@ -227,12 +213,7 @@ pub(super) fn effect_and_outcome(
         | K::Lvehx
         | K::Lvewx
         | K::Lvx
-        | K::Lvxl
-        | K::LwzCmpwi
-        | K::LwzMtlr
-        | K::LdMtlr
-        | K::LdLd
-        | K::LbzuCmpwi => (READ_EFFECTS, LOAD),
+        | K::Lvxl => (READ_EFFECTS, LOAD),
         K::Lfs | K::Lfd | K::Lfsx | K::Lfdx => (READ_EFFECTS, LOAD_OR_FAULT),
         K::Stmw | K::Stfs | K::Stfd | K::Stfiwx | K::Stfsx | K::Stfdx => {
             (WRITE_EFFECTS, STORE_OR_FAULT)
@@ -258,11 +239,7 @@ pub(super) fn effect_and_outcome(
         | K::Stvehx
         | K::Stvewx
         | K::Stvx
-        | K::Stvxl
-        | K::LiStw
-        | K::MflrStw
-        | K::MflrStd
-        | K::StdStd => (WRITE_EFFECTS, STORE),
+        | K::Stvxl => (WRITE_EFFECTS, STORE),
         // A block in a caching-inhibited view takes an alignment interrupt.
         K::Dcbz => (WRITE_EFFECTS, STORE_OR_FAULT),
         K::Ldarx | K::Lwarx => (RESERVATION_READ_EFFECTS, ATOMIC_LOAD),
@@ -271,18 +248,9 @@ pub(super) fn effect_and_outcome(
         // A block whose addressed byte no region holds faults; the check records no read.
         K::Dcbst | K::Dcbf | K::Icbi => (NO_EFFECTS, LOAD),
         K::B => (NO_EFFECTS, UNCONDITIONAL_BRANCH),
-        K::Bc
-        | K::Bclr
-        | K::Bcctr
-        | K::Bdnz
-        | K::BcTrue
-        | K::BcFalse
-        | K::Blr
-        | K::CmpwiBc
-        | K::CmpwBc
-        | K::CmpdiBc
-        | K::CmpdBc
-        | K::CmplwBc => (NO_EFFECTS, BRANCH),
+        K::Bc | K::Bclr | K::Bcctr | K::Bdnz | K::BcTrue | K::BcFalse | K::Blr => {
+            (NO_EFFECTS, BRANCH)
+        }
         K::Sc => (NO_EFFECTS, SYSCALL),
         // [CBE-Handbook p:739 s:A.2.4] The PPE does not implement these; each raises an illegal-instruction exception.
         K::Popcntb | K::Mcrxr | K::PpeIllegal => (NO_EFFECTS, FAULT),
@@ -293,14 +261,32 @@ pub(super) fn effect_and_outcome(
     }
 }
 
-/// The fault classes a fault outcome of `kind` may carry.
+/// The effects and outcomes of the fused pair `kind`: those of its
+/// memory half, or of its branch half.
+pub(super) fn fused_effect_and_outcome(
+    kind: FusedPairKind,
+) -> (&'static [EffectKind], &'static [PpuOutcomeClass]) {
+    use FusedPairKind as F;
+    match kind {
+        F::LwzCmpwi | F::LwzMtlr | F::LdMtlr | F::LdLd | F::LbzuCmpwi => (READ_EFFECTS, LOAD),
+        F::LiStw | F::MflrStw | F::MflrStd | F::StdStd => (WRITE_EFFECTS, STORE),
+        F::CmpwiBc | F::CmpwBc | F::CmpdiBc | F::CmpdBc | F::CmplwBc => (NO_EFFECTS, BRANCH),
+        F::OrAdd | F::LisOri => (NO_EFFECTS, CONTINUE),
+    }
+}
+
+/// The fault classes a fault outcome of `kind` may carry, given the
+/// `outcomes` of the instruction.
 ///
 /// A `MemoryFault` outcome is a data storage interrupt. An invalid form
 /// that faults is an illegal instruction.
-pub(super) fn fault_classes(kind: PpuInstructionKind, valid_form: bool) -> &'static [Class] {
+pub(super) fn fault_classes(
+    kind: PpuInstructionKind,
+    valid_form: bool,
+    outcomes: &[PpuOutcomeClass],
+) -> &'static [Class] {
     use PpuInstructionKind as K;
     const DATA: &[Class] = &[Class::DataStorage];
-    let (_, outcomes) = effect_and_outcome(kind, valid_form);
     let memory = outcomes.contains(&PpuOutcomeClass::MemoryFault);
     if !outcomes.contains(&PpuOutcomeClass::Fault) {
         return if memory { DATA } else { &[] };
@@ -597,22 +583,7 @@ pub(super) fn classify_kind(kind: PpuInstructionKind) {
         | PpuInstructionKind::BcFalse
         | PpuInstructionKind::Blr
         | PpuInstructionKind::RlwinmMask
-        | PpuInstructionKind::LwzCmpwi
-        | PpuInstructionKind::LiStw
-        | PpuInstructionKind::MflrStw
-        | PpuInstructionKind::LwzMtlr
-        | PpuInstructionKind::MflrStd
-        | PpuInstructionKind::LdMtlr
-        | PpuInstructionKind::StdStd
-        | PpuInstructionKind::LdLd
-        | PpuInstructionKind::LbzuCmpwi
-        | PpuInstructionKind::OrAdd
-        | PpuInstructionKind::LisOri
-        | PpuInstructionKind::CmpwiBc
-        | PpuInstructionKind::CmpwBc
-        | PpuInstructionKind::CmpdiBc
-        | PpuInstructionKind::CmpdBc
-        | PpuInstructionKind::CmplwBc
+        | PpuInstructionKind::Fused
         | PpuInstructionKind::Consumed
         | PpuInstructionKind::Dcbz
         | PpuInstructionKind::Dcbst

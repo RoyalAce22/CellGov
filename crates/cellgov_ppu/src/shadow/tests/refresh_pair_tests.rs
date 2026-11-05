@@ -1,6 +1,7 @@
 //! A refresh of one half of a fused pair stales the other half.
 
 use super::*;
+use crate::instruction::FusedPair;
 use crate::shadow::test_support::{build_from_words, cmpwi_raw, li_raw, lwz_raw};
 
 /// `lwz` + `cmpwi` fused at slot 0, `Consumed` at slot 1, `li` at slot 2.
@@ -8,7 +9,7 @@ fn fused() -> PredecodedShadow {
     let shadow = build_from_words(0, &[lwz_raw(3, 1, 8), cmpwi_raw(0, 3, 42), li_raw(5, 7)]);
     assert!(matches!(
         shadow.get(0),
-        Some(PpuInstruction::LwzCmpwi { .. })
+        Some(PpuInstruction::Fused(FusedPair::LwzCmpwi { .. }))
     ));
     assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
     shadow

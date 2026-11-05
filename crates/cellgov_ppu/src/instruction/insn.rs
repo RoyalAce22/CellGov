@@ -16,14 +16,17 @@
 /// each copy pays this size for each word.
 const _: () = assert!(core::mem::size_of::<Option<PpuInstruction>>() == 12);
 
+/// [`FusedPair`] must stay 2-byte aligned for the shadow slot to stay at 12 bytes.
+const _: () = assert!(core::mem::align_of::<FusedPair>() == 2);
+
 /// A decoded PPU instruction. Field names follow PPC ISA conventions
 /// (`rt`/`rs`/`ra`/`rb`, `imm`, `offset`, `link`).
 ///
-/// `IntoStaticStr` produces the variant identifier as a `&'static str`
-/// via `<&'static str>::from(&insn)`. Consumers
-/// (e.g. `PpuExecutionUnit::profile_prev`) store the name in
+/// `<&'static str>::from(&insn)` gives the variant identifier, and for
+/// [`PpuInstruction::Fused`] the identifier of the [`FusedPair`] variant.
+/// Consumers (e.g. `PpuExecutionUnit::profile_prev`) store the name in
 /// `&'static str` fields.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr, strum::EnumDiscriminants)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumDiscriminants)]
 #[strum_discriminants(
     name(PpuInstructionKind),
     derive(PartialOrd, Ord, strum::VariantArray, strum::IntoStaticStr)
@@ -1608,126 +1611,8 @@ pub enum PpuInstruction {
         mask: u32,
     },
 
-    // -- Superinstructions (compound 2-instruction pairs) --
-    LwzCmpwi {
-        rt: u8,
-        ra_load: u8,
-        offset: i16,
-        bf: u8,
-        cmp_imm: i16,
-    },
-    LiStw {
-        rt: u8,
-        imm: i16,
-        ra_store: u8,
-        store_offset: i16,
-    },
-    MflrStw {
-        rt: u8,
-        ra_store: u8,
-        store_offset: i16,
-    },
-    LwzMtlr {
-        rt: u8,
-        ra_load: u8,
-        offset: i16,
-    },
-    MflrStd {
-        rt: u8,
-        ra_store: u8,
-        store_offset: i16,
-    },
-    LdMtlr {
-        rt: u8,
-        ra_load: u8,
-        offset: i16,
-    },
-    /// Two adjacent `std` stores with `off2 == off1 + 8`.
-    StdStd {
-        rs1: u8,
-        rs2: u8,
-        ra: u8,
-        offset1: i16,
-    },
-    /// Two adjacent `ld` loads from one base with `off2 == off1 + 8`.
-    ///
-    /// The shadow fuses the pair only when `rt1` is not a nonzero `ra`, so the
-    /// first load keeps the base and EA2 is EA1 + 8.
-    LdLd {
-        rt1: u8,
-        rt2: u8,
-        ra: u8,
-        offset1: i16,
-    },
-    /// `lbzu rT, D(rA)` followed by `cmpwi crF, rC, 0`, where `rC` is `cmp_ra`.
-    ///
-    /// The shadow fuses only a valid `lbzu`, with `ra` neither 0 nor `rt`.
-    LbzuCmpwi {
-        rt: u8,
-        ra: u8,
-        offset: i16,
-        bf: u8,
-        cmp_ra: u8,
-    },
-    /// `or rA, rS, rB` (or its quickened `mr`) followed by
-    /// `add rT, rA2, rB2`. Neither half sets Rc, and the `add` has OE = 0.
-    OrAdd {
-        ra: u8,
-        rs: u8,
-        rb: u8,
-        rt: u8,
-        add_ra: u8,
-        add_rb: u8,
-    },
-    /// `lis rT, hi` followed by `ori rT, rT, lo`. `value` is `hi || lo`.
-    LisOri {
-        rt: u8,
-        value: i32,
-    },
-    CmpwiBc {
-        bf: u8,
-        ra: u8,
-        imm: i16,
-        bo: u8,
-        bi: u8,
-        target_offset: i16,
-    },
-    CmpwBc {
-        bf: u8,
-        ra: u8,
-        rb: u8,
-        bo: u8,
-        bi: u8,
-        target_offset: i16,
-    },
-    /// `cmpdi crF, rA, imm` (or its quickened zero form) followed by a
-    /// non-linking relative `bc`.
-    CmpdiBc {
-        bf: u8,
-        ra: u8,
-        imm: i16,
-        bo: u8,
-        bi: u8,
-        target_offset: i16,
-    },
-    /// `cmpd crF, rA, rB` followed by a non-linking relative `bc`.
-    CmpdBc {
-        bf: u8,
-        ra: u8,
-        rb: u8,
-        bo: u8,
-        bi: u8,
-        target_offset: i16,
-    },
-    /// `cmplw crF, rA, rB` followed by a non-linking relative `bc`.
-    CmplwBc {
-        bf: u8,
-        ra: u8,
-        rb: u8,
-        bo: u8,
-        bi: u8,
-        target_offset: i16,
-    },
+    /// A fused pair; see [`FusedPair`].
+    Fused(FusedPair),
     /// Placeholder for a slot absorbed by a preceding superinstruction.
     /// The superinstruction retires this slot itself; a branch that
     /// reaches the slot runs the word stored there.
@@ -1851,6 +1736,155 @@ pub enum PpuInstruction {
     ///
     /// [PPC-Book2 p:22 s:3.3.1] isync XL-form.
     Isync,
+}
+
+impl From<&PpuInstruction> for &'static str {
+    #[inline]
+    fn from(insn: &PpuInstruction) -> Self {
+        match insn {
+            PpuInstruction::Fused(pair) => pair.into(),
+            other => PpuInstructionKind::from(other).into(),
+        }
+    }
+}
+
+impl From<PpuInstruction> for &'static str {
+    #[inline]
+    fn from(insn: PpuInstruction) -> Self {
+        Self::from(&insn)
+    }
+}
+
+/// A fused pair: two adjacent decoded words the shadow runs as one slot.
+///
+/// The second word's slot holds [`PpuInstruction::Consumed`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr, strum::EnumDiscriminants)]
+#[strum_discriminants(
+    name(FusedPairKind),
+    derive(PartialOrd, Ord, strum::VariantArray, strum::IntoStaticStr)
+)]
+pub enum FusedPair {
+    LwzCmpwi {
+        rt: u8,
+        ra_load: u8,
+        offset: i16,
+        bf: u8,
+        cmp_imm: i16,
+    },
+    LiStw {
+        rt: u8,
+        imm: i16,
+        ra_store: u8,
+        store_offset: i16,
+    },
+    MflrStw {
+        rt: u8,
+        ra_store: u8,
+        store_offset: i16,
+    },
+    LwzMtlr {
+        rt: u8,
+        ra_load: u8,
+        offset: i16,
+    },
+    MflrStd {
+        rt: u8,
+        ra_store: u8,
+        store_offset: i16,
+    },
+    LdMtlr {
+        rt: u8,
+        ra_load: u8,
+        offset: i16,
+    },
+    /// Two adjacent `std` stores with `off2 == off1 + 8`.
+    StdStd {
+        rs1: u8,
+        rs2: u8,
+        ra: u8,
+        offset1: i16,
+    },
+    /// Two adjacent `ld` loads from one base with `off2 == off1 + 8`.
+    ///
+    /// The shadow fuses the pair only when `rt1` is not a nonzero `ra`, so the
+    /// first load keeps the base and EA2 is EA1 + 8.
+    LdLd {
+        rt1: u8,
+        rt2: u8,
+        ra: u8,
+        offset1: i16,
+    },
+    /// `lbzu rT, D(rA)` followed by `cmpwi crF, rC, 0`, where `rC` is `cmp_ra`.
+    ///
+    /// The shadow fuses only a valid `lbzu`, with `ra` neither 0 nor `rt`.
+    LbzuCmpwi {
+        rt: u8,
+        ra: u8,
+        offset: i16,
+        bf: u8,
+        cmp_ra: u8,
+    },
+    /// `or rA, rS, rB` (or its quickened `mr`) followed by
+    /// `add rT, rA2, rB2`. Neither half sets Rc, and the `add` has OE = 0.
+    OrAdd {
+        ra: u8,
+        rs: u8,
+        rb: u8,
+        rt: u8,
+        add_ra: u8,
+        add_rb: u8,
+    },
+    /// `lis rT, hi` followed by `ori rT, rT, lo`: `hi` is the `lis`
+    /// immediate, and `lo` is the `ori` immediate.
+    LisOri {
+        rt: u8,
+        hi: i16,
+        lo: u16,
+    },
+    CmpwiBc {
+        bf: u8,
+        ra: u8,
+        imm: i16,
+        bo: u8,
+        bi: u8,
+        target_offset: i16,
+    },
+    CmpwBc {
+        bf: u8,
+        ra: u8,
+        rb: u8,
+        bo: u8,
+        bi: u8,
+        target_offset: i16,
+    },
+    /// `cmpdi crF, rA, imm` (or its quickened zero form) followed by a
+    /// non-linking relative `bc`.
+    CmpdiBc {
+        bf: u8,
+        ra: u8,
+        imm: i16,
+        bo: u8,
+        bi: u8,
+        target_offset: i16,
+    },
+    /// `cmpd crF, rA, rB` followed by a non-linking relative `bc`.
+    CmpdBc {
+        bf: u8,
+        ra: u8,
+        rb: u8,
+        bo: u8,
+        bi: u8,
+        target_offset: i16,
+    },
+    /// `cmplw crF, rA, rB` followed by a non-linking relative `bc`.
+    CmplwBc {
+        bf: u8,
+        ra: u8,
+        rb: u8,
+        bo: u8,
+        bi: u8,
+        target_offset: i16,
+    },
 }
 
 #[cfg(test)]

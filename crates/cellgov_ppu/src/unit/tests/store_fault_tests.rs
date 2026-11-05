@@ -7,6 +7,8 @@ use cellgov_exec::{DataAccessFault, ExecutionContext, ExecutionUnit, YieldReason
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize, Region, RegionAccess};
 use cellgov_time::Budget;
 
+use crate::instruction::FusedPair;
+
 /// The end of the one writable region, at 0.
 const FLAT_END: u64 = 0x1000;
 /// An address between the two regions.
@@ -107,7 +109,7 @@ fn a_fused_store_pair_to_an_unmapped_address_faults_at_its_first_store() {
     assert!(
         matches!(
             shadow.get(0),
-            Some(instruction::PpuInstruction::StdStd { .. })
+            Some(instruction::PpuInstruction::Fused(FusedPair::StdStd { .. }))
         ),
         "precondition: the two stores fuse"
     );

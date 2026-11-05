@@ -4,7 +4,7 @@
 //! encodings independently.
 
 use crate::decode::decode;
-use crate::instruction::{AsmText, PpuInstruction};
+use crate::instruction::{AsmText, FusedPair, PpuInstruction};
 
 /// Decode `raw` and render at `addr`.
 fn fmt_at(raw: u32, addr: u64) -> String {
@@ -437,43 +437,43 @@ fn fmt_quickened_forms_render_extended_mnemonics() {
 #[test]
 fn fmt_superinstructions_render_fused_halves() {
     assert_eq!(
-        fmt_insn(PpuInstruction::LwzCmpwi {
+        fmt_insn(PpuInstruction::Fused(FusedPair::LwzCmpwi {
             rt: 3,
             ra_load: 1,
             offset: 8,
             bf: 7,
             cmp_imm: 0,
-        }),
+        })),
         "lwz        r3, 8(r1); cmpwi cr7, r3, 0"
     );
     assert_eq!(
-        fmt_insn(PpuInstruction::MflrStd {
+        fmt_insn(PpuInstruction::Fused(FusedPair::MflrStd {
             rt: 0,
             ra_store: 1,
             store_offset: 16,
-        }),
+        })),
         "mflr       r0; std r0, 16(r1)"
     );
     assert_eq!(
-        fmt_insn(PpuInstruction::StdStd {
+        fmt_insn(PpuInstruction::Fused(FusedPair::StdStd {
             rs1: 30,
             rs2: 31,
             ra: 1,
             offset1: -16,
-        }),
+        })),
         "std        r30, -16(r1); std r31, -8(r1)"
     );
     // The fused bc resolves relative to addr+4 (fmt_insn renders at
     // 0x1_0000, so the bc half sits at 0x1_0004).
     assert_eq!(
-        fmt_insn(PpuInstruction::CmpwiBc {
+        fmt_insn(PpuInstruction::Fused(FusedPair::CmpwiBc {
             bf: 0,
             ra: 3,
             imm: 0,
             bo: 12,
             bi: 2,
             target_offset: 0x20,
-        }),
+        })),
         "cmpwi      r3, 0; bc 12, 2, 0x10024"
     );
     assert_eq!(fmt_insn(PpuInstruction::Consumed), ".consumed");

@@ -1,6 +1,7 @@
 //! Shadow code-cache slot lookup and range invalidation.
 
 use super::*;
+use crate::instruction::FusedPair;
 use crate::shadow::test_support::{build_from_words, cmpwi_raw, li_raw, lwz_raw, stw_raw};
 
 #[test]
@@ -105,7 +106,7 @@ fn invalidate_just_consumed_widens_to_super_pair_head() {
     let mut shadow = build_from_words(0, &[lwz_raw(3, 1, 8), cmpwi_raw(0, 3, 42)]);
     assert!(matches!(
         shadow.get(0),
-        Some(PpuInstruction::LwzCmpwi { .. })
+        Some(PpuInstruction::Fused(FusedPair::LwzCmpwi { .. }))
     ));
     assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
     // Invalidate only slot 4 (byte range [4..8)).
@@ -123,7 +124,7 @@ fn invalidate_just_super_pair_head_widens_to_consumed() {
     let mut shadow = build_from_words(0, &[lwz_raw(3, 1, 8), cmpwi_raw(0, 3, 42)]);
     assert!(matches!(
         shadow.get(0),
-        Some(PpuInstruction::LwzCmpwi { .. })
+        Some(PpuInstruction::Fused(FusedPair::LwzCmpwi { .. }))
     ));
     assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
     // Invalidate only slot 0 (byte range [0..4)).
@@ -149,9 +150,15 @@ fn invalidate_partner_widening_preserves_unrelated_pairs() {
             stw_raw(4, 1, 8),
         ],
     );
-    assert!(matches!(shadow.get(0), Some(PpuInstruction::LiStw { .. })));
+    assert!(matches!(
+        shadow.get(0),
+        Some(PpuInstruction::Fused(FusedPair::LiStw { .. }))
+    ));
     assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
-    assert!(matches!(shadow.get(8), Some(PpuInstruction::LiStw { .. })));
+    assert!(matches!(
+        shadow.get(8),
+        Some(PpuInstruction::Fused(FusedPair::LiStw { .. }))
+    ));
     assert_eq!(shadow.get(12), Some(PpuInstruction::Consumed));
     // Invalidate only slot 1 (the Consumed at byte 4).
     shadow.invalidate_range(4, 4);

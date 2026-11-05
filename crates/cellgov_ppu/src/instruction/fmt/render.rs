@@ -4,7 +4,7 @@ use core::fmt;
 
 use crate::funcmap::FunctionMap;
 use crate::instruction::ops::{Fp59Shape, Fp63Shape, VaShape, VxShape};
-use crate::instruction::PpuInstruction;
+use crate::instruction::{FusedPair, PpuInstruction};
 
 use super::mnemonic::{mem_d, mem_x, mn_branch, mn_oe_rc, mn_rc, op, op0, shown_target, CrBit};
 use super::simplify::simplify;
@@ -673,178 +673,180 @@ pub(super) fn render(
         // -- Superinstructions (shadow-builder only). Rendered as the
         //    two fused halves joined with `; ` so the reader sees real
         //    assembly, not an internal codename. --
-        I::LwzCmpwi {
-            rt,
-            ra_load,
-            offset,
-            bf,
-            cmp_imm,
-        } => {
-            op(f, "lwz", format_args!("r{rt}, {offset}(r{ra_load})"))?;
-            if bf == 0 {
-                write!(f, "; cmpwi r{rt}, {cmp_imm}")
-            } else {
-                write!(f, "; cmpwi cr{bf}, r{rt}, {cmp_imm}")
+        I::Fused(pair) => match pair {
+            FusedPair::LwzCmpwi {
+                rt,
+                ra_load,
+                offset,
+                bf,
+                cmp_imm,
+            } => {
+                op(f, "lwz", format_args!("r{rt}, {offset}(r{ra_load})"))?;
+                if bf == 0 {
+                    write!(f, "; cmpwi r{rt}, {cmp_imm}")
+                } else {
+                    write!(f, "; cmpwi cr{bf}, r{rt}, {cmp_imm}")
+                }
             }
-        }
-        I::LiStw {
-            rt,
-            imm,
-            ra_store,
-            store_offset,
-        } => {
-            op(f, "li", format_args!("r{rt}, {imm}"))?;
-            write!(f, "; stw r{rt}, {store_offset}(r{ra_store})")
-        }
-        I::MflrStw {
-            rt,
-            ra_store,
-            store_offset,
-        } => {
-            op(f, "mflr", format_args!("r{rt}"))?;
-            write!(f, "; stw r{rt}, {store_offset}(r{ra_store})")
-        }
-        I::MflrStd {
-            rt,
-            ra_store,
-            store_offset,
-        } => {
-            op(f, "mflr", format_args!("r{rt}"))?;
-            write!(f, "; std r{rt}, {store_offset}(r{ra_store})")
-        }
-        I::LwzMtlr {
-            rt,
-            ra_load,
-            offset,
-        } => {
-            op(f, "lwz", format_args!("r{rt}, {offset}(r{ra_load})"))?;
-            write!(f, "; mtlr r{rt}")
-        }
-        I::LdMtlr {
-            rt,
-            ra_load,
-            offset,
-        } => {
-            op(f, "ld", format_args!("r{rt}, {offset}(r{ra_load})"))?;
-            write!(f, "; mtlr r{rt}")
-        }
-        I::StdStd {
-            rs1,
-            rs2,
-            ra,
-            offset1,
-        } => {
-            op(f, "std", format_args!("r{rs1}, {offset1}(r{ra})"))?;
-            let offset2 = offset1 as i32 + 8;
-            write!(f, "; std r{rs2}, {offset2}(r{ra})")
-        }
-        I::LdLd {
-            rt1,
-            rt2,
-            ra,
-            offset1,
-        } => {
-            op(f, "ld", format_args!("r{rt1}, {offset1}(r{ra})"))?;
-            let offset2 = offset1 as i32 + 8;
-            write!(f, "; ld r{rt2}, {offset2}(r{ra})")
-        }
-        I::LbzuCmpwi {
-            rt,
-            ra,
-            offset,
-            bf,
-            cmp_ra,
-        } => {
-            op(f, "lbzu", format_args!("r{rt}, {offset}(r{ra})"))?;
-            if bf == 0 {
-                write!(f, "; cmpwi r{cmp_ra}, 0")
-            } else {
-                write!(f, "; cmpwi cr{bf}, r{cmp_ra}, 0")
+            FusedPair::LiStw {
+                rt,
+                imm,
+                ra_store,
+                store_offset,
+            } => {
+                op(f, "li", format_args!("r{rt}, {imm}"))?;
+                write!(f, "; stw r{rt}, {store_offset}(r{ra_store})")
             }
-        }
-        I::OrAdd {
-            ra,
-            rs,
-            rb,
-            rt,
-            add_ra,
-            add_rb,
-        } => {
-            // [PPC-Book1 p:163 s:B.9] mr rX,rY is or rX,rY,rY, as the
-            // standalone `or` and the quickened `mr` both render.
-            if rs == rb {
-                op(f, "mr", format_args!("r{ra}, r{rs}"))?;
-            } else {
-                op(f, "or", format_args!("r{ra}, r{rs}, r{rb}"))?;
+            FusedPair::MflrStw {
+                rt,
+                ra_store,
+                store_offset,
+            } => {
+                op(f, "mflr", format_args!("r{rt}"))?;
+                write!(f, "; stw r{rt}, {store_offset}(r{ra_store})")
             }
-            write!(f, "; add r{rt}, r{add_ra}, r{add_rb}")
-        }
-        I::LisOri { rt, value } => {
-            op(f, "lis", format_args!("r{rt}, {}", (value >> 16) as i16))?;
-            write!(f, "; ori r{rt}, r{rt}, 0x{:x}", value as u16)
-        }
-        I::CmpwiBc {
-            bf,
-            ra,
-            imm,
-            bo,
-            bi,
-            target_offset,
-        } => {
-            cmp!(f, "cmpwi", bf, "r{}, {}", ra, imm)?;
-            // The fused bc occupies addr+4; its displacement is
-            // relative to its own address.
-            let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
-            write!(f, "; bc {bo}, {bi}, 0x{target:x}")
-        }
-        I::CmpwBc {
-            bf,
-            ra,
-            rb,
-            bo,
-            bi,
-            target_offset,
-        } => {
-            cmp!(f, "cmpw", bf, "r{}, r{}", ra, rb)?;
-            let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
-            write!(f, "; bc {bo}, {bi}, 0x{target:x}")
-        }
-        I::CmpdiBc {
-            bf,
-            ra,
-            imm,
-            bo,
-            bi,
-            target_offset,
-        } => {
-            cmp!(f, "cmpdi", bf, "r{}, {}", ra, imm)?;
-            let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
-            write!(f, "; bc {bo}, {bi}, 0x{target:x}")
-        }
-        I::CmpdBc {
-            bf,
-            ra,
-            rb,
-            bo,
-            bi,
-            target_offset,
-        } => {
-            cmp!(f, "cmpd", bf, "r{}, r{}", ra, rb)?;
-            let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
-            write!(f, "; bc {bo}, {bi}, 0x{target:x}")
-        }
-        I::CmplwBc {
-            bf,
-            ra,
-            rb,
-            bo,
-            bi,
-            target_offset,
-        } => {
-            cmp!(f, "cmplw", bf, "r{}, r{}", ra, rb)?;
-            let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
-            write!(f, "; bc {bo}, {bi}, 0x{target:x}")
-        }
+            FusedPair::MflrStd {
+                rt,
+                ra_store,
+                store_offset,
+            } => {
+                op(f, "mflr", format_args!("r{rt}"))?;
+                write!(f, "; std r{rt}, {store_offset}(r{ra_store})")
+            }
+            FusedPair::LwzMtlr {
+                rt,
+                ra_load,
+                offset,
+            } => {
+                op(f, "lwz", format_args!("r{rt}, {offset}(r{ra_load})"))?;
+                write!(f, "; mtlr r{rt}")
+            }
+            FusedPair::LdMtlr {
+                rt,
+                ra_load,
+                offset,
+            } => {
+                op(f, "ld", format_args!("r{rt}, {offset}(r{ra_load})"))?;
+                write!(f, "; mtlr r{rt}")
+            }
+            FusedPair::StdStd {
+                rs1,
+                rs2,
+                ra,
+                offset1,
+            } => {
+                op(f, "std", format_args!("r{rs1}, {offset1}(r{ra})"))?;
+                let offset2 = offset1 as i32 + 8;
+                write!(f, "; std r{rs2}, {offset2}(r{ra})")
+            }
+            FusedPair::LdLd {
+                rt1,
+                rt2,
+                ra,
+                offset1,
+            } => {
+                op(f, "ld", format_args!("r{rt1}, {offset1}(r{ra})"))?;
+                let offset2 = offset1 as i32 + 8;
+                write!(f, "; ld r{rt2}, {offset2}(r{ra})")
+            }
+            FusedPair::LbzuCmpwi {
+                rt,
+                ra,
+                offset,
+                bf,
+                cmp_ra,
+            } => {
+                op(f, "lbzu", format_args!("r{rt}, {offset}(r{ra})"))?;
+                if bf == 0 {
+                    write!(f, "; cmpwi r{cmp_ra}, 0")
+                } else {
+                    write!(f, "; cmpwi cr{bf}, r{cmp_ra}, 0")
+                }
+            }
+            FusedPair::OrAdd {
+                ra,
+                rs,
+                rb,
+                rt,
+                add_ra,
+                add_rb,
+            } => {
+                // [PPC-Book1 p:163 s:B.9] mr rX,rY is or rX,rY,rY, as the
+                // standalone `or` and the quickened `mr` both render.
+                if rs == rb {
+                    op(f, "mr", format_args!("r{ra}, r{rs}"))?;
+                } else {
+                    op(f, "or", format_args!("r{ra}, r{rs}, r{rb}"))?;
+                }
+                write!(f, "; add r{rt}, r{add_ra}, r{add_rb}")
+            }
+            FusedPair::LisOri { rt, hi, lo } => {
+                op(f, "lis", format_args!("r{rt}, {hi}"))?;
+                write!(f, "; ori r{rt}, r{rt}, 0x{lo:x}")
+            }
+            FusedPair::CmpwiBc {
+                bf,
+                ra,
+                imm,
+                bo,
+                bi,
+                target_offset,
+            } => {
+                cmp!(f, "cmpwi", bf, "r{}, {}", ra, imm)?;
+                // The fused bc occupies addr+4; its displacement is
+                // relative to its own address.
+                let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
+                write!(f, "; bc {bo}, {bi}, 0x{target:x}")
+            }
+            FusedPair::CmpwBc {
+                bf,
+                ra,
+                rb,
+                bo,
+                bi,
+                target_offset,
+            } => {
+                cmp!(f, "cmpw", bf, "r{}, r{}", ra, rb)?;
+                let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
+                write!(f, "; bc {bo}, {bi}, 0x{target:x}")
+            }
+            FusedPair::CmpdiBc {
+                bf,
+                ra,
+                imm,
+                bo,
+                bi,
+                target_offset,
+            } => {
+                cmp!(f, "cmpdi", bf, "r{}, {}", ra, imm)?;
+                let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
+                write!(f, "; bc {bo}, {bi}, 0x{target:x}")
+            }
+            FusedPair::CmpdBc {
+                bf,
+                ra,
+                rb,
+                bo,
+                bi,
+                target_offset,
+            } => {
+                cmp!(f, "cmpd", bf, "r{}, r{}", ra, rb)?;
+                let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
+                write!(f, "; bc {bo}, {bi}, 0x{target:x}")
+            }
+            FusedPair::CmplwBc {
+                bf,
+                ra,
+                rb,
+                bo,
+                bi,
+                target_offset,
+            } => {
+                cmp!(f, "cmplw", bf, "r{}, r{}", ra, rb)?;
+                let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
+                write!(f, "; bc {bo}, {bi}, 0x{target:x}")
+            }
+        },
         I::Consumed => op0(f, ".consumed"),
 
         // -- Cache / system --

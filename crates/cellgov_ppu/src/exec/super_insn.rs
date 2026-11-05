@@ -13,7 +13,7 @@ use crate::exec::branch::branch_condition;
 use crate::exec::mem::store_prechecked;
 use crate::exec::memory_helpers::{buffer_store, load_ze, LoadPort, Width};
 use crate::exec::ExecuteVerdict;
-use crate::instruction::{branch_target, PpuInstruction};
+use crate::instruction::{branch_target, FusedPair, PpuInstruction};
 use crate::state::{cmp_cr_field, PpuState};
 use crate::store_buffer::StoreBuffer;
 use cellgov_effects::Effect;
@@ -116,9 +116,34 @@ pub(crate) fn execute(
         }
 
         // Superinstructions (compound 2-instruction pairs)
+        PpuInstruction::Fused(pair) => {
+            execute_pair(pair, state, unit_id, region_views, effects, store_buf)
+        }
+        PpuInstruction::Consumed => {
+            // The fetch loop runs the stored word at a Consumed slot, so
+            // the placeholder reaches no execution arm.
+            debug_assert!(false, "a Consumed placeholder reached execute");
+            ExecuteVerdict::Fault(crate::exec::PpuFault::Internal(".consumed"))
+        }
+
+        _ => unreachable!("super_insn::execute called with non-super variant"),
+    }
+}
+
+/// Runs one fused pair as a single slot.
+#[inline]
+fn execute_pair(
+    pair: FusedPair,
+    state: &mut PpuState,
+    unit_id: UnitId,
+    region_views: &[cellgov_mem::RegionView<'_>],
+    effects: &mut Vec<Effect>,
+    store_buf: &mut StoreBuffer,
+) -> ExecuteVerdict {
+    match pair {
         // [PPC-Book1 p:37 s:3.3.2 Load Word and Zero] lwz: RT <- 32 zeros || MEM(EA,4); EA = (RA|0)+EXTS(D).
         // [PPC-Book1 p:60 s:3.3.9 Compare Immediate] cmpi (cmpwi when L=0): signed 32-bit compare against EXTS(SI), CR field <- c || XER[SO].
-        PpuInstruction::LwzCmpwi {
+        FusedPair::LwzCmpwi {
             rt,
             ra_load,
             offset,
@@ -141,7 +166,7 @@ pub(crate) fn execute(
         }
         // [PPC-Book1 p:51 s:3.3.8 Add Immediate] addi (li when RA=0): RT <- EXTS(SI); the li mnemonic forces RA=0.
         // [PPC-Book1 p:42 s:3.3.3 Store Word] stw: MEM(EA,4) <- (RS)32:63; EA = (RA|0)+EXTS(D).
-        PpuInstruction::LiStw {
+        FusedPair::LiStw {
             rt,
             imm,
             ra_store,
@@ -154,7 +179,7 @@ pub(crate) fn execute(
         }
         // [PPC-Book1 p:81 s:3.3.13 Move From Special Purpose Register] mfspr (mflr when SPR=8): RS <- LR.
         // [PPC-Book1 p:42 s:3.3.3 Store Word] stw: MEM(EA,4) <- (RS)32:63; low 32 bits stored.
-        PpuInstruction::MflrStw {
+        FusedPair::MflrStw {
             rt,
             ra_store,
             store_offset,
@@ -165,7 +190,7 @@ pub(crate) fn execute(
         }
         // [PPC-Book1 p:37 s:3.3.2 Load Word and Zero] lwz: RT <- 32 zeros || MEM(EA,4).
         // [PPC-Book1 p:81 s:3.3.13 Move To Special Purpose Register] mtspr (mtlr when SPR=8): LR <- (RS).
-        PpuInstruction::LwzMtlr {
+        FusedPair::LwzMtlr {
             rt,
             ra_load,
             offset,
@@ -186,7 +211,7 @@ pub(crate) fn execute(
         }
         // [PPC-Book1 p:81 s:3.3.13 Move From Special Purpose Register] mfspr (mflr when SPR=8): RS <- LR (full 64 bits).
         // [PPC-Book1 p:43 s:3.3.3 Store Doubleword] std: MEM(EA,8) <- (RS); EA = (RA|0)+EXTS(DS||0b00).
-        PpuInstruction::MflrStd {
+        FusedPair::MflrStd {
             rt,
             ra_store,
             store_offset,
@@ -197,7 +222,7 @@ pub(crate) fn execute(
         }
         // [PPC-Book1 p:39 s:3.3.2 Load Doubleword] ld: RT <- MEM(EA,8); EA = (RA|0)+EXTS(DS||0b00).
         // [PPC-Book1 p:81 s:3.3.13 Move To Special Purpose Register] mtspr (mtlr when SPR=8): LR <- (RS).
-        PpuInstruction::LdMtlr {
+        FusedPair::LdMtlr {
             rt,
             ra_load,
             offset,
@@ -217,7 +242,7 @@ pub(crate) fn execute(
             }
         }
         // [PPC-Book1 p:43 s:3.3.3 Store Doubleword] std (x2): MEM(EA,8) <- (RS) for each store; the second EA is constrained to EA1+8 by the fuser.
-        PpuInstruction::StdStd {
+        FusedPair::StdStd {
             rs1,
             rs2,
             ra,
@@ -238,7 +263,7 @@ pub(crate) fn execute(
         }
         // [PPC-Book1 p:39 s:3.3.2 Load Doubleword] ld (x2): RT <- MEM(EA,8); EA = (RA|0)+EXTS(DS||0b00).
         // [PPC-Book1 p:17 s:2.2] the second load runs after the first. The fuser keeps RT1 off a nonzero RA, so EA2 = EA1 + 8.
-        PpuInstruction::LdLd {
+        FusedPair::LdLd {
             rt1,
             rt2,
             ra,
@@ -261,7 +286,7 @@ pub(crate) fn execute(
         }
         // [PPC-Book1 p:34 s:3.3.2 Load Byte and Zero with Update] lbzu: RT <- 56 zeros || MEM(EA,1); RA <- EA; EA = (RA)+EXTS(D).
         // [PPC-Book1 p:60 s:3.3.9 Compare Immediate] cmpwi: signed 32-bit compare against 0, read after the load wrote RT and RA.
-        PpuInstruction::LbzuCmpwi {
+        FusedPair::LbzuCmpwi {
             rt,
             ra,
             offset,
@@ -285,7 +310,7 @@ pub(crate) fn execute(
         }
         // [PPC-Book1 p:67 s:3.3.11 OR] or: RA <- (RS) | (RB).
         // [PPC-Book1 p:52 s:3.3.8 Add] add: RT <- (RA) + (RB), read after the or wrote its RA.
-        PpuInstruction::OrAdd {
+        FusedPair::OrAdd {
             ra,
             rs,
             rb,
@@ -300,7 +325,8 @@ pub(crate) fn execute(
         }
         // [PPC-Book1 p:51 s:3.3.8 Add Immediate Shifted] addis (lis when RA=0): RT <- EXTS(SI || 0x0000).
         // [PPC-Book1 p:66 s:3.3.11 OR Immediate] ori: RA <- (RS) | (48 zeros || UI), so the word is hi || lo, sign-extended.
-        PpuInstruction::LisOri { rt, value } => {
+        FusedPair::LisOri { rt, hi, lo } => {
+            let value = (i32::from(hi) << 16) | i32::from(lo);
             state.set_gpr(rt as usize, value as i64 as u64);
             ExecuteVerdict::Continue
         }
@@ -309,7 +335,7 @@ pub(crate) fn execute(
         // [PPC-Book1 p:24 s:2.4 Branch Conditional] bc: BO/BI gate the branch; target = CIA + EXTS(BD||0b00). Here CIA is the bc slot (super + 4).
         // [PPC-Book1 p:20 s:2.4.1 Branch Instructions Figure 21] BO field encodings: 0b001at = "branch if CR_BI = 0", 0b011at = "branch if CR_BI = 1", 0b1z1zz = "branch always".
         // [PPC-Book1 p:24 s:2.4 Branch Conditional B-form] BD displacement is sign-extended with 0b00 appended; the fused form pre-resolves AA=0 so target_offset is already EXTS(BD||0b00) bytes.
-        PpuInstruction::CmpwiBc {
+        FusedPair::CmpwiBc {
             bf,
             ra,
             imm,
@@ -324,7 +350,7 @@ pub(crate) fn execute(
         // [PPC-Book1 p:18 s:2.3.1 Condition Register] CR field bits LT/GT/EQ/SO occupy positions 0/1/2/3 within the 4-bit field.
         // [PPC-Book1 p:24 s:2.4 Branch Conditional] bc: BO/BI gate the branch; target = CIA + EXTS(BD||0b00).
         // [PPC-Book1 p:20 s:2.4.1 Branch Instructions Figure 21] BO field encodings: 0b001at = "branch if CR_BI = 0", 0b011at = "branch if CR_BI = 1"; non-CTR-decrementing forms ignore the CTR clause.
-        PpuInstruction::CmpwBc {
+        FusedPair::CmpwBc {
             bf,
             ra,
             rb,
@@ -342,7 +368,7 @@ pub(crate) fn execute(
         }
         // [PPC-Book1 p:60 s:3.3.9] cmpi with L = 1 (cmpdi): signed compare of
         // all 64 bits of RA against EXTS(SI); then the bc slot as above.
-        PpuInstruction::CmpdiBc {
+        FusedPair::CmpdiBc {
             bf,
             ra,
             imm,
@@ -355,7 +381,7 @@ pub(crate) fn execute(
         }
         // [PPC-Book1 p:60 s:3.3.9] cmp with L = 1 (cmpd): signed 64-bit
         // register compare; then the bc slot as above.
-        PpuInstruction::CmpdBc {
+        FusedPair::CmpdBc {
             bf,
             ra,
             rb,
@@ -373,7 +399,7 @@ pub(crate) fn execute(
         }
         // [PPC-Book1 p:61 s:3.3.9] cmpl with L = 0 (cmplw): unsigned compare
         // of bits 32:63 of RA and RB; then the bc slot as above.
-        PpuInstruction::CmplwBc {
+        FusedPair::CmplwBc {
             bf,
             ra,
             rb,
@@ -389,14 +415,6 @@ pub(crate) fn execute(
             );
             take_bc(state, bo, bi, target_offset)
         }
-        PpuInstruction::Consumed => {
-            // The fetch loop runs the stored word at a Consumed slot, so
-            // the placeholder reaches no execution arm.
-            debug_assert!(false, "a Consumed placeholder reached execute");
-            ExecuteVerdict::Fault(crate::exec::PpuFault::Internal(".consumed"))
-        }
-
-        _ => unreachable!("super_insn::execute called with non-super variant"),
     }
 }
 
