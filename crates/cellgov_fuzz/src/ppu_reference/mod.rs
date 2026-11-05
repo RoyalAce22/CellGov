@@ -51,3 +51,11 @@ mod multiple;
 #[cfg(test)]
 #[path = "../tests/ppu_reference_multiple_tests.rs"]
 mod multiple_tests;
+
+#[cfg(test)]
+#[path = "../tests/ppu_reference_system.rs"]
+mod system;
+
+#[cfg(test)]
+#[path = "../tests/ppu_reference_system_tests.rs"]
+mod system_tests;

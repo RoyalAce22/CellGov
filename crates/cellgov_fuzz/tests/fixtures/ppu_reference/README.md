@@ -104,5 +104,36 @@ ended the process expect a fault stop and nothing else: a misaligned
 `lswx` vector with a zero count is the console's case, which reads one
 byte.
 
+The cache, synchronization and reservation files, the three group files
+and the six `facility_*` files come from the `ppu_reference::system_tests`
+drift test, from the cited rules and the console captures that answer
+them:
+
+- **Cache and barrier instructions.** Each one leaves every register and
+  data byte as it was. `dcbz` zeroes the 128-byte block that holds its
+  address, which the `ppu_granule_nan` capture shows.
+- **Reservations.** A load and reserve holds the 128-byte line of its
+  address. A store conditional stores only while that line is held, sets
+  CR0 from the outcome, and drops the line either way. The
+  `ppu_reservation_edges` pairs show the line as the granule, for either
+  width and after a `dcbf` or `dcbst`.
+- **Refused instructions.** Each instruction the PPE leaves unimplemented,
+  each Book III instruction, and each unassigned opcode expects a fault
+  stop and nothing else. The console vectors among them come from runs
+  that ended the process or removed the thread. The unassigned set takes
+  the word of all zeros, each illegal primary opcode but 4, which holds
+  the vector instructions, and eight unused extended opcodes under each
+  of 19, 31, 59 and 63, spread across the field.
+- **Facilities.**
+  - `thread_entry` holds each `ppu_entry_state` save area run through a
+    no-op.
+  - `time_base` holds single reads, because a second read differs between
+    the reference's execution paths: one of them holds the time base
+    still.
+  - `store_forwarding` holds a store and a load of bytes it wrote.
+  - `string_across_page` holds string moves across the data's 4 KiB edge.
+  - A reservation's loss through a system call is not in
+    `facility_reservation`: the reference stops at the call.
+
 The single-vector artifacts the other tests load live in
 `../ppu_reference_single/`, outside this directory.

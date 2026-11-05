@@ -1,21 +1,9 @@
-facility:dcbz_width
-facility:reservation
-facility:store_forwarding
-facility:string_across_page
-facility:thread_entry
-facility:time_base
-instruction:dcbf
-instruction:dcbst
-instruction:dcbt
-instruction:dcbtst
-instruction:dcbz
 instruction:dss
 instruction:dssall
 instruction:dst
 instruction:dstst
 instruction:dststt
 instruction:dstt
-instruction:eieio
 instruction:fabs
 instruction:fadd
 instruction:fadds
@@ -49,9 +37,6 @@ instruction:fsqrt
 instruction:fsqrts
 instruction:fsub
 instruction:fsubs
-instruction:icbi
-instruction:isync
-instruction:ldarx
 instruction:lfd
 instruction:lfdu
 instruction:lfdux
@@ -71,7 +56,6 @@ instruction:lvsl
 instruction:lvsr
 instruction:lvx
 instruction:lvxl
-instruction:lwarx
 instruction:mcrfs
 instruction:mffs
 instruction:mfvscr
@@ -79,7 +63,6 @@ instruction:mtfsb0
 instruction:mtfsf
 instruction:mtfsfi
 instruction:mtvscr
-instruction:stdcx.
 instruction:stfd
 instruction:stfdu
 instruction:stfdux
@@ -98,8 +81,6 @@ instruction:stvrx
 instruction:stvrxl
 instruction:stvx
 instruction:stvxl
-instruction:stwcx.
-instruction:sync
 instruction:vaddcuw
 instruction:vaddfp
 instruction:vaddsbs
@@ -241,6 +222,3 @@ instruction:vupklpx
 instruction:vupklsb
 instruction:vupklsh
 instruction:vxor
-ppe_unimplemented
-privileged
-unassigned_opcodes

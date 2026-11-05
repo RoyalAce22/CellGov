@@ -97,8 +97,13 @@ fn every_vector_matching_still_fails_when_a_unit_has_no_file_or_pending_entry() 
         cellgov_fuzz::ppu_reference::run_reference_directory(dir).expect("the directory reads");
     let text = render_ppu_reference(&campaign);
     assert!(text.contains(" 0 failing; "), "{text}");
+    let pending = std::fs::read_to_string(
+        fixtures().join(cellgov_fuzz::ppu_reference::PPU_REFERENCE_PENDING_FILE),
+    )
+    .expect("the pending list reads");
+    let unit = pending.lines().next().expect("a unit is still pending");
     assert!(
-        text.contains("fuzz ppu-reference: missing facility:dcbz_width\n"),
+        text.contains(&format!("fuzz ppu-reference: missing {unit}\n")),
         "{text}"
     );
 }

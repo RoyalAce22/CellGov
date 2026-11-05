@@ -92,9 +92,12 @@ struct Machine {
 
 impl Machine {
     /// The window offset of an effective address.
-    fn at(ea: u64) -> usize {
+    fn at(&self, ea: u64) -> usize {
         let at = ea.wrapping_sub(MEMORY_BASE) as usize;
-        assert!(at < WINDOW, "an access at {ea:#x} leaves the data window");
+        assert!(
+            at < self.data.len(),
+            "an access at {ea:#x} leaves the data window"
+        );
         at
     }
 
@@ -135,7 +138,7 @@ impl Machine {
 
     fn multiple(&mut self, first: usize, ea: u64, store: bool) {
         for (k, r) in (first..32).enumerate() {
-            let at = Self::at(ea + 4 * k as u64);
+            let at = self.at(ea + 4 * k as u64);
             if store {
                 self.data[at..at + 4].copy_from_slice(&(self.gpr[r] as u32).to_be_bytes());
             } else {
@@ -158,7 +161,7 @@ impl Machine {
                 }
             }
             let shift = 56 - i;
-            let at = Self::at(ea + k as u64);
+            let at = self.at(ea + k as u64);
             if store {
                 self.data[at] = (self.gpr[r] >> shift) as u8;
             } else {
@@ -181,20 +184,28 @@ fn model_vector(
     regs: &[(usize, u64)],
     xer: u64,
 ) -> PpuReferenceVector {
+    model_vector_over(name, citation, word, regs, xer, window())
+}
+
+/// [`model_vector`] over the data window `data`.
+pub(super) fn model_vector_over(
+    name: String,
+    citation: &str,
+    word: u32,
+    regs: &[(usize, u64)],
+    xer: u64,
+    data: Vec<u8>,
+) -> PpuReferenceVector {
     let mut gpr = start_gprs();
     for &(n, v) in regs {
         gpr[n] = v;
     }
     let start = Machine {
         gpr,
-        data: window(),
+        data: data.clone(),
         xer,
     };
-    let mut end = Machine {
-        gpr,
-        data: window(),
-        xer,
-    };
+    let mut end = Machine { gpr, data, xer };
     end.step(word);
     PpuReferenceVector {
         provenance: PpuReferenceProvenance::DocumentedVector {
@@ -262,16 +273,35 @@ fn expected(m: &Machine) -> PpuReferenceObservation {
     }
 }
 
-/// A vector whose console run ended the process: it expects the
-/// reference to stop on a fault and says nothing else.
-fn ended_vector(
+/// A [`fault_only_vector`] from a console capture that ended the process.
+pub(super) fn ended_vector(
     name: String,
     probe: &str,
     words: Vec<u32>,
     regs: &[(usize, u64)],
     xer: u64,
 ) -> PpuReferenceVector {
-    const ENDED: &str = "the console run ended the process, so it observed no end state";
+    let source = capture_source(probe);
+    let provenance = PpuReferenceProvenance::HardwareCapture {
+        capture_id: format!("{probe}/{PROFILE}"),
+        device: source.device,
+        environment: source.environment,
+        source_sha256: source.frame_sha256,
+    };
+    let reason = "the console run ended the process, so it observed no end state";
+    fault_only_vector(name, provenance, reason, words, regs, xer)
+}
+
+/// A vector that expects the reference to stop on a fault and marks
+/// every other component unsupported for `reason`.
+pub(super) fn fault_only_vector(
+    name: String,
+    provenance: PpuReferenceProvenance,
+    reason: &str,
+    words: Vec<u32>,
+    regs: &[(usize, u64)],
+    xer: u64,
+) -> PpuReferenceVector {
     let mut gpr = start_gprs();
     for &(n, v) in regs {
         gpr[n] = v;
@@ -283,44 +313,38 @@ fn ended_vector(
     };
     let mut stop = unobserved_stop();
     stop.reason = value(PpuReferenceYieldReason::Fault);
-    let source = capture_source(probe);
     PpuReferenceVector {
         name,
-        provenance: PpuReferenceProvenance::HardwareCapture {
-            capture_id: format!("{probe}/{PROFILE}"),
-            device: source.device,
-            environment: source.environment,
-            source_sha256: source.frame_sha256,
-        },
+        provenance,
         words,
         initial_state: input(&start),
         memory_base: MEMORY_BASE,
         initial_memory: start.data,
         expected: PpuReferenceObservation {
             state: PpuReferenceState {
-                gpr: unsupported(ENDED),
-                fpr: unsupported(ENDED),
-                vr_hex: unsupported(ENDED),
-                pc: unsupported(ENDED),
-                cr: unsupported(ENDED),
-                lr: unsupported(ENDED),
-                ctr: unsupported(ENDED),
-                xer: unsupported(ENDED),
-                fpscr: unsupported(ENDED),
-                vrsave: unsupported(ENDED),
-                vscr: unsupported(ENDED),
-                tb: unsupported(ENDED),
-                reservation: unsupported(ENDED),
+                gpr: unsupported(reason),
+                fpr: unsupported(reason),
+                vr_hex: unsupported(reason),
+                pc: unsupported(reason),
+                cr: unsupported(reason),
+                lr: unsupported(reason),
+                ctr: unsupported(reason),
+                xer: unsupported(reason),
+                fpscr: unsupported(reason),
+                vrsave: unsupported(reason),
+                vscr: unsupported(reason),
+                tb: unsupported(reason),
+                reservation: unsupported(reason),
             },
-            memory: unsupported(ENDED),
+            memory: unsupported(reason),
             stop,
-            retired: unsupported(ENDED),
-            staged_effects: unsupported(ENDED),
-            committed_effects: unsupported(ENDED),
-            reservations: unsupported(ENDED),
-            store_buffer: unsupported(ENDED),
-            commit_error: unsupported(ENDED),
-            fault_discarded: unsupported(ENDED),
+            retired: unsupported(reason),
+            staged_effects: unsupported(reason),
+            committed_effects: unsupported(reason),
+            reservations: unsupported(reason),
+            store_buffer: unsupported(reason),
+            commit_error: unsupported(reason),
+            fault_discarded: unsupported(reason),
         },
     }
 }
@@ -422,9 +446,9 @@ fn indexed_vectors(xo: u32, name: &str, citation: &str) -> Vec<PpuReferenceVecto
     out
 }
 
-/// The vector of a console string capture that ended the process: the
+/// The vector of a one-case console capture that ended the process: the
 /// case's own words and inputs, with the buffer at the window.
-fn ended_string_vector(probe: &str) -> PpuReferenceVector {
+pub(super) fn ended_case_vector(probe: &str) -> PpuReferenceVector {
     let cases = table(probe);
     let [case] = &cases[..] else {
         panic!("{probe}: one case");
@@ -500,7 +524,7 @@ pub(super) fn multiple_set(unit: &str) -> PpuReferenceSet {
         INVALID_STRING_PROBES
             .iter()
             .filter(|(u, _)| *u == unit)
-            .map(|(_, probe)| ended_string_vector(probe)),
+            .map(|(_, probe)| ended_case_vector(probe)),
     );
     if unit == "lswx" {
         // [PPC-Book1 p:48 s:3.3.6] A zero lswx count leaves RT undefined;
