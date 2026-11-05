@@ -69,7 +69,7 @@ fn the_unit_list_names_each_unit_once() {
 }
 
 #[test]
-fn a_one_bit_change_to_each_vectors_expected_pc_fails_its_replay() {
+fn a_one_bit_change_to_each_vectors_expected_pc_or_lr_fails_its_replay() {
     let campaign = run_reference_directory(&fixtures()).expect("the directory reads");
     let mut broken = 0;
     for run in &campaign.files {
@@ -79,18 +79,21 @@ fn a_one_bit_change_to_each_vectors_expected_pc_fails_its_replay() {
         };
         for index in 0..set.vectors.len() {
             let mut mutated = set.clone();
-            let ReferenceField::Value { value } = &mut mutated.vectors[index].expected.state.pc
-            else {
-                panic!(
-                    "{} {}: the expected PC is a value",
+            let state = &mut mutated.vectors[index].expected.state;
+            // A vector that stops at a system call leaves its PC open;
+            // its LR is a value.
+            match (&mut state.pc, &mut state.lr) {
+                (ReferenceField::Value { value }, _) => *value ^= 4,
+                (_, ReferenceField::Value { value }) => *value ^= 4,
+                _ => panic!(
+                    "{} {}: neither the expected PC nor LR is a value",
                     run.file, set.vectors[index].name
-                );
-            };
-            *value ^= 4;
+                ),
+            }
             let replay = replay_reference(&mutated.vectors[index].to_artifact()).expect("replays");
             assert!(
                 !replay.is_match(),
-                "{} {}: the changed PC still matches",
+                "{} {}: the changed PC or LR still matches",
                 run.file,
                 set.vectors[index].name
             );

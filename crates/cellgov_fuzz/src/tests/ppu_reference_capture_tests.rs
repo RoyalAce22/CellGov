@@ -46,14 +46,22 @@ fn each_converted_file_is_its_captures_converted() {
 }
 
 #[test]
-fn the_converter_skips_only_other_units_and_the_traps_that_ended_the_console_run() {
+fn the_converter_skips_only_other_units_and_the_cases_it_cannot_represent() {
     let conversion = convert(&captured_probes());
-    let skipped: Vec<_> = conversion.skipped.keys().copied().collect();
-    assert_eq!(skipped, [Skip::OtherUnit, Skip::Ended]);
+    let skipped: Vec<(Skip, usize)> = conversion.skipped.into_iter().collect();
+    // - Ended: the tdi and twi cases that trapped, and the privileged
+    //   and reserved SPR reads. Each one ended the console run.
+    // - Flow: the two bcctr probes that move SPRs around a branch.
+    // - Memory: the one case of a converted unit that names the memory
+    //   buffer.
     assert_eq!(
-        conversion.skipped[&Skip::Ended],
-        2,
-        "the tdi and twi cases that trapped on the console"
+        skipped,
+        [
+            (Skip::OtherUnit, 819),
+            (Skip::Memory, 1),
+            (Skip::Ended, 7),
+            (Skip::Flow, 2)
+        ]
     );
 }
 
@@ -63,7 +71,11 @@ fn each_converted_set_meets_the_floor_of_its_unit() {
     for unit in UNITS {
         let f = floor(unit);
         let set = committed_set(unit);
-        let shown: BTreeSet<String> = set.vectors.iter().flat_map(|v| features(&f, v)).collect();
+        let shown: BTreeSet<String> = set
+            .vectors
+            .iter()
+            .flat_map(|v| features(&f, unit, v))
+            .collect();
         let missing: Vec<String> = required(&f).difference(&shown).cloned().collect();
         if !missing.is_empty() {
             short.push(format!("{unit}: {missing:?}"));

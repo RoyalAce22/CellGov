@@ -161,6 +161,29 @@ pub fn render(probe: &str, cases: &[Case]) -> String {
             "          \"v1\", \"v2\", \"v3\", \"v4\", \"v5\", \"v6\", \"v7\", \"v8\", \"v9\", \"v10\", \"v11\",\n          \"v12\", \"v13\",\n",
         );
     }
-    out.push_str("          \"xer\", \"ctr\", \"memory\");\n}\n");
+    if writes_lr(cases) {
+        out.push_str("          \"xer\", \"ctr\", \"lr\", \"memory\");\n}\n");
+    } else {
+        out.push_str("          \"xer\", \"ctr\", \"memory\");\n}\n");
+    }
     out
+}
+
+/// Whether a case moves a value to LR before it saves LR.
+///
+/// The asm names LR as a clobber only then, so the compiler keeps the LR
+/// that the routine's return needs. A case that saves LR first and
+/// restores it last needs no clobber.
+fn writes_lr(cases: &[Case]) -> bool {
+    use cellgov_ppu::instruction::PpuInstruction as I;
+    cases.iter().any(|c| {
+        for &w in &c.words {
+            match cellgov_ppu::decode::decode(w) {
+                Ok(I::Mflr { .. }) => return false,
+                Ok(I::Mtlr { .. }) => return true,
+                _ => {}
+            }
+        }
+        false
+    })
 }

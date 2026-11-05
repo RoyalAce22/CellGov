@@ -1,0 +1,170 @@
+id	asm	words	inputs	record	may_end_process
+crand_t17_a0b0	crand 4*cr4+gt, eq, 4*cr2+gt	0x4e224a02	cr=0x9abcdef0	-	0
+crand_t17_a0b1	crand 4*cr4+gt, eq, 4*cr2+gt	0x4e224a02	cr=0x9afcdef0	-	0
+crand_t17_a1b0	crand 4*cr4+gt, eq, 4*cr2+gt	0x4e224a02	cr=0xbabcdef0	-	0
+crand_t17_a1b1	crand 4*cr4+gt, eq, 4*cr2+gt	0x4e224a02	cr=0xbafc9ef0	-	0
+crand_ta_a0b0	crand eq, eq, 4*cr2+gt	0x4c424a02	cr=0x9abcdef0	-	0
+crand_ta_a0b1	crand eq, eq, 4*cr2+gt	0x4c424a02	cr=0x9afcdef0	-	0
+crand_ta_a1b0	crand eq, eq, 4*cr2+gt	0x4c424a02	cr=0xbabcdef0	-	0
+crand_ta_a1b1	crand eq, eq, 4*cr2+gt	0x4c424a02	cr=0xbafc9ef0	-	0
+crand_tb_a0b0	crand 4*cr2+gt, eq, 4*cr2+gt	0x4d224a02	cr=0x9abcdef0	-	0
+crand_tb_a0b1	crand 4*cr2+gt, eq, 4*cr2+gt	0x4d224a02	cr=0x9afcdef0	-	0
+crand_tb_a1b0	crand 4*cr2+gt, eq, 4*cr2+gt	0x4d224a02	cr=0xbabcdef0	-	0
+crand_tb_a1b1	crand 4*cr2+gt, eq, 4*cr2+gt	0x4d224a02	cr=0xbafc9ef0	-	0
+crand_same_a0	crand 4*cr4+gt, eq, eq	0x4e221202	cr=0x9abcdef0	-	0
+crand_same_a1	crand 4*cr4+gt, eq, eq	0x4e221202	cr=0xbabcdef0	-	0
+crandc_t17_a0b0	crandc 4*cr4+gt, eq, 4*cr2+gt	0x4e224902	cr=0x9abcdef0	-	0
+crandc_t17_a0b1	crandc 4*cr4+gt, eq, 4*cr2+gt	0x4e224902	cr=0x9afcdef0	-	0
+crandc_t17_a1b0	crandc 4*cr4+gt, eq, 4*cr2+gt	0x4e224902	cr=0xbabcdef0	-	0
+crandc_t17_a1b1	crandc 4*cr4+gt, eq, 4*cr2+gt	0x4e224902	cr=0xbafc9ef0	-	0
+crandc_ta_a0b0	crandc eq, eq, 4*cr2+gt	0x4c424902	cr=0x9abcdef0	-	0
+crandc_ta_a0b1	crandc eq, eq, 4*cr2+gt	0x4c424902	cr=0x9afcdef0	-	0
+crandc_ta_a1b0	crandc eq, eq, 4*cr2+gt	0x4c424902	cr=0xbabcdef0	-	0
+crandc_ta_a1b1	crandc eq, eq, 4*cr2+gt	0x4c424902	cr=0xbafc9ef0	-	0
+crandc_tb_a0b0	crandc 4*cr2+gt, eq, 4*cr2+gt	0x4d224902	cr=0x9abcdef0	-	0
+crandc_tb_a0b1	crandc 4*cr2+gt, eq, 4*cr2+gt	0x4d224902	cr=0x9afcdef0	-	0
+crandc_tb_a1b0	crandc 4*cr2+gt, eq, 4*cr2+gt	0x4d224902	cr=0xbabcdef0	-	0
+crandc_tb_a1b1	crandc 4*cr2+gt, eq, 4*cr2+gt	0x4d224902	cr=0xbafc9ef0	-	0
+crandc_same_a0	crandc 4*cr4+gt, eq, eq	0x4e221102	cr=0x9abcdef0	-	0
+crandc_same_a1	crandc 4*cr4+gt, eq, eq	0x4e221102	cr=0xbabcdef0	-	0
+creqv_t17_a0b0	creqv 4*cr4+gt, eq, 4*cr2+gt	0x4e224a42	cr=0x9abcdef0	-	0
+creqv_t17_a0b1	creqv 4*cr4+gt, eq, 4*cr2+gt	0x4e224a42	cr=0x9afcdef0	-	0
+creqv_t17_a1b0	creqv 4*cr4+gt, eq, 4*cr2+gt	0x4e224a42	cr=0xbabcdef0	-	0
+creqv_t17_a1b1	creqv 4*cr4+gt, eq, 4*cr2+gt	0x4e224a42	cr=0xbafc9ef0	-	0
+creqv_ta_a0b0	creqv eq, eq, 4*cr2+gt	0x4c424a42	cr=0x9abcdef0	-	0
+creqv_ta_a0b1	creqv eq, eq, 4*cr2+gt	0x4c424a42	cr=0x9afcdef0	-	0
+creqv_ta_a1b0	creqv eq, eq, 4*cr2+gt	0x4c424a42	cr=0xbabcdef0	-	0
+creqv_ta_a1b1	creqv eq, eq, 4*cr2+gt	0x4c424a42	cr=0xbafc9ef0	-	0
+creqv_tb_a0b0	creqv 4*cr2+gt, eq, 4*cr2+gt	0x4d224a42	cr=0x9abcdef0	-	0
+creqv_tb_a0b1	creqv 4*cr2+gt, eq, 4*cr2+gt	0x4d224a42	cr=0x9afcdef0	-	0
+creqv_tb_a1b0	creqv 4*cr2+gt, eq, 4*cr2+gt	0x4d224a42	cr=0xbabcdef0	-	0
+creqv_tb_a1b1	creqv 4*cr2+gt, eq, 4*cr2+gt	0x4d224a42	cr=0xbafc9ef0	-	0
+creqv_same_a0	creqv 4*cr4+gt, eq, eq	0x4e221242	cr=0x9abcdef0	-	0
+creqv_same_a1	creqv 4*cr4+gt, eq, eq	0x4e221242	cr=0xbabcdef0	-	0
+crnand_t17_a0b0	crnand 4*cr4+gt, eq, 4*cr2+gt	0x4e2249c2	cr=0x9abcdef0	-	0
+crnand_t17_a0b1	crnand 4*cr4+gt, eq, 4*cr2+gt	0x4e2249c2	cr=0x9afcdef0	-	0
+crnand_t17_a1b0	crnand 4*cr4+gt, eq, 4*cr2+gt	0x4e2249c2	cr=0xbabcdef0	-	0
+crnand_t17_a1b1	crnand 4*cr4+gt, eq, 4*cr2+gt	0x4e2249c2	cr=0xbafc9ef0	-	0
+crnand_ta_a0b0	crnand eq, eq, 4*cr2+gt	0x4c4249c2	cr=0x9abcdef0	-	0
+crnand_ta_a0b1	crnand eq, eq, 4*cr2+gt	0x4c4249c2	cr=0x9afcdef0	-	0
+crnand_ta_a1b0	crnand eq, eq, 4*cr2+gt	0x4c4249c2	cr=0xbabcdef0	-	0
+crnand_ta_a1b1	crnand eq, eq, 4*cr2+gt	0x4c4249c2	cr=0xbafc9ef0	-	0
+crnand_tb_a0b0	crnand 4*cr2+gt, eq, 4*cr2+gt	0x4d2249c2	cr=0x9abcdef0	-	0
+crnand_tb_a0b1	crnand 4*cr2+gt, eq, 4*cr2+gt	0x4d2249c2	cr=0x9afcdef0	-	0
+crnand_tb_a1b0	crnand 4*cr2+gt, eq, 4*cr2+gt	0x4d2249c2	cr=0xbabcdef0	-	0
+crnand_tb_a1b1	crnand 4*cr2+gt, eq, 4*cr2+gt	0x4d2249c2	cr=0xbafc9ef0	-	0
+crnand_same_a0	crnand 4*cr4+gt, eq, eq	0x4e2211c2	cr=0x9abcdef0	-	0
+crnand_same_a1	crnand 4*cr4+gt, eq, eq	0x4e2211c2	cr=0xbabcdef0	-	0
+crnor_t17_a0b0	crnor 4*cr4+gt, eq, 4*cr2+gt	0x4e224842	cr=0x9abcdef0	-	0
+crnor_t17_a0b1	crnor 4*cr4+gt, eq, 4*cr2+gt	0x4e224842	cr=0x9afcdef0	-	0
+crnor_t17_a1b0	crnor 4*cr4+gt, eq, 4*cr2+gt	0x4e224842	cr=0xbabcdef0	-	0
+crnor_t17_a1b1	crnor 4*cr4+gt, eq, 4*cr2+gt	0x4e224842	cr=0xbafc9ef0	-	0
+crnor_ta_a0b0	crnor eq, eq, 4*cr2+gt	0x4c424842	cr=0x9abcdef0	-	0
+crnor_ta_a0b1	crnor eq, eq, 4*cr2+gt	0x4c424842	cr=0x9afcdef0	-	0
+crnor_ta_a1b0	crnor eq, eq, 4*cr2+gt	0x4c424842	cr=0xbabcdef0	-	0
+crnor_ta_a1b1	crnor eq, eq, 4*cr2+gt	0x4c424842	cr=0xbafc9ef0	-	0
+crnor_tb_a0b0	crnor 4*cr2+gt, eq, 4*cr2+gt	0x4d224842	cr=0x9abcdef0	-	0
+crnor_tb_a0b1	crnor 4*cr2+gt, eq, 4*cr2+gt	0x4d224842	cr=0x9afcdef0	-	0
+crnor_tb_a1b0	crnor 4*cr2+gt, eq, 4*cr2+gt	0x4d224842	cr=0xbabcdef0	-	0
+crnor_tb_a1b1	crnor 4*cr2+gt, eq, 4*cr2+gt	0x4d224842	cr=0xbafc9ef0	-	0
+crnor_same_a0	crnor 4*cr4+gt, eq, eq	0x4e221042	cr=0x9abcdef0	-	0
+crnor_same_a1	crnor 4*cr4+gt, eq, eq	0x4e221042	cr=0xbabcdef0	-	0
+cror_t17_a0b0	cror 4*cr4+gt, eq, 4*cr2+gt	0x4e224b82	cr=0x9abcdef0	-	0
+cror_t17_a0b1	cror 4*cr4+gt, eq, 4*cr2+gt	0x4e224b82	cr=0x9afcdef0	-	0
+cror_t17_a1b0	cror 4*cr4+gt, eq, 4*cr2+gt	0x4e224b82	cr=0xbabcdef0	-	0
+cror_t17_a1b1	cror 4*cr4+gt, eq, 4*cr2+gt	0x4e224b82	cr=0xbafc9ef0	-	0
+cror_ta_a0b0	cror eq, eq, 4*cr2+gt	0x4c424b82	cr=0x9abcdef0	-	0
+cror_ta_a0b1	cror eq, eq, 4*cr2+gt	0x4c424b82	cr=0x9afcdef0	-	0
+cror_ta_a1b0	cror eq, eq, 4*cr2+gt	0x4c424b82	cr=0xbabcdef0	-	0
+cror_ta_a1b1	cror eq, eq, 4*cr2+gt	0x4c424b82	cr=0xbafc9ef0	-	0
+cror_tb_a0b0	cror 4*cr2+gt, eq, 4*cr2+gt	0x4d224b82	cr=0x9abcdef0	-	0
+cror_tb_a0b1	cror 4*cr2+gt, eq, 4*cr2+gt	0x4d224b82	cr=0x9afcdef0	-	0
+cror_tb_a1b0	cror 4*cr2+gt, eq, 4*cr2+gt	0x4d224b82	cr=0xbabcdef0	-	0
+cror_tb_a1b1	cror 4*cr2+gt, eq, 4*cr2+gt	0x4d224b82	cr=0xbafc9ef0	-	0
+cror_same_a0	cror 4*cr4+gt, eq, eq	0x4e221382	cr=0x9abcdef0	-	0
+cror_same_a1	cror 4*cr4+gt, eq, eq	0x4e221382	cr=0xbabcdef0	-	0
+crorc_t17_a0b0	crorc 4*cr4+gt, eq, 4*cr2+gt	0x4e224b42	cr=0x9abcdef0	-	0
+crorc_t17_a0b1	crorc 4*cr4+gt, eq, 4*cr2+gt	0x4e224b42	cr=0x9afcdef0	-	0
+crorc_t17_a1b0	crorc 4*cr4+gt, eq, 4*cr2+gt	0x4e224b42	cr=0xbabcdef0	-	0
+crorc_t17_a1b1	crorc 4*cr4+gt, eq, 4*cr2+gt	0x4e224b42	cr=0xbafc9ef0	-	0
+crorc_ta_a0b0	crorc eq, eq, 4*cr2+gt	0x4c424b42	cr=0x9abcdef0	-	0
+crorc_ta_a0b1	crorc eq, eq, 4*cr2+gt	0x4c424b42	cr=0x9afcdef0	-	0
+crorc_ta_a1b0	crorc eq, eq, 4*cr2+gt	0x4c424b42	cr=0xbabcdef0	-	0
+crorc_ta_a1b1	crorc eq, eq, 4*cr2+gt	0x4c424b42	cr=0xbafc9ef0	-	0
+crorc_tb_a0b0	crorc 4*cr2+gt, eq, 4*cr2+gt	0x4d224b42	cr=0x9abcdef0	-	0
+crorc_tb_a0b1	crorc 4*cr2+gt, eq, 4*cr2+gt	0x4d224b42	cr=0x9afcdef0	-	0
+crorc_tb_a1b0	crorc 4*cr2+gt, eq, 4*cr2+gt	0x4d224b42	cr=0xbabcdef0	-	0
+crorc_tb_a1b1	crorc 4*cr2+gt, eq, 4*cr2+gt	0x4d224b42	cr=0xbafc9ef0	-	0
+crorc_same_a0	crorc 4*cr4+gt, eq, eq	0x4e221342	cr=0x9abcdef0	-	0
+crorc_same_a1	crorc 4*cr4+gt, eq, eq	0x4e221342	cr=0xbabcdef0	-	0
+crxor_t17_a0b0	crxor 4*cr4+gt, eq, 4*cr2+gt	0x4e224982	cr=0x9abcdef0	-	0
+crxor_t17_a0b1	crxor 4*cr4+gt, eq, 4*cr2+gt	0x4e224982	cr=0x9afcdef0	-	0
+crxor_t17_a1b0	crxor 4*cr4+gt, eq, 4*cr2+gt	0x4e224982	cr=0xbabcdef0	-	0
+crxor_t17_a1b1	crxor 4*cr4+gt, eq, 4*cr2+gt	0x4e224982	cr=0xbafc9ef0	-	0
+crxor_ta_a0b0	crxor eq, eq, 4*cr2+gt	0x4c424982	cr=0x9abcdef0	-	0
+crxor_ta_a0b1	crxor eq, eq, 4*cr2+gt	0x4c424982	cr=0x9afcdef0	-	0
+crxor_ta_a1b0	crxor eq, eq, 4*cr2+gt	0x4c424982	cr=0xbabcdef0	-	0
+crxor_ta_a1b1	crxor eq, eq, 4*cr2+gt	0x4c424982	cr=0xbafc9ef0	-	0
+crxor_tb_a0b0	crxor 4*cr2+gt, eq, 4*cr2+gt	0x4d224982	cr=0x9abcdef0	-	0
+crxor_tb_a0b1	crxor 4*cr2+gt, eq, 4*cr2+gt	0x4d224982	cr=0x9afcdef0	-	0
+crxor_tb_a1b0	crxor 4*cr2+gt, eq, 4*cr2+gt	0x4d224982	cr=0xbabcdef0	-	0
+crxor_tb_a1b1	crxor 4*cr2+gt, eq, 4*cr2+gt	0x4d224982	cr=0xbafc9ef0	-	0
+crxor_same_a0	crxor 4*cr4+gt, eq, eq	0x4e221182	cr=0x9abcdef0	-	0
+crxor_same_a1	crxor 4*cr4+gt, eq, eq	0x4e221182	cr=0xbabcdef0	-	0
+mcrf_0_7_c0	mcrf cr0, cr7	0x4c1c0000	cr=0x9abcdef0	-	0
+mcrf_0_7_c1	mcrf cr0, cr7	0x4c1c0000	cr=0xf1e2d3c	-	0
+mcrf_7_0_c0	mcrf cr7, cr0	0x4f800000	cr=0x9abcdef0	-	0
+mcrf_7_0_c1	mcrf cr7, cr0	0x4f800000	cr=0xf1e2d3c	-	0
+mcrf_3_3_c0	mcrf cr3, cr3	0x4d8c0000	cr=0x9abcdef0	-	0
+mcrf_3_3_c1	mcrf cr3, cr3	0x4d8c0000	cr=0xf1e2d3c	-	0
+mcrf_1_2_c0	mcrf cr1, cr2	0x4c880000	cr=0x9abcdef0	-	0
+mcrf_1_2_c1	mcrf cr1, cr2	0x4c880000	cr=0xf1e2d3c	-	0
+mcrf_6_5_c0	mcrf cr6, cr5	0x4f140000	cr=0x9abcdef0	-	0
+mcrf_6_5_c1	mcrf cr6, cr5	0x4f140000	cr=0xf1e2d3c	-	0
+mfcr_c0	mfcr r5	0x7ca00026	cr=0x0	r5	0
+mfcr_c1	mfcr r5	0x7ca00026	cr=0x9abcdef0	r5	0
+mfcr_c2	mfcr r5	0x7ca00026	cr=0xffffffff	r5	0
+mfcr_c3	mfcr r5	0x7ca00026	cr=0x80000001	r5	0
+mtcrf_00_v0	mtcrf 0x0, r3	0x7c600120	cr=0x9abcdef0,r3=0xfedcba9812345678	-	0
+mtcrf_00_v1	mtcrf 0x0, r3	0x7c600120	cr=0x9abcdef0,r3=0x0	-	0
+mtcrf_00_v2	mtcrf 0x0, r3	0x7c600120	cr=0x9abcdef0,r3=0xffffffff	-	0
+mtcrf_01_v0	mtcrf 0x1, r3	0x7c601120	cr=0x9abcdef0,r3=0xfedcba9812345678	-	0
+mtcrf_01_v1	mtcrf 0x1, r3	0x7c601120	cr=0x9abcdef0,r3=0x0	-	0
+mtcrf_01_v2	mtcrf 0x1, r3	0x7c601120	cr=0x9abcdef0,r3=0xffffffff	-	0
+mtcrf_80_v0	mtcrf 0x80, r3	0x7c680120	cr=0x9abcdef0,r3=0xfedcba9812345678	-	0
+mtcrf_80_v1	mtcrf 0x80, r3	0x7c680120	cr=0x9abcdef0,r3=0x0	-	0
+mtcrf_80_v2	mtcrf 0x80, r3	0x7c680120	cr=0x9abcdef0,r3=0xffffffff	-	0
+mtcrf_24_v0	mtcrf 0x24, r3	0x7c624120	cr=0x9abcdef0,r3=0xfedcba9812345678	-	0
+mtcrf_24_v1	mtcrf 0x24, r3	0x7c624120	cr=0x9abcdef0,r3=0x0	-	0
+mtcrf_24_v2	mtcrf 0x24, r3	0x7c624120	cr=0x9abcdef0,r3=0xffffffff	-	0
+mtcrf_7e_v0	mtcrf 0x7e, r3	0x7c67e120	cr=0x9abcdef0,r3=0xfedcba9812345678	-	0
+mtcrf_7e_v1	mtcrf 0x7e, r3	0x7c67e120	cr=0x9abcdef0,r3=0x0	-	0
+mtcrf_7e_v2	mtcrf 0x7e, r3	0x7c67e120	cr=0x9abcdef0,r3=0xffffffff	-	0
+mtcrf_ff_v0	mtcrf 0xff, r3	0x7c6ff120	cr=0x9abcdef0,r3=0xfedcba9812345678	-	0
+mtcrf_ff_v1	mtcrf 0xff, r3	0x7c6ff120	cr=0x9abcdef0,r3=0x0	-	0
+mtcrf_ff_v2	mtcrf 0xff, r3	0x7c6ff120	cr=0x9abcdef0,r3=0xffffffff	-	0
+mtocrf_01_v0	mtocrf 0x1, r3	0x7c701120	cr=0x9abcdef0,r3=0xfedcba9812345678	-	0
+mtocrf_01_v1	mtocrf 0x1, r3	0x7c701120	cr=0x9abcdef0,r3=0x0	-	0
+mtocrf_01_v2	mtocrf 0x1, r3	0x7c701120	cr=0x9abcdef0,r3=0xffffffff	-	0
+mtocrf_10_v0	mtocrf 0x10, r3	0x7c710120	cr=0x9abcdef0,r3=0xfedcba9812345678	-	0
+mtocrf_10_v1	mtocrf 0x10, r3	0x7c710120	cr=0x9abcdef0,r3=0x0	-	0
+mtocrf_10_v2	mtocrf 0x10, r3	0x7c710120	cr=0x9abcdef0,r3=0xffffffff	-	0
+mtocrf_80_v0	mtocrf 0x80, r3	0x7c780120	cr=0x9abcdef0,r3=0xfedcba9812345678	-	0
+mtocrf_80_v1	mtocrf 0x80, r3	0x7c780120	cr=0x9abcdef0,r3=0x0	-	0
+mtocrf_80_v2	mtocrf 0x80, r3	0x7c780120	cr=0x9abcdef0,r3=0xffffffff	-	0
+mtocrf_0c_v0	mtocrf 0xc, r3	0x7c70c120	cr=0x9abcdef0,r3=0xfedcba9812345678	-	0
+mtocrf_0c_v1	mtocrf 0xc, r3	0x7c70c120	cr=0x9abcdef0,r3=0x0	-	0
+mtocrf_0c_v2	mtocrf 0xc, r3	0x7c70c120	cr=0x9abcdef0,r3=0xffffffff	-	0
+mtocrf_ff_v0	mtocrf 0xff, r3	0x7c7ff120	cr=0x9abcdef0,r3=0xfedcba9812345678	-	0
+mtocrf_ff_v1	mtocrf 0xff, r3	0x7c7ff120	cr=0x9abcdef0,r3=0x0	-	0
+mtocrf_ff_v2	mtocrf 0xff, r3	0x7c7ff120	cr=0x9abcdef0,r3=0xffffffff	-	0
+mfocrf_01_c0	mfocrf r5, 0x1	0x7cb01026	cr=0x9abcdef0	r5	0
+mfocrf_01_c1	mfocrf r5, 0x1	0x7cb01026	cr=0xffffffff	r5	0
+mfocrf_10_c0	mfocrf r5, 0x10	0x7cb10026	cr=0x9abcdef0	r5	0
+mfocrf_10_c1	mfocrf r5, 0x10	0x7cb10026	cr=0xffffffff	r5	0
+mfocrf_80_c0	mfocrf r5, 0x80	0x7cb80026	cr=0x9abcdef0	r5	0
+mfocrf_80_c1	mfocrf r5, 0x80	0x7cb80026	cr=0xffffffff	r5	0
+mfocrf_0c_c0	mfocrf r5, 0xc	0x7cb0c026	cr=0x9abcdef0	r5	0
+mfocrf_0c_c1	mfocrf r5, 0xc	0x7cb0c026	cr=0xffffffff	r5	0
+mfocrf_ff_c0	mfocrf r5, 0xff	0x7cbff026	cr=0x9abcdef0	r5	0
+mfocrf_ff_c1	mfocrf r5, 0xff	0x7cbff026	cr=0xffffffff	r5	0

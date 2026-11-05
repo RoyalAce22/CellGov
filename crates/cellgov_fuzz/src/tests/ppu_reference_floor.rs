@@ -5,13 +5,16 @@
 //!
 //! - a form of the word;
 //! - an operand at one of its typed boundaries;
-//! - an XER bit the word reads or writes.
+//! - an XER bit the word reads or writes;
+//! - the values of the CR bits the word reads;
+//! - whether the word's CR target is also a source;
+//! - the field-mask count or SPR number the word names.
 //!
 //! A unit's floor is the set of features its set must show.
 
 use std::collections::BTreeSet;
 
-use crate::ppu_reference::{PpuReferenceVector, ReferenceField};
+use crate::ppu_reference::{word_unit, PpuReferenceUnit, PpuReferenceVector, ReferenceField};
 
 /// [PPC-Book1 p:32 s:3.2.2] XER bit 32 is SO, bit 33 OV, bit 34 CA.
 const XER_SO: u64 = 0x8000_0000;
@@ -74,6 +77,27 @@ pub(super) struct Floor {
     pub(super) ra0: bool,
     /// Whether the unit has an L bit; the set shows both widths.
     pub(super) l: bool,
+    /// Whether the unit combines two CR bits; the set shows each value of
+    /// the two source bits, and a target bit equal to a source bit.
+    pub(super) cr_logic: bool,
+    /// Whether the unit copies one CR field to another; the set shows the
+    /// two fields apart and the same.
+    pub(super) mcrf: bool,
+    /// The field mask counts the set shows.
+    pub(super) fxm: Fxm,
+    /// The special-purpose registers the set moves.
+    pub(super) sprs: &'static [u16],
+}
+
+/// The field mask counts a CR move's set shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Fxm {
+    /// The unit has no field mask.
+    None,
+    /// `mtcrf`: no field, one field and every field.
+    Crf,
+    /// `mtocrf` and `mfocrf`: one field and several fields.
+    Ocrf,
 }
 
 const NONE: Floor = Floor {
@@ -85,6 +109,10 @@ const NONE: Floor = Floor {
     ca_out: false,
     ra0: false,
     l: false,
+    cr_logic: false,
+    mcrf: false,
+    fxm: Fxm::None,
+    sprs: &[],
 };
 
 const RA: &[Field] = &[Field::Ra];
@@ -180,7 +208,58 @@ pub(super) fn floor(unit: &str) -> Floor {
         },
         "td" | "tw" => d(RA_RB, Imm::None),
         "tdi" | "twi" => d(RA, Imm::Signed),
+        "crand" | "crandc" | "creqv" | "crnand" | "crnor" | "cror" | "crorc" | "crxor" => Floor {
+            cr_logic: true,
+            ..NONE
+        },
+        "mcrf" => Floor { mcrf: true, ..NONE },
+        "mfcr" => NONE,
+        "mtcrf" => Floor {
+            fxm: Fxm::Crf,
+            ..NONE
+        },
+        "mtocrf" | "mfocrf" => Floor {
+            fxm: Fxm::Ocrf,
+            ..NONE
+        },
+        "mfspr" => Floor {
+            sprs: &MFSPR_SPRS,
+            ..NONE
+        },
+        "mtspr" => Floor {
+            sprs: &MTSPR_SPRS,
+            ..NONE
+        },
         other => panic!("no floor for {other}"),
+    }
+}
+
+/// The SPRs a problem-state program may read: XER, LR, CTR, VRSAVE, CTRL
+/// and SPRG3.
+const MFSPR_SPRS: [u16; 6] = [1, 8, 9, 256, 136, 259];
+
+/// The SPRs a problem-state program may write and read back: XER, LR,
+/// CTR and VRSAVE.
+const MTSPR_SPRS: [u16; 4] = [1, 8, 9, 256];
+
+/// The SPR number of an `mfspr` or `mtspr` word: its two 5-bit halves
+/// swapped.
+fn spr_number(word: u32) -> u16 {
+    (((word >> 16) & 0x1f) | (((word >> 11) & 0x1f) << 5)) as u16
+}
+
+/// The CR bit `n` of `cr`, bit 0 the most significant.
+fn cr_bit(cr: u32, n: u32) -> u32 {
+    (cr >> (31 - n)) & 1
+}
+
+/// The count class of a CR move's field mask.
+fn fxm_class(word: u32) -> &'static str {
+    match ((word >> 12) & 0xff).count_ones() {
+        0 => "none",
+        1 => "one",
+        8 => "all",
+        _ => "several",
     }
 }
 
@@ -230,10 +309,12 @@ fn expected_xer(v: &PpuReferenceVector) -> Option<u64> {
     }
 }
 
-/// The features `v` shows towards `floor`.
-pub(super) fn features(floor: &Floor, v: &PpuReferenceVector) -> BTreeSet<String> {
+/// The features `v` shows towards `floor`, read from its first word of
+/// `unit`.
+pub(super) fn features(floor: &Floor, unit: &str, v: &PpuReferenceVector) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
-    let Some(&word) = v.words.last() else {
+    let of_unit = |w: &&u32| matches!(word_unit(**w), Some(PpuReferenceUnit::Instruction { mnemonic }) if mnemonic == unit);
+    let Some(&word) = v.words.iter().find(of_unit) else {
         return out;
     };
     out.insert(format!("word:0x{word:08x}"));
@@ -285,6 +366,24 @@ pub(super) fn features(floor: &Floor, v: &PpuReferenceVector) -> BTreeSet<String
     if floor.l {
         out.insert(format!("l{}", (word >> 21) & 1));
     }
+    let cr = v.initial_state.cr;
+    if floor.cr_logic {
+        let (bt, ba, bb) = ((word >> 21) & 31, (word >> 16) & 31, (word >> 11) & 31);
+        out.insert(format!("ab:{}{}", cr_bit(cr, ba), cr_bit(cr, bb)));
+        if bt == ba || bt == bb {
+            out.insert("bt-is-source".into());
+        }
+    }
+    if floor.mcrf {
+        let same = (word >> 23) & 7 == (word >> 18) & 7;
+        out.insert(if same { "bf-eq-bfa" } else { "bf-ne-bfa" }.into());
+    }
+    if floor.fxm != Fxm::None {
+        out.insert(format!("fxm:{}", fxm_class(word)));
+    }
+    if !floor.sprs.is_empty() {
+        out.insert(format!("spr:{}", spr_number(word)));
+    }
     out
 }
 
@@ -320,5 +419,17 @@ pub(super) fn required(floor: &Floor) -> BTreeSet<String> {
     if floor.l {
         add(&["l0", "l1"]);
     }
+    if floor.cr_logic {
+        add(&["ab:00", "ab:01", "ab:10", "ab:11", "bt-is-source"]);
+    }
+    if floor.mcrf {
+        add(&["bf-eq-bfa", "bf-ne-bfa"]);
+    }
+    match floor.fxm {
+        Fxm::None => {}
+        Fxm::Crf => add(&["fxm:none", "fxm:one", "fxm:all"]),
+        Fxm::Ocrf => add(&["fxm:one", "fxm:several"]),
+    }
+    out.extend(floor.sprs.iter().map(|n| format!("spr:{n}")));
     out
 }

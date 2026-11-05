@@ -33,5 +33,13 @@ mod capture;
 mod floor;
 
 #[cfg(test)]
+#[path = "../tests/ppu_reference_documented.rs"]
+mod documented;
+
+#[cfg(test)]
+#[path = "../tests/ppu_reference_documented_tests.rs"]
+mod documented_tests;
+
+#[cfg(test)]
 #[path = "../tests/ppu_reference_capture_tests.rs"]
 mod capture_tests;

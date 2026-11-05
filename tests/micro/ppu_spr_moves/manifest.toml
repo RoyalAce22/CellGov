@@ -1,0 +1,19 @@
+[test]
+name = "ppu_spr_moves"
+
+# A hardware probe of the special-purpose register moves a problem-state program may make.
+# cases.tsv lists the 32 cases. The console capture is the answer;
+# no emulator runs it.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case.
+memory_regions = [
+  { name = "result", addr = 0, size = 4112 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
