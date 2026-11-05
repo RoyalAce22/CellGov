@@ -105,31 +105,71 @@ pub fn shipped_coverage(
         retired: profile.retired(),
         ..Coverage::default()
     };
+    for_each_shipped(profile, shadow, mem, |slot, n| {
+        if slot.is_super_pair() {
+            out.covered += 2 * n;
+            out.dispatches_removed += n;
+        } else {
+            out.covered += n;
+        }
+    });
+    out
+}
+
+/// The retirements of each quickened form and fused pair the shadow runs
+/// for `profile`, by variant name, most retired first.
+///
+/// A fused pair counts the retirements of its head.
+pub fn shipped_forms(
+    profile: &OperandProfile,
+    shadow: &PredecodedShadow,
+    mem: &[u8],
+) -> Vec<(String, u64)> {
+    let mut forms: BTreeMap<String, u64> = BTreeMap::new();
+    for_each_shipped(profile, shadow, mem, |slot, n| {
+        *forms.entry(variant_name(slot)).or_default() += n;
+    });
+    rank(forms)
+}
+
+/// Calls `each` with every slot of `profile` that the shadow runs as a
+/// quickened form or the head of a fused pair, and its retirements.
+///
+/// A slot is quickened as [`shipped_coverage`] says. The walk skips a
+/// consumed slot, because a branch that reaches it runs its stored word.
+fn for_each_shipped(
+    profile: &OperandProfile,
+    shadow: &PredecodedShadow,
+    mem: &[u8],
+    mut each: impl FnMut(&PpuInstruction, u64),
+) {
     for (&pc, &n) in &profile.pcs {
         let Some(slot) = shadow.get(pc) else {
             continue;
         };
-        if slot.is_super_pair() {
-            out.covered += 2 * n;
-            out.dispatches_removed += n;
-            continue;
-        }
         if matches!(slot, PpuInstruction::Consumed) {
             continue;
         }
-        let raw = word_at(0, mem, pc).and_then(|w| decode::decode(w).ok());
-        if raw.is_some_and(|raw| raw != slot) {
-            out.covered += n;
+        if !slot.is_super_pair() {
+            let raw = word_at(0, mem, pc).and_then(|w| decode::decode(w).ok());
+            if !raw.is_some_and(|raw| raw != slot) {
+                continue;
+            }
         }
+        each(&slot, n);
     }
-    out
+}
+
+fn variant_name(insn: &PpuInstruction) -> String {
+    <&'static str>::from(insn).to_string()
 }
 
 /// The report of `units`' profiles summed, over the text the first
 /// unit's shadow covers in `mem`.
 ///
-/// The units share one text image: a unit of another address space
-/// counts its addresses against this one's text.
+/// The units must run in the address space whose memory is `mem`. For
+/// units of several spaces, the caller reports each space alone and
+/// merges the reports with [`ProfileReport::merge`].
 pub fn report_units<'a>(
     units: impl IntoIterator<Item = &'a PpuExecutionUnit>,
     mem: &[u8],
@@ -149,11 +189,13 @@ pub fn report_units<'a>(
         .and_then(|(lo, hi)| mem.get(lo..hi))
         .unwrap_or_default();
     let shipped = shipped_coverage(&profile, shadow, mem);
-    ProfileReport::new(&profile, mem, text, Some(shipped))
+    let mut report = ProfileReport::new(&profile, mem, text, Some(shipped));
+    report.shipped_forms = shipped_forms(&profile, shadow, mem);
+    report
 }
 
 /// A run's profile ranked for the shadow candidates.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ProfileReport {
     /// Every retirement the profile counted.
     pub retired: u64,
@@ -164,6 +206,9 @@ pub struct ProfileReport {
     pub pairs: Vec<(PairClass, u64)>,
     /// What the shadow's quickened forms and fused pairs cover.
     pub shipped: Option<Coverage>,
+    /// The retirements of each shipped form, as [`shipped_forms`] counts
+    /// them. Empty when the report has no shadow.
+    pub shipped_forms: Vec<(String, u64)>,
 }
 
 impl ProfileReport {
@@ -183,21 +228,45 @@ impl ProfileReport {
         for (class, n) in static_counts(text) {
             rows.entry(class).or_default().1 += n;
         }
-        let mut insns: Vec<_> = rows.into_iter().map(|(c, (d, s))| (c, d, s)).collect();
-        insns.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.cmp(&a.2)).then(a.0.cmp(&b.0)));
-        let mut pairs: Vec<_> = pair_counts.into_iter().collect();
-        pairs.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
         Self {
             retired: profile.retired(),
-            insns,
-            pairs,
+            insns: rank_insns(rows),
+            pairs: rank(pair_counts),
             shipped,
+            shipped_forms: Vec::new(),
         }
     }
 
+    /// Adds `other`'s rows to this report's, row by row on each label.
+    ///
+    /// The shipped coverage sums over the reports that have one. It is
+    /// `None` only when neither report has one.
+    pub fn merge(&mut self, other: ProfileReport) {
+        self.retired += other.retired;
+        let mut rows: BTreeMap<InsnClass, (u64, u64)> = BTreeMap::new();
+        for (class, d, s) in self.insns.drain(..).chain(other.insns) {
+            let row = rows.entry(class).or_default();
+            row.0 += d;
+            row.1 += s;
+        }
+        self.insns = rank_insns(rows);
+        self.pairs = rank(sum_rows(self.pairs.drain(..).chain(other.pairs)));
+        self.shipped = match (self.shipped, other.shipped) {
+            (Some(a), Some(b)) => Some(Coverage {
+                retired: a.retired + b.retired,
+                covered: a.covered + b.covered,
+                dispatches_removed: a.dispatches_removed + b.dispatches_removed,
+            }),
+            (a, b) => a.or(b),
+        };
+        let forms = self.shipped_forms.drain(..).chain(other.shipped_forms);
+        self.shipped_forms = rank(sum_rows(forms));
+    }
+
     /// The report as JSON: `retired`, then `insns` rows of `class`,
-    /// `dynamic` and `static`, `pairs` rows of `pair` and `dynamic`, and
-    /// `shipped` coverage or `null`.
+    /// `dynamic` and `static`, `pairs` rows of `pair` and `dynamic`,
+    /// `shipped` coverage or `null`, and `shipped_forms` rows of `form`
+    /// and `dynamic`.
     ///
     /// The label keys each row, so a caller can sum the reports of several
     /// runs row by row.
@@ -232,9 +301,42 @@ impl ProfileReport {
             }
             None => out.push_str("null"),
         }
-        out.push_str("\n}\n");
+        out.push_str(",\n  \"shipped_forms\": [");
+        for (i, (form, dynamic)) in self.shipped_forms.iter().enumerate() {
+            let sep = if i == 0 { "" } else { "," };
+            let _ = write!(
+                out,
+                "{sep}\n    {{\"form\": \"{}\", \"dynamic\": {dynamic}}}",
+                escape(form)
+            );
+        }
+        out.push_str("\n  ]\n}\n");
         out
     }
+}
+
+/// The class rows, most retired first, then most words in the text, then
+/// by class.
+fn rank_insns(rows: BTreeMap<InsnClass, (u64, u64)>) -> Vec<(InsnClass, u64, u64)> {
+    let mut insns: Vec<_> = rows.into_iter().map(|(c, (d, s))| (c, d, s)).collect();
+    insns.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.cmp(&a.2)).then(a.0.cmp(&b.0)));
+    insns
+}
+
+/// The rows, most retired first, then by key.
+fn rank<K: Ord>(rows: BTreeMap<K, u64>) -> Vec<(K, u64)> {
+    let mut rows: Vec<_> = rows.into_iter().collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    rows
+}
+
+/// The counts of `rows` summed on each key.
+fn sum_rows<K: Ord>(rows: impl Iterator<Item = (K, u64)>) -> BTreeMap<K, u64> {
+    let mut sums = BTreeMap::new();
+    for (key, n) in rows {
+        *sums.entry(key).or_default() += n;
+    }
+    sums
 }
 
 /// `s` with its JSON string metacharacters escaped.

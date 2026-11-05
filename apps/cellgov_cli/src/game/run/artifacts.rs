@@ -3,7 +3,10 @@
 use cellgov_boot::manifest::TitleManifest;
 use cellgov_boot::observation::{self, save_boot_observation};
 use cellgov_compare::BootOutcome;
-use cellgov_core::Runtime;
+use std::collections::BTreeMap;
+
+use cellgov_core::{AddressSpaceId, Runtime};
+use cellgov_ppu::profile::{report_units, ProfileReport};
 use cellgov_ppu::PpuExecutionUnit;
 use cellgov_spu::capture::LocalStoreCapture;
 use cellgov_spu::state::SpuState;
@@ -223,11 +226,7 @@ pub(super) fn save_artifacts(
         );
     }
     if let Some(path) = artifacts.operand_profile {
-        let units = rt
-            .registry()
-            .iter()
-            .filter_map(|(_, unit)| unit.as_any().downcast_ref::<PpuExecutionUnit>());
-        let report = cellgov_ppu::profile::report_units(units, rt.memory().as_bytes());
+        let report = operand_profile_report(rt);
         std::fs::write(path, report.to_json()).map_err(|source| RunError::SaveOperandProfile {
             path: path.to_string(),
             source,
@@ -240,6 +239,35 @@ pub(super) fn save_artifacts(
     Ok(())
 }
 
+/// The operand profile of every PPU unit, each address space's units
+/// classified against that space's memory.
+///
+/// If a space has no memory left, this function prints the space's
+/// retirements on stderr and leaves its units out of the report.
+fn operand_profile_report(rt: &Runtime) -> ProfileReport {
+    let mut by_space: BTreeMap<AddressSpaceId, Vec<&PpuExecutionUnit>> = BTreeMap::new();
+    for (id, unit) in rt.registry().iter() {
+        if let Some(ppu) = unit.as_any().downcast_ref::<PpuExecutionUnit>() {
+            by_space.entry(rt.unit_space(id)).or_default().push(ppu);
+        }
+    }
+    let mut report = ProfileReport::default();
+    for (space, units) in by_space {
+        match rt.space_memory(space) {
+            Ok(mem) => report.merge(report_units(units, mem.as_bytes())),
+            Err(e) => {
+                let retired: u64 = units.iter().map(|u| u.operand_profile().retired()).sum();
+                eprintln!("save-operand-profile: {retired} retirements left out: {e}");
+            }
+        }
+    }
+    report
+}
+
 #[cfg(test)]
 #[path = "tests/artifacts_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/operand_profile_space_tests.rs"]
+mod operand_profile_space_tests;

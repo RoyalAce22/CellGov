@@ -137,6 +137,6 @@ fn the_report_ranks_by_retirements_and_carries_the_static_count() {
          \n  ],\n  \"pairs\": [\
          \n    {\"pair\": \"Addi imm=nz same ; Addi imm=0 same\", \"dynamic\": 1},\
          \n    {\"pair\": \"Addi imm=0 same ; Addi imm=0 same | dependent\", \"dynamic\": 1}\
-         \n  ],\n  \"shipped\": null\n}\n"
+         \n  ],\n  \"shipped\": null,\n  \"shipped_forms\": [\n  ]\n}\n"
     );
 }

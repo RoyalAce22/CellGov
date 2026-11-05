@@ -14,7 +14,7 @@ mod report;
 pub use class::{BaseClass, InsnClass, PairClass};
 pub use counts::OperandProfile;
 pub use report::{
-    coverage, report_units, shipped_coverage, static_counts, Coverage, ProfileReport,
+    coverage, report_units, shipped_coverage, shipped_forms, static_counts, Coverage, ProfileReport,
 };
 
 #[cfg(test)]
@@ -24,3 +24,11 @@ mod class_tests;
 #[cfg(test)]
 #[path = "tests/report_tests.rs"]
 mod report_tests;
+
+#[cfg(test)]
+#[path = "tests/shipped_forms_tests.rs"]
+mod shipped_forms_tests;
+
+#[cfg(test)]
+#[path = "tests/merge_tests.rs"]
+mod merge_tests;
