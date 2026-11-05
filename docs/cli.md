@@ -2005,6 +2005,46 @@ $ cellgov dev oracle-gap
 Usage: cellgov dev oracle-gap [OPTIONS]
 ```
 
+#### `cellgov dev ppu-trace-replay`
+
+Replay an RPCS3 PPU instruction trace and report each decoded kind.
+
+```console
+$ cellgov dev ppu-trace-replay target/ppu_trace.bin --references crates/cellgov_fuzz/tests/fixtures/ppu_reference
+$ cellgov dev ppu-trace-replay target/ppu_trace.bin --skip-context-dependent --format json
+```
+
+```
+Usage: cellgov dev ppu-trace-replay [OPTIONS] <TRACE>
+```
+
+| Argument | Description |
+| --- | --- |
+| `TRACE` | The trace the patched RPCS3 wrote. Required. |
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--references` | `DIR` | Directory of PPU reference files whose console vectors decide a failure. |
+| `--skip-context-dependent` | -- | Count the reservation and time-base records as skipped. |
+| `--max-failures` | `N` | Most failures to list; the counts cover every record. Default `20`. |
+
+```
+Failure classes:
+  undefined          the documents leave every differing bit undefined
+  cellgov-defect     a console vector with the record's inputs agrees with RPCS3
+  rpcs3-divergence   a console vector with the record's inputs agrees with CellGov
+  context-dependent  the outcome depends on state one replayed instruction lacks
+  unclassified       no other class fits
+
+Exit codes particular to this command:
+  1   a failure is a cellgov-defect or unclassified; also the shared
+      failed-operation status when TRACE or --references could not be
+      read or parsed
+  10  no failure needs triage and no record was replayed: the trace
+      holds none, or --skip-context-dependent skipped every one
+  141 stdout was closed by a downstream reader
+```
+
 #### `cellgov dev fuzz`
 
 Run a typed interpreter or decoder campaign.
