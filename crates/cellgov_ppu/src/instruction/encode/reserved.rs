@@ -254,6 +254,7 @@ pub fn reserved_bits(insn: &PpuInstruction) -> u32 {
         | I::BcTrue { .. }
         | I::BcFalse { .. }
         | I::Blr { .. }
+        | I::RlwinmMask { .. }
         | I::LwzCmpwi { .. }
         | I::LiStw { .. }
         | I::MflrStw { .. }

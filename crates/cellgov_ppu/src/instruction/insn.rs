@@ -1595,6 +1595,18 @@ pub enum PpuInstruction {
         bo: u8,
         bi: u8,
     },
+    /// Quickened form of `rlwinm` with Rc = 0 and MB <= ME.
+    ///
+    /// The quickening pass tries the `Slwi`, `Srwi` and `Clrlwi` forms first.
+    /// `mask` is MASK(MB+32, ME+32) as a word.
+    RlwinmMask {
+        ra: u8,
+        rs: u8,
+        sh: u8,
+        mb: u8,
+        me: u8,
+        mask: u32,
+    },
 
     // -- Superinstructions (compound 2-instruction pairs) --
     LwzCmpwi {

@@ -6,8 +6,7 @@ use super::PpuInstruction;
 impl PpuInstruction {
     /// Whether this instruction is a fused 2-instruction super-pair
     /// requiring a [`PpuInstruction::Consumed`] placeholder at PC+4.
-    /// One-instruction quickenings (`Li`, `Slwi`, `Srwi`, `Clrlwi`)
-    /// are not super-pairs.
+    /// One-instruction quickenings are not super-pairs.
     ///
     /// Exhaustive: every variant must declare its super-pair status
     /// at compile time. Producer side lives in
@@ -250,6 +249,7 @@ impl PpuInstruction {
             | PpuInstruction::BcTrue { .. }
             | PpuInstruction::BcFalse { .. }
             | PpuInstruction::Blr { .. }
+            | PpuInstruction::RlwinmMask { .. }
             | PpuInstruction::Consumed
             | PpuInstruction::Dcbz { .. }
             | PpuInstruction::Dcbst { .. }

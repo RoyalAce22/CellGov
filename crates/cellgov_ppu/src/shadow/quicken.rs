@@ -35,7 +35,7 @@ pub(super) fn quicken_insn(insn: PpuInstruction) -> Option<PpuInstruction> {
             rc: false,
         } if rs == rb && ra != rs => Some(PpuInstruction::Mr { ra, rs }),
         // rlwinm rA, rS, sh, 0, 31-sh => Slwi (only when sh != 0).
-        // [PPC-Book1 p:161 s:B.7.2 Table 9] slwi ra,rs,n (n<32) == rlwinm ra,rs,n,0,31-n.
+        // [PPC-Book1 p:160 s:B.7.2 Table 10] slwi ra,rs,n (n<32) == rlwinm ra,rs,n,0,31-n.
         //
         // The sh=0 case is `rlwinm rA, rS, 0, 0, 31` -- a 32-bit zero-extend,
         // not a left shift. It is canonically Clrlwi { n: 0 }, which the
@@ -49,7 +49,7 @@ pub(super) fn quicken_insn(insn: PpuInstruction) -> Option<PpuInstruction> {
             rc: false,
         } if sh != 0 && mb == 0 && me == 31 - sh => Some(PpuInstruction::Slwi { ra, rs, n: sh }),
         // rlwinm rA, rS, 32-n, n, 31 => Srwi
-        // [PPC-Book1 p:161 s:B.7.2 Table 9] srwi ra,rs,n (n<32) == rlwinm ra,rs,32-n,n,31.
+        // [PPC-Book1 p:160 s:B.7.2 Table 10] srwi ra,rs,n (n<32) == rlwinm ra,rs,32-n,n,31.
         PpuInstruction::Rlwinm {
             ra,
             rs,
@@ -59,7 +59,7 @@ pub(super) fn quicken_insn(insn: PpuInstruction) -> Option<PpuInstruction> {
             rc: false,
         } if me == 31 && sh != 0 && mb == (32 - sh) => Some(PpuInstruction::Srwi { ra, rs, n: mb }),
         // rlwinm rA, rS, 0, n, 31 => Clrlwi
-        // [PPC-Book1 p:161 s:B.7.2 Table 9] clrlwi ra,rs,n (n<32) == rlwinm ra,rs,0,n,31.
+        // [PPC-Book1 p:160 s:B.7.2 Table 10] clrlwi ra,rs,n (n<32) == rlwinm ra,rs,0,n,31.
         PpuInstruction::Rlwinm {
             ra,
             rs,
@@ -68,6 +68,26 @@ pub(super) fn quicken_insn(insn: PpuInstruction) -> Option<PpuInstruction> {
             me,
             rc: false,
         } if sh == 0 && me == 31 => Some(PpuInstruction::Clrlwi { ra, rs, n: mb }),
+        // Any other rlwinm with MB <= ME => RlwinmMask, with the mask built here.
+        // A wrapping mask (MB > ME) keeps rotated bits in the high word, so
+        // that rlwinm stays generic.
+        // [PPC-Book1 p:160 s:B.7.2 Table 10] rotlwi, clrrwi, extrwi and
+        // extlwi are rlwinm with MB <= ME.
+        PpuInstruction::Rlwinm {
+            ra,
+            rs,
+            sh,
+            mb,
+            me,
+            rc: false,
+        } if mb <= me => Some(PpuInstruction::RlwinmMask {
+            ra,
+            rs,
+            sh,
+            mb,
+            me,
+            mask: (u32::MAX >> mb) & (u32::MAX << (31 - me)),
+        }),
         // ori 0, 0, 0 => Nop
         // [PPC-Book1 p:162 s:B.9 No-op] preferred no-op form is ori 0,0,0.
         // [PPC-Book1 p:66 s:3.3.11] other forms that alter no state may
@@ -83,7 +103,7 @@ pub(super) fn quicken_insn(insn: PpuInstruction) -> Option<PpuInstruction> {
         // [PPC-Book1 p:157 s:B.5 Table 6] cmpdi bf,ra,si == cmpi bf,1,ra,si.
         PpuInstruction::Cmpdi { bf, ra, imm: 0 } => Some(PpuInstruction::CmpdZero { bf, ra }),
         // rldicl rA, rS, 0, n => Clrldi
-        // [PPC-Book1 p:160 s:B.7.1 Table 10] clrldi ra,rs,n (n<64) == rldicl ra,rs,0,n.
+        // [PPC-Book1 p:160 s:B.7.1 Table 9] clrldi ra,rs,n (n<64) == rldicl ra,rs,0,n.
         PpuInstruction::Rldicl {
             ra,
             rs,
@@ -92,7 +112,7 @@ pub(super) fn quicken_insn(insn: PpuInstruction) -> Option<PpuInstruction> {
             rc: false,
         } => Some(PpuInstruction::Clrldi { ra, rs, n: mb }),
         // rldicr rA, rS, n, 63-n => Sldi
-        // [PPC-Book1 p:160 s:B.7.1 Table 10] sldi ra,rs,n (n<64) == rldicr ra,rs,n,63-n.
+        // [PPC-Book1 p:159 s:B.7.1 Table 9] sldi ra,rs,n (n<64) == rldicr ra,rs,n,63-n.
         PpuInstruction::Rldicr {
             ra,
             rs,
@@ -101,7 +121,7 @@ pub(super) fn quicken_insn(insn: PpuInstruction) -> Option<PpuInstruction> {
             rc: false,
         } if sh != 0 && me == 63 - sh => Some(PpuInstruction::Sldi { ra, rs, n: sh }),
         // rldicl rA, rS, 64-n, n => Srdi
-        // [PPC-Book1 p:160 s:B.7.1 Table 10] srdi ra,rs,n (n<64) == rldicl ra,rs,64-n,n.
+        // [PPC-Book1 p:160 s:B.7.1 Table 9] srdi ra,rs,n (n<64) == rldicl ra,rs,64-n,n.
         PpuInstruction::Rldicl {
             ra,
             rs,
@@ -181,3 +201,7 @@ mod cmpd_tests;
 #[cfg(test)]
 #[path = "tests/quicken_branch_tests.rs"]
 mod branch_tests;
+
+#[cfg(test)]
+#[path = "tests/quicken_rotate_tests.rs"]
+mod rotate_tests;

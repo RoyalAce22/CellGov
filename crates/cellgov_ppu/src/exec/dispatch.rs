@@ -298,6 +298,7 @@ pub fn execute(
         | PpuInstruction::BcTrue { .. }
         | PpuInstruction::BcFalse { .. }
         | PpuInstruction::Blr { .. }
+        | PpuInstruction::RlwinmMask { .. }
         | PpuInstruction::LwzCmpwi { .. }
         | PpuInstruction::LiStw { .. }
         | PpuInstruction::MflrStw { .. }

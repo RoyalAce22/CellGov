@@ -124,6 +124,7 @@ pub(super) fn form_for_word(kind: PpuInstructionKind, raw: u32) -> PpuEncodingFo
             | K::BcTrue
             | K::BcFalse
             | K::Blr
+            | K::RlwinmMask
             | K::LwzCmpwi
             | K::LiStw
             | K::MflrStw
@@ -583,6 +584,7 @@ pub(super) fn classify_kind(kind: PpuInstructionKind) {
         | PpuInstructionKind::BcTrue
         | PpuInstructionKind::BcFalse
         | PpuInstructionKind::Blr
+        | PpuInstructionKind::RlwinmMask
         | PpuInstructionKind::LwzCmpwi
         | PpuInstructionKind::LiStw
         | PpuInstructionKind::MflrStw

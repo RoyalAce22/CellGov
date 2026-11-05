@@ -1074,6 +1074,7 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
         | I::Rldicl { ra, rs, rc, .. }
         | I::Rldicr { ra, rs, rc, .. }
         | I::Rldic { ra, rs, rc, .. } => one(logical(Op::on(unit::FXU).src(gpr(rs)), ra, rc)),
+        I::RlwinmMask { ra, rs, .. } => one(logical(Op::on(unit::FXU).src(gpr(rs)), ra, false)),
         I::Rlwimi { ra, rs, rc, .. } | I::Rldimi { ra, rs, rc, .. } => {
             one(logical(Op::on(unit::FXU).src(gpr(rs)).src(gpr(ra)), ra, rc))
         }

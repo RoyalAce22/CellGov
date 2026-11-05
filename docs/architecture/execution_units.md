@@ -59,7 +59,7 @@ The `PpuInstruction` set covers:
 The variant count also includes:
 
 - the shadow's quickening rewrites (`Mr`, `Li`, `Lis`,
-  `Slwi`/`Srwi`/`Sldi`/`Srdi`, `Clrlwi`/`Clrldi`, `Nop`,
+  `Slwi`/`Srwi`/`Sldi`/`Srdi`, `Clrlwi`/`Clrldi`, `RlwinmMask`, `Nop`,
   `CmpwZero`, `CmpdZero`, `Bdnz`, `BcTrue`, `BcFalse`, `Blr`);
 - the super-pair fusions (`LwzCmpwi`, `LwzMtlr`, `MflrStw`,
   `MflrStd`, `LiStw`, `CmpwiBc`, `CmpwBc`, `LdMtlr`, `StdStd`);
@@ -273,7 +273,7 @@ work:
 - `addi rT, 0, imm` -> `Li`
 - `addis rT, 0, imm` -> `Lis`
 - `or rA, rS, rS` -> `Mr`
-- `rlwinm` subsets -> `Slwi`/`Srwi`/`Clrlwi`
+- `rlwinm` subsets -> `Slwi`/`Srwi`/`Clrlwi`/`RlwinmMask`
 - `ori 0, 0, 0` -> `Nop`
 - `cmpwi crF, rA, 0` -> `CmpwZero`
 - `cmpdi crF, rA, 0` -> `CmpdZero`

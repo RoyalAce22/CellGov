@@ -81,6 +81,15 @@ pub(crate) fn execute(
             state.set_gpr(ra as usize, state.gpr[rs as usize] >> n);
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:73 s:3.3.12] rlwinm: ROTL32 of the low word, ANDed with
+        // MASK(MB+32, ME+32). With MB <= ME the mask holds no high-word bit.
+        PpuInstruction::RlwinmMask {
+            ra, rs, sh, mask, ..
+        } => {
+            let val = (state.gpr[rs as usize] as u32).rotate_left(u32::from(sh)) & mask;
+            state.set_gpr(ra as usize, u64::from(val));
+            ExecuteVerdict::Continue
+        }
         PpuInstruction::Lis { rt, imm } => {
             state.set_gpr(rt as usize, (imm as i64 as u64) << 16);
             ExecuteVerdict::Continue

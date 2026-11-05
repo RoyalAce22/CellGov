@@ -599,6 +599,7 @@ pub(super) fn simplify(insn: &PpuInstruction, addr: u64) -> Option<Simplified> {
         | I::Sldi { .. }
         | I::Srdi { .. }
         | I::Lis { .. }
+        | I::RlwinmMask { .. }
         | I::LwzCmpwi { .. }
         | I::LiStw { .. }
         | I::MflrStw { .. }
