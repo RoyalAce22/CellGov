@@ -1,0 +1,129 @@
+#0001 > GET /cpursx.ps3
+#0002 < 200 (5725 bytes)
+#0003 = console: model CECH-2001A, kernel cex, firmware 4.93, cfw EvilNAT 4.93 PEX, cobra 8.5, webman 1.47.48t, debugger not attached
+#0004 = console satisfies profile cech20-cex-493
+#0005 = load: Cell 67 C, RSX 61 C, fan 43%, /dev_hdd0 99840 MiB free; cool
+#0006 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0007 > USER anonymous
+#0008 < 331 OK
+#0009 > PASS anonymous@
+#0010 < 230 OK
+#0011 > TYPE I
+#0012 < 200 TYPE OK
+#0013 > MKD /dev_hdd0/tmp/cellgov_lease
+#0014 < 257 "/dev_hdd0/tmp/cellgov_lease" OK
+#0015 > PASV
+#0016 < 227 Entering Passive Mode (10,77,0,2,168,170)
+#0017 > STOR /dev_hdd0/tmp/cellgov_lease/holder (74 bytes)
+#0018 < 150 OK
+#0019 < 226 OK
+#0020 > GET /dev_hdd0/tmp/cgov_ppu_lbz_lbz_pair.bin
+#0021 < 404 (510 bytes)
+#0022 > PASV
+#0023 < 227 Entering Passive Mode (10,77,0,2,170,111)
+#0024 > NLST /dev_hdd0/game
+#0025 < 150 OK
+#0026 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 61C]
+#0027 > MKD /dev_hdd0/game/CGOV00001
+#0028 < 257 "/dev_hdd0/game/CGOV00001" OK
+#0029 > MKD /dev_hdd0/game/CGOV00001/USRDIR
+#0030 < 257 "/dev_hdd0/game/CGOV00001/USRDIR" OK
+#0031 > PASV
+#0032 < 227 Entering Passive Mode (10,77,0,2,170,151)
+#0033 > STOR /dev_hdd0/game/CGOV00001/PARAM.SFO (1040 bytes)
+#0034 < 150 OK
+#0035 < 226 OK
+#0036 > PASV
+#0037 < 227 Entering Passive Mode (10,77,0,2,172,76)
+#0038 > STOR /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN (4720 bytes)
+#0039 < 150 OK
+#0040 < 226 OK
+#0041 = deployed 2 file(s) under /dev_hdd0/game/CGOV00001
+#0042 > QUIT
+#0043 < 221 BYE
+#0044 > GET /play.ps3?CGOV00001
+#0045 < 200 (5725 bytes)
+#0046 = started
+#0047 > GET /cpursx.ps3
+#0048 < 200 (5725 bytes)
+#0049 > GET /dev_hdd0/tmp/cgov_ppu_lbz_lbz_pair.bin
+#0050 < 404 (510 bytes)
+#0051 > GET /cpursx.ps3
+#0052 < 200 (5725 bytes)
+#0053 > GET /dev_hdd0/tmp/cgov_ppu_lbz_lbz_pair.bin
+#0054 < 404 (510 bytes)
+#0055 > GET /cpursx.ps3
+#0056 < 200 (5725 bytes)
+#0057 > GET /dev_hdd0/tmp/cgov_ppu_lbz_lbz_pair.bin
+#0058 < 404 (510 bytes)
+#0059 > GET /cpursx.ps3
+#0060 < 200 (5725 bytes)
+#0061 > GET /dev_hdd0/tmp/cgov_ppu_lbz_lbz_pair.bin
+#0062 < 404 (510 bytes)
+#0063 > GET /cpursx.ps3
+#0064 < 200 (5725 bytes)
+#0065 > GET /dev_hdd0/tmp/cgov_ppu_lbz_lbz_pair.bin
+#0066 < 404 (510 bytes)
+#0067 > GET /cpursx.ps3
+#0068 < 200 (5933 bytes)
+#0069 = left the XMB after 6 poll(s)
+#0070 > GET /dev_hdd0/tmp/cgov_ppu_lbz_lbz_pair.bin
+#0071 < 404 (510 bytes)
+#0072 > GET /dev_hdd0/tmp/cgov_ppu_lbz_lbz_pair.bin
+#0073 < 404 (510 bytes)
+#0074 > GET /dev_hdd0/tmp/cgov_ppu_lbz_lbz_pair.bin
+#0075 < 200 (120 bytes)
+#0076 = result present after 3 poll(s)
+#0077 > GET /cpursx.ps3
+#0078 < 200 (6432 bytes)
+#0079 > GET /cpursx.ps3
+#0080 < 200 (6432 bytes)
+#0081 > GET /cpursx.ps3
+#0082 < 200 (5933 bytes)
+#0083 > GET /cpursx.ps3
+#0084 < 200 (5933 bytes)
+#0085 > GET /cpursx.ps3
+#0086 < 200 (5933 bytes)
+#0087 > GET /cpursx.ps3
+#0088 < 200 (5725 bytes)
+#0089 = back at the XMB after 6 poll(s)
+#0090 > GET /dev_hdd0/tmp/cgov_ppu_lbz_lbz_pair.bin
+#0091 < 200 (120 bytes)
+#0092 = captured micro:ppu_lbz_lbz_pair#7da57f33fbae
+#0093 > GET /mount.ps3/unmount
+#0094 < 200 (4441 bytes)
+#0095 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0096 > USER anonymous
+#0097 < 331 OK
+#0098 > PASS anonymous@
+#0099 < 230 OK
+#0100 > TYPE I
+#0101 < 200 TYPE OK
+#0102 > PASV
+#0103 < 227 Entering Passive Mode (10,77,0,2,158,213)
+#0104 > NLST /dev_hdd0/game
+#0105 < 150 OK
+#0106 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 59C]
+#0107 > PASV
+#0108 < 227 Entering Passive Mode (10,77,0,2,158,136)
+#0109 > NLST /dev_hdd0/game/CGOV00001
+#0110 < 150 OK
+#0111 < 226 [/dev_hdd0/game/CGOV00001/] [ 97.5 GB free CPU: 67C | RSX: 59C]
+#0112 > PASV
+#0113 < 227 Entering Passive Mode (10,77,0,2,160,190)
+#0114 > NLST /dev_hdd0/game/CGOV00001/USRDIR
+#0115 < 150 OK
+#0116 < 226 [/dev_hdd0/game/CGOV00001/USRDIR/] [ 0.0 MB free CPU: 67C | RSX: 59C]
+#0117 > DELE /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN
+#0118 < 250 OK
+#0119 > RMD /dev_hdd0/game/CGOV00001/USRDIR
+#0120 < 250 OK
+#0121 > DELE /dev_hdd0/game/CGOV00001/PARAM.SFO
+#0122 < 250 OK
+#0123 > RMD /dev_hdd0/game/CGOV00001
+#0124 < 250 OK
+#0125 > GET /dev_hdd0/tmp/cgov_ppu_lbz_lbz_pair.bin
+#0126 < 200 (120 bytes)
+#0127 > DELE /dev_hdd0/tmp/cgov_ppu_lbz_lbz_pair.bin
+#0128 < 250 OK
+#0129 = console restored
