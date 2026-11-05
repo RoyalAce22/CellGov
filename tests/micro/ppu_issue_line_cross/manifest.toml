@@ -1,0 +1,22 @@
+[test]
+name = "ppu_issue_line_cross"
+
+# A hardware probe of what a load or a load or store multiple costs when
+# its bytes cross from one 128-byte line into the next: an ld chase at an
+# aligned offset, a word-aligned offset in one 32-byte sector, an offset
+# across two sectors of one line and an offset across two lines, warm and
+# with the second line or both lines flushed; an lmw chase and an stmw on
+# one line and across two. The console capture is the answer; ppu/main.c's
+# header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 472 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 472 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 120000

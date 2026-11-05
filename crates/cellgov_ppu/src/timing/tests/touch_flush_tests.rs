@@ -21,7 +21,7 @@ fn a_pending_flush_survives_more_later_store_backs_than_the_table_holds() {
         caches.store_back(0, LINE_A + i * k::PPU_CACHE_LINE_BYTES);
     }
     caches.store_back(10, LINE_A + OVERFILL * k::PPU_CACHE_LINE_BYTES);
-    assert_eq!(caches.busy(10, LINE_A), k::PPU_DCBF_LINE_BUSY_CYCLES);
+    assert_eq!(caches.busy(10, LINE_A, 8), k::PPU_DCBF_LINE_BUSY_CYCLES);
 }
 
 #[test]
@@ -31,10 +31,10 @@ fn a_demand_reload_from_memory_ends_the_touch_of_its_line() {
     // Lines that share the touched line's L2 set push it out of both caches.
     let stride = k::PPU_L2_SETS as u64 * k::PPU_CACHE_LINE_BYTES;
     for j in 1..=2 * k::PPU_L2_WAYS as u64 {
-        caches.load(LINE_A + j * stride, false);
+        caches.load(LINE_A + j * stride, 8, false);
     }
-    assert_eq!(caches.load(LINE_A, false), Level::Memory);
-    assert_eq!(caches.arrival(100, LINE_A), 0);
+    assert_eq!(caches.load(LINE_A, 8, false), Level::Memory);
+    assert_eq!(caches.arrival(100, LINE_A, 8), 0);
 }
 
 #[test]

@@ -44,3 +44,11 @@ mod fused_or_add_tests;
 #[cfg(test)]
 #[path = "tests/touch_flush_tests.rs"]
 mod touch_flush_tests;
+
+#[cfg(test)]
+#[path = "tests/cache_tag_tests.rs"]
+mod cache_tag_tests;
+
+#[cfg(test)]
+#[path = "tests/line_cross_tests.rs"]
+mod line_cross_tests;

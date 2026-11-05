@@ -1,0 +1,23 @@
+[test]
+name = "ppu_issue_line_cross_waits"
+
+# A hardware probe of what an access whose bytes cross from one 128-byte
+# line into the next leaves in, or waits for in, its second line: a chase
+# of a flushed line after an stmw into it, alone or across from the line
+# before; a load across two lines just after a dcbf of either; a load
+# across two lines with a dcbt of either line ahead; and a chase of a
+# flushed line after a count-0 lswx, an lbz or nothing touched it. The
+# console capture is the answer; ppu/main.c's header lists the loops and
+# the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 472 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 472 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 120000

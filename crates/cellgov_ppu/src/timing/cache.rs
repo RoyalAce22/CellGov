@@ -9,8 +9,8 @@
 
 use cellgov_ps3_abi::hw::ppu_issue as k;
 
-/// Where a load found its line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Where a load found its line. A later variant is farther from the core.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Level {
     L1,
     L2,
@@ -18,10 +18,16 @@ pub(crate) enum Level {
 }
 
 /// A set-associative tag array with tree pseudo-LRU replacement.
+///
+/// [CBE-Handbook p:135 s:6.1] the L1 data cache has an effective-addressed
+/// index and real-addressed tags, so two distinct lines never share a tag.
+/// Each way keeps its whole line number for this reason.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Tags<const SETS: usize, const WAYS: usize> {
-    /// Each way's line number plus one; zero is an empty way.
-    lines: [[u32; WAYS]; SETS],
+    /// Each way's line number. Only a way that `valid` marks holds a line.
+    lines: [[u64; WAYS]; SETS],
+    /// Each set's ways that hold a line, bit `w` for way `w`.
+    valid: [u8; SETS],
     /// Each set's tree: bit `n - 1` is node `n` of a heap-ordered tree,
     /// and points to the half that holds the next victim.
     tree: [u8; SETS],
@@ -33,23 +39,32 @@ impl<const SETS: usize, const WAYS: usize> Tags<SETS, WAYS> {
     const LEVELS: u32 = WAYS.trailing_zeros();
 
     fn new() -> Self {
+        const {
+            assert!(
+                WAYS <= u8::BITS as usize,
+                "a set's valid byte marks each way"
+            )
+        };
         Self {
             lines: [[0; WAYS]; SETS],
+            valid: [0; SETS],
             tree: [0; SETS],
             modified: [[false; WAYS]; SETS],
         }
     }
 
-    fn slot(line: u64) -> (usize, u32) {
-        let set = (line % SETS as u64) as usize;
-        (set, (line as u32).wrapping_add(1))
+    fn set_of(line: u64) -> usize {
+        (line % SETS as u64) as usize
+    }
+
+    fn holds(&self, set: usize, way: usize) -> bool {
+        self.valid[set] >> way & 1 != 0
     }
 
     fn find(&self, line: u64) -> Option<(usize, usize)> {
-        let (set, tag) = Self::slot(line);
-        self.lines[set]
-            .iter()
-            .position(|w| *w == tag)
+        let set = Self::set_of(line);
+        (0..WAYS)
+            .find(|&w| self.holds(set, w) && self.lines[set][w] == line)
             .map(|w| (set, w))
     }
 
@@ -92,21 +107,24 @@ impl<const SETS: usize, const WAYS: usize> Tags<SETS, WAYS> {
 
     /// Place `line`, and return the line it evicted.
     fn fill(&mut self, line: u64) -> Option<u64> {
-        let (set, tag) = Self::slot(line);
-        let way = self.lines[set]
-            .iter()
-            .position(|w| *w == 0)
-            .unwrap_or_else(|| self.victim(set));
-        let old = self.lines[set][way];
-        self.lines[set][way] = tag;
+        let set = Self::set_of(line);
+        let empty = (!self.valid[set]).trailing_zeros() as usize;
+        let way = if empty < WAYS {
+            empty
+        } else {
+            self.victim(set)
+        };
+        let old = self.holds(set, way).then_some(self.lines[set][way]);
+        self.lines[set][way] = line;
+        self.valid[set] |= 1 << way;
         self.modified[set][way] = false;
         self.touch(set, way);
-        (old != 0).then(|| u64::from(old - 1))
+        old
     }
 
     fn invalidate(&mut self, line: u64) {
         if let Some((set, way)) = self.find(line) {
-            self.lines[set][way] = 0;
+            self.valid[set] &= !(1 << way);
             self.modified[set][way] = false;
         }
     }
@@ -231,6 +249,16 @@ impl Caches {
         ea / k::PPU_CACHE_LINE_BYTES
     }
 
+    /// The first and the last line that `len` bytes at `ea` cover.
+    ///
+    /// An access of no bytes covers the line at `ea`. In the
+    /// `ppu_issue_line_cross_waits` capture, an `lswx` with a byte count
+    /// of 0 brings the line at its address into the L1.
+    fn lines(ea: u64, len: u8) -> (u64, u64) {
+        let last = ea.saturating_add(u64::from(len.max(1)) - 1);
+        (Self::line(ea), Self::line(last))
+    }
+
     /// Allocate `line` in the L2, and drop from the L1 the line that the
     /// L2 evicts.
     fn fill_l2(&mut self, line: u64) {
@@ -239,10 +267,24 @@ impl Caches {
         }
     }
 
-    /// A load of the line at `ea`. `skip_l1` misses the L1 and leaves it
-    /// as it was.
-    pub(crate) fn load(&mut self, ea: u64, skip_l1: bool) -> Level {
-        let line = Self::line(ea);
+    /// A load of `len` bytes at `ea`, and the level of the farthest line
+    /// it reads. `skip_l1` misses the L1 and leaves it as it was.
+    ///
+    /// In the `ppu_issue_line_cross` capture, an `ld` or `lmw` whose bytes
+    /// reach a flushed line waits for that line from memory. With the
+    /// second line in the L1, an `lmw` across two lines costs what it
+    /// costs on one line.
+    pub(crate) fn load(&mut self, ea: u64, len: u8, skip_l1: bool) -> Level {
+        let (first, last) = Self::lines(ea, len);
+        let level = self.load_line(first, skip_l1);
+        if last == first {
+            level
+        } else {
+            level.max(self.load_line(last, skip_l1))
+        }
+    }
+
+    fn load_line(&mut self, line: u64, skip_l1: bool) -> Level {
         if !skip_l1 && self.l1.lookup(line) {
             return Level::L1;
         }
@@ -261,10 +303,17 @@ impl Caches {
         level
     }
 
-    /// A store to the line at `ea`: the L1 keeps its copy current, and
-    /// the L2 allocates on a miss.
-    pub(crate) fn store(&mut self, ea: u64) {
-        let line = Self::line(ea);
+    /// A store of `len` bytes at `ea`: the L1 keeps its copy of each line
+    /// current, and the L2 allocates each line it misses.
+    pub(crate) fn store(&mut self, ea: u64, len: u8) {
+        let (first, last) = Self::lines(ea, len);
+        self.store_line(first);
+        if last != first {
+            self.store_line(last);
+        }
+    }
+
+    fn store_line(&mut self, line: u64) {
         if !self.l2.lookup(line) {
             self.fill_l2(line);
         }
@@ -311,21 +360,28 @@ impl Caches {
         self.touched.record(t, line, arrival);
     }
 
-    /// The cycle the touched line at `ea` arrives, or 0 when no touch is
-    /// on its way at cycle `t`. A result at or before `t` means the line
-    /// is present.
-    pub(crate) fn arrival(&self, t: u64, ea: u64) -> u64 {
-        self.touched.after(t, Self::line(ea))
+    /// The latest cycle a touched line of the `len` bytes at `ea` arrives.
+    ///
+    /// The result is 0 when no touch of those lines is on its way at
+    /// cycle `t`. A result at or before `t` means the lines are present.
+    pub(crate) fn arrival(&self, t: u64, ea: u64, len: u8) -> u64 {
+        let (first, last) = Self::lines(ea, len);
+        self.touched
+            .after(t, first)
+            .max(self.touched.after(t, last))
     }
 
-    /// The cycle a flush or store-back of the line at `ea` finishes with
-    /// it, or 0 when no flush or store-back is under way at cycle `t`. A
-    /// result at or before `t` means the line is free.
+    /// The latest cycle a flush or store-back finishes with a line of the
+    /// `len` bytes at `ea`.
+    ///
+    /// The result is 0 when no flush or store-back of those lines is under
+    /// way at cycle `t`. A result at or before `t` means the lines are free.
     ///
     /// [CBE-Handbook p:147 s:6.1.6.5] `dcbf` and `dcbst` can complete
     /// before the operation they cause completes.
-    pub(crate) fn busy(&self, t: u64, ea: u64) -> u64 {
-        self.busy.after(t, Self::line(ea))
+    pub(crate) fn busy(&self, t: u64, ea: u64, len: u8) -> u64 {
+        let (first, last) = Self::lines(ea, len);
+        self.busy.after(t, first).max(self.busy.after(t, last))
     }
 
     /// A `dcbf` at cycle `t`: drop the line at `ea` from the L1 and the

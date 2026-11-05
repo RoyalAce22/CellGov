@@ -674,14 +674,14 @@ impl PpeTiming {
     /// instructions after it.
     fn load(&mut self, t: u64, op: &Op, ea: u64, len: u8, class: LoadClass) {
         let tables = &mut *self.tables;
-        let level = tables.caches.load(ea, class == LoadClass::Reserve);
+        let level = tables.caches.load(ea, len, class == LoadClass::Reserve);
         let arrival = match level {
             Level::Memory => 0,
-            Level::L1 | Level::L2 => tables.caches.arrival(t, ea),
+            Level::L1 | Level::L2 => tables.caches.arrival(t, ea, len),
         };
         // The load starts when a flush or store-back still busy with its
-        // line finishes.
-        let start = t.max(tables.caches.busy(t, ea));
+        // lines finishes.
+        let start = t.max(tables.caches.busy(t, ea, len));
         let hit_lat = match class {
             LoadClass::Fixed | LoadClass::Reserve => k::PPU_LOAD_FX_USE_CYCLES,
             LoadClass::Float => k::PPU_FP_LOAD_LATENCY_CYCLES,
@@ -1064,7 +1064,7 @@ fn queue_room(tables: &Tables, t: u64, ea: u64, len: u8) -> u64 {
 /// [`PPU_STORE_DRAIN_CYCLES`]: k::PPU_STORE_DRAIN_CYCLES
 #[inline]
 fn queue_store(tables: &mut Tables, t: u64, op: &Op, ea: u64, len: u8) {
-    tables.caches.store(ea);
+    tables.caches.store(ea, len);
     // [CBE-Handbook p:134 s:6.1.2.2] the CIU store queue holds
     // 16-byte entries. [CBE-Handbook p:144 s:6.1.5.7] the L2
     // store queue that takes each CIU request unloads first in,
