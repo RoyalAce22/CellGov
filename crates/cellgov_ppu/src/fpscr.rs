@@ -299,5 +299,9 @@ pub(crate) fn mtfsb1(state: &mut PpuState, frt: u8) {
 mod tests;
 
 #[cfg(test)]
+#[path = "tests/fpscr_enabled_console_tests.rs"]
+mod fpscr_enabled_console_tests;
+
+#[cfg(test)]
 #[path = "tests/fpscr_console_tests.rs"]
 mod console_tests;

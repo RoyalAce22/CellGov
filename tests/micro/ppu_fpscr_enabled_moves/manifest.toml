@@ -1,0 +1,18 @@
+[test]
+name = "ppu_fpscr_enabled_moves"
+
+# A hardware probe of whether mtfsf, mtfsfi and mtfsb1, setting an FPSCR
+# exception bit together with its enable bit, raise an interrupt: the
+# process reaches its end only if none does. The console capture is the
+# answer; no emulator runs it.
+
+[observe]
+# Big-endian u32 words, as ppu/main.c lists: words 0 and 1 are the
+# failed step and the count of steps that ran, then 7 FPSCR words:
+# 9 words, 36 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 36 },
+]
+
+[expect]
+outcome = "completed"

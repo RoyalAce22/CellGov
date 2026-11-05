@@ -18,9 +18,12 @@
 //! - `fsel` and the moves leave the FPSCR unchanged.
 //!
 //! An enabled exception sets FEX and raises no interrupt: the guest runs
-//! in Ignore Exceptions mode (`MSR[FE0:FE1]` = 0). The
-//! ppu_fp_enabled_results console capture runs every enabled case to
+//! in Ignore Exceptions mode (`MSR[FE0:FE1]` = 0), so every arm
+//! continues. This holds for an FPSCR move that sets an exception bit and
+//! its enable bit together. The ppu_fp_enabled_results and
+//! ppu_fpscr_enabled_moves console captures run every enabled case to
 //! completion.
+// [PPC-Book1 p:95 s:4.4] in Ignore Exceptions mode the system floating-point enabled exception handler is not invoked.
 // [PPC-Book1 p:96 s:4.4] FE0 and FE1 do not change whether a result is stored or its value; the FPSCR enable bits decide both.
 // [PPC-Book1 p:89 s:4.2.2] FPSCR[RN] encoding: 0b00 selects Round to Nearest.
 

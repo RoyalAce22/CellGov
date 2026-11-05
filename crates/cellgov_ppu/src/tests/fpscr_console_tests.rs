@@ -9,7 +9,7 @@ use crate::state::PpuState;
 use crate::store_buffer::StoreBuffer;
 
 /// The payload of `tests/micro/<probe>`'s capture, as big-endian u32 words.
-fn captured(probe: &str) -> Vec<u32> {
+pub(super) fn captured(probe: &str) -> Vec<u32> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/micro")
         .join(probe)
@@ -25,20 +25,20 @@ fn captured(probe: &str) -> Vec<u32> {
 }
 
 /// A probe's sequence, replayed on one PPU state.
-struct Replay {
+pub(super) struct Replay {
     s: PpuState,
-    out: Vec<u32>,
+    pub(super) out: Vec<u32>,
 }
 
 impl Replay {
-    fn new(words: usize) -> Self {
+    pub(super) fn new(words: usize) -> Self {
         Self {
             s: PpuState::new(),
             out: vec![0; words],
         }
     }
 
-    fn run(&mut self, raw: u32) {
+    pub(super) fn run(&mut self, raw: u32) {
         let insn = crate::decode::decode(raw).unwrap_or_else(|e| panic!("0x{raw:08x}: {e:?}"));
         let page = [0u8; 0x100];
         let views = [cellgov_mem::RegionView::plain(0, &page)];
@@ -60,16 +60,24 @@ impl Replay {
         self.s.fpr[0]
     }
 
-    fn fpscr(&mut self) -> u32 {
+    pub(super) fn fpscr(&mut self) -> u32 {
         self.mffs_over(0) as u32
     }
 
-    fn mtfsf(&mut self, flm: u32, v: u64) {
+    pub(super) fn mtfsf(&mut self, flm: u32, v: u64) {
         self.s.set_fpr(0, v);
         self.run(mtfsf(flm, 0));
     }
 
-    fn clear(&mut self) {
+    pub(super) fn set_fpr(&mut self, n: usize, v: u64) {
+        self.s.set_fpr(n, v);
+    }
+
+    pub(super) fn fpr(&self, n: usize) -> u64 {
+        self.s.fpr[n]
+    }
+
+    pub(super) fn clear(&mut self) {
         self.mtfsf(0xFF, 0);
     }
 
@@ -114,7 +122,7 @@ fn mcrfs(bf: u32, bfa: u32) -> u32 {
     (63 << 26) | (bf << 23) | (bfa << 18) | (64 << 1)
 }
 /// [PPC-Book1 p:121 s:4.6.8] mtfsfi is 63/134 with BF at bits 6:8 and U at 16:19.
-fn mtfsfi(bf: u32, u: u32) -> u32 {
+pub(super) fn mtfsfi(bf: u32, u: u32) -> u32 {
     (63 << 26) | (bf << 23) | (u << 12) | (134 << 1)
 }
 /// [PPC-Book1 p:121 s:4.6.8] mtfsf is 63/711, XFL-form, with FLM at bits 7:14.
@@ -126,7 +134,7 @@ fn mtfsb0(bt: u32) -> u32 {
     (63 << 26) | (bt << 21) | (70 << 1)
 }
 /// [PPC-Book1 p:122 s:4.6.8] mtfsb1 is 63/38 with BT at bits 6:10.
-fn mtfsb1(bt: u32) -> u32 {
+pub(super) fn mtfsb1(bt: u32) -> u32 {
     (63 << 26) | (bt << 21) | (38 << 1)
 }
 
