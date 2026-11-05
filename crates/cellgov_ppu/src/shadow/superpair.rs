@@ -497,6 +497,26 @@ fn fuse(a: PpuInstruction, b: PpuInstruction) -> Option<FusedPair> {
             bi,
             target_offset: offset,
         }),
+        // std rS, off(r1) + lwz rT, off2(rA). The std writes no register, so
+        // the lwz EA does not depend on it.
+        (
+            PpuInstruction::Std {
+                rs,
+                ra: 1,
+                imm: store_offset,
+            },
+            PpuInstruction::Lwz {
+                rt,
+                ra,
+                imm: offset,
+            },
+        ) => Some(FusedPair::StdLwz {
+            rs,
+            store_offset,
+            rt,
+            ra,
+            offset,
+        }),
         _ => None,
     }
 }
@@ -590,3 +610,7 @@ mod lwz_pair_tests;
 #[cfg(test)]
 #[path = "tests/superpair_or_rlwinm_tests.rs"]
 mod or_rlwinm_tests;
+
+#[cfg(test)]
+#[path = "tests/superpair_std_lwz_tests.rs"]
+mod std_lwz_tests;

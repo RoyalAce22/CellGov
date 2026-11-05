@@ -1517,6 +1517,18 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
                     branch(bo, bi, false, Target::Direct, branches(state, bo, bi)),
                 )
             }
+            FusedPair::StdLwz {
+                rs,
+                store_offset,
+                rt,
+                ra,
+                offset,
+            } => two(
+                store(INT_STORE, ea_d(state, 1, store_offset), 8)
+                    .src(gpr(rs))
+                    .base(1),
+                int_load(ea_d(state, ra, offset), 4, rt).base(ra),
+            ),
         },
         I::Consumed => ([none, none], 0),
         I::Dcbz { ra, rb } => one(Op::on(unit::LSU)

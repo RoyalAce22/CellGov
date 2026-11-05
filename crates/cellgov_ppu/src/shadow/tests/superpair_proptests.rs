@@ -378,6 +378,33 @@ fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
                     },
                 )
             }),
+        // Half the cases load a word of the doubleword the std stored.
+        (
+            reg(),
+            ds_displacement(),
+            reg(),
+            reg(),
+            displacement(),
+            prop::option::of(prop::sample::select(vec![0i16, 4]))
+        )
+            .prop_map(|(rs, store_offset, rt, ra, offset, overlap)| {
+                let (ra, offset) = match overlap {
+                    Some(word) => (1, store_offset.wrapping_add(word)),
+                    None => (ra, offset),
+                };
+                (
+                    PpuInstruction::Std {
+                        rs,
+                        ra: 1,
+                        imm: store_offset,
+                    },
+                    PpuInstruction::Lwz {
+                        rt,
+                        ra,
+                        imm: offset,
+                    },
+                )
+            }),
     ]
 }
 
@@ -461,7 +488,7 @@ fn aim_compare(
 }
 
 proptest! {
-    // Seven of the twenty-six arms are compares that need an aimed
+    // Seven of the twenty-seven arms are compares that need an aimed
     // operand to show an off-by-one. Four times the default count
     // makes one such case near certain per run.
     #![proptest_config(ProptestConfig::with_cases(1024))]

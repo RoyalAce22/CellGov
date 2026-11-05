@@ -16,6 +16,8 @@ const READ_EFFECTS: &[EffectKind] = &[EffectKind::SharedReadIntent];
 const RESERVATION_READ_EFFECTS: &[EffectKind] =
     &[EffectKind::SharedReadIntent, EffectKind::ReservationAcquire];
 const WRITE_EFFECTS: &[EffectKind] = &[EffectKind::SharedWriteIntent];
+const READ_WRITE_EFFECTS: &[EffectKind] =
+    &[EffectKind::SharedReadIntent, EffectKind::SharedWriteIntent];
 const ATOMIC_STORE_EFFECTS: &[EffectKind] = &[EffectKind::ConditionalStore];
 const CLOCK_EFFECTS: &[EffectKind] = &[EffectKind::ClockRead];
 const CONTINUE: &[PpuOutcomeClass] = &[PpuOutcomeClass::Continue];
@@ -262,7 +264,7 @@ pub(super) fn effect_and_outcome(
 }
 
 /// The effects and outcomes of the fused pair `kind`: those of its
-/// memory half, or of its branch half.
+/// memory halves, or of its branch half.
 pub(super) fn fused_effect_and_outcome(
     kind: FusedPairKind,
 ) -> (&'static [EffectKind], &'static [PpuOutcomeClass]) {
@@ -277,6 +279,7 @@ pub(super) fn fused_effect_and_outcome(
         | F::LdRlwinm
         | F::LwzLwz => (READ_EFFECTS, LOAD),
         F::LiStw | F::MflrStw | F::MflrStd | F::StdStd => (WRITE_EFFECTS, STORE),
+        F::StdLwz => (READ_WRITE_EFFECTS, STORE),
         F::CmpwiBc | F::CmpwBc | F::CmpdiBc | F::CmpdBc | F::CmplwBc | F::AddiBc | F::ExtswBlr => {
             (NO_EFFECTS, BRANCH)
         }

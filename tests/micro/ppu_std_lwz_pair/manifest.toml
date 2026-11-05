@@ -1,0 +1,26 @@
+[test]
+name = "ppu_std_lwz_pair"
+
+# A hardware probe: the registers and memory an adjacent
+# "std rS,d(r1) ; lwz rT,d2(rA)" leaves, for a load of the high word and
+# of the low word the std stored, a load into the stored register, a load
+# from another base, negative displacements, and a branch over the std
+# into the lwz. The console capture is the answer; no emulator runs it.
+
+[observe]
+# 20 big-endian u32 words, as ppu/main.c lists: 80 bytes.
+#   0 failed step, 1 its return code; each register as a high word and
+#   a low word:
+#   2-3 r6 after "std 5,8(1) ; lwz 6,8(1)", 18-19 buf words 2-3 after it;
+#   4-5 r6 after "std 5,8(1) ; lwz 6,12(1)";
+#   6-7 r5 after "std 5,8(1) ; lwz 5,8(1)";
+#   8-9 r6 after "std 5,8(1) ; lwz 6,4(4)", 10-11 buf words 2-3 after it;
+#   12-13 r6 after "std 5,-8(1) ; lwz 6,-4(1)" with r1 = buf + 16;
+#   14-15 r6 after a branch over the std into the lwz, 16-17 buf words
+#   2-3 after it.
+memory_regions = [
+  { name = "result", addr = 0, size = 80 },
+]
+
+[expect]
+outcome = "completed"

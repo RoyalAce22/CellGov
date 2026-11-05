@@ -959,6 +959,17 @@ pub(super) fn render(
                 let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
                 write!(f, "; bc {bo}, {bi}, 0x{target:x}")
             }
+            FusedPair::StdLwz {
+                rs,
+                store_offset,
+                rt,
+                ra,
+                offset,
+            } => {
+                mem_d(f, "std", 'r', rs, store_offset, 1)?;
+                f.write_str("; ")?;
+                mem_d(f, "lwz", 'r', rt, offset, ra)
+            }
         },
         I::Consumed => op0(f, ".consumed"),
 

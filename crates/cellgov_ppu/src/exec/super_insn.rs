@@ -574,6 +574,35 @@ fn execute_pair(
             state.set_gpr(rt as usize, base.wrapping_add(imm as i64 as u64));
             take_bc(state, bo, bi, target_offset)
         }
+        // [PPC-Book1 p:43 s:3.3.3 Store Doubleword] std: MEM(EA,8) <- (RS); EA = (r1)+EXTS(DS||0b00).
+        // [PPC-Book1 p:37 s:3.3.2 Load Word and Zero] lwz: RT <- 32 zeros || MEM(EA,4); EA = (RA|0)+EXTS(D).
+        // The std writes no register, so the lwz takes its EA from the starting state.
+        // The lwz reads through the store buffer, so it gets the bytes the std staged.
+        FusedPair::StdLwz {
+            rs,
+            store_offset,
+            rt,
+            ra,
+            offset,
+        } => {
+            let store_ea = state.ea_d_form(1, store_offset);
+            let stored = buffer_store(store_buf, region_views, store_ea, 8, state.gpr[rs as usize]);
+            if !matches!(stored, ExecuteVerdict::Continue) {
+                return stored;
+            }
+            let ea = state.ea_d_form(ra, offset);
+            match load_ze(
+                &mut LoadPort::new(region_views, store_buf, effects, unit_id),
+                ea,
+                Width::B4,
+            ) {
+                Ok(val) => {
+                    state.set_gpr(rt as usize, val);
+                    ExecuteVerdict::Continue
+                }
+                Err(ea) => ExecuteVerdict::MemFault(ea),
+            }
+        }
     }
 }
 

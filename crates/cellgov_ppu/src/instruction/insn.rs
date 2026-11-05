@@ -1963,6 +1963,17 @@ pub enum FusedPair {
         bi: u8,
         target_offset: i16,
     },
+    /// `std rS, store_offset(r1)` followed by `lwz rT, offset(rA)`.
+    ///
+    /// The `lwz` reads memory after the `std` wrote it, so where the two
+    /// accesses overlap, the `lwz` gets the stored bytes.
+    StdLwz {
+        rs: u8,
+        store_offset: i16,
+        rt: u8,
+        ra: u8,
+        offset: i16,
+    },
 }
 
 #[cfg(test)]
