@@ -104,7 +104,7 @@ Column definitions:
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | ---: | ---: | --- | --- |
 | [BCES00664](titles/BCES00664.md) | WipEout HD Fury | 2009 | Sony Liverpool | Studio Liverpool proprietary | Disc ISO | fw 4.93 x base | 2.76 | FirstRsxWrite -> RsxWriteCheckpoint | 38,243 | 9,790,208 | Yes | 975 non-semantic |
 | [BCUS98103](titles/BCUS98103.md) | Uncharted: Drake's Fortune | 2007 | Naughty Dog | Naughty Dog proprietary | Disc ISO | fw 4.93 x base | 1.94 | FirstRsxWrite -> RsxWriteCheckpoint | 4,183 | 1,070,848 | -- | -- |
-| [NPUA80001](titles/NPUA80001.md) | flOw | 2007 | thatgamecompany | PhyreEngine | PSN HDD | fw 4.93 x base | 1.50 | ProcessExit -> ProcessExit | 6,599 | 1,689,344 | -- | -- |
+| [NPUA80001](titles/NPUA80001.md) | flOw | 2007 | thatgamecompany | PhyreEngine | PSN HDD | fw 4.93 x base | 1.50 | ProcessExit -> ProcessExit | 6,600 | 1,689,600 | -- | -- |
 | [NPUA80068](titles/NPUA80068.md) | Super Stardust HD | 2007 | Housemarque | Housemarque proprietary | PSN HDD | fw 4.93 x base | 3.70 | FirstRsxWrite -> MaxSteps | 390,426 | 99,949,056 | No (outcome: Timeout vs Completed) | -- |
 
 Coverage: 4 game title(s), 5 firmware(s), 8 declared cell(s), 8 recorded.
