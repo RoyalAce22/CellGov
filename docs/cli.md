@@ -2542,6 +2542,31 @@ Exit codes particular to this command:
   141 stdout was closed by a downstream reader
 ```
 
+##### `cellgov dev fuzz ppu-reference`
+
+Replay every PPU reference file in a directory and name each PPU unit with no file.
+
+```console
+$ cellgov dev fuzz ppu-reference crates/cellgov_fuzz/tests/fixtures/ppu_reference
+```
+
+```
+Usage: cellgov dev fuzz ppu-reference [OPTIONS] <DIR>
+```
+
+| Argument | Description |
+| --- | --- |
+| `DIR` | Directory of reference files and their pending list. Required. |
+
+```
+Exit codes particular to this command:
+  1   a file did not parse or replay, a vector differed from its expected
+      end, or the directory's files and pending list do not give every
+      PPU unit exactly one file or one pending entry; also the shared
+      failed-operation status when DIR could not be read
+  141 stdout was closed by a downstream reader
+```
+
 ##### `cellgov dev fuzz spu-documented`
 
 Generate the SPU floating-point vectors the documents define and replay them.
