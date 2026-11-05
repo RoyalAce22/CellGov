@@ -1,0 +1,24 @@
+[test]
+name = "ppu_span_shm_maps"
+
+# A hardware probe: a doubleword ld and std that run across the seam
+# between two 64 KiB shared-memory segments mapped end to end, run in a
+# child thread so a fault ends only that thread.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 32 big-endian u32 words, as ppu/main.c lists: 128 bytes. Word 0 is
+# the done or progress marker, word 1 the step a progress record names,
+# words 2..7 the area, segment and map return codes (word 3 the area's
+# low word), words 8..9 the child create and start return codes, words
+# 10..11 the reached and passed flags, words 12..13 what the ld loaded,
+# word 14 the get-priority answer for the child, words 15..16 the join
+# return code and exit value, words 17..20 the words at seam - 8, - 4,
+# + 0 and + 4 after the child, words 21..25 the unmap and free return
+# codes.
+memory_regions = [
+  { name = "result", addr = 0, size = 128 },
+]
+
+[expect]
+outcome = "completed"

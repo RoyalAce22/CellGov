@@ -2,7 +2,7 @@
 
 use crate::exec::memory_helpers::{
     buffer_conditional_store, buffer_store, caching_inhibited, check_block_translates, check_store,
-    inhibited_store, load_ze, LoadPort, Width,
+    inhibited_load, inhibited_store, load_ze, LoadPort, Width,
 };
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::PpuInstruction;
@@ -57,8 +57,9 @@ pub(crate) fn execute(
                 return ExecuteVerdict::Fault(PpuFault::alignment(ea, false));
             }
             // [CBE-Handbook p:253 s:9.5.8] An lmw, stmw, lswi, lswx, stswi or stswx operand in caching-inhibited storage takes the alignment interrupt.
-            if caching_inhibited(region_views, ea, 4 * (32 - u64::from(rt))) {
-                return ExecuteVerdict::Fault(PpuFault::alignment(ea, false));
+            let len = 4 * (32 - u64::from(rt));
+            if caching_inhibited(region_views, ea, len) {
+                return inhibited_load(region_views, ea, ea, len);
             }
             // The loop loads every word before it writes a register, so
             // a fault part way writes none.
@@ -114,7 +115,7 @@ pub(crate) fn execute(
             // [PPC-Book1 p:15 s:1.12.2] In 32-bit mode only the low 32 bits of an address sum address storage.
             let base = effective_address(state.ra_or_zero(ra));
             if caching_inhibited(region_views, base, n as u64) {
-                return ExecuteVerdict::Fault(PpuFault::alignment(base, false));
+                return inhibited_load(region_views, base, base, n as u64);
             }
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
             string_load(state, &mut port, rt as usize, base, n)
@@ -132,7 +133,7 @@ pub(crate) fn execute(
             // ppu_may_trap_lswx_n0_null).
             let n = n.max(1);
             if caching_inhibited(region_views, base, n as u64) {
-                return ExecuteVerdict::Fault(PpuFault::alignment(base, false));
+                return inhibited_load(region_views, base, base, n as u64);
             }
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
             string_load(state, &mut port, rt as usize, base, n)
@@ -211,7 +212,7 @@ pub(crate) fn execute(
         PpuInstruction::Lvlx { vt, ra, rb } | PpuInstruction::Lvlxl { vt, ra, rb } => {
             let addr = state.ea_x_form(ra, rb);
             if caching_inhibited(region_views, addr, 16 - (addr & 15)) {
-                return ExecuteVerdict::Fault(PpuFault::alignment(addr, false));
+                return inhibited_load(region_views, addr, addr, 16 - (addr & 15));
             }
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
             let val = match read_aligned_16(&mut port, addr & !15u64) {
@@ -234,7 +235,7 @@ pub(crate) fn execute(
                 return ExecuteVerdict::Continue;
             }
             if caching_inhibited(region_views, addr & !15u64, lo) {
-                return ExecuteVerdict::Fault(PpuFault::alignment(addr, false));
+                return inhibited_load(region_views, addr, addr & !15u64, lo);
             }
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
             let val = match read_aligned_16(&mut port, addr & !15u64) {
@@ -422,7 +423,7 @@ fn load_reserve(
     }
     // [CBE-Handbook p:253 s:9.5.8] An lwarx, ldarx, stwcx. or stdcx. operand in caching-inhibited storage takes the alignment interrupt.
     if caching_inhibited(region_views, ea, u64::from(width.bytes())) {
-        return ExecuteVerdict::Fault(PpuFault::alignment(ea, false));
+        return inhibited_load(region_views, ea, ea, u64::from(width.bytes()));
     }
     let loaded = load_ze(
         &mut LoadPort::new(region_views, store_buf, effects, unit_id),

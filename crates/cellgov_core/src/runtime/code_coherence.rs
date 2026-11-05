@@ -61,7 +61,7 @@ pub struct UnsyncedCodeFetch {
     /// The sequence steps that ran after the store, as the
     /// `cellgov_trace::SEQUENCE_*` bits.
     pub sequence: u8,
-    /// Whether every store to the line swapped a word between a branch
+    /// Whether every store to the line atomically swapped a word between a branch
     /// and `ori 0,0,0` [PPC-Book2 p:13 s:1.8.1].
     pub patch_class: bool,
 }
@@ -117,21 +117,50 @@ fn is_patch_word(w: u32) -> bool {
     w == PPC_NOP || w >> 26 == PPC_B_OPCD
 }
 
-/// Whether a store of `word` at `addr` swaps one patch-class word for
-/// another. The replaced word is the batch's own earlier store to `addr`
-/// in `written`, else `before`. The function adds a word store to
-/// `written`.
+/// The addresses of the words that `[addr, addr + len)` overlaps.
+fn words_of(addr: u64, len: u8) -> impl Iterator<Item = u64> {
+    let end = addr.saturating_add(u64::from(len));
+    (addr & !3..end).step_by(4)
+}
+
+/// The code words a batch's stores overlap, keyed by address.
+/// The runtime reads them before the batch commits, then updates them
+/// after each store.
+type CodeWords = BTreeMap<u64, u32>;
+
+/// Merge a store into the code words in `words`, and return whether it is patch class.
+///
+/// The store is patch class when it swaps a patch-class word for another
+/// at every code word it writes [PPC-Book2 p:13 s:1.8.1]. That needs an
+/// `atomic` store of whole words, which modifies all four bytes of each
+/// word.
 fn store_is_patch(
-    written: &mut BTreeMap<u64, u32>,
-    addr: u64,
-    before: Option<u32>,
-    word: Option<u32>,
+    words: &mut CodeWords,
+    spans: &[(u64, u64)],
+    (addr, len, value, atomic): (u64, u8, u128, bool),
 ) -> bool {
-    let Some(new) = word else {
-        return false;
-    };
-    let old = written.insert(addr, new).or(before);
-    old.is_some_and(is_patch_word) && is_patch_word(new)
+    let end = addr.saturating_add(u64::from(len));
+    let mut patch = atomic && matches!(len, 4 | 8);
+    for at in words_of(addr, len) {
+        if !touches_code(spans, at, at.saturating_add(4)) {
+            continue;
+        }
+        let Some(old) = words.get(&at).copied() else {
+            patch = false;
+            continue;
+        };
+        let mut bytes = old.to_be_bytes();
+        for (byte_at, byte) in (at..).zip(bytes.iter_mut()) {
+            if (addr..end).contains(&byte_at) {
+                // `value` holds the store's bytes in its low `len` bytes.
+                *byte = (value >> (8 * (end - 1 - byte_at))) as u8;
+            }
+        }
+        let new = u32::from_be_bytes(bytes);
+        words.insert(at, new);
+        patch &= is_patch_word(old) && is_patch_word(new);
+    }
+    patch
 }
 
 /// Whether `[start, end)` overlaps a code span.
@@ -163,32 +192,35 @@ impl Runtime {
         &self.code_coherence.records
     }
 
-    /// The word each word store in `events` replaced, read from `space`
-    /// before the batch commits: `None` for an event that is no word
-    /// store into code.
+    /// The code words the stores in `events` overlap, read from `space`
+    /// before the batch commits.
     pub(super) fn code_event_old_words(
         &self,
         space: AddressSpaceId,
         events: &[CodeEvent],
-    ) -> Vec<Option<u32>> {
+    ) -> CodeWords {
+        let mut words = CodeWords::new();
         if events.is_empty() {
-            return Vec::new();
+            return words;
         }
         let Ok(memory) = self.space_memory(space) else {
-            return Vec::new();
+            return words;
         };
         let spans = memory.code_spans();
-        events
-            .iter()
-            .map(|event| match *event {
-                CodeEvent::Store {
-                    addr,
-                    word: Some(_),
-                    ..
-                } if touches_code(spans, addr, addr.saturating_add(4)) => read_word(memory, addr),
-                _ => None,
-            })
-            .collect()
+        for event in events {
+            let CodeEvent::Store { addr, len, .. } = *event else {
+                continue;
+            };
+            for at in words_of(addr, len) {
+                if words.contains_key(&at) || !touches_code(spans, at, at.saturating_add(4)) {
+                    continue;
+                }
+                if let Some(word) = read_word(memory, at) {
+                    words.insert(at, word);
+                }
+            }
+        }
+        words
     }
 
     /// Replay `unit`'s committed `events` in program order against the
@@ -199,7 +231,7 @@ impl Runtime {
         unit: UnitId,
         space: AddressSpaceId,
         events: &[CodeEvent],
-        old_words: &[Option<u32>],
+        old_words: &CodeWords,
     ) {
         if events.is_empty() {
             return;
@@ -210,14 +242,18 @@ impl Runtime {
             .unwrap_or_default();
         let step = self.steps_taken as u64;
         let raw_space = space.raw();
-        // The batch's own word stores, so a second store to a word sees
-        // the first as the word it replaced.
-        let mut written: BTreeMap<u64, u32> = BTreeMap::new();
-        for (i, event) in events.iter().enumerate() {
+        // Each store updates the words, so a later store to a word sees
+        // the batch's own earlier store as the word it replaced.
+        let mut words = old_words.clone();
+        for event in events {
             match *event {
-                CodeEvent::Store { addr, len, word } => {
-                    let before = old_words.get(i).copied().flatten();
-                    let patch = store_is_patch(&mut written, addr, before, word);
+                CodeEvent::Store {
+                    addr,
+                    len,
+                    value,
+                    atomic,
+                } => {
+                    let patch = store_is_patch(&mut words, &spans, (addr, len, value, atomic));
                     self.code_coherence.mark_lines(
                         raw_space,
                         code_lines(&spans, addr, len),
@@ -360,3 +396,11 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/code_coherence_host_write_tests.rs"]
 mod host_write_tests;
+
+#[cfg(test)]
+#[path = "tests/code_coherence_atomic_tests.rs"]
+mod atomic_tests;
+
+#[cfg(test)]
+#[path = "tests/code_coherence_baseline_tests.rs"]
+mod baseline_tests;

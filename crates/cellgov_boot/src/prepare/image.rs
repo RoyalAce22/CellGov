@@ -206,13 +206,16 @@ fn image_regions(
             rsx_access,
         )
         .with_caching_inhibited(),
+        // A Raw SPU's window, carved from this region, keeps its caching
+        // attribute: see `PS3_SPU_RESERVED_BASE`.
         cellgov_mem::Region::with_access(
             PS3_SPU_RESERVED_BASE,
             PS3_SPU_RESERVED_SIZE,
             "spu_reserved",
             cellgov_mem::PageSize::Page64K,
             reserved_access,
-        ),
+        )
+        .with_caching_inhibited(),
     ]
 }
 

@@ -63,14 +63,13 @@ impl ExecutionUnit for Scripted {
         let step = self.steps.pop_front().unwrap_or_default();
         for event in &step.events {
             if let CodeEvent::Store {
-                addr,
-                word: Some(w),
-                ..
+                addr, len, value, ..
             } = *event
             {
+                let bytes = value.to_be_bytes()[16 - usize::from(len)..].to_vec();
                 effects.push(Effect::SharedWriteIntent {
-                    range: ByteRange::new(GuestAddr::new(addr), 4).unwrap(),
-                    bytes: WritePayload::new(w.to_be_bytes().to_vec()),
+                    range: ByteRange::new(GuestAddr::new(addr), u64::from(len)).unwrap(),
+                    bytes: WritePayload::new(bytes),
                     source: self.id,
                     source_time: GuestTicks::new(0),
                 });
@@ -101,7 +100,8 @@ pub(super) fn store(addr: u64, word: u32) -> CodeEvent {
     CodeEvent::Store {
         addr,
         len: 4,
-        word: Some(word),
+        value: u128::from(word),
+        atomic: true,
     }
 }
 
@@ -158,7 +158,7 @@ fn run(budget: u64, scripts: &[Vec<Step>]) -> (Vec<UnsyncedCodeFetch>, Vec<UnitI
     (rt.unsynced_code_fetches().to_vec(), ids)
 }
 
-fn run_one(steps: &[Step]) -> (Vec<UnsyncedCodeFetch>, UnitId) {
+pub(super) fn run_one(steps: &[Step]) -> (Vec<UnsyncedCodeFetch>, UnitId) {
     let (records, ids) = run(1, &[steps.to_vec()]);
     (records, ids[0])
 }

@@ -300,12 +300,12 @@ impl Runtime {
         self.shared_alias_ranges_in(self.spaces.space_of(unit), range)
     }
 
-    /// Sibling-view aliases of `range` as seen from `space`: for every
-    /// shared mapping whose view in `space` wholly contains `range`,
-    /// the equivalent range through each other view. A range that
-    /// straddles a view's end gives nothing. The commit pipeline's
-    /// fanout replicates under the same containment, so the aliases
-    /// are the bytes a commit would reach.
+    /// Sibling-view aliases of `range` as seen from `space`.
+    ///
+    /// For each shared view in `space` that `range` reaches, the result
+    /// holds the part of `range` inside that view, through each other view
+    /// of its segment. The commit pipeline's fanout replicates the same
+    /// parts, so the aliases are the bytes a commit would reach.
     ///
     /// Dependency analysis reads these so two cross-space writes to the
     /// same shared bytes never prove independent. A host write names
@@ -316,35 +316,64 @@ impl Runtime {
         space: AddressSpaceId,
         range: ByteRange,
     ) -> Vec<ByteRange> {
-        let (start, len) = (range.start().raw(), range.length());
         let mut out = Vec::new();
         for mapping in self.spaces.shared.values() {
-            let source_view = mapping
-                .views
-                .iter()
-                .find(|(view_space, base)| {
-                    *view_space == space && start >= *base && start + len <= *base + mapping.size
-                })
-                .copied();
-            let Some((_, source_base)) = source_view else {
-                continue;
-            };
-            let offset = start - source_base;
-            for &(other_space, other_base) in &mapping.views {
-                // Skip only the view `range` itself lies in; a second
-                // view in the same space aliases the same bytes.
-                if other_space == space && other_base == source_base {
-                    continue;
-                }
-                if let Some(alias) = ByteRange::new(GuestAddr::new(other_base + offset), len) {
-                    out.push(alias);
-                }
+            for (source_base, piece) in pieces_in_views(range, space, &mapping.views, mapping.size)
+            {
+                let offset = piece.start().raw() - source_base;
+                out.extend(
+                    sibling_views(&mapping.views, space, source_base).filter_map(
+                        |(_, other_base)| {
+                            ByteRange::new(GuestAddr::new(other_base + offset), piece.length())
+                        },
+                    ),
+                );
             }
         }
         out
     }
 }
 
+/// Each part of `range` inside a view in `space`, with that view's base.
+///
+/// The views belong to one shared segment of `size` bytes. A range can run
+/// out of a view into the region beside it, so a part can be shorter than
+/// `range`.
+pub(super) fn pieces_in_views(
+    range: ByteRange,
+    space: AddressSpaceId,
+    views: &[(AddressSpaceId, u64)],
+    size: u64,
+) -> impl Iterator<Item = (u64, ByteRange)> + '_ {
+    let (start, end) = (range.start().raw(), range.end().raw());
+    views.iter().filter_map(move |&(view_space, base)| {
+        let (lo, hi) = (start.max(base), end.min(base.saturating_add(size)));
+        (view_space == space && lo < hi)
+            .then(|| ByteRange::new(GuestAddr::new(lo), hi - lo))
+            .flatten()
+            .map(|piece| (base, piece))
+    })
+}
+
+/// Every view of one shared segment except the view at `base` in `space`.
+///
+/// The views come in registration order. A second view in the same space
+/// aliases the same bytes, so the filter skips the one view at `base` alone.
+pub(super) fn sibling_views(
+    views: &[(AddressSpaceId, u64)],
+    space: AddressSpaceId,
+    base: u64,
+) -> impl Iterator<Item = (AddressSpaceId, u64)> + '_ {
+    views
+        .iter()
+        .copied()
+        .filter(move |&(view_space, view_base)| !(view_space == space && view_base == base))
+}
+
 #[cfg(test)]
 #[path = "tests/shared_view_store_tests.rs"]
 mod shared_view_store_tests;
+
+#[cfg(test)]
+#[path = "tests/shared_view_span_tests.rs"]
+mod shared_view_span_tests;

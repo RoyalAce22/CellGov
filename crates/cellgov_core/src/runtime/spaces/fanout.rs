@@ -97,40 +97,43 @@ impl Runtime {
             return 0;
         }
         let mut cleared = 0usize;
-        let (start, len) = (range.start().raw(), range.length());
         let mut replications: Vec<(Vec<u8>, AddressSpaceId, u64)> = Vec::new();
+        let source_mem = match source_space {
+            AddressSpaceId::BOOT => Some(&self.memory),
+            s => self.spaces.extra.get(&s),
+        };
         for mapping in self.spaces.shared.values() {
-            let source_view = mapping
-                .views
-                .iter()
-                .find(|(space, base)| {
-                    *space == source_space && start >= *base && start + len <= *base + mapping.size
-                })
-                .copied();
-            let Some((_, source_base)) = source_view else {
-                continue;
-            };
-            let offset = start - source_base;
-            let committed: Vec<u8> = {
-                let mem = match source_space {
-                    AddressSpaceId::BOOT => &self.memory,
-                    s => self.spaces.extra.get(&s).expect("source space exists"),
-                };
-                match mem.read(range) {
-                    Some(bytes) => bytes.to_vec(),
-                    // An unreadable source range committed nothing, so
-                    // there is nothing to replicate; only an effect that
-                    // never landed reaches here.
-                    None => continue,
-                }
-            };
-            for &(dst_space, dst_base) in &mapping.views {
-                // Skip only the view the write landed in; a second view
-                // in the same space aliases the same bytes.
-                if dst_space == source_space && dst_base == source_base {
+            // A write can run out of a view into the region beside it;
+            // only the part inside the view has siblings.
+            for (source_base, piece) in
+                super::shared::pieces_in_views(range, source_space, &mapping.views, mapping.size)
+            {
+                // A space with no memory committed nothing, so there is
+                // nothing to replicate.
+                let Some(mem) = source_mem else {
+                    self.lv2_host.log_invariant_break(
+                        "runtime.fanout_source_space_missing",
+                        format_args!(
+                            "a shared view in space {} has no memory; \
+                             the write at 0x{:x} is not replicated",
+                            source_space.raw(),
+                            piece.start().raw()
+                        ),
+                    );
                     continue;
-                }
-                replications.push((committed.clone(), dst_space, dst_base + offset));
+                };
+                // An unreadable piece committed nothing, so there is
+                // nothing to replicate; only an effect that never landed
+                // reaches here.
+                let Some(committed) = mem.read(piece) else {
+                    continue;
+                };
+                let offset = piece.start().raw() - source_base;
+                replications.extend(
+                    super::shared::sibling_views(&mapping.views, source_space, source_base).map(
+                        |(dst_space, dst_base)| (committed.to_vec(), dst_space, dst_base + offset),
+                    ),
+                );
             }
         }
         for (bytes, dst_space, dst_addr) in replications {

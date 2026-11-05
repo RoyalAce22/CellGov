@@ -1,0 +1,29 @@
+[test]
+name = "spu_raw_window_span"
+
+# A hardware probe: an aligned word store and two misaligned doubleword
+# stores into Raw SPU windows, one inside a local store and one running
+# from one Raw SPU's window into the next one's, each in a child thread
+# so a fault ends only that thread.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 48 big-endian u32 words, as ppu/main.c lists: 192 bytes. Word 0 is
+# the done or progress marker, word 1 the step a progress record names,
+# words 2..8 the initialize, create (with the two ids in words 4 and 6)
+# and destroy return codes. Words 9..19, 20..30 and 31..41 are cases 1,
+# 2 and 3, each: child create and start return codes, the reached and
+# passed flags, the get-priority answer for the child, the join return
+# code and exit value, and b's local store words 0..3 after the case.
+memory_regions = [
+  { name = "result", addr = 0, size = 192 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+volatile = [
+  { region = "result", offset = 16, size = 4, reason = "w4: a Raw SPU id is the lowest the whole system leaves free" },
+  { region = "result", offset = 24, size = 4, reason = "w6: a Raw SPU id is the lowest the whole system leaves free" },
+]

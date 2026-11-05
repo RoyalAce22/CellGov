@@ -25,8 +25,12 @@ pub enum CodeEvent {
         addr: u64,
         /// The store width in bytes.
         len: u8,
-        /// The stored word, for a word-aligned 4-byte store.
-        word: Option<u32>,
+        /// The stored bytes, in the low `len` bytes. The bits above them
+        /// are zero.
+        value: u128,
+        /// Whether the store is one single-copy atomic access of a word
+        /// or a doubleword [PPC-Book2 p:3 s:1.4].
+        atomic: bool,
     },
     /// `dcbst` on the block that holds `addr`.
     Dcbst {

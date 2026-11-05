@@ -66,9 +66,9 @@ fn lwz_mem_fault_on_bad_address() {
 }
 
 #[test]
-fn a_load_straddling_a_plain_view_and_a_reserved_view_is_unmapped_and_unlogged() {
-    use cellgov_mem::{GuestMemory, PageSize, Region, RegionAccess};
-    let mem = GuestMemory::from_regions(vec![
+fn a_load_straddling_a_plain_view_and_a_reserved_view_reads_both_and_logs_the_reserved_piece() {
+    use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize, Region, RegionAccess};
+    let mut mem = GuestMemory::from_regions(vec![
         Region::new(0, 0x1_0000, "flat", PageSize::Page64K),
         Region::with_access(
             0x1_0000,
@@ -79,14 +79,16 @@ fn a_load_straddling_a_plain_view_and_a_reserved_view_is_unmapped_and_unlogged()
         ),
     ])
     .unwrap();
+    let low = ByteRange::new(GuestAddr::new(0xFFFC), 4).unwrap();
+    mem.apply_commit(low, &[0x11, 0x22, 0x33, 0x44]).unwrap();
     let views: Vec<cellgov_mem::RegionView<'_>> = mem.region_views().collect();
     let mut s = PpuState::new();
     s.set_gpr(1, 0xFFFC);
     s.set_gpr(3, 0xDEAD_BEEF);
     let mut effects = Vec::new();
     let mut store_buf = StoreBuffer::new();
-    // Bytes 0xFFFC..0x1_0004 cross the region boundary; no single view
-    // covers them, which is the same answer `GuestMemory::read` gives.
+    // Bytes 0xFFFC..0x1_0004 cross the region boundary: the low four
+    // come from the plain view, the high four from the zero-readable one.
     let v = execute(
         &PpuInstruction::Ld {
             rt: 3,
@@ -99,19 +101,15 @@ fn a_load_straddling_a_plain_view_and_a_reserved_view_is_unmapped_and_unlogged()
         &mut effects,
         &mut store_buf,
     );
-    assert!(
-        matches!(
-            v,
-            ExecuteVerdict::MemFault(cellgov_mem::MemError::Unmapped(ctx)) if ctx.addr == 0xFFFC
-        ),
-        "got {v:?}"
+    assert_eq!(v, ExecuteVerdict::Continue);
+    assert_eq!(s.gpr[3], 0x1122_3344_0000_0000);
+    let reads = mem.drain_provisional_reads();
+    assert_eq!(reads.len(), 1, "{reads:?}");
+    assert_eq!(
+        (reads[0].addr, reads[0].len, reads[0].hits),
+        (0x1_0000, 4, 1),
+        "only the reserved piece is a provisional read"
     );
-    assert_eq!(s.gpr[3], 0xDEAD_BEEF, "a faulting load leaves RT alone");
-    assert!(
-        mem.drain_provisional_reads().is_empty(),
-        "a miss on the reserved view is not a read of it"
-    );
-    assert_eq!(mem.provisional_read_count(), 0);
 }
 
 #[test]

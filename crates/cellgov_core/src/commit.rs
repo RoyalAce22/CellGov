@@ -665,8 +665,12 @@ fn require_mailbox(
     Ok(())
 }
 
-/// Refuse a write of `len` bytes over `range` whose length disagrees,
-/// whose end overflows, or that no memory region contains.
+/// Refuse a write of `len` bytes over `range` that memory cannot take.
+///
+/// The check refuses the write when:
+/// - the length of `range` disagrees with `len`
+/// - the end of `range` overflows
+/// - no memory region holds a byte of `range`
 fn check_write_target(
     memory: &GuestMemory,
     range: &ByteRange,
@@ -681,7 +685,7 @@ fn check_write_target(
     start
         .checked_add(length)
         .ok_or(CommitError::OutOfRange { effect_index: idx })?;
-    if memory.containing_region(start, length).is_none() {
+    if !memory.holds(start, length) {
         return Err(CommitError::OutOfRange { effect_index: idx });
     }
     Ok(())
@@ -768,6 +772,10 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/dma_argument_tests.rs"]
 mod dma_argument_tests;
+
+#[cfg(test)]
+#[path = "tests/commit_span_tests.rs"]
+mod commit_span_tests;
 
 #[cfg(test)]
 #[path = "tests/put_bus_request_tests.rs"]

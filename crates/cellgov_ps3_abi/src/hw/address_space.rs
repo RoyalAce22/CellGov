@@ -180,6 +180,18 @@ pub const PS3_RSX_SIZE: usize = 0x1000_0000;
 /// raw SPU's windows sit at this base plus `id * 0x10_0000`
 /// (`spu_raw_window_modes`). SPU thread windows start at `0xF000_0000`
 /// (`spu_thread_window_slots`, `spu_ls_alias`).
+///
+/// A raw SPU's window is caching-inhibited. On the reference console an
+/// aligned `stw` into a raw SPU's local store completes
+/// (`spu_raw_window_span`). Each of these stores ends the thread at the
+/// store, as an alignment interrupt does, and changes no local-store byte:
+///
+/// - a `std` four bytes past a doubleword in the local store
+/// - a `std` that runs from one raw SPU's window into the next one's
+///
+/// An aligned or misaligned `lwz` also ends the thread at a raw SPU stride
+/// with no raw SPU, and at an SPU thread window slot with no thread group
+/// (`ppu_spu_reserved_loads`).
 pub const PS3_SPU_RESERVED_BASE: u64 = 0xE000_0000;
 
 /// Size in bytes of CellGov's SPU region, which runs to the end of the

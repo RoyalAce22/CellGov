@@ -258,7 +258,7 @@ pub(super) fn load(
         Dest::Zero(_) | Dest::Reversed(_) | Dest::Fpr(_) => port.unaligned_inhibited(addr, width),
     };
     if inhibited {
-        return ExecuteVerdict::Fault(PpuFault::alignment(addr, false));
+        return port.inhibited_load(addr, u64::from(width.bytes()));
     }
     let loaded = match dest {
         Dest::Sign(_) => load_se(port, addr, width),

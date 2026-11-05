@@ -60,13 +60,30 @@ impl Window {
         self.base + raw_window::PROBLEM_STATE + u64::from(offset)
     }
 
-    /// The offset of `range` from the window's base, or `None` for a
-    /// range that starts outside the window. An address past the window
-    /// names no register and no local-store byte of this Raw SPU.
-    fn offset_of(&self, range: ByteRange) -> Option<u64> {
-        let offset = range.start().raw().checked_sub(self.base)?;
-        (offset < raw_window::STRIDE).then_some(offset)
+    /// The part of `range` inside the window, or `None` if `range` misses it.
+    ///
+    /// Windows sit end to end, so a range can run from one window into the
+    /// next. Each window takes its own part.
+    fn part_of(&self, range: ByteRange) -> Option<WindowPart> {
+        let (start, end) = (range.start().raw(), range.end().raw());
+        let window_end = self.base + raw_window::STRIDE;
+        let (lo, hi) = (start.max(self.base), end.min(window_end));
+        (lo < hi).then(|| WindowPart {
+            offset: lo - self.base,
+            skip: (lo - start) as usize,
+            len: hi - lo,
+        })
     }
+}
+
+/// The part of an access that lands in one window.
+#[derive(Debug, Clone, Copy)]
+struct WindowPart {
+    /// Offset of the part from the window's base.
+    offset: u64,
+    /// Bytes of the access before the part.
+    skip: usize,
+    len: u64,
 }
 
 /// The first address of Raw SPU `id`'s window.
@@ -164,12 +181,15 @@ impl Runtime {
                 _ => continue,
             };
             for window in &windows {
-                let Some(offset) = window.offset_of(range) else {
+                let Some(part) = window.part_of(range) else {
                     continue;
                 };
                 match bytes {
-                    Some(bytes) => self.write_raw_spu_window(window, offset, bytes),
-                    None => self.read_raw_spu_window(window, offset, range.length()),
+                    Some(bytes) => {
+                        let bytes = &bytes[part.skip..part.skip + part.len as usize];
+                        self.write_raw_spu_window(window, part.offset, bytes);
+                    }
+                    None => self.read_raw_spu_window(window, part.offset, part.len),
                 }
             }
         }

@@ -187,7 +187,7 @@ fn drain_into_reserved_strict_region_returns_reserved_write() {
 }
 
 #[test]
-fn drain_into_cross_region_span_rejects_whole_batch() {
+fn drain_into_a_span_across_adjacent_regions_writes_both() {
     use crate::{PageSize, Region};
     let mut mem = GuestMemory::from_regions(vec![
         Region::new(0, 0x100, "main", PageSize::Page64K),
@@ -196,6 +196,18 @@ fn drain_into_cross_region_span_rejects_whole_batch() {
     .unwrap();
     let mut s = StagingMemory::new();
     // [0xFC, 0x104): straddles the main/tail boundary at 0x100.
+    s.stage(staged(0xFC, &[1, 2, 3, 4, 5, 6, 7, 8]));
+    assert_eq!(s.drain_into(&mut mem).unwrap(), 1);
+    assert_eq!(mem.read(range(0xFC, 4)).unwrap(), &[1, 2, 3, 4]);
+    assert_eq!(mem.read(range(0x100, 4)).unwrap(), &[5, 6, 7, 8]);
+}
+
+#[test]
+fn drain_into_a_span_running_past_the_last_region_rejects_whole_batch() {
+    use crate::{PageSize, Region};
+    let mut mem =
+        GuestMemory::from_regions(vec![Region::new(0, 0x100, "main", PageSize::Page64K)]).unwrap();
+    let mut s = StagingMemory::new();
     s.stage(staged(0xFC, &[1, 2, 3, 4, 5, 6, 7, 8]));
     let err = s.drain_into(&mut mem).unwrap_err();
     assert!(matches!(err, MemError::Unmapped(_)));

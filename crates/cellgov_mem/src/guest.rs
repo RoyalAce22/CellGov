@@ -479,7 +479,10 @@ pub enum MemError {
         /// Size in bytes the removal named.
         size: u64,
     },
-    /// Range is not entirely contained within any single mapped region.
+    /// The mapped regions do not hold the range as its access needs.
+    ///
+    /// - A write needs each byte in some region.
+    /// - A read or a window needs the whole range in one region.
     #[error("{0}")]
     Unmapped(FaultContext),
     /// Write targeted a non-`ReadWrite` region.
@@ -846,60 +849,108 @@ impl GuestMemory {
     ///
     /// # Errors
     ///
-    /// - [`MemError::LengthMismatch`] if `bytes.len()` differs from `range.length()`.
-    /// - [`MemError::Unmapped`] if [`GuestMemory::containing_region`] finds
-    ///   no region for the range.
-    /// - [`MemError::ReservedWrite`] if the target region is not `ReadWrite`.
+    /// As [`Self::validate_write`].
     pub fn apply_commit(&mut self, range: ByteRange, bytes: &[u8]) -> Result<(), MemError> {
-        self.validate_write(range, bytes.len())?;
-        let start = range.start().raw();
-        let length = range.length();
-        let idx = self
-            .containing_region_index(start, length)
-            .expect("validate_write proved the range lies in a ReadWrite region");
-        let region = &mut self.regions[idx];
-        let offset = (start - region.base()) as usize;
-        let end = offset + length as usize;
-        Arc::make_mut(&mut region.bytes)[offset..end].copy_from_slice(bytes);
-        if length > 0 {
-            let first_page = offset >> RESET_PAGE_BITS;
-            let last_page = (end - 1) >> RESET_PAGE_BITS;
-            region.dirty_pages.mark_range(first_page, last_page);
-            self.page_hashes.get_mut()[idx]
-                .stale
-                .mark_range(first_page, last_page);
+        let span = self.write_span(range, bytes.len())?;
+        let mut at = range.start().raw();
+        let mut taken = 0usize;
+        for idx in span {
+            let region = &mut self.regions[idx];
+            let offset = (at - region.base()) as usize;
+            let n = (region.bytes.len() - offset).min(bytes.len() - taken);
+            let end = offset + n;
+            Arc::make_mut(&mut region.bytes)[offset..end].copy_from_slice(&bytes[taken..taken + n]);
+            if n > 0 {
+                let first_page = offset >> RESET_PAGE_BITS;
+                let last_page = (end - 1) >> RESET_PAGE_BITS;
+                region.dirty_pages.mark_range(first_page, last_page);
+                self.page_hashes.get_mut()[idx]
+                    .stale
+                    .mark_range(first_page, last_page);
+            }
+            at += n as u64;
+            taken += n;
         }
         self.cached_hash.set(None);
         Ok(())
     }
 
     /// Validate that a `byte_len`-byte write at `range` would succeed
-    /// via `apply_commit`, without mutating. The single source of
-    /// truth for write-validity; `apply_commit` calls it as its first
-    /// step.
+    /// via `apply_commit`, without mutating. `apply_commit` runs the same
+    /// check first, then writes the regions the check found.
+    ///
+    /// The range may run across regions that sit end to end, as a store
+    /// runs across adjacent pages.
     ///
     /// # Errors
     ///
     /// - [`MemError::LengthMismatch`] if `byte_len as u64 != range.length()`.
-    /// - [`MemError::Unmapped`] if [`GuestMemory::containing_region`] finds
-    ///   no region for the range.
-    /// - [`MemError::ReservedWrite`] if the target region is not `ReadWrite`.
+    /// - [`MemError::Unmapped`] if a byte of the range lies in no region.
+    /// - [`MemError::ReservedWrite`] if a region the range reaches is not
+    ///   `ReadWrite`. The error's `addr` is the first byte of the range in
+    ///   that region.
     pub fn validate_write(&self, range: ByteRange, byte_len: usize) -> Result<(), MemError> {
+        self.write_span(range, byte_len).map(|_| ())
+    }
+
+    /// The indices of the `ReadWrite` regions a write of `byte_len` bytes
+    /// over `range` lands in, refused as [`Self::validate_write`] refuses.
+    fn write_span(
+        &self,
+        range: ByteRange,
+        byte_len: usize,
+    ) -> Result<std::ops::Range<usize>, MemError> {
         if byte_len as u64 != range.length() {
             return Err(MemError::LengthMismatch);
         }
         let start = range.start().raw();
-        let length = range.length();
-        let region = self
-            .containing_region(start, length)
-            .ok_or_else(|| MemError::Unmapped(self.fault_context(start)))?;
-        if region.access() != RegionAccess::ReadWrite {
+        let span = self
+            .region_span(start, range.length())
+            .map_err(|_| MemError::Unmapped(self.fault_context(start)))?;
+        if let Some(region) = self.regions[span.clone()]
+            .iter()
+            .find(|r| r.access() != RegionAccess::ReadWrite)
+        {
             return Err(MemError::ReservedWrite {
-                addr: start,
+                addr: start.max(region.base()),
                 region: region.label(),
             });
         }
-        Ok(())
+        Ok(span)
+    }
+
+    /// Whether every byte of `[addr, addr + length)` lies in a region,
+    /// whatever its access. The range may run across regions that sit end
+    /// to end.
+    pub fn holds(&self, addr: u64, length: u64) -> bool {
+        self.region_span(addr, length).is_ok()
+    }
+
+    /// The indices of the regions that hold `[addr, addr + length)` end to
+    /// end, or the first address of the range that no region holds.
+    fn region_span(&self, addr: u64, length: u64) -> Result<std::ops::Range<usize>, u64> {
+        if let Some(idx) = self.containing_region_index(addr, length) {
+            return Ok(idx..idx + 1);
+        }
+        let end = addr.checked_add(length).ok_or(addr)?;
+        let after = self.regions.partition_point(|r| r.base() <= addr);
+        if length == 0 || after == 0 || addr < self.unmapped_below {
+            return Err(addr);
+        }
+        let first = after - 1;
+        let (mut idx, mut at) = (first, addr);
+        // Regions are sorted and disjoint, so the region after one that
+        // ends at `at` holds `at` only when it starts there.
+        while at < end {
+            match self.regions.get(idx) {
+                Some(r) if r.base() <= at && at < r.end() => {
+                    at = r.end();
+                    idx += 1;
+                }
+                _ => return Err(at),
+            }
+        }
+        Ok(first..idx)
     }
 
     /// Zero every dirty page across every region in place. O(touched
@@ -1050,6 +1101,10 @@ mod incremental_hash_tests;
 #[cfg(test)]
 #[path = "tests/remove_region_tests.rs"]
 mod remove_region_tests;
+
+#[cfg(test)]
+#[path = "tests/region_span_tests.rs"]
+mod region_span_tests;
 
 #[cfg(test)]
 #[path = "tests/provisional_rewind_tests.rs"]

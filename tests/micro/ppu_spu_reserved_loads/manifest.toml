@@ -1,0 +1,23 @@
+[test]
+name = "ppu_spu_reserved_loads"
+
+# A hardware probe: an aligned and a misaligned word load at the first
+# Raw SPU stride with no Raw SPU created, and at the first SPU thread
+# window slot with no SPU thread group, each in a child thread so a
+# fault ends only that thread.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 36 big-endian u32 words, as ppu/main.c lists: 144 bytes. Word 0 is
+# the done or progress marker, word 1 the step a progress record names.
+# Words 2..9, 10..17, 18..25 and 26..33 are cases 1 to 4 (0xE0000000,
+# 0xE0000002, 0xF0000000, 0xF0000002), each: child create and start
+# return codes, the reached and passed flags, the loaded word, the
+# get-priority answer for the child, and the join return code and exit
+# value. Words 34..35 are zero.
+memory_regions = [
+  { name = "result", addr = 0, size = 144 },
+]
+
+[expect]
+outcome = "completed"

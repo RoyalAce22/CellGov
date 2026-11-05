@@ -79,16 +79,21 @@ impl<'v, 'e> LoadPort<'v, 'e> {
 
     /// Copy the committed bytes at `ea` into `out` and record the read.
     ///
-    /// Returns `false` when no region view covers the range; the port
-    /// then leaves `out` unchanged and records nothing.
+    /// The range may run across views that sit end to end, as a load runs
+    /// across adjacent pages. Returns `false` when a byte of the range lies
+    /// in no view; the port then leaves `out` unchanged and records
+    /// nothing.
     #[inline]
     pub(crate) fn read_committed(&mut self, ea: u64, out: &mut [u8]) -> bool {
-        let Some(slice) = load_slice(self.views, ea, out.len()) else {
+        // A range whose end overflows u64 lies in no view.
+        let Some(range) = ByteRange::new(GuestAddr::new(ea), out.len() as u64) else {
             return false;
         };
-        out.copy_from_slice(slice);
-        let range = ByteRange::new(GuestAddr::new(ea), out.len() as u64)
-            .expect("load_slice rejects an (ea, len) that overflows u64");
+        match load_slice(self.views, ea, out.len()) {
+            Some(slice) => out.copy_from_slice(slice),
+            None if copy_across_views(self.views, ea, out) => {}
+            None => return false,
+        }
         self.effects.push(Effect::SharedReadIntent {
             range,
             source: self.source,
@@ -96,24 +101,12 @@ impl<'v, 'e> LoadPort<'v, 'e> {
         true
     }
 
-    /// The fault for a read at `ea` that no view holds whole.
+    /// The fault for a read at `ea` that the views do not hold.
     ///
-    /// Its address is the first byte no view holds: the end of the view
-    /// the read starts in, when no view holds that byte. Otherwise `ea`:
-    /// the read crosses from one view into another, which no single
-    /// view can serve.
+    /// Its address is the first byte of the read that no view holds.
     #[inline]
     fn refusal(&self, ea: u64) -> cellgov_mem::MemError {
-        let holds = |addr: u64| {
-            self.views
-                .iter()
-                .find(|v| v.base <= addr && addr < v.base + v.bytes.len() as u64)
-        };
-        let first_unheld = holds(ea)
-            .map(|v| v.base + v.bytes.len() as u64)
-            .filter(|&end| holds(end).is_none())
-            .unwrap_or(ea);
-        unmapped(first_unheld)
+        unmapped(first_unheld(self.views, ea))
     }
 
     /// See [`caching_inhibited`].
@@ -127,6 +120,71 @@ impl<'v, 'e> LoadPort<'v, 'e> {
     pub(crate) fn unaligned_inhibited(&self, ea: u64, width: Width) -> bool {
         unaligned_inhibited(self.views, ea, width.bytes())
     }
+
+    /// See [`inhibited_load`].
+    #[inline]
+    pub(crate) fn inhibited_load(&self, ea: u64, len: u64) -> ExecuteVerdict {
+        inhibited_load(self.views, ea, ea, len)
+    }
+}
+
+#[inline]
+fn view_holding<'v, 'a>(views: &'v [RegionView<'a>], addr: u64) -> Option<&'v RegionView<'a>> {
+    views
+        .iter()
+        .find(|v| v.base <= addr && addr < v.base + v.bytes.len() as u64)
+}
+
+/// The first byte at or after `ea` that no view holds, across views that
+/// sit end to end.
+#[inline]
+fn first_unheld(views: &[RegionView<'_>], ea: u64) -> u64 {
+    let mut at = ea;
+    while let Some(view) = view_holding(views, at) {
+        at = view.base + view.bytes.len() as u64;
+    }
+    at
+}
+
+/// Copy `[ea, ea + out.len())` from views that sit end to end.
+///
+/// Each provisional piece logs its read with its view. Returns `false`
+/// when a byte of the range lies in no view; the copy then writes and
+/// logs nothing.
+fn copy_across_views(views: &[RegionView<'_>], ea: u64, out: &mut [u8]) -> bool {
+    let Some(end) = ea.checked_add(out.len() as u64) else {
+        return false;
+    };
+    if out.is_empty() || first_unheld(views, ea) < end {
+        return false;
+    }
+    for (view, at, piece_end) in pieces_held(views, ea, end) {
+        let (offset, n) = ((at - view.base) as usize, (piece_end - at) as usize);
+        let done = (at - ea) as usize;
+        view.note_read(at, n as u32);
+        out[done..done + n].copy_from_slice(&view.bytes[offset..offset + n]);
+    }
+    true
+}
+
+/// Each view that holds a piece of `[ea, end)`, with the piece's start
+/// and end, in address order. The iterator stops at the first byte that
+/// no view holds.
+fn pieces_held<'v, 'a>(
+    views: &'v [RegionView<'a>],
+    ea: u64,
+    end: u64,
+) -> impl Iterator<Item = (&'v RegionView<'a>, u64, u64)> {
+    let mut at = ea;
+    std::iter::from_fn(move || {
+        if at >= end {
+            return None;
+        }
+        let view = view_holding(views, at)?;
+        let piece = (view, at, (view.base + view.bytes.len() as u64).min(end));
+        at = piece.2;
+        Some(piece)
+    })
 }
 
 /// Synthesize a `MemError::Unmapped` for `ea` with no nearest-region
@@ -194,8 +252,8 @@ pub(crate) fn load_ze(
     })
 }
 
-/// [`load_ze`] for a fused pair's load half, after the alignment check
-/// of [`unaligned_inhibited`].
+/// [`load_ze`] for a fused pair's load half, after the check of
+/// [`unaligned_inhibited`] and the verdict of [`inhibited_load`].
 #[inline]
 pub(crate) fn load_ze_checked(
     port: &mut LoadPort<'_, '_>,
@@ -203,7 +261,7 @@ pub(crate) fn load_ze_checked(
     width: Width,
 ) -> Result<u64, ExecuteVerdict> {
     if port.unaligned_inhibited(ea, width) {
-        return Err(ExecuteVerdict::Fault(PpuFault::alignment(ea, false)));
+        return Err(port.inhibited_load(ea, u64::from(width.bytes())));
     }
     load_ze(port, ea, width).map_err(ExecuteVerdict::MemFault)
 }
@@ -250,10 +308,7 @@ pub(crate) fn check_block_translates(
     views: &[RegionView<'_>],
     ea: u64,
 ) -> Result<(), cellgov_mem::MemError> {
-    let held = views
-        .iter()
-        .any(|v| v.base <= ea && ea < v.base + v.bytes.len() as u64);
-    if held {
+    if view_holding(views, ea).is_some() {
         Ok(())
     } else {
         Err(unmapped(ea))
@@ -279,6 +334,28 @@ pub(crate) fn caching_inhibited(views: &[RegionView<'_>], ea: u64, len: u64) -> 
 #[inline]
 fn unaligned_inhibited(views: &[RegionView<'_>], ea: u64, size: u8) -> bool {
     ea & u64::from(size - 1) != 0 && caching_inhibited(views, ea, u64::from(size))
+}
+
+/// The verdict of a load of `[start, start + len)` that the PPE refuses
+/// in caching-inhibited storage, with `dar` the instruction's EA.
+///
+/// A load that runs into a byte no view holds faults on the first such
+/// byte.
+///
+/// [CBE-Handbook p:290 s:9.10] A load's page-fault data storage interrupt precedes its alignment interrupt in caching-inhibited storage.
+#[inline]
+pub(crate) fn inhibited_load(
+    views: &[RegionView<'_>],
+    dar: u64,
+    start: u64,
+    len: u64,
+) -> ExecuteVerdict {
+    let unheld = first_unheld(views, start);
+    if unheld < start.saturating_add(len) {
+        ExecuteVerdict::MemFault(unmapped(unheld))
+    } else {
+        ExecuteVerdict::Fault(PpuFault::alignment(dar, false))
+    }
 }
 
 /// The verdict of a store of `[start, start + len)` that the PPE refuses
@@ -312,10 +389,7 @@ fn write_refusal(views: &[RegionView<'_>], start: u64, len: u64) -> Option<cellg
     let mut at = start;
     // Each pass moves `at` to the end of the view that holds it.
     while at < end {
-        let Some(view) = views
-            .iter()
-            .find(|v| v.base <= at && at < v.base + v.bytes.len() as u64)
-        else {
+        let Some(view) = view_holding(views, at) else {
             return Some(unmapped(at));
         };
         if let Some(region) = view.write_refused_by {
@@ -326,41 +400,23 @@ fn write_refusal(views: &[RegionView<'_>], start: u64, len: u64) -> Option<cellg
     None
 }
 
-/// Refuse a store of `len` bytes at `ea` that no one view holds, or
-/// that reaches a view whose region refuses writes.
+/// Refuse a store of `len` bytes at `ea` that [`write_refusal`] refuses.
 ///
 /// The error's address is the first refused byte: `ea`, or the end of
-/// the writable view the store starts in. That byte lies in the first
+/// the writable views the store starts in. That byte lies in the first
 /// doubleword the store accesses in the refusing page, which is where
-/// the architecture puts the DAR [PPC-Book3 p:67 s:5.5.3]. For a store
-/// that runs from one writable view into another, the error names `ea`:
-/// no single view can take it.
+/// the architecture puts the DAR [PPC-Book3 p:67 s:5.5.3].
 #[inline]
 pub(crate) fn check_store(
     views: &[RegionView<'_>],
     ea: u64,
     len: u64,
 ) -> Result<(), cellgov_mem::MemError> {
-    let end = ea.checked_add(len).ok_or_else(|| unmapped(ea))?;
-    for view in views {
-        let view_end = view.base + view.bytes.len() as u64;
-        if ea < view.base || ea >= view_end {
-            continue;
-        }
-        if let Some(region) = view.write_refused_by {
-            return Err(cellgov_mem::MemError::ReservedWrite { addr: ea, region });
-        }
-        if end <= view_end {
-            return Ok(());
-        }
-        // The rest lies past this view, in a region that refuses it,
-        // in no region, or in another writable view.
-        return Err(match check_store(views, view_end, end - view_end) {
-            Err(e) => e,
-            Ok(()) => unmapped(ea),
-        });
+    ea.checked_add(len).ok_or_else(|| unmapped(ea))?;
+    match write_refusal(views, ea, len) {
+        Some(e) => Err(e),
+        None => Ok(()),
     }
-    Err(unmapped(ea))
 }
 
 /// Stage a store. The unit's own reservation survives it: only a
@@ -380,10 +436,9 @@ pub(crate) fn buffer_store(
     size: u8,
     value: u64,
 ) -> ExecuteVerdict {
-    // `check_store` refuses a store that runs from one view into
-    // another. An operand that runs from a cacheable view into an
-    // inhibited one takes the alignment interrupt, so this check runs
-    // first.
+    // An operand that runs from a cacheable view into an inhibited one
+    // takes the alignment interrupt. `check_store` does not give that
+    // interrupt, so this check runs first.
     if unaligned_inhibited(views, ea, size) {
         return inhibited_store(views, ea, ea, u64::from(size));
     }

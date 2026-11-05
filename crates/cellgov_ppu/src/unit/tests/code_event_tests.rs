@@ -54,13 +54,15 @@ fn the_events_follow_program_order_and_a_fetch_records_once_per_line_run() {
             CodeEvent::Store {
                 addr: 128,
                 len: 4,
-                word: Some(0x1234)
+                value: 0x1234,
+                atomic: true
             },
             fetch(4),
             CodeEvent::Store {
                 addr: 132,
                 len: 1,
-                word: None
+                value: 0x34,
+                atomic: false
             },
             fetch(8),
             CodeEvent::Dcbst { addr: 0x80 },

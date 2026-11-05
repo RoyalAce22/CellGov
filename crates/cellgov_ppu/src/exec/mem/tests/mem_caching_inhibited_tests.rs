@@ -4,12 +4,12 @@ use super::*;
 use crate::instruction::FusedPair;
 
 /// Base of the 0x200-byte view each case runs over.
-const BASE: u64 = 0x0001_0000;
+pub(super) const BASE: u64 = 0x0001_0000;
 /// The doubleword-aligned EA that [`run`] puts in r3.
-const EA: u64 = BASE + 0x40;
+pub(super) const EA: u64 = BASE + 0x40;
 
 /// A view of `mem` at [`BASE`].
-fn view<'a>(
+pub(super) fn view<'a>(
     mem: &'a [u8],
     inhibited: bool,
     refused_by: Option<&'static str>,
@@ -23,7 +23,7 @@ fn view<'a>(
 
 /// Runs `insn` over `views` with r3 = [`EA`], r4 = 2 and a marker in r5
 /// and r29-r31. The effects include the flushed store buffer.
-fn run(
+pub(super) fn run(
     insn: PpuInstruction,
     views: &[cellgov_mem::RegionView<'_>],
 ) -> (ExecuteVerdict, PpuState, Vec<Effect>) {
@@ -42,7 +42,7 @@ fn run(
 
 /// Each form the PPE refuses in caching-inhibited storage, with the EA
 /// it computes and whether it stores.
-fn refused_forms() -> Vec<(PpuInstruction, u64, bool)> {
+pub(super) fn refused_forms() -> Vec<(PpuInstruction, u64, bool)> {
     use PpuInstruction as I;
     vec![
         // [CBE-Handbook p:253 s:9.5.8] an unaligned operand of a load or store.

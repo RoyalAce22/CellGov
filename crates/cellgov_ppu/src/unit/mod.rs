@@ -278,3 +278,7 @@ mod snapshot_restore_tests;
 #[cfg(test)]
 #[path = "tests/code_event_tests.rs"]
 mod code_event_tests;
+
+#[cfg(test)]
+#[path = "tests/code_event_atomic_tests.rs"]
+mod code_event_atomic_tests;

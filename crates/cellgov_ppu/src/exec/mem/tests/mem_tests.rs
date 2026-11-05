@@ -14,6 +14,8 @@ use cellgov_event::UnitId;
 
 use cellgov_sync::ReservedLine;
 
+#[path = "mem_adjacent_views_tests.rs"]
+mod adjacent_views;
 #[path = "mem_alignment_tests.rs"]
 mod alignment;
 #[path = "mem_altivec_tests.rs"]
@@ -28,6 +30,8 @@ mod dcbz_console;
 mod dcbz_rsx;
 #[path = "mem_float_tests.rs"]
 mod floats;
+#[path = "mem_inhibited_hole_tests.rs"]
+mod inhibited_hole;
 #[path = "mem_lmw_form_tests.rs"]
 mod lmw_form;
 #[path = "mem_load_wrap_tests.rs"]

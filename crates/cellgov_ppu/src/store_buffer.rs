@@ -171,20 +171,16 @@ impl StoreBuffer {
             .map(|e| (e.addr, e.len))
     }
 
-    /// [`Self::stores_from`] with a third field, `word`.
+    /// [`Self::stores_from`] with a third field, the entry's value.
     ///
-    /// `word` is the stored value of a 4-byte store, and `None` for any
-    /// other width.
-    pub(crate) fn words_from(
-        &self,
-        from: usize,
-    ) -> impl Iterator<Item = (u64, u8, Option<u32>)> + '_ {
+    /// The stored bytes are the low `len` bytes of the value. The bits
+    /// above them can hold register bits, so the caller masks them.
+    pub(crate) fn values_from(&self, from: usize) -> impl Iterator<Item = (u64, u8, u128)> + '_ {
         self.entries
             .get(from..)
             .unwrap_or_default()
             .iter()
-            // An entry holds its bytes in the low `len` bytes of `value`.
-            .map(|e| (e.addr, e.len, (e.len == 4).then_some(e.value as u32)))
+            .map(|e| (e.addr, e.len, e.value))
     }
 
     /// Whether `n` more entries fit. Multi-store instructions
