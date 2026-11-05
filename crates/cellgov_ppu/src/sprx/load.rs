@@ -314,6 +314,9 @@ pub fn load_prx(
         staging.clear();
         return Err(PrxLoadError::BatchCommitFailed { count, source });
     }
+    // The text's file bytes are its code; its zero-filled tail can
+    // reach under the data segment.
+    memory.declare_code(text_start, text_content_end - text_start);
 
     let mut exports: BTreeMap<String, BTreeMap<u32, u64>> = BTreeMap::new();
     for lib in &prx.exports {
@@ -786,3 +789,7 @@ mod placeholder_reloc_refusal_tests;
 #[cfg(test)]
 #[path = "tests/resident_end_tests.rs"]
 mod resident_end_tests;
+
+#[cfg(test)]
+#[path = "tests/load_code_span_tests.rs"]
+mod load_code_span_tests;

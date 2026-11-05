@@ -406,6 +406,15 @@ pub struct GuestMemory {
     /// Set while [`Self::with_reads_unlogged`] runs; a provisional read
     /// then logs nothing.
     reads_unlogged: Cell<bool>,
+    /// The memory refuses every access below this address; see
+    /// [`Self::unmap_below`].
+    unmapped_below: u64,
+    /// Code spans `[start, end)`, sorted, none touching another; see
+    /// [`Self::declare_code`].
+    code_spans: Vec<(u64, u64)>,
+    /// When set, the memory refuses a fetch outside `code_spans`; see
+    /// [`Self::restrict_fetch`].
+    fetch_restricted: bool,
 }
 
 /// Diagnostic context for an out-of-region access.
@@ -536,6 +545,9 @@ impl GuestMemory {
             provisional_read_count: Cell::new(0),
             provisional_reads: RefCell::new(BTreeMap::new()),
             reads_unlogged: Cell::new(false),
+            unmapped_below: 0,
+            code_spans: Vec::new(),
+            fetch_restricted: false,
         })
     }
 
@@ -683,13 +695,22 @@ impl GuestMemory {
     }
 
     /// Every region as a [`RegionView`], in base-address order.
+    ///
+    /// Each view leaves out the bytes below the floor that
+    /// [`Self::unmap_below`] sets. A region wholly below the floor has
+    /// no view.
     pub fn region_views(&self) -> impl Iterator<Item = RegionView<'_>> {
-        self.regions.iter().map(move |r| RegionView {
-            base: r.base(),
-            bytes: r.bytes(),
-            provisional: (r.access() == RegionAccess::ReservedZeroReadable).then_some(self),
-            write_refused_by: (r.access() != RegionAccess::ReadWrite).then_some(r.label()),
-            caching_inhibited: r.caching_inhibited,
+        let floor = self.unmapped_below;
+        self.regions.iter().filter_map(move |r| {
+            let skip = usize::try_from(floor.saturating_sub(r.base())).ok()?;
+            let bytes = r.bytes().get(skip..).filter(|b| !b.is_empty())?;
+            Some(RegionView {
+                base: r.base().max(floor),
+                bytes,
+                provisional: (r.access() == RegionAccess::ReservedZeroReadable).then_some(self),
+                write_refused_by: (r.access() != RegionAccess::ReadWrite).then_some(r.label()),
+                caching_inhibited: r.caching_inhibited,
+            })
         })
     }
 
@@ -768,9 +789,10 @@ impl GuestMemory {
         Ok(&region.bytes[offset..end])
     }
 
-    /// Returns `None` if no region contains the range or the target region
-    /// is `ReservedStrict`. Outside [`GuestMemory::with_reads_unlogged`],
-    /// a read from a `ReservedZeroReadable` region bumps
+    /// Returns `None` if [`GuestMemory::containing_region`] finds no region
+    /// for the range or the target region is `ReservedStrict`. Outside
+    /// [`GuestMemory::with_reads_unlogged`], a read from a
+    /// `ReservedZeroReadable` region bumps
     /// [`GuestMemory::provisional_read_count`]. Use
     /// [`GuestMemory::read_checked`] for typed errors.
     pub fn read(&self, range: ByteRange) -> Option<&[u8]> {
@@ -779,8 +801,8 @@ impl GuestMemory {
 
     /// # Errors
     ///
-    /// - [`MemError::Unmapped`] with a [`FaultContext`] when no region
-    ///   contains the range.
+    /// - [`MemError::Unmapped`] with a [`FaultContext`] when
+    ///   [`GuestMemory::containing_region`] finds no region for the range.
     /// - [`MemError::ReservedStrictRead`] when the target region is
     ///   `ReservedStrict`.
     pub fn read_checked(&self, range: ByteRange) -> Result<&[u8], MemError> {
@@ -793,7 +815,8 @@ impl GuestMemory {
     /// # Errors
     ///
     /// - [`MemError::LengthMismatch`] if `bytes.len()` differs from `range.length()`.
-    /// - [`MemError::Unmapped`] if no region contains the range.
+    /// - [`MemError::Unmapped`] if [`GuestMemory::containing_region`] finds
+    ///   no region for the range.
     /// - [`MemError::ReservedWrite`] if the target region is not `ReadWrite`.
     pub fn apply_commit(&mut self, range: ByteRange, bytes: &[u8]) -> Result<(), MemError> {
         self.validate_write(range, bytes.len())?;
@@ -826,7 +849,8 @@ impl GuestMemory {
     /// # Errors
     ///
     /// - [`MemError::LengthMismatch`] if `byte_len as u64 != range.length()`.
-    /// - [`MemError::Unmapped`] if no region contains the range.
+    /// - [`MemError::Unmapped`] if [`GuestMemory::containing_region`] finds
+    ///   no region for the range.
     /// - [`MemError::ReservedWrite`] if the target region is not `ReadWrite`.
     pub fn validate_write(&self, range: ByteRange, byte_len: usize) -> Result<(), MemError> {
         if byte_len as u64 != range.length() {
@@ -928,22 +952,18 @@ impl GuestMemory {
     }
 
     /// Region that entirely contains `[addr, addr+length)`.
+    ///
+    /// Returns `None` when:
+    /// - no region contains the range;
+    /// - `addr` is below the floor that [`Self::unmap_below`] sets.
     pub fn containing_region(&self, addr: u64, length: u64) -> Option<&Region> {
-        let idx = self.regions.partition_point(|r| r.base() <= addr);
-        if idx == 0 {
-            return None;
-        }
-        let region = &self.regions[idx - 1];
-        if region.contains(addr, length) {
-            Some(region)
-        } else {
-            None
-        }
+        self.containing_region_index(addr, length)
+            .map(|idx| &self.regions[idx])
     }
 
     fn containing_region_index(&self, addr: u64, length: u64) -> Option<usize> {
         let idx = self.regions.partition_point(|r| r.base() <= addr);
-        if idx == 0 {
+        if idx == 0 || addr < self.unmapped_below {
             return None;
         }
         self.regions[idx - 1]
@@ -977,6 +997,14 @@ impl GuestMemory {
 
 #[path = "guest_window.rs"]
 mod window;
+
+#[path = "guest_fetch.rs"]
+mod fetch;
+pub use fetch::FetchRefusal;
+
+#[cfg(test)]
+#[path = "tests/fetch_tests.rs"]
+mod fetch_tests;
 
 #[cfg(test)]
 #[path = "tests/guest_tests.rs"]

@@ -166,7 +166,7 @@ pub(super) fn install_spawn_loader(
             exit_stub_addr,
             region_size: child_mem_size as u64,
         };
-        let tls = place_child_tls(elf_bytes, mem, &prx_modules, resident, sink.as_ref())?;
+        let tls = finish_child_space(elf_bytes, mem, &prx_modules, resident, sink.as_ref())?;
         // This report follows the last refusal above. On a refusal the
         // runtime removes the child's address space (`cellgov_core`
         // `process_spawn.rs` `handle_process_spawn`). An earlier report
@@ -256,6 +256,15 @@ fn install_child_region_and_exit_stub(
     mem.install_region(0, child_mem_size, "spawned", cellgov_mem::PageSize::Page64K)
         .map_err(|source| cellgov_core::ProcessSpawnLoadError::RegionInstall { source })?;
     let exit_stub_addr = child_exit_stub_addr(required);
+    write_exit_stub(mem, exit_stub_addr)?;
+    Ok((child_mem_size, exit_stub_addr))
+}
+
+/// Write the exit stub at `exit_stub_addr` and declare it as code.
+fn write_exit_stub(
+    mem: &mut cellgov_mem::GuestMemory,
+    exit_stub_addr: u64,
+) -> Result<(), cellgov_core::ProcessSpawnLoadError> {
     // li r11, 22; sc -- the child enters this when its entry
     // returns. r11 is the LV2 syscall number, and 22 is
     // `cellgov_ps3_abi::lv2::syscall::PROCESS_EXIT`. The exit status is
@@ -270,7 +279,8 @@ fn install_child_region_and_exit_stub(
     })?;
     mem.apply_commit(range, &stub)
         .map_err(|source| cellgov_core::ProcessSpawnLoadError::ExitStubWrite { source })?;
-    Ok((child_mem_size, exit_stub_addr))
+    mem.declare_code(exit_stub_addr, stub.len() as u64);
+    Ok(())
 }
 
 /// Return the firmware candidates in `cache`, scanning `dir` into it on
@@ -325,6 +335,23 @@ fn load_child_firmware(
         }
     }
     Ok((prx_modules, child_exports))
+}
+
+/// Place a child's TLS area, then fence the child's space.
+///
+/// The fence is [`super::image::fence_title_memory`], which the boot
+/// also applies to the title's space. The kernel-context OPD in the TLS
+/// area is the last code the loader writes, so the fence follows it.
+fn finish_child_space(
+    elf_bytes: &[u8],
+    mem: &mut cellgov_mem::GuestMemory,
+    prx_modules: &[PrxLoadInfo],
+    resident: ChildResident,
+    sink: &dyn crate::BootSink,
+) -> Result<TlsArea, cellgov_core::ProcessSpawnLoadError> {
+    let tls = place_child_tls(elf_bytes, mem, prx_modules, resident, sink)?;
+    super::image::fence_title_memory(mem);
+    Ok(tls)
 }
 
 /// Place a child's TLS area, initialize it, and install the
@@ -435,3 +462,7 @@ fn spawned_child_region_size(
 #[cfg(test)]
 #[path = "tests/loaders_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/child_fence_tests.rs"]
+mod child_fence_tests;

@@ -3,8 +3,8 @@
 //! The block is a pointer table carved off the top of the primary
 //! stack -- argv pointers, NULL, envp pointers, NULL -- followed by
 //! the NUL-terminated strings those pointers name. The primary
-//! thread's r1 lands [`ENTRY_FRAME_RESERVE`] below the block, and the
-//! entry receives r3=argc, r4=argv, r5=envp.
+//! thread's r1 lands at least [`ENTRY_FRAME_RESERVE`] below the block,
+//! and the entry receives r3=argc, r4=argv, r5=envp.
 
 // [CBE-Handbook p:397 s:14.3] The PPE 64-bit initial stack frame carries an
 // argument-pointer array and an environment-pointer array, each closed by a
@@ -22,6 +22,14 @@
 // arguments, and R5 at one when there is no environment.
 //
 // This port builds no auxiliary vector, so R6 stays null at entry.
+
+/// The only argument the reference console passes to a launched title.
+///
+/// The capture `ppu_entry_argv` shows this block:
+/// - argc is 1.
+/// - argv\[1\] and envp\[0\] are NULL.
+/// - The block ends at the top of the primary stack.
+pub(crate) const TITLE_ARGV0: &str = "/app_home/PS3_GAME/USRDIR/EBOOT.BIN";
 
 /// One u64 pointer slot in the table.
 const SLOT: u64 = 8;
@@ -50,15 +58,15 @@ pub enum GuestArgsError {
         index: usize,
     },
     /// The block plus the entry frame reserve below it does not fit
-    /// between the stack's base and its entry top.
+    /// between the stack's base and its top.
     #[error(
         "args block of {total} bytes plus a 0x70-byte entry frame reserve \
-         does not fit the 0x{room:08x} bytes below the primary stack's entry top"
+         does not fit the 0x{room:08x} bytes of the primary stack"
     )]
     BlockTooLarge {
         /// Bytes the pointer table and string storage need.
         total: u64,
-        /// Bytes from the stack's base to its entry top.
+        /// Bytes from the stack's base to its top.
         room: u64,
     },
 }
@@ -68,9 +76,9 @@ pub enum GuestArgsError {
 pub(crate) struct GuestArgsBlock {
     /// Guest address of the block (== `argv_addr`).
     pub base: u64,
-    /// Primary thread r1: [`ENTRY_FRAME_RESERVE`] below `base` so
-    /// the entry function's linkage-area stores cannot reach the
-    /// pointer table.
+    /// Highest primary-thread r1 that clears the block:
+    /// [`ENTRY_FRAME_RESERVE`] below `base`, so the entry function's
+    /// linkage-area stores cannot reach the pointer table.
     pub initial_r1: u64,
     /// Block image: pointer table then string storage.
     pub bytes: Vec<u8>,
@@ -83,10 +91,10 @@ pub(crate) struct GuestArgsBlock {
     pub envp_addr: u64,
 }
 
-/// Lay out `args` below `stack_top`, the r1 a no-args entry would
-/// take, in a stack whose lowest address is `stack_base`. Caller skips
-/// the call when `args` is empty; an empty slice here still produces a
-/// valid argc=0 block, which is not the no-args boot shape (r3..r6 = 0).
+/// Lay out `args` below `stack_top`, the first address past the stack.
+///
+/// `stack_base` is the lowest address of the stack. An empty slice
+/// gives a valid argc=0 block.
 ///
 /// # Errors
 ///

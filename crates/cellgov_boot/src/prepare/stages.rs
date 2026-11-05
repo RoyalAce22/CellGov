@@ -61,6 +61,10 @@ pub fn prepare(opts: PrepareOptions<'_>) -> Result<PreparedBoot, BootError> {
     // module_start entry reads it through r11/r12, so it goes in once
     // before the module_start loop.
     install_kernel_context_opd(&mut image.mem, placement.tls)?;
+    // Every code span the boot loads is now resident and declared; the
+    // writes below (the argument block, debug patches) land above the
+    // floor.
+    image::fence_title_memory(&mut image.mem);
 
     // 4. Process parameters: step budget, priority, stack, TLS.
     let params = params::resolve_boot_params(&execution, sink, &elf_data)?;

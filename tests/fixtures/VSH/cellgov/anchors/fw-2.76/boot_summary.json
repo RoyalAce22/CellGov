@@ -52,12 +52,12 @@
       "class": "absent"
     },
     "mem_fault_arm_entries": {
-      "value": 0,
-      "class": "absent"
+      "value": 1,
+      "class": "at-least"
     },
     "mem_fault_unmapped_routed": {
-      "value": 0,
-      "class": "absent"
+      "value": 1,
+      "class": "at-least"
     },
     "mfvrsave_executed": {
       "value": 0,
@@ -199,63 +199,63 @@
   "unsupported_syscalls": {
     "45": {
       "hits": 2,
-      "first_hit": 2108055907
+      "first_hit": 2108056123
     },
     "133": {
       "hits": 4,
-      "first_hit": 2107972722
+      "first_hit": 2107972938
     },
     "380": {
       "hits": 5,
-      "first_hit": 192582005
+      "first_hit": 192582174
     },
     "382": {
       "hits": 1,
-      "first_hit": 2107932393
+      "first_hit": 2107932609
     },
     "563": {
       "hits": 1,
-      "first_hit": 522339
+      "first_hit": 522142
     },
     "610": {
       "hits": 21,
-      "first_hit": 2108031691
+      "first_hit": 2108031907
     },
     "612": {
       "hits": 1,
-      "first_hit": 2108013762
+      "first_hit": 2108013978
     },
     "635": {
       "hits": 1,
-      "first_hit": 2179128935
+      "first_hit": 2179129179
     },
     "650": {
       "hits": 1,
-      "first_hit": 440901
+      "first_hit": 440704
     },
     "699": {
       "hits": 3,
-      "first_hit": 106360
+      "first_hit": 106330
     },
     "811": {
       "hits": 3,
-      "first_hit": 2108178076
+      "first_hit": 2108178318
     },
     "817": {
       "hits": 9,
-      "first_hit": 2108151083
+      "first_hit": 2108151325
     },
     "837": {
       "hits": 7,
-      "first_hit": 192718634
+      "first_hit": 192718850
     },
     "867": {
       "hits": 1,
-      "first_hit": 2179024221
+      "first_hit": 2179024483
     },
     "873": {
       "hits": 3,
-      "first_hit": 2108144199
+      "first_hit": 2108144441
     }
   },
   "firmware": {

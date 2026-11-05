@@ -1,7 +1,6 @@
 //! `run_module_start`: drive a PRX's module_start to completion or
-//! fault on the title's `Runtime`. An illegal-instruction program
-//! interrupt at PC=0 with LR=0 at fault time is the clean-return
-//! sentinel.
+//! fault on the title's `Runtime`. An instruction storage interrupt
+//! at PC=0 with LR=0 at fault time is the clean-return sentinel.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
@@ -415,9 +414,9 @@ fn spawn_module_start_unit(
     ms_state.set_gpr(11, env.tls.kernel_context_opd());
     ms_state.set_gpr(12, env.tls.kernel_context_opd());
     ms_state.set_gpr(13, env.tls.thread_pointer());
-    // LR=0 sentinel: blr from module_start jumps to PC=0. The all-zero
-    // word there takes the illegal-instruction program interrupt, and
-    // that fault signals a return.
+    // LR=0 sentinel: blr from module_start jumps to PC=0. Address 0 is
+    // unmapped, so the fetch there takes the instruction storage
+    // interrupt, and that fault signals a return.
     ms_state.set_lr(0);
     seed_tls_thread_id(rt, env)?;
 
@@ -624,9 +623,9 @@ fn classify_ms_fault(
         .as_ref()
         .map(|r| r.lr)
         .unwrap_or(u64::MAX);
-    let illegal = guest_code.and_then(cellgov_ppu::PpuFaultClass::of_code)
-        == Some(cellgov_ppu::PpuFaultClass::ProgramIllegal);
-    if fault_pc == 0 && lr_at_fault == 0 && illegal {
+    let unfetchable = guest_code.and_then(cellgov_ppu::PpuFaultClass::of_code)
+        == Some(cellgov_ppu::PpuFaultClass::InstructionStorage);
+    if fault_pc == 0 && lr_at_fault == 0 && unfetchable {
         return FaultDisposition::Returned;
     }
     let fault_text = fault_report(rt, env, ms_unit_id, &step.result, fault, stats);

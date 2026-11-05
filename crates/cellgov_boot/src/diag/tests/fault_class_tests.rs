@@ -26,7 +26,7 @@ fn case(class: PpuFaultClass) -> (PpuFault, &'static str) {
     let interrupt = |i: PpuInterrupt| PpuFault::Interrupt(i);
     match class {
         C::InstructionStorage => (
-            interrupt(PpuInterrupt::InstructionStorage),
+            interrupt(PpuInterrupt::InstructionStorage { no_execute: false }),
             "INSTRUCTION_STORAGE at SRR0=0x00000010 SRR1[33:36]=0b1000",
         ),
         C::InstructionSegment => (

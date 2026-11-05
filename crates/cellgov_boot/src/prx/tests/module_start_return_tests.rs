@@ -1,6 +1,6 @@
-//! The module_start loop reads an illegal-instruction program interrupt
-//! at PC 0 with LR 0 as the module_start's return, and any other fault
-//! as a fault of the module.
+//! The module_start loop reads an instruction storage interrupt at PC 0
+//! with LR 0 as the module_start's return, and any other fault as a
+//! fault of the module.
 
 use std::rc::Rc;
 
@@ -17,9 +17,10 @@ use crate::prx::TlsArea;
 /// The thread the module_start unit runs as. No unit holds this id, so
 /// the module_start unit is the only one the scheduler runs.
 const OWNER: UnitId = UnitId::new(7);
-/// The module_start entry point.
+/// The module_start entry point, and the floor below which
+/// [`AtZero::Unmapped`] unmaps the memory.
 const ENTRY: u64 = 0x1_0000;
-/// The base of the TLS area, clear of the word at 0 and of the entry.
+/// The base of the TLS area, clear of the entry.
 const TLS: u64 = 0x2_0000;
 /// `blr`.
 const BLR: u32 = 0x4E80_0020;
@@ -28,13 +29,31 @@ const BLA_0: u32 = 0x4800_0003;
 /// `tw 31,r0,r0`: a trap whose condition always holds.
 const TW_ALWAYS: u32 = 0x7FE0_0008;
 
-/// Runs a module_start whose first word is `entry_word`, with
-/// `word_at_0` at address 0.
-fn run(entry_word: u32, word_at_0: u32) -> Result<ModuleStartOutcome, ModuleStartError> {
+/// What lies at address 0.
+#[derive(Clone, Copy)]
+enum AtZero {
+    /// No word: as in a title's memory after the boot, the memory below
+    /// the entry is unmapped, and the entry word is the only code.
+    Unmapped,
+    /// This word, in mapped memory that fetches at every address.
+    Word(u32),
+}
+
+/// Runs a module_start whose first word is `entry_word`.
+fn run(entry_word: u32, at_zero: AtZero) -> Result<ModuleStartOutcome, ModuleStartError> {
     let mut mem = GuestMemory::new(0x4_0000);
-    for (addr, word) in [(ENTRY, entry_word), (0, word_at_0)] {
-        let range = ByteRange::new(GuestAddr::new(addr), 4).unwrap();
-        mem.apply_commit(range, &word.to_be_bytes()).unwrap();
+    let entry = ByteRange::new(GuestAddr::new(ENTRY), 4).unwrap();
+    mem.apply_commit(entry, &entry_word.to_be_bytes()).unwrap();
+    match at_zero {
+        AtZero::Unmapped => {
+            mem.declare_code(ENTRY, 4);
+            mem.unmap_below(ENTRY);
+            mem.restrict_fetch();
+        }
+        AtZero::Word(word) => {
+            let zero = ByteRange::new(GuestAddr::new(0), 4).unwrap();
+            mem.apply_commit(zero, &word.to_be_bytes()).unwrap();
+        }
     }
     let mut rt = Runtime::new(mem, Budget::new(1), 1_000);
     rt.lv2_host_mut().seed_primary_ppu_thread(
@@ -89,22 +108,34 @@ fn faulted_code(outcome: Result<ModuleStartOutcome, ModuleStartError>) -> String
 #[test]
 fn a_blr_to_the_lr_zero_sentinel_is_a_return() {
     assert_eq!(
-        run(BLR, 0).expect("the module_start returns"),
+        run(BLR, AtZero::Unmapped).expect("the module_start returns"),
         ModuleStartOutcome::Completed { steps: 2 }
     );
 }
 
 #[test]
-fn an_illegal_word_at_zero_reached_with_a_nonzero_lr_is_a_fault() {
-    let illegal = cellgov_ppu::FAULT_PROGRAM | 0x0800;
-    assert_eq!(faulted_code(run(BLA_0, 0)), format!("0x{illegal:08x}"));
+fn an_unmapped_zero_reached_with_a_nonzero_lr_is_a_fault() {
+    let not_found = cellgov_ppu::FAULT_INSTRUCTION_STORAGE | 0x4000;
+    assert_eq!(
+        faulted_code(run(BLA_0, AtZero::Unmapped)),
+        format!("0x{not_found:08x}")
+    );
 }
 
 #[test]
-fn a_trap_at_zero_reached_with_lr_zero_is_a_fault() {
+fn an_illegal_word_at_a_mapped_zero_reached_with_lr_zero_is_a_fault() {
+    let illegal = cellgov_ppu::FAULT_PROGRAM | 0x0800;
+    assert_eq!(
+        faulted_code(run(BLR, AtZero::Word(0))),
+        format!("0x{illegal:08x}")
+    );
+}
+
+#[test]
+fn a_trap_at_a_mapped_zero_reached_with_lr_zero_is_a_fault() {
     let trap_to_31 = cellgov_ppu::FAULT_PROGRAM | 0x0200 | 31;
     assert_eq!(
-        faulted_code(run(BLR, TW_ALWAYS)),
+        faulted_code(run(BLR, AtZero::Word(TW_ALWAYS))),
         format!("0x{trap_to_31:08x}")
     );
 }

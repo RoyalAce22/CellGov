@@ -1,14 +1,12 @@
 //! The guest argv block's layout and the refusals that reject it.
 
 use super::{build_args_block, GuestArgsError};
-use cellgov_ps3_abi::hw::address_space::{
-    PS3_PRIMARY_STACK_ENTRY_RESERVE, PS3_PRIMARY_STACK_SIZE_MAX, PS3_PRIMARY_STACK_START,
-};
+use cellgov_ps3_abi::hw::address_space::{PS3_PRIMARY_STACK_SIZE_MAX, PS3_PRIMARY_STACK_START};
 
-/// The largest primary stack and the no-args entry r1 it gets.
+/// The largest primary stack and its top.
 const BASE: u64 = PS3_PRIMARY_STACK_START;
 const SIZE: u64 = PS3_PRIMARY_STACK_SIZE_MAX as u64;
-const TOP: u64 = BASE + SIZE - PS3_PRIMARY_STACK_ENTRY_RESERVE;
+const TOP: u64 = BASE + SIZE;
 
 fn be64(bytes: &[u8], off: usize) -> u64 {
     u64::from_be_bytes(bytes[off..off + 8].try_into().unwrap())
@@ -115,20 +113,20 @@ fn r1_sits_a_full_linkage_frame_below_the_pointer_table() {
 
 #[test]
 fn the_fit_check_counts_the_entry_frame_reserve() {
-    // One arg: 4 table slots (0x20). The room is TOP - BASE = 0xFFDD0.
-    // A string chunk of 0xFFD40 makes total + 0x70 == room exactly, so
+    // One arg: 4 table slots (0x20). The room is TOP - BASE = 0x100000.
+    // A string chunk of 0xFFF70 makes total + 0x70 == room exactly, so
     // r1 lands at the inclusive stack base and fits. One 16-byte
     // granule more does not fit.
-    let exact = vec!["x".repeat(0xFFD3F)];
+    let exact = vec!["x".repeat(0xFFF6F)];
     let block = build_args_block(BASE, TOP, &exact).unwrap();
     assert_eq!(block.initial_r1, BASE);
 
-    let rejected = vec!["x".repeat(0xFFD4F)];
+    let rejected = vec!["x".repeat(0xFFF7F)];
     assert!(matches!(
         build_args_block(BASE, TOP, &rejected),
         Err(GuestArgsError::BlockTooLarge {
-            total: 0xFFD70,
-            room: 0xFFDD0,
+            total: 0xFFFA0,
+            room: 0x100000,
         })
     ));
 }

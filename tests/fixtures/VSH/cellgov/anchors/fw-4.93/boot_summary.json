@@ -52,12 +52,12 @@
       "class": "absent"
     },
     "mem_fault_arm_entries": {
-      "value": 0,
-      "class": "absent"
+      "value": 1,
+      "class": "at-least"
     },
     "mem_fault_unmapped_routed": {
-      "value": 0,
-      "class": "absent"
+      "value": 1,
+      "class": "at-least"
     },
     "mfvrsave_executed": {
       "value": 0,
@@ -199,83 +199,83 @@
   "unsupported_syscalls": {
     "45": {
       "hits": 2,
-      "first_hit": 2108106033
+      "first_hit": 2108105306
     },
     "133": {
       "hits": 4,
-      "first_hit": 2108024039
+      "first_hit": 2108023304
     },
     "230": {
       "hits": 1,
-      "first_hit": 192161390
+      "first_hit": 192160711
     },
     "248": {
       "hits": 1,
-      "first_hit": 458073
+      "first_hit": 457414
     },
     "380": {
       "hits": 5,
-      "first_hit": 192629223
+      "first_hit": 192628500
     },
     "382": {
       "hits": 1,
-      "first_hit": 2107986305
+      "first_hit": 2107985570
     },
     "398": {
       "hits": 1,
-      "first_hit": 65948129858
+      "first_hit": 65948129132
     },
     "465": {
       "hits": 1,
-      "first_hit": 171192
+      "first_hit": 171111
     },
     "563": {
       "hits": 1,
-      "first_hit": 559092
+      "first_hit": 558451
     },
     "610": {
       "hits": 21,
-      "first_hit": 2108081059
+      "first_hit": 2108080332
     },
     "612": {
       "hits": 1,
-      "first_hit": 2108064005
+      "first_hit": 2108063270
     },
     "635": {
       "hits": 1,
-      "first_hit": 2185491546
+      "first_hit": 2185490499
     },
     "650": {
       "hits": 1,
-      "first_hit": 529722
+      "first_hit": 529081
     },
     "699": {
       "hits": 3,
-      "first_hit": 106421
+      "first_hit": 106391
     },
     "811": {
       "hits": 3,
-      "first_hit": 2108224530
+      "first_hit": 2108223823
     },
     "817": {
       "hits": 10,
-      "first_hit": 2107982243
+      "first_hit": 2107981508
     },
     "837": {
       "hits": 7,
-      "first_hit": 192764725
+      "first_hit": 192763990
     },
     "867": {
       "hits": 4,
-      "first_hit": 2185367852
+      "first_hit": 2185366806
     },
     "873": {
       "hits": 3,
-      "first_hit": 2108193212
+      "first_hit": 2108192485
     },
     "956": {
       "hits": 1,
-      "first_hit": 176374
+      "first_hit": 176293
     }
   },
   "firmware": {

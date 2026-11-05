@@ -177,9 +177,10 @@ pub fn required_memory_size(data: &[u8]) -> Result<usize, LoadError> {
 /// Load a PPU ELF64 into `memory` and set `state.pc` / `state.gpr[2]`
 /// by dereferencing the entry-point OPD.
 ///
-/// `.bss` (memsz > filesz) is zero-filled. If the entry address does
-/// not point at a valid OPD the raw entry is written to `state.pc`
-/// unchanged.
+/// The loader zero-fills `.bss` (memsz > filesz) and declares each
+/// executable segment as code in `memory`. If the entry address does
+/// not point at a valid OPD, the loader writes the raw entry to
+/// `state.pc` unchanged.
 pub fn load_ppu_elf(
     data: &[u8],
     memory: &mut GuestMemory,
@@ -202,6 +203,9 @@ pub fn load_ppu_elf(
         };
         if range.end > max_addr {
             max_addr = range.end;
+        }
+        if seg.executable {
+            memory.declare_code(range.start, range.end - range.start);
         }
         loaded.push(range);
     }

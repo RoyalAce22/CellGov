@@ -246,6 +246,11 @@ fn stage_got_batch(
     staging
         .drain_into(mem)
         .map_err(|source| PrxLoadStageError::GotBatchCommit { staged, source })?;
+    // Each slot's body is code. Its OPD is data, like a PRX's own OPDs,
+    // which the loader leaves out of the declared text.
+    for &slot_base in slots.by_nid.values() {
+        mem.declare_code(slot_base + 8, UNRESOLVED_TRAMP_BODY_BYTES as u64);
+    }
     Ok(stats)
 }
 

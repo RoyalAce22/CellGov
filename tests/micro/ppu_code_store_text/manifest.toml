@@ -1,0 +1,16 @@
+[test]
+name = "ppu_code_store_text"
+
+# A hardware probe: a store into the process's own text segment. The console capture is the answer; no
+# emulator runs it.
+
+[observe]
+# 8 big-endian u32 words, as ppu/main.c lists: 32 bytes. Word 0 is the
+# done or progress marker, word 1 the step a progress record names,
+# word 2 the text word read and stored back, word 3 its address.
+memory_regions = [
+  { name = "result", addr = 0, size = 32 },
+]
+
+[expect]
+outcome = "completed"

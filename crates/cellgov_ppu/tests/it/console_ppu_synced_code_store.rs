@@ -4,14 +4,15 @@
 //! The probe stores `li r3,1` over `li r3,0` in a line of its writable
 //! data. It runs the sequence on the line and calls it. A second step
 //! stores `li r3,2` and does the same. The console ends the process at
-//! the first call. A game process cannot run its writable data, and its
-//! text is not writable. Thus no user program can observe the sequence.
+//! the first call: a game process cannot run its writable data. Its text
+//! is writable (capture `ppu_code_store_text`).
 //!
-//! CellGov has no no-execute storage, so it runs the line. The replay
-//! asserts the stored instruction runs at budget 1 and at a budget that holds
-//! the store and the call in one batch. [PPC-Book2 p:12 s:1.8] Case 1:
-//! after the sequence, the next fetch of the location runs the new
-//! instruction.
+//! In memory restricted to its code, as the boot leaves a title's,
+//! CellGov refuses the call. In memory that fetches anywhere, CellGov
+//! runs the line. The replay asserts the stored instruction runs at
+//! budget 1 and at a budget that holds the store and the call in one
+//! batch. [PPC-Book2 p:12 s:1.8] Case 1: after the sequence, the next
+//! fetch of the location runs the new instruction.
 
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_ppu::PpuExecutionUnit;
@@ -70,13 +71,12 @@ fn program() -> Vec<u32> {
     p
 }
 
-/// Runs the program at `budget` and returns the r3 of each call.
-fn run(budget: u64) -> [u32; 2] {
+/// Runs the program at `budget`. When `restricted`, the memory fetches
+/// only from the program.
+fn run_program(budget: u64, restricted: bool) -> runner::ScenarioResult {
     let words = program();
-    assert!(
-        4 * (words.len() as u64) <= CODE,
-        "the program ends below the code line"
-    );
+    let program_len = 4 * words.len() as u64;
+    assert!(program_len <= CODE, "the program ends below the code line");
     let fixture = ScenarioFixture::builder()
         .memory_size(0x2000)
         .budget(Budget::new(budget))
@@ -91,12 +91,21 @@ fn run(budget: u64) -> [u32; 2] {
             }
             put(CODE, LI_R3_0);
             put(CODE + 4, BLR);
+            if restricted {
+                mem.declare_code(0, program_len);
+                mem.restrict_fetch();
+            }
         })
         .register(|rt| {
             rt.register_unit_with(PpuExecutionUnit::new);
         })
         .build();
-    let result = runner::run(fixture);
+    runner::run(fixture)
+}
+
+/// Runs the program at `budget` and returns the r3 of each call.
+fn run(budget: u64) -> [u32; 2] {
+    let result = run_program(budget, false);
     assert_eq!(result.outcome, ScenarioOutcome::Stalled);
     assert_eq!(result.first_fault, None);
     let m = &result.final_memory;
@@ -107,18 +116,26 @@ fn run(budget: u64) -> [u32; 2] {
 }
 
 #[test]
-fn the_console_ends_the_process_at_a_call_into_writable_data_that_cellgov_runs() {
+fn the_console_ends_the_process_at_a_call_into_writable_data_and_cellgov_refuses_it() {
     assert_eq!(
         console(),
         [PROGRESS, 1, 0, 0, 0, 0, 0, 0],
         "the console run ends inside step 1, at the first call into the data line"
     );
+    let no_execute = cellgov_ppu::FAULT_INSTRUCTION_STORAGE
+        | (cellgov_ps3_abi::hw::ppu_interrupt::SRR1_FETCH_NO_EXECUTE >> 16) as u32;
     for budget in [1, 256] {
         assert_eq!(
-            run(budget),
-            [1, 2],
-            "CellGov runs writable data, which the console refuses, and runs the stored \
-             instruction at budget {budget}"
+            run_program(budget, true).first_fault.map(|(_, kind)| kind),
+            Some(cellgov_effects::FaultKind::Guest(no_execute)),
+            "budget {budget}"
         );
+    }
+}
+
+#[test]
+fn a_memory_that_fetches_anywhere_runs_the_stored_instruction() {
+    for budget in [1, 256] {
+        assert_eq!(run(budget), [1, 2], "budget {budget}");
     }
 }

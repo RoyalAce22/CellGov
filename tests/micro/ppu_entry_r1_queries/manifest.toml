@@ -1,0 +1,16 @@
+[test]
+name = "ppu_entry_r1_queries"
+
+# A hardware probe: lv2_process_queries with the r1 the main thread
+# starts with recorded as well. The console capture is the answer; no
+# emulator runs it.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: the 1208 bytes
+# of lv2_process_queries, then the entry r1 at offset 1208.
+memory_regions = [
+  { name = "result", addr = 0, size = 1216 },
+]
+
+[expect]
+outcome = "completed"

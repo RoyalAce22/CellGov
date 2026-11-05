@@ -27,9 +27,10 @@ pub const PS3_PRIMARY_STACK_START: u64 = 0xD000_1000;
 /// Bytes between the top of the primary stack and the primary thread's
 /// r1 at entry.
 ///
-/// On the reference console r1 in `main` is 0x3B0 below the top for
-/// every declared size. The probe's crt0 takes a 0x80-byte frame and its
-/// `main` a 0x100-byte one, so the entry r1 sits 0x230 below the top.
+/// On the reference console the entry r1 is 0x220 below the top, under
+/// the one-argument block LV2 places there (captures `ppu_entry_argv`,
+/// `ppu_entry_r1_queries`). r1 in the stack probes' `main` is 0x3B0
+/// below the top for every declared size, 0x190 below the entry r1.
 ///
 /// The reserve holds at least the minimum frame the entry function
 /// writes into: it stores CR at 8(r1) and LR at 16(r1), linkage slots
@@ -38,7 +39,7 @@ pub const PS3_PRIMARY_STACK_START: u64 = 0xD000_1000;
 /// [CBE-Handbook p:396 s:14.3.1.3] The loader hands the entry point an R1 that
 /// is quadword-aligned and already points at a reserved initial frame carrying a
 /// null back chain, so the top of the stack is never itself the SP.
-pub const PS3_PRIMARY_STACK_ENTRY_RESERVE: u64 = 0x230;
+pub const PS3_PRIMARY_STACK_ENTRY_RESERVE: u64 = 0x220;
 
 /// Base of CellGov's child-thread stack region, which sits immediately
 /// above its primary-stack region. A new thread's stack takes the

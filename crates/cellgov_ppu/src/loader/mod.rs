@@ -28,3 +28,7 @@ mod pt_load_tests;
 #[cfg(test)]
 #[path = "tests/process_param_console_tests.rs"]
 mod process_param_console_tests;
+
+#[cfg(test)]
+#[path = "tests/code_span_tests.rs"]
+mod code_span_tests;

@@ -86,6 +86,10 @@ mod store_fault_tests;
 mod interrupt_record_tests;
 
 #[cfg(test)]
+#[path = "tests/fetch_attribute_tests.rs"]
+mod fetch_attribute_tests;
+
+#[cfg(test)]
 #[path = "tests/synced_code_store_tests.rs"]
 mod synced_code_store_tests;
 

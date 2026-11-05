@@ -119,6 +119,9 @@ impl PpuExecutionUnit {
         let mut force_split = None;
         // The span of the buffered stores when the last `isync` retired.
         let mut synced_stores: Option<(u64, u64)> = None;
+        // The fetchable span the last fetch read: its first byte and the
+        // last word that starts in it. It starts empty.
+        let mut fetchable = (1, 0);
 
         loop {
             let step_pc = self.state.pc;
@@ -150,7 +153,12 @@ impl PpuExecutionUnit {
             }
 
             let boundary = (effects.len(), self.store_buf.len());
-            let mut insn = match self.fetch_decode(step_pc, mem) {
+            let fetched = if holds_word(fetchable, step_pc) {
+                Ok(())
+            } else {
+                fetch_window(ctx.memory(), step_pc).map(|window| fetchable = window)
+            };
+            let mut insn = match fetched.and_then(|()| self.fetch_decode(step_pc, mem)) {
                 Ok(insn) => insn,
                 Err(fault) => {
                     let exit = FaultExit::Verdict(fault);
@@ -172,7 +180,8 @@ impl PpuExecutionUnit {
             // - the budget cannot retire both slots,
             // - a break is set on the second slot,
             // - per-step tracing is on, or
-            // - a full-state window is set.
+            // - a full-state window is set, or
+            // - the second slot is not fetchable.
             // The trace and the window record the state after each
             // instruction, and a fused head has no state between its slots.
             // A head that faulted fused also runs split, so its first
@@ -182,6 +191,7 @@ impl PpuExecutionUnit {
                 _ if insn.is_super_pair() => {
                     forced
                         || remaining < 2
+                        || !holds_word(fetchable, step_pc.wrapping_add(4))
                         || self.break_pc == Some(step_pc + 4)
                         || ctx.trace_per_step()
                         || self.full_state_window.is_some()
@@ -561,6 +571,36 @@ fn ctrl_for_placement(siblings: u32, older_sibling: bool) -> u32 {
     }
 }
 
+/// Whether the word at `pc` lies in the window `(start, last)`, where
+/// `last` is the last word that starts in the span.
+#[inline]
+fn holds_word((start, last): (u64, u64), pc: u64) -> bool {
+    start <= pc && pc <= last
+}
+
+/// The fetchable span of `mem` that holds the word at `pc`, as its first
+/// byte and the last word that starts in it.
+///
+/// # Errors
+///
+/// Returns `PpuInterrupt::InstructionStorage` if a byte of the word is
+/// not fetchable. The interrupt sets `no_execute` if that byte is mapped.
+fn fetch_window(mem: &cellgov_mem::GuestMemory, pc: u64) -> Result<(u64, u64), PpuFault> {
+    use cellgov_mem::FetchRefusal;
+    let refused = |r: FetchRefusal| {
+        PpuFault::Interrupt(PpuInterrupt::InstructionStorage {
+            no_execute: r == FetchRefusal::NoExecute,
+        })
+    };
+    let (start, end) = mem.fetch_span(pc).map_err(refused)?;
+    match pc.checked_add(4) {
+        Some(word_end) if word_end <= end => Ok((start, end - 4)),
+        _ => Err(refused(
+            mem.fetch_span(end).err().unwrap_or(FetchRefusal::Unmapped),
+        )),
+    }
+}
+
 /// The word stored at `pc` and its decode, without the shadow.
 ///
 /// # Errors
@@ -572,7 +612,9 @@ fn decode_stored(pc: u64, mem: &[u8]) -> Result<(u32, instruction::PpuInstructio
     let bytes = usize::try_from(pc)
         .ok()
         .and_then(|pc| mem.get(pc..pc.checked_add(4)?))
-        .ok_or(PpuFault::Interrupt(PpuInterrupt::InstructionStorage))?;
+        .ok_or(PpuFault::Interrupt(PpuInterrupt::InstructionStorage {
+            no_execute: false,
+        }))?;
     let raw = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
     let insn = decode::decode(raw).map_err(|_| PpuFault::unrecognized_word())?;
     Ok((raw, insn))

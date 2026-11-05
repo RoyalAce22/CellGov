@@ -1,0 +1,2 @@
+id	asm	words	inputs	record	may_end_process
+lwz_low	lwz r4, 0(r6)	0x80860000	r6=0x8000	r4	1

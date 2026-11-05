@@ -1,0 +1,18 @@
+[test]
+name = "ppu_entry_argv"
+
+# A hardware probe: the argument registers the main thread starts with,
+# the argv and envp slots they name and the string argv[0] names. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# 32 big-endian u32 words, as ppu/main.c lists: 128 bytes. Word 0 is the
+# done marker, words 1-5 r3, r4, r5, r6 and r1, words 6-11 argv[0],
+# argv[1] and envp[0] as high and low words, word 12 the length of
+# argv[0]'s string, word 13 r1 in main, words 16-31 that string.
+memory_regions = [
+  { name = "result", addr = 0, size = 128 },
+]
+
+[expect]
+outcome = "completed"

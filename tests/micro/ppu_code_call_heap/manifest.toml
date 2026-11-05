@@ -1,0 +1,18 @@
+[test]
+name = "ppu_code_call_heap"
+
+# A hardware probe: a call into a sys_memory_allocate page that holds
+# li r3,1; blr. The console capture is the answer; no emulator runs it.
+
+[observe]
+# 8 big-endian u32 words, as ppu/main.c lists: 32 bytes. Word 0 is the
+# done or progress marker, word 1 the step a progress record names
+# (1 the allocate, 2 the call), word 2 the r3 the call returned, word 3
+# the buffer's address, word 4 the allocate's return code, word 5 the
+# free's return code.
+memory_regions = [
+  { name = "result", addr = 0, size = 32 },
+]
+
+[expect]
+outcome = "completed"

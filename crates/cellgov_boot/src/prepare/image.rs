@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use cellgov_ps3_abi::hw::address_space::{
     PS3_CHILD_STACKS_BASE, PS3_CHILD_STACKS_SIZE, PS3_PRIMARY_STACK_BASE, PS3_PRIMARY_STACK_SIZE,
     PS3_RSX_BASE, PS3_RSX_IOMAP_BASE, PS3_RSX_IOMAP_SIZE, PS3_RSX_SIZE, PS3_SPU_RESERVED_BASE,
-    PS3_SPU_RESERVED_SIZE,
+    PS3_SPU_RESERVED_SIZE, PS3_USER_TEXT_FLOOR,
 };
 
 use super::types::{
@@ -216,6 +216,20 @@ fn image_regions(
     ]
 }
 
+/// Unmap the memory below a process's text and restrict fetch to declared code.
+///
+/// The boot calls this for the title's space, and the spawn loader
+/// calls it for each child's space. Each caller runs it after every
+/// writer of code or of memory below the text.
+/// The console ends a process that does one of these:
+/// - loads from 0x0 or 0x8000;
+/// - calls into a page with no code: below the text, a stack, an
+///   allocated page, or a data segment.
+pub(super) fn fence_title_memory(mem: &mut cellgov_mem::GuestMemory) {
+    mem.unmap_below(PS3_USER_TEXT_FLOOR);
+    mem.restrict_fetch();
+}
+
 /// Walk the title ELF's executable PT_LOAD segments through the
 /// PPU decoder and report the gaps. Firmware PRX text is out
 /// of scope; gaps there surface at execution time.
@@ -231,6 +245,10 @@ fn emit_prescan_report(elf_data: &[u8], elf_path: &str, sink: &dyn crate::BootSi
         sink.warn(&line);
     }
 }
+
+#[cfg(test)]
+#[path = "tests/fence_tests.rs"]
+mod fence_tests;
 
 #[cfg(test)]
 #[path = "tests/image_regions_tests.rs"]

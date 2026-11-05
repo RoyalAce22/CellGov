@@ -6,6 +6,10 @@ mod module_start;
 mod tls;
 mod types;
 
+#[cfg(test)]
+#[path = "tests/code_span_tests.rs"]
+mod code_span_tests;
+
 pub use load::{
     install_unresolved_trampolines_only, load_firmware_set_bound, load_firmware_set_from,
     FirmwareCandidates, FirmwareLoadError,

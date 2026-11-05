@@ -1,0 +1,2 @@
+id	asm	words	inputs	record	may_end_process
+stw_null	stw r4, 0(r6)	0x90860000	r6=0x0	r4	1

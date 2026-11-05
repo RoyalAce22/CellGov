@@ -67,9 +67,14 @@ pub enum PpuInterrupt {
         /// The access was a store or `dcbz`.
         store: bool,
     },
-    /// A fetch from an address no region holds.
+    /// A fetch from an address no region holds, or from a mapped
+    /// address that holds no code.
     #[error("PPU instruction storage interrupt")]
-    InstructionStorage,
+    InstructionStorage {
+        /// The address is mapped but holds no code; otherwise the
+        /// fetch found no translation.
+        no_execute: bool,
+    },
     /// A fetch whose segment has no entry. CellGov does not raise it.
     #[error("PPU instruction segment interrupt")]
     InstructionSegment,
@@ -181,7 +186,7 @@ impl PpuInterrupt {
         match self {
             Self::DataStorage { .. } => irq::VECTOR_DATA_STORAGE,
             Self::DataSegment { .. } => irq::VECTOR_DATA_SEGMENT,
-            Self::InstructionStorage => irq::VECTOR_INSTRUCTION_STORAGE,
+            Self::InstructionStorage { .. } => irq::VECTOR_INSTRUCTION_STORAGE,
             Self::InstructionSegment => irq::VECTOR_INSTRUCTION_SEGMENT,
             Self::Alignment { .. } => irq::VECTOR_ALIGNMENT,
             Self::Program(_) => irq::VECTOR_PROGRAM,
@@ -195,7 +200,9 @@ impl PpuInterrupt {
     fn srr1(&self) -> u64 {
         match self {
             // [PPC-Book3 p:68 s:5.5.5] No translation found sets SRR1 bit 33.
-            Self::InstructionStorage => irq::SRR1_FETCH_NOT_FOUND,
+            Self::InstructionStorage { no_execute: false } => irq::SRR1_FETCH_NOT_FOUND,
+            // [PPC-Book3 p:68 s:5.5.5] A fetch from no-execute storage sets SRR1 bit 35.
+            Self::InstructionStorage { no_execute: true } => irq::SRR1_FETCH_NO_EXECUTE,
             Self::Program(cause) => cause.srr1(),
             _ => 0,
         }
@@ -265,7 +272,7 @@ impl PpuInterrupt {
         match self {
             Self::DataStorage { .. } => PpuFaultClass::DataStorage,
             Self::DataSegment { .. } => PpuFaultClass::DataSegment,
-            Self::InstructionStorage => PpuFaultClass::InstructionStorage,
+            Self::InstructionStorage { .. } => PpuFaultClass::InstructionStorage,
             Self::InstructionSegment => PpuFaultClass::InstructionSegment,
             Self::Alignment { .. } => PpuFaultClass::Alignment,
             Self::Program(ProgramCause::FpEnabled) => PpuFaultClass::ProgramFpEnabled,
@@ -284,7 +291,9 @@ impl PpuInterrupt {
         match *self {
             Self::DataStorage { .. } => FAULT_DATA_STORAGE | dsisr_high(self),
             Self::DataSegment { .. } => FAULT_DATA_SEGMENT | dsisr_high(self),
-            Self::InstructionStorage => FAULT_INSTRUCTION_STORAGE | (self.srr1() >> 16) as u32,
+            Self::InstructionStorage { .. } => {
+                FAULT_INSTRUCTION_STORAGE | (self.srr1() >> 16) as u32
+            }
             Self::InstructionSegment => FAULT_INSTRUCTION_SEGMENT,
             Self::Alignment { .. } => FAULT_ALIGNMENT,
             Self::Program(cause) => {

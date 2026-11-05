@@ -10,8 +10,8 @@ region, plus:
 
 `containing_region(addr, length)` translates addresses by binary
 search. It returns the region entirely containing the range, or
-`None` if the access straddles a boundary or falls in an unmapped
-gap.
+`None` if the access straddles a boundary, falls in an unmapped
+gap, or starts below the floor `unmap_below` sets.
 
 The `boot run` driver builds these regions, matching the canonical
 PS3 LV2 virtual-address layout. High addresses are at the top.
@@ -98,8 +98,10 @@ The PPU interpreter routes fetches, loads and stores by three
 different paths:
 
 - **Fetches** go through `GuestMemory::as_bytes()`, a legacy
-  accessor returning the base-0 region's bytes. This is safe
-  because code always lives in `main`.
+  accessor returning the base-0 region's bytes, within the span
+  `GuestMemory::fetch_span` allows. A title's memory fetches only
+  the code spans its loaders declare, above its text floor; a fetch
+  outside them takes the instruction storage interrupt.
 - **Loads** (`ld`, `lwz`, `lfs`, `lvx`, etc.) use the `load_slice`
   helper, which scans a region-view table.
 - **Stores** check the region-view table, then go through

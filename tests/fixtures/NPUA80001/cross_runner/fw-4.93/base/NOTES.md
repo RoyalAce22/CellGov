@@ -6,7 +6,7 @@ developer: thatgamecompany
 engine: PhyreEngine
 distribution: PSN HDD
 checkpoint: ProcessExit
-steps: 11224
+steps: 6600
 convergence: No (outcome: ProcessExit vs Completed)
 byte_parity: --
 ---
@@ -14,13 +14,13 @@ byte_parity: --
 Does not converge with RPCS3 at the manifest's `process-exit`
 checkpoint: outcomes are distinct.
 
-CellGov reaches `process-exit` at step 11,224 (cumulative
-2,873,344 instructions at the default budget of 256 per step).
+CellGov reaches `process-exit` at step 6,600 (cumulative
+1,689,600 instructions at the default budget of 256 per step).
 The boot trajectory is an EARLY ABORT: the title calls
 `sys_process_exit(CELL_EABORT)` at step 5910, then runs its
 atexit / cleanup sequence -- walking every registered module id
 through the `_sys_prx_stop_module` / `_sys_prx_unload_module`
-handshake -- then calls `sys_process_exit(1)` at step 11,224.
+handshake -- then calls `sys_process_exit(1)` at step 6,600.
 The runtime detects `NoRunnableUnit` and reports
 `outcome=ProcessExit`. The cleanup generates 4 host-invariant
 breaks: 1 SPU initialize, 1 PPU thread create with unmodeled

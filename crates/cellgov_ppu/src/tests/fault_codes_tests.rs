@@ -17,7 +17,10 @@ fn sample(class: PpuFaultClass) -> (PpuFault, u32) {
     use PpuFaultClass as C;
     let interrupt = PpuFault::Interrupt;
     match class {
-        C::InstructionStorage => (interrupt(PpuInterrupt::InstructionStorage), 0x0102_4000),
+        C::InstructionStorage => (
+            interrupt(PpuInterrupt::InstructionStorage { no_execute: false }),
+            0x0102_4000,
+        ),
         C::InstructionSegment => (interrupt(PpuInterrupt::InstructionSegment), 0x0111_0000),
         C::DataStorage => (
             interrupt(PpuInterrupt::DataStorage {

@@ -214,7 +214,13 @@ fn resolve_primary_stacksize(declared: Option<u32>, sink: &dyn crate::BootSink) 
 /// [CBE-Handbook p:396 s:14.3.1.2] at entry R1 addresses the word
 /// holding the initial frame's NULL back-chain pointer.
 pub(super) const fn primary_entry_sp(size: u32) -> u64 {
-    PS3_PRIMARY_STACK_START + size as u64 - PS3_PRIMARY_STACK_ENTRY_RESERVE
+    primary_stack_top(size) - PS3_PRIMARY_STACK_ENTRY_RESERVE
+}
+
+/// First address past the primary stack for a stack of `size` bytes:
+/// the end of the argument block (capture `ppu_entry_argv`).
+pub(super) const fn primary_stack_top(size: u32) -> u64 {
+    PS3_PRIMARY_STACK_START + size as u64
 }
 
 /// Convert a retired-instruction cap into the `rt.step()` call cap

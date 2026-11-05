@@ -30,10 +30,16 @@ const OFF_STACK_INFO: usize = 56;
 const OFF_R1_AT_MAIN: usize = 64;
 const OFF_DECLARED: usize = 72;
 
-/// What the probes push between the entry r1 and the r1 `main` reads:
-/// the common crt0's 0x80-byte frame (`tests/micro/common/crt0.S`) and
-/// the probe `main`'s 0x100-byte one (its `stdu r1,-256(r1)`).
-const PROBE_FRAMES: u64 = 0x180;
+/// Payload offset of the entry r1 `ppu_entry_r1_queries` appends.
+const OFF_ENTRY_R1: usize = 1208;
+
+/// What the probes push between the entry r1 and the r1 `main` reads,
+/// from `ppu_entry_r1_queries`: a copy of `lv2_process_queries` that
+/// records its entry r1 as well.
+fn probe_frames() -> u64 {
+    let p = payload("ppu_entry_r1_queries");
+    word(&p, OFF_ENTRY_R1) - word(&p, OFF_R1_AT_MAIN)
+}
 
 fn payload(probe: &str) -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -51,6 +57,7 @@ fn word(payload: &[u8], at: usize) -> u64 {
 
 #[test]
 fn the_primary_stack_sits_at_the_console_base_with_the_console_entry_r1() {
+    let probe_frames = probe_frames();
     let mut wrong = Vec::new();
     for (probe, declares) in PROBES {
         let p = payload(probe);
@@ -59,7 +66,7 @@ fn the_primary_stack_sits_at_the_console_base_with_the_console_entry_r1() {
         let console_r1 = word(&p, OFF_R1_AT_MAIN);
         let declared = word(&p, OFF_DECLARED) as u32;
         let size = resolve_primary_stacksize(declares.then_some(declared), &NullSink);
-        let cellgov_r1 = primary_entry_sp(size) - PROBE_FRAMES;
+        let cellgov_r1 = primary_entry_sp(size) - probe_frames;
         if (PS3_PRIMARY_STACK_START, cellgov_r1) != (console_base, console_r1) {
             wrong.push(format!(
                 "{probe}: size {size:#x}, CellGov base {PS3_PRIMARY_STACK_START:#x} r1 at main \

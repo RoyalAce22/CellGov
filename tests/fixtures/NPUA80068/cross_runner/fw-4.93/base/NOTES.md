@@ -6,13 +6,13 @@ developer: Housemarque
 engine: Housemarque proprietary
 distribution: PSN HDD
 checkpoint: FirstRsxWrite (requested; not reached)
-steps: 390432
+steps: 390426
 convergence: No (outcome: Timeout vs Completed)
 byte_parity: --
 ---
 
 Does not converge with RPCS3 at FirstRsxWrite: CellGov
-times out at `MaxSteps` (390,432 under default budget) before
+times out at `MaxSteps` (390,426 under default budget) before
 reaching the first RSX put-pointer write; RPCS3 completes
 the checkpoint. Byte parity undefined until convergence.
 
@@ -26,7 +26,7 @@ the shared firmware libgcm spin-poll on `dma.ref` at
 without re-hitting any Fault, confirming the prior fault
 path is downstream of one of the corrected boot stages.
 One residual host invariant break at the new anchor
-(390,433 steps): an unclaimed syscall 465 returning
+(390,426 steps): an unclaimed syscall 465 returning
 CELL_ENOSYS.
 
 The prior `14,341,833 / Fault` with three honest residual

@@ -314,6 +314,7 @@ pub fn install_kernel_context_opd(mem: &mut GuestMemory, area: TlsArea) -> Resul
             addr: opd_addr,
             source,
         })?;
+    mem.declare_code(u64::from(blr_addr), 4);
     Ok(opd_addr)
 }
 

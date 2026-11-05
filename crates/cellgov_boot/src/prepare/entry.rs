@@ -6,7 +6,7 @@ use cellgov_ppu::shadow::PredecodedShadow;
 use cellgov_ppu::PpuExecutionUnit;
 
 use super::firmware::MemoryPlacement;
-use super::params::{primary_entry_sp, BootParams};
+use super::params::{primary_entry_sp, primary_stack_top, BootParams};
 use super::types::{BootDebugOptions, DiagnosticOptions, ExecutionOptions, PpuShadow};
 use crate::env::EnvBoolError;
 use crate::error::narrow_u32;
@@ -82,7 +82,8 @@ pub enum EntryError {
 }
 
 /// Stamp the title's primary entry state into `state`, and place the
-/// guest args block when the caller supplied one.
+/// argument block: the caller's guest args, or the one argument the
+/// console passes.
 ///
 /// r3..r10 follow the PS3 LV2 process-start convention; the args-block
 /// layout lives in [`crate::guest_args`]. Called before the primary
@@ -102,51 +103,61 @@ pub(super) fn seed_primary_entry_state(
     params: &BootParams,
     start: ProcessStart,
 ) -> Result<(), EntryError> {
-    let args_block = if execution.guest_args.is_empty() {
-        None
-    } else {
-        let block = crate::guest_args::build_args_block(
-            params.primary_stack_base,
-            primary_entry_sp(params.primary_stack_size),
-            execution.guest_args,
-        )?;
-        let range = cellgov_mem::ByteRange::new(
-            cellgov_mem::GuestAddr::new(block.base),
-            block.bytes.len() as u64,
-        )
-        .ok_or(EntryError::ArgsBlockBadRange {
+    let (block, r1) = entry_args(execution.guest_args, params.primary_stack_size)?;
+    let range = cellgov_mem::ByteRange::new(
+        cellgov_mem::GuestAddr::new(block.base),
+        block.bytes.len() as u64,
+    )
+    .ok_or(EntryError::ArgsBlockBadRange {
+        base: block.base,
+        len: block.bytes.len(),
+    })?;
+    rt.place_bytes(AddressSpaceId::BOOT, range, &block.bytes)
+        .map_err(|e| EntryError::ArgsBlockPlace {
             base: block.base,
-            len: block.bytes.len(),
+            detail: format!("{e:?}"),
         })?;
-        rt.place_bytes(AddressSpaceId::BOOT, range, &block.bytes)
-            .map_err(|e| EntryError::ArgsBlockPlace {
-                base: block.base,
-                detail: format!("{e:?}"),
-            })?;
-        if diagnostics.print_banner {
-            sink.note(&format!(
-                "guest args: argc={} argv=0x{:08x} r1=0x{:08x}",
-                block.argc, block.argv_addr, block.initial_r1
-            ));
-        }
-        Some(block)
-    };
-    match &args_block {
-        Some(b) => {
-            state.set_gpr(1, b.initial_r1);
-            state.set_gpr(3, b.argc);
-            state.set_gpr(4, b.argv_addr);
-            state.set_gpr(5, b.envp_addr);
-        }
-        None => {
-            state.set_gpr(1, primary_entry_sp(params.primary_stack_size));
-            state.set_gpr(3, 0);
-            state.set_gpr(4, 0);
-            state.set_gpr(5, 0);
-        }
+    if diagnostics.print_banner && !execution.guest_args.is_empty() {
+        sink.note(&format!(
+            "guest args: argc={} argv=0x{:08x} r1=0x{r1:08x}",
+            block.argc, block.argv_addr
+        ));
     }
+    state.set_gpr(1, r1);
+    state.set_gpr(3, block.argc);
+    state.set_gpr(4, block.argv_addr);
+    state.set_gpr(5, block.envp_addr);
     seed_process_start_registers(state, params.tls_info, params.malloc_pagesize, start);
     Ok(())
+}
+
+/// The argument block at the top of the primary stack, and the entry r1.
+///
+/// With no guest args, the block holds [`crate::guest_args::TITLE_ARGV0`].
+/// The entry r1 is [`primary_entry_sp`] when the block clears it. A
+/// larger block moves the entry r1 below the block.
+///
+/// # Errors
+///
+/// Returns [`GuestArgsError`] if a guest arg holds a NUL or the block
+/// does not fit the stack.
+fn entry_args(
+    guest_args: &[String],
+    stack_size: u32,
+) -> Result<(crate::guest_args::GuestArgsBlock, u64), GuestArgsError> {
+    let console_args = [crate::guest_args::TITLE_ARGV0.to_string()];
+    let args = if guest_args.is_empty() {
+        &console_args[..]
+    } else {
+        guest_args
+    };
+    let block = crate::guest_args::build_args_block(
+        cellgov_ps3_abi::hw::address_space::PS3_PRIMARY_STACK_START,
+        primary_stack_top(stack_size),
+        args,
+    )?;
+    let r1 = block.initial_r1.min(primary_entry_sp(stack_size));
+    Ok((block, r1))
 }
 
 /// Where the predecode shadow ends: past the title's last executable
@@ -294,3 +305,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/shadow_choice_tests.rs"]
 mod shadow_choice_tests;
+
+#[cfg(test)]
+#[path = "tests/entry_argv_console_tests.rs"]
+mod entry_argv_console_tests;
