@@ -760,8 +760,6 @@ fn weigh(share: u32, w: u64, counts: bool) -> u32 {
     ((kept + added) / PRESSURE_WINDOW_CYCLES) as u32
 }
 
-/// Add an instruction that took `own` cycles of this thread's own to the
-/// averages [`PpeTiming::pressure`] reads.
 /// Pushes back every result still pending when the sibling's stall
 /// began by the length of that stall.
 ///
@@ -829,6 +827,8 @@ fn queue_store(tables: &mut Tables, t: u64, op: &Op, ea: u64, len: u8) {
     }
 }
 
+/// Add an instruction that took `own` cycles of this thread's own to the
+/// averages [`PpeTiming::pressure`] reads.
 fn note_pressure(c: &mut Core, op: &Op, own: u64) {
     let n = PRESSURE_WINDOW_INSTRUCTIONS;
     let interval = own.saturating_mul(256).min(u64::from(u32::MAX));
