@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "capture_id": "micro:ppu_issue_vscr_smt_depth#653f029a22de",
+  "captured_at": "2026-11-04T02:58:58Z",
+  "console": {
+    "profile": "cech20-cex-493",
+    "model": "CECH-2001A",
+    "kernel": "cex",
+    "firmware": "4.93",
+    "cfw": "EvilNAT 4.93 PEX",
+    "cobra": "8.5",
+    "webman": "1.47.48t",
+    "debugger_attached": false,
+    "load_at_start": {
+      "cpu_c": 67,
+      "rsx_c": 62,
+      "fan_percent": 45
+    }
+  },
+  "transport": {
+    "kind": "webman-filedrop"
+  },
+  "harness": {
+    "runner": "runner_ps3",
+    "revision": "f2712091bfa01d050716949579dd6783036b547c",
+    "link": "https://github.com/RoyalAce22/CellGov/commit/f2712091bfa01d050716949579dd6783036b547c"
+  },
+  "microtest": {
+    "name": "ppu_issue_vscr_smt_depth",
+    "manifest_sha256": "ee091950a4a1c33c8f390c94772fd03c956b1a881f47a577bc8a91bcd69927f2",
+    "sources": {
+      "../common/cgov_cases.h": "2cc9df4e06e27071ec36fd32a33acdec781c8ed863f2871ccc1b31e8b30b3f78",
+      "../common/cgov_lv2.h": "18efe6e4e763676e4b215a12af9d37a68f82a01f93e6ee816a882abee5132c0e",
+      "../common/cgov_out.h": "dcd53f330ba62b8aba0acd9cff2a580b5bfdcdc4f18c9e4d5ac64caee4efab9a",
+      "../common/cgov_spu_load.h": "999392b83cb8965f4cd5612632a73b8021861a6a588d9e3ebb2c405cfdf726c3",
+      "../common/crt0.S": "a0e5c9e27431ef06df31507e0320d001b10098b154b59c3a6639b7916d76b8d9",
+      "../common/package_ps3.sh": "78e6be20e91352ffd7afa3e89e06d7ce57bc9842181c3c59e0b86670ecbd8abf",
+      "../common/param_sfo.xml": "0fe1608eeeb92cc1e033cd012a07991997cc91c7c8eac3bc8c31b212ef892c97",
+      "../common/patch_ctrl_flags.py": "86a0ec46658144b0a50e9179ac3e2323b96532a89227612e6a640a469ea4bf4d",
+      "../common/patch_toc.py": "6218bae28d718aeb19ab94b5fc464e526dbb46270e2614ed10922a8773edd229",
+      "../common/test_patch_toc.py": "9bb95d499c2e7c9da88bcaf56ee34fb724edfb17a8fc566189b79fad48d4f5b6",
+      "build.sh": "f4fd12d6169bace02ef51d2357628f012dff1fd972e6057a395b5d990468334f",
+      "ppu/main.c": "17b0c61d78954b0899d5ef902c1d692e56ba7ea48e779e7912abd2cc0f9650d3"
+    }
+  },
+  "artifacts": {
+    "eboot_sha256": "ffff2be636e6264746a91dae4230a4a5d63d223c4363079d4a38fca896d08aaf",
+    "ps3_elf_sha256": "51d11a98d4abc4e02a4358c421d172be6b3d171d3665f55105bd4fff06fe8920",
+    "reference_elf_sha256": "85fd7991994b6b0511dce5832c8e7c67273bed59117860cb21899fb728e6c9bd",
+    "siblings": {},
+    "param_sfo_sha256": "aebde5cab44b4ce3bb330072a5e6daa711d917cf8847478aba17d82435f01914"
+  },
+  "frame": {
+    "file": "cgov_frame.bin",
+    "sha256": "653f029a22dec54d1adf804951452e1342fb44401e73832525fe26ffcce1bc19",
+    "bytes": 1096,
+    "result_path": "/dev_hdd0/tmp/cgov_ppu_issue_vscr_smt_depth.bin"
+  },
+  "digest": "653f029a22dec54d1adf804951452e1342fb44401e73832525fe26ffcce1bc19  micro:ppu_issue_vscr_smt_depth  1096",
+  "recapture_reason": null
+}
