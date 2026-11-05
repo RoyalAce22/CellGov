@@ -23,7 +23,8 @@ pub fn reserved_bits(insn: &PpuInstruction) -> u32 {
         I::Cmpwi { .. } | I::Cmpdi { .. } | I::Cmplwi { .. } | I::Cmpldi { .. } => CMP_BIT_9,
         I::Cmpw { .. } | I::Cmpd { .. } | I::Cmplw { .. } | I::Cmpld { .. } => CMP_BIT_9 | RC,
         // [PPC-Book1 p:8 s:1.7.3 SC-Form] every field but LEV and the marker bit is reserved.
-        I::Sc { .. } => 0x03FF_F01C,
+        // [PPC-Book3 p:12 s:2.3.1] bits 0:5 of LEV are a reserved field too, so bit 26 alone is read.
+        I::Sc { .. } => 0x03FF_FFDD,
         // [PPC-Book2 p:26 s:3.3.3] sync reads L alone; bits 6:8, 11:20 and 31 are reserved.
         I::Sync { .. } => 0x039F_F801,
         // [PPC-Book2 p:28 s:3.3.3], [PPC-Book2 p:22 s:3.3.1] eieio and isync read no operand field.

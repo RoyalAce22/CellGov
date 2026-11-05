@@ -351,7 +351,8 @@ impl Lv2Host {
         Lv2Dispatch::immediate(0)
     }
 
-    /// PS3 usermode never issues `sc` with LEV != 0; CELL_EINVAL.
+    /// Answers a hand-built request with nonzero LEV with CELL_EINVAL;
+    /// the PPU stops on `sc` with LEV = 1.
     pub(super) fn dispatch_hypercall_rejection(
         &mut self,
         lev: u8,

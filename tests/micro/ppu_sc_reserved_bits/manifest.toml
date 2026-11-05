@@ -1,0 +1,14 @@
+[test]
+name = "ppu_sc_reserved_bits"
+
+# A hardware probe: getpid and getppid through a plain `sc` and through four `sc` words with reserved bits set (bit 31, LEV 2, LEV 0x7E, LEV 0x7E with bit 31), every one with bit 26 clear.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u64 words: 0 the index of the first word whose answers differ from the plain sc's (0xFFFFFFFF for none), 8 the word count (5), then from 16 per word 24 bytes: the sc word, the getpid r3, the getppid r3. 136 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 136 },
+]
+
+[expect]
+outcome = "completed"

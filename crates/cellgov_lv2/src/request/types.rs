@@ -1333,8 +1333,8 @@ pub enum Lv2Request {
         /// out-pointer for the 64-bit authority-id.
         a3: u64,
     },
-    /// `sc` with non-zero LEV. PS3 usermode must never issue this;
-    /// the runtime rejects it.
+    /// `sc` with non-zero LEV. The PPU stops on `sc` with LEV = 1, so
+    /// only a caller that builds the request by hand produces this.
     Hypercall {
         /// In: privilege level. LEV=0 is the normal-syscall path
         /// and never produces a `Hypercall` variant.

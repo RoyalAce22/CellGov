@@ -14,7 +14,7 @@ How a guest `sc` reaches an answer:
 ```mermaid
 flowchart TD
   sc["guest sc"] --> lev{"LEV = 0?"}
-  lev -->|no| hyp["Hypercall: CELL_EINVAL + invariant break"]
+  lev -->|no| hyp["PPU fault: the thread stops, no request"]
   lev -->|yes| timer{"141 / 142?"}
   timer -->|yes| fast["runtime timer fast path: TimerWakeQueue, no classify arm"]
   timer -->|no| classify["classify into Lv2Request"]
@@ -92,8 +92,8 @@ gives it beside what the other committed sources say.
 
 **Three requests have no ordinal.**
 
-- `Hypercall` -- an `sc` with LEV != 0, which PS3 usermode never
-  issues. It returns CELL_EINVAL with an invariant break.
+- `Hypercall` -- a request with LEV != 0, which the PPU never
+  yields. It returns CELL_EINVAL with an invariant break.
 - `Malformed` -- a request whose fields the classifier could not
   bind. It returns CELL_EINVAL with an invariant break.
 - `UnresolvedImport` -- fires when CRT0 calls through a GOT slot

@@ -666,7 +666,8 @@ fn ppu_fault_ea(fault: &cellgov_ppu::exec::PpuFault) -> Option<u64> {
         | cellgov_ppu::exec::PpuFault::ProgramTrap(_)
         | cellgov_ppu::exec::PpuFault::InvalidForm(_)
         | cellgov_ppu::exec::PpuFault::IllegalInstruction(_)
-        | cellgov_ppu::exec::PpuFault::PrivilegedInstruction(_) => None,
+        | cellgov_ppu::exec::PpuFault::PrivilegedInstruction(_)
+        | cellgov_ppu::exec::PpuFault::HypervisorCall => None,
     }
 }
 

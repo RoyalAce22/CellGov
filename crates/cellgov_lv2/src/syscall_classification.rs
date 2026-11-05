@@ -25,11 +25,12 @@ pub enum SyscallClassification {
         /// dispatch time.
         index: u32,
     },
-    /// Routes to the hypercall fault path; LEV >= 1 cannot originate from PS3 usermode.
+    /// Routes to the hypercall fault path. Only a caller that passes LEV = 1
+    /// by hand reaches it: the PPU stops on `sc` with LEV = 1 and yields no syscall.
     ///
-    /// [PPC-Book3 p:73 s:5.5.13 System Call Interrupt] sc with LEV=1 in
-    /// problem state should be treated as a programming error (hypervisor
-    /// call from unprivileged context is not permitted).
+    /// [PPC-Book3 p:12 s:2.3.1] sc with LEV=1 invokes the hypervisor, even
+    /// from problem state, and the architecture calls that a programming
+    /// error.
     Hypercall {
         /// Privilege level from the `sc` operand.
         lev: u8,

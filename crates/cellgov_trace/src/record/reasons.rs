@@ -33,9 +33,10 @@ pub enum TracedYieldReason {
     Fault = 7,
     /// Unit reached its terminal state.
     Finished = 8,
-    /// `sc` with LEV >= 1 (hypercall). PS3 usermode never issues these;
-    /// distinguished from `Syscall` so a rejection cannot byte-collide with an
-    /// unrelated LV2 handler returning `CELL_EINVAL`.
+    /// A request with nonzero LEV (hypercall). The PPU stops on `sc` with
+    /// LEV = 1, so only a hand-built request reaches it. A separate
+    /// reason keeps its rejection from a byte collision with an
+    /// unrelated LV2 handler that returns `CELL_EINVAL`.
     Hypercall = 9,
     /// Unit parked on a blocking channel whose count was zero; the
     /// stalled instruction runs again when the unit wakes.
@@ -272,8 +273,8 @@ pub enum TracedSyscallDisposition {
     /// `Lv2Request::Malformed`: classifier rejected the request shape
     /// (bad argument-register read, narrowing, etc.).
     Malformed = 3,
-    /// `Lv2Request::Hypercall`: LEV >= 1; PS3 usermode never issues
-    /// these.
+    /// `Lv2Request::Hypercall`: nonzero LEV; only a hand-built request
+    /// carries one.
     Hypercall = 4,
     /// `TIMER_USLEEP` or `TIMER_SLEEP` short-circuit: bypasses
     /// `Lv2Host::dispatch` entirely; the caller parks on the runtime's

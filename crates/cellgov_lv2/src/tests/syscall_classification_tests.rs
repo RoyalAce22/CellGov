@@ -23,15 +23,12 @@ fn classify_hypercall_routes_distinctly_for_lev_1() {
     );
 }
 
+/// The decoder passes no nonzero LEV other than 1.
 #[test]
-fn nonzero_lev_always_routes_to_hypercall() {
-    for lev in 1..=63u8 {
+fn lev_one_routes_to_hypercall_whatever_r11_names() {
+    for r11 in [22, 0x10005, 0x80000] {
         assert!(matches!(
-            classify(lev, 22),
-            SyscallClassification::Hypercall { .. }
-        ));
-        assert!(matches!(
-            classify(lev, 0x80000),
+            classify(1, r11),
             SyscallClassification::Hypercall { .. }
         ));
     }

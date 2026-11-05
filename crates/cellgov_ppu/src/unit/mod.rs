@@ -58,6 +58,10 @@ mod fused_resume_invalidation_tests;
 mod fused_trace_hash_tests;
 
 #[cfg(test)]
+#[path = "tests/sc_reserved_lev_tests.rs"]
+mod sc_reserved_lev_tests;
+
+#[cfg(test)]
 #[path = "tests/smc_branch_patch_tests.rs"]
 mod smc_branch_patch_tests;
 

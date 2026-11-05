@@ -468,13 +468,13 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         17 => {
             // [PPC-Book1 p:8 s:1.7.3 SC-Form] OPCD ///(6:10) ///(11:15) //(16:19) LEV(20:26) //(27:29) 1(30) /(31).
             // [PPC-Book1 p:26 s:2.4.2 System Call Instruction] LEV occupies PPC bits 20..=26 (7 bits); LSB-0 that is bits 5..=11.
-            // Bit 30 must be 1 (the `sc` form marker); bit 31 reserved.
-            // Accepting any primary-17 word would let bit-30-clear
-            // patterns silently route to LV2 syscall dispatch.
-            if (raw & 0x3) != 0x2 {
+            // [PPC-Book3 p:12 s:2.3.1] LEV values above 1 are reserved, and bits 0:5 of the LEV field are a reserved field.
+            // [PPC-Book1 p:3 s:1.5.2] The processor ignores a reserved field, so the PPE reads LEV as bit 26 alone and bit 31 changes nothing.
+            // Bit 30 is the `sc` form marker; a word with bit 30 clear is not `sc`.
+            if (raw & 0x2) != 0x2 {
                 return Err(reject_opcode(raw, 17, 0));
             }
-            let lev = ((raw >> 5) & 0x7F) as u8;
+            let lev = ((raw >> 5) & 0x1) as u8;
             Ok(PpuInstruction::Sc { lev })
         }
 

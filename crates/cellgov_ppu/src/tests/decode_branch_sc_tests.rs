@@ -10,15 +10,26 @@ fn sc_decodes() {
     assert_eq!(insn, PpuInstruction::Sc { lev: 0 });
 }
 
+/// [PPC-Book3 p:12 s:2.3.1] bits 0:5 of LEV are a reserved field, and
+/// [PPC-Book1 p:3 s:1.5.2] the processor ignores a reserved field.
 #[test]
-fn sc_preserves_lev_field() {
-    // LEV=1 is the LV1 hypercall form; LEV occupies raw bits
-    // 5..=11 (PPC bits 20..=26). Build LEV=1 and LEV=5.
-    for lev in [1u8, 5, 0x7F] {
-        let raw: u32 = (17u32 << 26) | ((lev as u32) << 5) | 2;
-        let insn = decode(raw).unwrap();
-        assert_eq!(insn, PpuInstruction::Sc { lev });
+fn sc_reads_lev_bit_26_alone_and_ignores_bit_31() {
+    let mut decoded = 0;
+    for lev in 0u32..=0x7F {
+        for bit31 in [0u32, 1] {
+            let raw: u32 = (17u32 << 26) | (lev << 5) | 2 | bit31;
+            let insn = decode(raw).unwrap_or_else(|e| panic!("0x{raw:08x}: {e:?}"));
+            assert_eq!(
+                insn,
+                PpuInstruction::Sc {
+                    lev: (lev & 1) as u8
+                },
+                "0x{raw:08x}"
+            );
+            decoded += 1;
+        }
     }
+    assert_eq!(decoded, 256);
 }
 
 #[test]

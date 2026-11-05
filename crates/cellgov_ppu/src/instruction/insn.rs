@@ -1702,11 +1702,8 @@ pub enum PpuInstruction {
     },
 
     // -- System --
-    /// System call. LV2 convention: syscall number in r11. The 7-bit
-    /// LEV field selects the privilege level: PS3 usermode always
-    /// issues LEV=0 (kernel syscall); LEV=1 would target an LV1
-    /// hypercall. Preserved at decode so the executor can route on
-    /// it when hypercall dispatch is wired.
+    /// System call. LV2 convention: syscall number in r11. `lev` is
+    /// bit 26 of the word, so it is 0 or 1.
     ///
     /// [PPC-Book1 p:26 s:2.4.2 System Linkage Instructions] sc SC-form; LEV field selects hypervisor (1) vs kernel (0).
     Sc {

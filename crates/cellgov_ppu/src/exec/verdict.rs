@@ -16,8 +16,8 @@ pub enum ExecuteVerdict {
     /// [PPC-Book3 p:12 s:2.3.1] sc with LEV=1 invokes the hypervisor; LEV>1 reserved.
     /// [PPC-Book1 p:26 s:2.4.2] sc LEV-field encoding (instruction bits 20:25 reserved).
     Syscall {
-        /// LEV field of `sc`: 0 = kernel syscall, 1 = hypercall,
-        /// greater than 1 reserved.
+        /// LEV of `sc`. Always 0: `sc` with LEV = 1 executes to
+        /// `PpuFault::HypervisorCall`.
         lev: u8,
     },
     /// Architectural fault.

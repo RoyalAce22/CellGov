@@ -59,6 +59,16 @@ pub enum PpuFault {
     /// [CBE-Handbook p:254 s:9.5.9] The PPE takes the privileged-instruction type of program interrupt.
     #[error("PPU privileged instruction: {0} in problem state")]
     PrivilegedInstruction(&'static str),
+    /// `sc` with LEV = 1, which invokes the hypervisor.
+    ///
+    /// The thread stops, and LV2 receives no request. No document or
+    /// console capture shows what LV1 does with this call from a game
+    /// process.
+    ///
+    /// [PPC-Book3 p:12 s:2.3.1] `sc` with LEV = 1 invokes the hypervisor, even from problem state, and the architecture calls that a programming error.
+    /// [CBE-Handbook p:256 s:9.5.13] On the PPE, LEV = 1 sets MSR\[HV\].
+    #[error("PPU hypervisor call: sc with LEV = 1 from problem state")]
+    HypervisorCall,
 }
 
 impl PpuFault {
@@ -78,6 +88,7 @@ impl PpuFault {
             Self::InvalidForm(_) => crate::FAULT_INVALID_FORM,
             Self::IllegalInstruction(_) => crate::FAULT_ILLEGAL_INSTRUCTION,
             Self::PrivilegedInstruction(_) => crate::FAULT_PRIVILEGED_INSTRUCTION,
+            Self::HypervisorCall => crate::FAULT_HYPERVISOR_CALL,
         }
     }
 }

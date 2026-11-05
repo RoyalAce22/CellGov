@@ -274,14 +274,18 @@ pub(super) fn effect_and_outcome(
     }
 }
 
-/// The outcomes of `instruction` given its kind's `outcomes`: a VX op
-/// the interpreter executes always continues.
+/// The outcomes of `instruction` given its kind's `outcomes`.
+///
+/// Two instruction forms override their kind:
+/// - A VX op the interpreter executes always continues.
+/// - `sc` with LEV = 1 always faults.
 pub(super) fn instruction_outcomes(
     instruction: PpuInstruction,
     outcomes: &'static [PpuOutcomeClass],
 ) -> &'static [PpuOutcomeClass] {
     match instruction {
         PpuInstruction::Vx { op, rc, .. } if crate::exec::vx_executes(op, rc) => CONTINUE,
+        PpuInstruction::Sc { lev: 1 } => FAULT,
         _ => outcomes,
     }
 }

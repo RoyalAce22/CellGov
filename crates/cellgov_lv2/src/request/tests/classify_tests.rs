@@ -1501,29 +1501,23 @@ fn classify_with_lev_hypercall_preserves_high_bits_without_narrowing() {
         0,
         0,
     ];
-    let req = classify_with_lev(7, 12345, &args);
+    let req = classify_with_lev(1, 12345, &args);
     assert_eq!(
         req,
         Lv2Request::Hypercall {
-            lev: NonZeroU8::new(7).unwrap(),
+            lev: NonZeroU8::new(1).unwrap(),
             r11: 12345,
             args,
         }
     );
 }
 
+/// The decoder passes the LEV from bit 26 alone, so LEV is 0 or 1.
 #[test]
-fn classify_with_lev_full_u8_range_routes_to_hypercall() {
+fn classify_with_lev_zero_runs_the_syscall_r11_names() {
     let args = [0; 8];
-    let req = classify_with_lev(u8::MAX, syscall::PROCESS_EXIT, &args);
-    assert!(matches!(
-        req,
-        Lv2Request::Hypercall {
-            lev,
-            r11: n,
-            ..
-        } if lev.get() == 255 && n == syscall::PROCESS_EXIT,
-    ));
+    let req = classify_with_lev(0, syscall::PROCESS_GETPID, &args);
+    assert_eq!(req, Lv2Request::ProcessGetPid);
 }
 
 #[test]

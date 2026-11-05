@@ -1720,17 +1720,21 @@ fn sc_zero_yields_with_syscall_lev_zero() {
 }
 
 #[test]
-fn sc_one_yields_with_syscall_lev_one() {
+fn sc_one_stops_the_thread_with_the_hypervisor_call_fault() {
     let mut mem = GuestMemory::new(256);
     place_insn(&mut mem, 0, 0x4400_0022);
 
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    unit.state_mut().set_gpr(3, 0x1234);
     let ctx = ExecutionContext::new(&mem);
     let mut effects = Vec::new();
     let result = unit.run_until_yield(Budget::new(10), &ctx, &mut effects);
 
-    assert_eq!(result.yield_reason, YieldReason::Syscall);
-    assert_eq!(result.local_diagnostics.syscall_lev, Some(1));
+    assert_eq!(result.yield_reason, YieldReason::Fault);
+    assert_eq!(result.fault, Some(FaultKind::Guest(FAULT_HYPERVISOR_CALL)));
+    assert_eq!(result.local_diagnostics.pc, Some(0));
+    assert_eq!(result.local_diagnostics.syscall_lev, None);
+    assert_eq!(unit.state().gpr[3], 0x1234, "no value comes back in r3");
 }
 
 mod fault_class_tests {

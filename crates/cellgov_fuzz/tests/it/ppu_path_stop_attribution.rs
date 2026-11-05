@@ -46,12 +46,15 @@ fn syscall_lev_return_address_and_raw_arguments_agree() {
     state.set_lr(0xabcd);
     state.set_gpr(11, 0x77);
     state.set_gpr(3, 0x55);
-    let runs = run_all_paths(&[0x4400_0022], &state, &[0; 64])
-        .expect("LEV one syscall must be observable");
+    // LEV field = 2 and bit 31 set: the PPU reads LEV from bit 26
+    // alone, so this is `sc` with LEV = 0.
+    let runs = run_all_paths(&[0x4400_0043], &state, &[0; 64])
+        .expect("a syscall with reserved bits set must be observable");
 
+    assert_eq!(runs.len(), 4, "one run per execution path");
     assert!(first_path_divergence(&runs).is_none(), "{runs:#?}");
     for run in &runs {
-        assert_eq!(run.stop.diagnostics.syscall_lev, Some(1));
+        assert_eq!(run.stop.diagnostics.syscall_lev, Some(0));
         assert_eq!(run.stop.diagnostics.lr, Some(0xabcd));
         assert_eq!(
             run.stop.syscall_args.map(|args| args[..2].to_vec()),
@@ -86,11 +89,12 @@ fn independent_reference_can_compare_represented_syscall_diagnostics() {
     let mut state = PpuState::new();
     state.set_lr(0xabcd);
     state.set_gpr(11, 0x77);
-    let runs = run_all_paths(&[0x4400_0022], &state, &[0; 64]).expect("syscall must be observable");
+    // `sc` with LEV = 0: LEV = 1 stops the thread and yields no syscall.
+    let runs = run_all_paths(&[0x4400_0002], &state, &[0; 64]).expect("syscall must be observable");
     reference.expected.stop.lr = ReferenceField::Value {
         value: Some(0xabcd),
     };
-    reference.expected.stop.syscall_lev = ReferenceField::Value { value: Some(1) };
+    reference.expected.stop.syscall_lev = ReferenceField::Value { value: Some(0) };
     reference.expected.stop.syscall_args = ReferenceField::Value {
         value: Some([0, 0, 0, 0, 0, 0, 0, 0, 0].to_vec()),
     };
@@ -108,4 +112,12 @@ fn independent_reference_can_compare_represented_syscall_diagnostics() {
         .differences
         .iter()
         .any(|difference| difference.field == PpuReferenceComponent::StopSyscallArgs));
+    assert!(
+        !comparison.differences.iter().any(|difference| matches!(
+            difference.field,
+            PpuReferenceComponent::StopLr | PpuReferenceComponent::StopSyscallLev
+        )),
+        "{:#?}",
+        comparison.differences
+    );
 }

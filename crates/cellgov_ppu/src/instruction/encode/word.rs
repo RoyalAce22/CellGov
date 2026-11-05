@@ -668,7 +668,7 @@ pub fn encode(insn: &PpuInstruction) -> Result<u32, EncodeError> {
         } => a_form(59, frt, fra, frb, frc, op as u32, rc),
 
         // [PPC-Book1 p:8 s:1.7.3 SC-Form] LEV(20:26) 1(30).
-        I::Sc { lev } => p(17) | (((lev as u32) & 0x7F) << 5) | 2,
+        I::Sc { lev } => p(17) | (((lev as u32) & 1) << 5) | 2,
 
         // [PPC-Book2 p:26 s:3.3.3] sync X-form: L at bits 9:10, XO 598.
         I::Sync { l } => p(31) | (((l as u32) & 3) << 21) | xo_10(PPC_SYNC_XO, false),

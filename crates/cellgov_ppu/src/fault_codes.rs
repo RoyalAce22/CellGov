@@ -28,6 +28,8 @@ pub const FAULT_INVALID_FORM: u32 = 0x010C_0000;
 pub const FAULT_ILLEGAL_INSTRUCTION: u32 = 0x010D_0000;
 /// Instruction the PPE runs only in privileged or hypervisor state.
 pub const FAULT_PRIVILEGED_INSTRUCTION: u32 = 0x010E_0000;
+/// `sc` with LEV = 1: a hypervisor call from problem state.
+pub const FAULT_HYPERVISOR_CALL: u32 = 0x010F_0000;
 
 /// True when `code` belongs to the [`FAULT_DECODE_ERROR`] class.
 #[inline]
