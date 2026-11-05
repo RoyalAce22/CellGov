@@ -236,8 +236,17 @@ impl PpuExecutionUnit {
                 }
                 ExecuteVerdict::Branch => None,
                 ExecuteVerdict::Syscall { lev } => {
+                    // `sc` retires at the yield like any other instruction
+                    // [PPC-Book1 p:26 s:2.4.2]: counted, hashed and charged.
+                    // Its records hold the state at the yield. The next
+                    // batch applies the return value and the step past it.
                     self.note_fetch(step_pc);
                     self.retire_timing(step_pc, ops, step_pc + 4);
+                    if ctx.trace_per_step() {
+                        self.per_step_hashes
+                            .push((step_pc, self.state.state_hash()));
+                    }
+                    self.record_retirement(step_pc);
                     self.close_block(effects);
                     let args = state::ppu_syscall_args(&self.state);
                     return ExecutionStepResult {

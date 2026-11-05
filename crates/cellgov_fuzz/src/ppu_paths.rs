@@ -471,6 +471,8 @@ fn run_plain(
                     ),
                     syscall_args: Some(cellgov_ppu::state::ppu_syscall_args(&run.state)),
                 };
+                // `sc` retires at the yield, as it does in the unit.
+                run.retired = run.retired.saturating_add(1);
                 break;
             }
             ExecuteVerdict::BufferFull => {
