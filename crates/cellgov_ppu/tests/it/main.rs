@@ -34,6 +34,7 @@ mod console_ppu_issue_loop_shape;
 mod console_ppu_issue_mftb;
 mod console_ppu_issue_mfvscr_lsu_waw;
 mod console_ppu_issue_mfvscr_younger;
+mod console_ppu_issue_mfxer;
 mod console_ppu_issue_miss;
 mod console_ppu_issue_mix_switch;
 mod console_ppu_issue_multiple;

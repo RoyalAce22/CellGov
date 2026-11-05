@@ -693,6 +693,17 @@ pub const PPU_MFFS_LATENCY_CYCLES: u64 = 31;
 /// cycles.
 pub const PPU_MFCR_CYCLES: u64 = 27;
 
+/// The cycles a move from the XER takes and holds the fixed-point unit.
+///
+/// In the `ppu_issue_mfxer` capture, eight `mfxer` and their `bdnz` take
+/// 219.44 cycles an iteration. An `mfxer` and eight `li` take 34.77
+/// cycles: the `li` wait for the `mfxer`.
+///
+/// [CBE-Handbook p:720 s:A.1.2] `mfspr` of an SPR other than LR and CTR:
+/// handled by the FXU and not pipelined; the pipeline stalls until
+/// writeback.
+pub const PPU_MFXER_CYCLES: u64 = 27;
+
 /// The cycles from a move from the time base to a dependent instruction.
 ///
 /// The handbook gives about 40; eight `mftb` to one register and their

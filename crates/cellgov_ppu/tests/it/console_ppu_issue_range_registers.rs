@@ -118,10 +118,7 @@ const TOLERANCE: f64 = 0.20;
 
 /// The loops the model times outside the tolerance, each with the cycles
 /// an iteration it may stay apart by.
-///
-/// - Loops 3 and 4: an `mfxer` costs the console about 37 cycles a pair,
-///   and the model issues it as a one-cycle fixed-point move.
-const RESIDUALS: [(usize, f64); 2] = [(3, 110.0), (4, 110.0)];
+const RESIDUALS: [(usize, f64); 0] = [];
 
 #[test]
 fn each_loop_lands_within_the_console_s_tolerance_or_its_named_residual() {

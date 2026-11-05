@@ -444,7 +444,10 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
         I::Mtctr { rs } => one(Op::on(unit::BRU)
             .src(gpr(rs))
             .dst(CTR, k::PPU_BRANCH_UNIT_LATENCY_CYCLES)),
-        I::Mfxer { rt } => one(fx(gpr(rt)).src(XER)),
+        I::Mfxer { rt } => one(Op::on(unit::FXU)
+            .src(XER)
+            .dst(gpr(rt), k::PPU_MFXER_CYCLES)
+            .kind(Kind::Unpipelined(k::PPU_MFXER_CYCLES as u16))),
         I::Mtxer { rs } => one(Op::on(unit::FXU)
             .src(gpr(rs))
             .dst(XER, k::PPU_FX_LATENCY_CYCLES)),
