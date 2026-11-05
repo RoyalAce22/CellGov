@@ -20,6 +20,8 @@ mod alignment;
 mod altivec;
 #[path = "mem_atomic_tests.rs"]
 mod atomics;
+#[path = "mem_caching_inhibited_tests.rs"]
+mod caching_inhibited;
 #[path = "mem_dcbz_console_tests.rs"]
 mod dcbz_console;
 #[path = "mem_dcbz_rsx_tests.rs"]

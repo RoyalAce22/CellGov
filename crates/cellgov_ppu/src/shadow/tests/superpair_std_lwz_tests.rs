@@ -105,6 +105,7 @@ fn the_pair_declares_the_effects_and_outcomes_of_both_halves() {
         descriptor.outcomes,
         &[
             PpuOutcomeClass::Continue,
+            PpuOutcomeClass::Fault,
             PpuOutcomeClass::MemoryFault,
             PpuOutcomeClass::BufferFull
         ]

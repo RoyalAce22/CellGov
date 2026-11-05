@@ -55,17 +55,18 @@ fn only_an_invalid_update_encoding_admits_the_illegal_instruction_fault() {
     let outcomes = |raw: u32| descriptor(raw).outcomes;
     // (invalid, valid, the valid form's fault classes)
     for (invalid, valid, valid_faults) in [
-        // stwu r3,16(r0) / stwu r3,16(r1)
+        // stbu r3,16(r0) / stbu r3,16(r1): a byte is aligned wherever it lies.
         (
-            (37 << 26) | (3 << 21) | 16,
-            (37 << 26) | (3 << 21) | (1 << 16) | 16,
+            (39 << 26) | (3 << 21) | 16,
+            (39 << 26) | (3 << 21) | (1 << 16) | 16,
             &[C::DataStorage][..],
         ),
-        // lhzu r4,0(r4) / lhzu r4,0(r5)
+        // lhzu r4,0(r4) / lhzu r4,0(r5): an unaligned halfword in
+        // caching-inhibited storage takes the alignment interrupt.
         (
             (41 << 26) | (4 << 21) | (4 << 16),
             (41 << 26) | (4 << 21) | (5 << 16),
-            &[C::DataStorage][..],
+            &[C::Alignment, C::DataStorage][..],
         ),
         // lfsu f1,0(r0) / lfsu f1,0(r1): RA=FRT is a valid form, and a
         // misaligned EA takes the alignment interrupt.

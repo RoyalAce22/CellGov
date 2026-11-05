@@ -120,7 +120,11 @@ fn the_pair_declares_the_effects_and_outcomes_of_a_load() {
     assert_eq!(descriptor.effects, &[EffectKind::SharedReadIntent]);
     assert_eq!(
         descriptor.outcomes,
-        &[PpuOutcomeClass::Continue, PpuOutcomeClass::MemoryFault]
+        &[
+            PpuOutcomeClass::Continue,
+            PpuOutcomeClass::Fault,
+            PpuOutcomeClass::MemoryFault
+        ]
     );
 }
 

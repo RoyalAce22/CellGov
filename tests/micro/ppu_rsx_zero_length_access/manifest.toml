@@ -1,0 +1,21 @@
+[test]
+name = "ppu_rsx_zero_length_access"
+
+# A hardware probe: an lvrx and an stvrx at a quadword-aligned EA and an
+# stswx with a zero count inside RSX local memory, which is
+# caching-inhibited for a game process, once libgcm has brought up an
+# RSX context. Each access writes a progress record that names it before
+# it runs. The console capture is the answer; no emulator runs it.
+
+[observe]
+# 9 big-endian u64 (72 bytes): DONE or PROG, the step a progress record
+# names, rsxInit rc, the local memory address, v0 (high, low) after an
+# lvrx at +0x40 with v0 first all ones, ld +0x50 and ld +0x58 after an
+# stvrx of 0x07 bytes at +0x50, ld +0x60 after an stswx with an XER
+# count of 0 at +0x60.
+memory_regions = [
+  { name = "result", addr = 0, size = 72 },
+]
+
+[expect]
+outcome = "completed"

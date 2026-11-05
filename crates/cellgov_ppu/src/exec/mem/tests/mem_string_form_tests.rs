@@ -89,19 +89,24 @@ fn a_load_string_with_its_address_registers_outside_the_range_loads() {
 }
 
 #[test]
-fn only_an_invalid_load_string_encoding_admits_a_fault() {
+fn only_an_invalid_load_string_encoding_admits_the_illegal_instruction_fault() {
     use crate::instruction::fuzz::PpuOutcomeClass;
-    let outcomes = |xo: u32, rt: u32, ra: u32, rb: u32| {
+    use crate::PpuFaultClass;
+    let descriptor = |xo: u32, rt: u32, ra: u32, rb: u32| {
         let raw = (31 << 26) | (rt << 21) | (ra << 16) | (rb << 11) | (xo << 1);
-        crate::decode::decode(raw)
-            .unwrap()
-            .fuzz_descriptor(raw)
-            .outcomes
+        crate::decode::decode(raw).unwrap().fuzz_descriptor(raw)
     };
-    // lswi: NB from the word decides the range.
+    let outcomes = |xo, rt, ra, rb| descriptor(xo, rt, ra, rb).outcomes;
+    // lswi: NB from the word decides the range. A valid lswi can still
+    // take the alignment interrupt in caching-inhibited storage, or a
+    // data storage fault.
     assert_eq!(outcomes(597, 4, 5, 8), &[PpuOutcomeClass::Fault]);
-    assert!(!outcomes(597, 4, 6, 8).contains(&PpuOutcomeClass::Fault));
-    assert!(!outcomes(597, 4, 0, 8).contains(&PpuOutcomeClass::Fault));
+    for valid in [descriptor(597, 4, 6, 8), descriptor(597, 4, 0, 8)] {
+        assert_eq!(
+            valid.faults,
+            &[PpuFaultClass::Alignment, PpuFaultClass::DataStorage]
+        );
+    }
     // lswx: RT=RA always faults; the XER count decides the rest.
     assert_eq!(outcomes(533, 4, 4, 6), &[PpuOutcomeClass::Fault]);
     let open = outcomes(533, 4, 5, 6);

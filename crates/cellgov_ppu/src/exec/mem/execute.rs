@@ -2,7 +2,7 @@
 
 use crate::exec::memory_helpers::{
     buffer_conditional_store, buffer_store, caching_inhibited, check_block_translates, check_store,
-    load_ze, LoadPort, Width,
+    inhibited_store, load_ze, LoadPort, Width,
 };
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::PpuInstruction;
@@ -56,6 +56,10 @@ pub(crate) fn execute(
             if ea & 3 != 0 {
                 return ExecuteVerdict::Fault(PpuFault::alignment(ea, false));
             }
+            // [CBE-Handbook p:253 s:9.5.8] An lmw, stmw, lswi, lswx, stswi or stswx operand in caching-inhibited storage takes the alignment interrupt.
+            if caching_inhibited(region_views, ea, 4 * (32 - u64::from(rt))) {
+                return ExecuteVerdict::Fault(PpuFault::alignment(ea, false));
+            }
             // The loop loads every word before it writes a register, so
             // a fault part way writes none.
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
@@ -83,6 +87,10 @@ pub(crate) fn execute(
             if ea & 3 != 0 {
                 return ExecuteVerdict::Fault(PpuFault::alignment(ea, true));
             }
+            let len = 4 * (32 - first) as u64;
+            if caching_inhibited(region_views, ea, len) {
+                return inhibited_store(region_views, ea, ea, len);
+            }
             let gpr = *state.gpr.as_array();
             let words = (first..32).map(|r| (ea.wrapping_add(4 * (r - first) as u64), 4, gpr[r]));
             store_prechecked(store_buf, region_views, 32 - first, words, "stmw word")
@@ -105,6 +113,9 @@ pub(crate) fn execute(
             }
             // [PPC-Book1 p:15 s:1.12.2] In 32-bit mode only the low 32 bits of an address sum address storage.
             let base = effective_address(state.ra_or_zero(ra));
+            if caching_inhibited(region_views, base, n as u64) {
+                return ExecuteVerdict::Fault(PpuFault::alignment(base, false));
+            }
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
             string_load(state, &mut port, rt as usize, base, n)
         }
@@ -115,21 +126,32 @@ pub(crate) fn execute(
                 return ExecuteVerdict::Fault(PpuFault::illegal("lswx"));
             }
             let base = state.ea_x_form(ra, rb);
-            let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
             // [PPC-Book1 p:48 s:3.3.6] With a zero count the contents of RT are undefined.
             // The reference console loads one byte, as a count of 1 does, and an
             // unmapped EA ends the process (probes ppu_reference_vectors and
             // ppu_may_trap_lswx_n0_null).
-            string_load(state, &mut port, rt as usize, base, n.max(1))
+            let n = n.max(1);
+            if caching_inhibited(region_views, base, n as u64) {
+                return ExecuteVerdict::Fault(PpuFault::alignment(base, false));
+            }
+            let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
+            string_load(state, &mut port, rt as usize, base, n)
         }
         PpuInstruction::Stswi { rs, ra, nb } => {
             let n = if nb == 0 { 32usize } else { nb as usize };
             let base = effective_address(state.ra_or_zero(ra));
+            if caching_inhibited(region_views, base, n as u64) {
+                return inhibited_store(region_views, base, base, n as u64);
+            }
             string_store(state, region_views, store_buf, rs as usize, base, n)
         }
+        // [PPC-Book1 p:49 s:3.3.6] A zero count stores no byte, so it has no operand to refuse.
         PpuInstruction::Stswx { rs, ra, rb } => {
             let base = state.ea_x_form(ra, rb);
             let n = state.xer_tbc() as usize;
+            if caching_inhibited(region_views, base, n as u64) {
+                return inhibited_store(region_views, base, base, n as u64);
+            }
             string_store(state, region_views, store_buf, rs as usize, base, n)
         }
 
@@ -185,8 +207,12 @@ pub(crate) fn execute(
         // [CBE-Handbook p:744 s:A.3] PPE-only VMX additions lvlx/lvrx/stvlx/stvrx: unaligned vector load/store helpers.
         // [CBE-Handbook p:744 s:A.3.3] lvlxl / lvrxl: identical to lvlx / lvrx,
         // with the LRU cache hint that CellGov's no-cache model ignores.
+        // [CBE-Handbook p:290 s:9.10] A VSU load or store, left or right, that references caching-inhibited storage takes the alignment interrupt.
         PpuInstruction::Lvlx { vt, ra, rb } | PpuInstruction::Lvlxl { vt, ra, rb } => {
             let addr = state.ea_x_form(ra, rb);
+            if caching_inhibited(region_views, addr, 16 - (addr & 15)) {
+                return ExecuteVerdict::Fault(PpuFault::alignment(addr, false));
+            }
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
             let val = match read_aligned_16(&mut port, addr & !15u64) {
                 Ok(v) => v,
@@ -206,6 +232,9 @@ pub(crate) fn execute(
             if lo == 0 {
                 state.set_vr(vt as usize, 0);
                 return ExecuteVerdict::Continue;
+            }
+            if caching_inhibited(region_views, addr & !15u64, lo) {
+                return ExecuteVerdict::Fault(PpuFault::alignment(addr, false));
             }
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
             let val = match read_aligned_16(&mut port, addr & !15u64) {
@@ -300,6 +329,9 @@ pub(crate) fn execute(
         PpuInstruction::Stvlx { vs, ra, rb } | PpuInstruction::Stvlxl { vs, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
             let count = 16 - (ea & 0xF) as usize;
+            if caching_inhibited(region_views, ea, count as u64) {
+                return inhibited_store(region_views, ea, ea, count as u64);
+            }
             let bytes = state.vr[vs as usize].to_be_bytes();
             let stores = (0..count).map(|i| (ea + i as u64, 1, u64::from(bytes[i])));
             store_prechecked(store_buf, region_views, count, stores, "stvlx byte")
@@ -311,6 +343,9 @@ pub(crate) fn execute(
                 return ExecuteVerdict::Continue;
             }
             let aligned = ea & !15u64;
+            if caching_inhibited(region_views, aligned, m as u64) {
+                return inhibited_store(region_views, ea, aligned, m as u64);
+            }
             let bytes = state.vr[vs as usize].to_be_bytes();
             let stores = (0..m).map(|i| (aligned + i as u64, 1, u64::from(bytes[16 - m + i])));
             store_prechecked(store_buf, region_views, m, stores, "stvrx byte")
@@ -339,7 +374,7 @@ pub(crate) fn execute(
                 return ExecuteVerdict::StoreFault(e);
             }
             // [CBE-Handbook p:147 s:6.1.6.4] A dcbz to caching-inhibited storage takes an alignment interrupt.
-            if caching_inhibited(region_views, ea) {
+            if caching_inhibited(region_views, ea, DCBZ_BLOCK_BYTES as u64) {
                 return ExecuteVerdict::Fault(PpuFault::alignment(target, true));
             }
             // Capacity pre-check prevents a partial block from
@@ -385,6 +420,10 @@ fn load_reserve(
     if ea & u64::from(width.bytes() - 1) != 0 {
         return ExecuteVerdict::Fault(PpuFault::alignment(ea, false));
     }
+    // [CBE-Handbook p:253 s:9.5.8] An lwarx, ldarx, stwcx. or stdcx. operand in caching-inhibited storage takes the alignment interrupt.
+    if caching_inhibited(region_views, ea, u64::from(width.bytes())) {
+        return ExecuteVerdict::Fault(PpuFault::alignment(ea, false));
+    }
     let loaded = load_ze(
         &mut LoadPort::new(region_views, store_buf, effects, unit_id),
         ea,
@@ -427,6 +466,10 @@ fn store_conditional(
     // interrupt whether or not the store would update storage.
     if let Err(e) = check_store(region_views, ea, u64::from(size)) {
         return ExecuteVerdict::StoreFault(e);
+    }
+    // The alignment interrupt follows a refusal, as `inhibited_store` orders them.
+    if caching_inhibited(region_views, ea, u64::from(size)) {
+        return ExecuteVerdict::Fault(PpuFault::alignment(ea, true));
     }
     let success = holds_reservation_for(state, ea);
     // [PPC-Book2 p:25 s:3.3.2 Atomic Update Primitives] CR0 = 0b00 || n || XER[SO].

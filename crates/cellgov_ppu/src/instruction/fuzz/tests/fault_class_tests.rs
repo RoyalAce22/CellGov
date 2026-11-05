@@ -40,9 +40,10 @@ fn a_descriptor_names_fault_classes_exactly_when_an_outcome_is_a_fault() {
 
 #[test]
 fn each_producer_names_the_class_it_raises() {
-    let cases: [(&str, u32, &[C]); 10] = [
+    let cases: [(&str, u32, &[C]); 11] = [
         ("addi", 14 << 26, &[]),
-        ("lwz", 32 << 26, &[C::DataStorage]),
+        ("lbz", 34 << 26, &[C::DataStorage]),
+        ("lwz", 32 << 26, &[C::Alignment, C::DataStorage]),
         (
             "lwzu r3,0(r0)",
             (33 << 26) | (3 << 21),

@@ -4,3 +4,19 @@ spu_mailbox_write	no-frame	a raw SPU image built by cellgov_mkelf; its result st
 lv2_exitspawn	not-portable	the exitspawn under the runner's /play.ps3 launch never starts the named process; the title hangs until webMAN's exit clears it	1832
 ppu_may_trap_rsx_window	not-portable	the dcbz at RSX local memory + 0x40 stops the game process after the progress record that names it; the title hangs until webMAN's exit clears it	1983
 ppu_may_trap_rsx_lwz	not-portable	the misaligned lwz at RSX local memory + 0x81 stops the game process after the progress record that names it; the title hangs until webMAN's exit clears it	1983
+ppu_may_trap_rsx_stw	not-portable	the misaligned stw at RSX local memory + 0x81 stops the game process after the progress record that names it; the title hangs until webMAN's exit clears it	2584
+ppu_may_trap_rsx_lmw	not-portable	the lmw at RSX local memory + 0x40 stops the game process after the progress record that names it; the title hangs until webMAN's exit clears it	2584
+ppu_may_trap_rsx_lswi	not-portable	the lswi at RSX local memory + 0x40 stops the game process after the progress record that names it; the title hangs until webMAN's exit clears it	2584
+ppu_may_trap_rsx_lha	not-portable	the lha at RSX local memory + 0x40 stops the game process after the progress record that names it; the title hangs until webMAN's exit clears it	2584
+ppu_may_trap_rsx_lwarx	not-portable	the lwarx at RSX local memory + 0x40 stops the game process after the progress record that names it; the title hangs until webMAN's exit clears it	2584
+ppu_may_trap_rsx_lfd	not-portable	the word-aligned lfd at RSX local memory + 0x44 stops the game process after the progress record that names it; the title hangs until webMAN's exit clears it	2584
+ppu_may_trap_rsx_lvlx	not-portable	the lvlx at RSX local memory + 0x44 stops the game process after the progress record that names it; the title hangs until webMAN's exit clears it	2584
+ppu_may_trap_rsx_lswx_n0	not-portable	the lswx with a zero count at RSX local memory + 0x40 stops the game process after the progress record that names it; the title hangs until webMAN's exit clears it	2584
+ppu_may_trap_rsx_stmw	not-portable	the stmw at RSX local memory + 0x40 stops the game process after the progress record that names it; the title hangs until webMAN's exit clears it	2584
+ppu_may_trap_rsx_stvlx	not-portable	the stvlx at RSX local memory + 0x44 stops the game process after the progress record that names it; the title hangs until webMAN's exit clears it	2584
+ppu_may_trap_rsx_stwcx	not-portable	the stwcx. at RSX local memory + 0x40 stops the game process after the progress record that names it; the title hangs until webMAN's exit clears it	2584
+ppu_may_trap_rsx_stfd	not-portable	the word-aligned stfd at RSX local memory + 0x44 stops the game process after the progress record that names it; the title hangs until webMAN's exit clears it	2584
+ppu_may_trap_rsx_straddle	not-portable	the unaligned lwz at 0xBFFFFFFE, two bytes in a cacheable segment and two in RSX local memory, stops the game process after the progress record that names it; the title hangs until webMAN's exit clears it	2584
+ppu_may_trap_rsx_straddle_stw	not-portable	the unaligned stw at 0xBFFFFFFE, two bytes in a cacheable segment and two in RSX local memory, stops the game process after the progress record that names it; the title hangs until webMAN's exit clears it	2584
+ppu_may_trap_rsx_straddle_stmw	not-portable	the stmw at 0xBFFFFFF8, eight bytes in a cacheable segment and four in RSX local memory, stops the game process after the progress record that names it; the title hangs until webMAN's exit clears it	2584
+ppu_may_trap_rsx_straddle_stswi	not-portable	the 12-byte stswi at 0xBFFFFFF8, eight bytes in a cacheable segment and four in RSX local memory, stops the game process after the progress record that names it; the title hangs until webMAN's exit clears it	2584

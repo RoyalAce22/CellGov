@@ -516,10 +516,10 @@ fn the_or_reads_what_the_lwz_wrote() {
 
 #[test]
 fn each_pair_declares_the_effects_and_outcomes_of_its_halves() {
-    use PpuOutcomeClass::{Branch, Continue, MemoryFault};
+    use PpuOutcomeClass::{Branch, Continue, Fault, MemoryFault};
     let load = (
         vec![EffectKind::SharedReadIntent],
-        vec![Continue, MemoryFault],
+        vec![Continue, Fault, MemoryFault],
     );
     let cases = [
         (

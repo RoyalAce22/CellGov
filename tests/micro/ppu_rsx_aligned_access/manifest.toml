@@ -1,0 +1,21 @@
+[test]
+name = "ppu_rsx_aligned_access"
+
+# A hardware probe: aligned loads and stores inside RSX local memory,
+# which is caching-inhibited for a game process, once libgcm has
+# brought up an RSX context. Each access writes a progress record that
+# names it before it runs. The console capture is the answer; no
+# emulator runs it.
+
+[observe]
+# 11 big-endian u64 (88 bytes): DONE or PROG, the step a progress
+# record names, rsxInit rc, the local memory address, then the values
+# of lwz +0x40, ld +0x48, lhz +0x52, lfd +0x58 (raw bits), ld +0x60
+# after stw 0x11223344 there, ld +0x68 after std 0x5566778899AABBCC
+# there, lbz +0x71.
+memory_regions = [
+  { name = "result", addr = 0, size = 88 },
+]
+
+[expect]
+outcome = "completed"

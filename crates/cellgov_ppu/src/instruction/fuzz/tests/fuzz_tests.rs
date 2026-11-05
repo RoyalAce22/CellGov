@@ -520,7 +520,11 @@ fn synthetic_memory_descriptors_match_their_fused_operations() {
         assert_eq!(descriptor.effects, &[EffectKind::SharedReadIntent]);
         assert_eq!(
             descriptor.outcomes,
-            &[PpuOutcomeClass::Continue, PpuOutcomeClass::MemoryFault]
+            &[
+                PpuOutcomeClass::Continue,
+                PpuOutcomeClass::Fault,
+                PpuOutcomeClass::MemoryFault
+            ]
         );
     }
 
@@ -554,6 +558,7 @@ fn synthetic_memory_descriptors_match_their_fused_operations() {
             descriptor.outcomes,
             &[
                 PpuOutcomeClass::Continue,
+                PpuOutcomeClass::Fault,
                 PpuOutcomeClass::MemoryFault,
                 PpuOutcomeClass::BufferFull
             ]
@@ -573,23 +578,25 @@ fn descriptors_reject_verdicts_the_executor_cannot_return() {
         &[PpuOutcomeClass::Continue]
     );
 
-    let lwz = PpuInstruction::Lwz {
+    // A byte access is aligned wherever it lies, so no alignment
+    // interrupt can refuse it.
+    let lbz = PpuInstruction::Lbz {
         rt: 3,
         ra: 4,
         imm: 0,
     };
     assert_eq!(
-        lwz.fuzz_descriptor(32 << 26).outcomes,
+        lbz.fuzz_descriptor(34 << 26).outcomes,
         &[PpuOutcomeClass::Continue, PpuOutcomeClass::MemoryFault]
     );
 
-    let stw = PpuInstruction::Stw {
+    let stb = PpuInstruction::Stb {
         rs: 3,
         ra: 4,
         imm: 0,
     };
     assert_eq!(
-        stw.fuzz_descriptor(36 << 26).outcomes,
+        stb.fuzz_descriptor(38 << 26).outcomes,
         &[
             PpuOutcomeClass::Continue,
             PpuOutcomeClass::MemoryFault,

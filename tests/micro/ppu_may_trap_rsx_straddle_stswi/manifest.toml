@@ -1,0 +1,30 @@
+[test]
+name = "ppu_may_trap_rsx_straddle_stswi"
+
+# A hardware probe: a word-aligned 12-byte stswi r29 whose first eight
+# bytes are in a cacheable 1 MiB segment mapped at 0xBFF00000 and whose
+# last four are in RSX local memory at 0xC0000000, once libgcm has
+# brought up an RSX context. It may end or stop the process, so a
+# progress record names it before it runs. The console capture is the
+# answer; no emulator runs it.
+
+[observe]
+# 14 big-endian u64 (112 bytes): DONE or PROG, the step the progress
+# record names, rsxInit rc, the local memory address, the last 330 rc
+# and the base it wrote, the 332 rc, the 334 rc of the map at
+# 0xBFF00000, the stswi EA, the u64 at 0xBFFFFFF8 after the stswi, the
+# 335, 329 and 331 rc of the cleanup, local memory's first u64 after
+# the stswi.
+memory_regions = [
+  { name = "result", addr = 0, size = 112 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# The access stops the process and the title never returns to the XMB,
+# so the runner keeps no capture. The same reason is the test's row in
+# tests/micro/ps3_gaps.tsv.
+portable = false
+not_portable_reason = "the 12-byte stswi at 0xBFFFFFF8, eight bytes in a cacheable segment and four in RSX local memory, stops the game process after the progress record that names it; the title hangs until webMAN's exit clears it"

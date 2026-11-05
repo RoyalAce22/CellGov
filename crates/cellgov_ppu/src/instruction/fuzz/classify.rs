@@ -160,6 +160,9 @@ pub(super) fn effect_and_outcome(
         ((NO_EFFECTS, FAULT), (NO_EFFECTS, FAULT))
     };
     // A misaligned EA takes the alignment interrupt: see `word_aligned` in the scalar model, and the lmw arm.
+    // In a caching-inhibited view, the PPE also takes it for:
+    // - an unaligned load or store wider than a byte;
+    // - a string, lha / lwa or VSU left / right form at any EA.
     let (aligned_load, aligned_store) = if valid_form {
         (
             (READ_EFFECTS, LOAD_OR_FAULT),
@@ -169,35 +172,52 @@ pub(super) fn effect_and_outcome(
         ((NO_EFFECTS, FAULT), (NO_EFFECTS, FAULT))
     };
     match kind {
-        K::Lmw | K::Lfsu | K::Lfdu | K::Lfsux | K::Lfdux => aligned_load,
-        K::Lhau
+        K::Lmw
+        | K::Lfsu
+        | K::Lfdu
+        | K::Lfsux
+        | K::Lfdux
+        | K::Lhau
         | K::Lwzu
-        | K::Lbzu
         | K::Lhzu
         | K::Ldu
         | K::Lwzux
-        | K::Lbzux
         | K::Lhzux
         | K::Ldux
         | K::Lhaux
         | K::Lwaux
-        | K::Lswi => checked_load,
+        | K::Lswi => aligned_load,
+        K::Lbzu | K::Lbzux => checked_load,
         // The XER byte count decides whether RA or RB falls in the range,
         // so a word that passes the RT check may still fault.
         K::Lswx if valid_form => (READ_EFFECTS, LOAD_OR_FAULT),
         K::Lswx => (NO_EFFECTS, FAULT),
-        K::Stfsu | K::Stfdu | K::Stfsux | K::Stfdux => aligned_store,
-        K::Stwu | K::Stdu | K::Stbu | K::Sthu | K::Stdux | K::Sthux | K::Stwux | K::Stbux => {
-            checked_store
-        }
+        K::Stfsu
+        | K::Stfdu
+        | K::Stfsux
+        | K::Stfdux
+        | K::Stwu
+        | K::Stdu
+        | K::Sthu
+        | K::Stdux
+        | K::Sthux
+        | K::Stwux => aligned_store,
+        K::Stbu | K::Stbux => checked_store,
+        K::Lbz
+        | K::Lbzx
+        | K::Lvsl
+        | K::Lvebx
+        | K::Lvsr
+        | K::Lvehx
+        | K::Lvewx
+        | K::Lvx
+        | K::Lvxl => (READ_EFFECTS, LOAD),
         K::Lwz
-        | K::Lbz
         | K::Lhz
         | K::Lha
         | K::Ld
         | K::Lwa
         | K::Lwzx
-        | K::Lbzx
         | K::Ldx
         | K::Lhzx
         | K::Lhax
@@ -209,24 +229,21 @@ pub(super) fn effect_and_outcome(
         | K::Lvrx
         | K::Lvlxl
         | K::Lvrxl
-        | K::Lvsl
-        | K::Lvebx
-        | K::Lvsr
-        | K::Lvehx
-        | K::Lvewx
-        | K::Lvx
-        | K::Lvxl => (READ_EFFECTS, LOAD),
-        K::Lfs | K::Lfd | K::Lfsx | K::Lfdx => (READ_EFFECTS, LOAD_OR_FAULT),
-        K::Stmw | K::Stfs | K::Stfd | K::Stfiwx | K::Stfsx | K::Stfdx => {
-            (WRITE_EFFECTS, STORE_OR_FAULT)
-        }
-        K::Stw
-        | K::Stb
+        | K::Lfs
+        | K::Lfd
+        | K::Lfsx
+        | K::Lfdx => (READ_EFFECTS, LOAD_OR_FAULT),
+        K::Stmw
+        | K::Stfs
+        | K::Stfd
+        | K::Stfiwx
+        | K::Stfsx
+        | K::Stfdx
+        | K::Stw
         | K::Sth
         | K::Std
         | K::Stwx
         | K::Stdx
-        | K::Stbx
         | K::Sthx
         | K::Stswi
         | K::Stswx
@@ -236,12 +253,10 @@ pub(super) fn effect_and_outcome(
         | K::Stvlx
         | K::Stvrx
         | K::Stvlxl
-        | K::Stvrxl
-        | K::Stvebx
-        | K::Stvehx
-        | K::Stvewx
-        | K::Stvx
-        | K::Stvxl => (WRITE_EFFECTS, STORE),
+        | K::Stvrxl => (WRITE_EFFECTS, STORE_OR_FAULT),
+        K::Stb | K::Stbx | K::Stvebx | K::Stvehx | K::Stvewx | K::Stvx | K::Stvxl => {
+            (WRITE_EFFECTS, STORE)
+        }
         // A block in a caching-inhibited view takes an alignment interrupt.
         K::Dcbz => (WRITE_EFFECTS, STORE_OR_FAULT),
         K::Ldarx | K::Lwarx => (RESERVATION_READ_EFFECTS, ATOMIC_LOAD),
@@ -270,21 +285,22 @@ pub(super) fn fused_effect_and_outcome(
 ) -> (&'static [EffectKind], &'static [PpuOutcomeClass]) {
     use FusedPairKind as F;
     match kind {
+        F::LbzuCmpwi | F::LbzLbz => (READ_EFFECTS, LOAD),
+        // An unaligned word or doubleword half in a caching-inhibited view
+        // takes the alignment interrupt.
         F::LwzCmpwi
         | F::LwzMtlr
         | F::LdMtlr
         | F::LdLd
-        | F::LbzuCmpwi
         | F::LduLdu
         | F::LdRlwinm
         | F::LwzLwz
         | F::LdLdAny
-        | F::LbzLbz
         | F::OrLwz
         | F::LdAddi
-        | F::LwzOr => (READ_EFFECTS, LOAD),
-        F::LiStw | F::MflrStw | F::MflrStd | F::StdStd => (WRITE_EFFECTS, STORE),
-        F::StdLwz => (READ_WRITE_EFFECTS, STORE),
+        | F::LwzOr => (READ_EFFECTS, LOAD_OR_FAULT),
+        F::LiStw | F::MflrStw | F::MflrStd | F::StdStd => (WRITE_EFFECTS, STORE_OR_FAULT),
+        F::StdLwz => (READ_WRITE_EFFECTS, STORE_OR_FAULT),
         F::CmpwiBc
         | F::CmpwBc
         | F::CmpdiBc
@@ -329,6 +345,9 @@ pub(super) fn fault_classes(
         K::Ldarx | K::Lwarx | K::Stdcx | K::Stwcx | K::Dcbz => {
             &[Class::Alignment, Class::DataStorage]
         }
+        // A fused pair faults only on a memory half's alignment interrupt.
+        K::Fused => &[Class::Alignment, Class::DataStorage],
+        K::Lswx if valid_form => &[Class::ProgramIllegal, Class::Alignment, Class::DataStorage],
         K::Lmw
         | K::Stmw
         | K::Lfs
@@ -348,6 +367,54 @@ pub(super) fn fault_classes(
         | K::Stfdx
         | K::Stfdux
         | K::Stfiwx
+        | K::Lwz
+        | K::Lhz
+        | K::Lha
+        | K::Ld
+        | K::Lwa
+        | K::Lwzx
+        | K::Ldx
+        | K::Lhzx
+        | K::Lhax
+        | K::Lwax
+        | K::Ldbrx
+        | K::Lwbrx
+        | K::Lhbrx
+        | K::Lvlx
+        | K::Lvrx
+        | K::Lvlxl
+        | K::Lvrxl
+        | K::Lhau
+        | K::Lwzu
+        | K::Lhzu
+        | K::Ldu
+        | K::Lwzux
+        | K::Lhzux
+        | K::Ldux
+        | K::Lhaux
+        | K::Lwaux
+        | K::Lswi
+        | K::Stw
+        | K::Sth
+        | K::Std
+        | K::Stwx
+        | K::Stdx
+        | K::Sthx
+        | K::Stswi
+        | K::Stswx
+        | K::Sdbrx
+        | K::Stwbrx
+        | K::Sthbrx
+        | K::Stvlx
+        | K::Stvrx
+        | K::Stvlxl
+        | K::Stvrxl
+        | K::Stwu
+        | K::Stdu
+        | K::Sthu
+        | K::Stdux
+        | K::Sthux
+        | K::Stwux
             if valid_form =>
         {
             &[Class::Alignment, Class::DataStorage]

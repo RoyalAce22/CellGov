@@ -158,8 +158,15 @@ pub const PS3_RSX_IOMAP_SIZE: usize = 0x0550_0000;
 ///
 /// - a `dcbz` at `0xC000_0040` (`ppu_may_trap_rsx_window`)
 /// - a misaligned `lwz` at `0xC000_0081` (`ppu_may_trap_rsx_lwz`)
+/// - a misaligned `stw` at `0xC000_0081` (`ppu_may_trap_rsx_stw`)
+/// - an `lmw`, `lswi`, `lha` or `lwarx` at `0xC000_0040`
+///   (`ppu_may_trap_rsx_lmw`, `_lswi`, `_lha`, `_lwarx`)
+/// - a word-aligned `lfd` or an `lvlx` at `0xC000_0044`
+///   (`ppu_may_trap_rsx_lfd`, `_lvlx`)
 ///
-/// Neither probe run ends, so neither has a capture.
+/// No such run ends, so none has a capture. An aligned `lwz`, `ld`,
+/// `lhz`, `lfd`, `stw`, `std` or `lbz` there runs to completion
+/// (`ppu_rsx_aligned_access`).
 pub const PS3_RSX_BASE: u64 = 0xC000_0000;
 
 /// Size in bytes of CellGov's RSX region. It holds the console's local

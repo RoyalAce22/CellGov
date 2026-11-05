@@ -5,6 +5,7 @@
 //! overlaps with pre-block memory both resolve correctly.
 
 use crate::exec::verdict::ExecuteVerdict;
+use crate::exec::PpuFault;
 use crate::store_buffer::{StoreBuffer, StoreRefusal};
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
@@ -114,6 +115,18 @@ impl<'v, 'e> LoadPort<'v, 'e> {
             .unwrap_or(ea);
         unmapped(first_unheld)
     }
+
+    /// See [`caching_inhibited`].
+    #[inline]
+    pub(crate) fn inhibited(&self, ea: u64, len: u64) -> bool {
+        caching_inhibited(self.views, ea, len)
+    }
+
+    /// See [`unaligned_inhibited`].
+    #[inline]
+    pub(crate) fn unaligned_inhibited(&self, ea: u64, width: Width) -> bool {
+        unaligned_inhibited(self.views, ea, width.bytes())
+    }
 }
 
 /// Synthesize a `MemError::Unmapped` for `ea` with no nearest-region
@@ -181,6 +194,20 @@ pub(crate) fn load_ze(
     })
 }
 
+/// [`load_ze`] for a fused pair's load half, after the alignment check
+/// of [`unaligned_inhibited`].
+#[inline]
+pub(crate) fn load_ze_checked(
+    port: &mut LoadPort<'_, '_>,
+    ea: u64,
+    width: Width,
+) -> Result<u64, ExecuteVerdict> {
+    if port.unaligned_inhibited(ea, width) {
+        return Err(ExecuteVerdict::Fault(PpuFault::alignment(ea, false)));
+    }
+    load_ze(port, ea, width).map_err(ExecuteVerdict::MemFault)
+}
+
 /// Sign-extending load with store-buffer forwarding. See [`load_ze`].
 #[inline]
 pub(crate) fn load_se(
@@ -233,14 +260,70 @@ pub(crate) fn check_block_translates(
     }
 }
 
-/// Whether the view that holds `ea` is caching-inhibited storage. An
-/// address that no view holds returns `false`.
+/// Whether a byte of `[ea, ea + len)` lies in a caching-inhibited view.
+/// A byte that no view holds is not caching-inhibited, and an empty
+/// range holds no byte.
 #[inline]
-pub(crate) fn caching_inhibited(views: &[RegionView<'_>], ea: u64) -> bool {
-    views
-        .iter()
-        .find(|view| ea >= view.base && ea - view.base < view.bytes.len() as u64)
-        .is_some_and(|view| view.caching_inhibited)
+pub(crate) fn caching_inhibited(views: &[RegionView<'_>], ea: u64, len: u64) -> bool {
+    let end = ea.saturating_add(len);
+    len != 0
+        && views.iter().any(|view| {
+            view.caching_inhibited && view.base < end && ea < view.base + view.bytes.len() as u64
+        })
+}
+
+/// Whether an access of `size` bytes at `ea` is unaligned and in
+/// caching-inhibited storage.
+///
+/// [CBE-Handbook p:253 s:9.5.8] The PPE takes the alignment interrupt for a load or store whose operand is unaligned and in caching-inhibited storage.
+#[inline]
+fn unaligned_inhibited(views: &[RegionView<'_>], ea: u64, size: u8) -> bool {
+    ea & u64::from(size - 1) != 0 && caching_inhibited(views, ea, u64::from(size))
+}
+
+/// The verdict of a store of `[start, start + len)` that the PPE refuses
+/// in caching-inhibited storage, with `dar` the instruction's EA.
+///
+/// A store that a region also refuses faults as that refusal. The PPE
+/// orders the two by the C bit of the page table entry. Problem state
+/// cannot read that bit, so CellGov takes the order the PPE gives when
+/// C is 0.
+///
+/// [CBE-Handbook p:290 s:9.10] A store's alignment interrupt in caching-inhibited storage follows the page-protection data storage interrupt when C is 0.
+#[inline]
+pub(crate) fn inhibited_store(
+    views: &[RegionView<'_>],
+    dar: u64,
+    start: u64,
+    len: u64,
+) -> ExecuteVerdict {
+    match write_refusal(views, start, len) {
+        Some(e) => ExecuteVerdict::StoreFault(e),
+        None => ExecuteVerdict::Fault(PpuFault::alignment(dar, true)),
+    }
+}
+
+/// The refusal of the first byte of `[start, start + len)` that no view
+/// holds or whose region refuses writes, or `None` when each byte is in
+/// a writable view. The range may span several views.
+#[inline]
+fn write_refusal(views: &[RegionView<'_>], start: u64, len: u64) -> Option<cellgov_mem::MemError> {
+    let end = start.saturating_add(len);
+    let mut at = start;
+    // Each pass moves `at` to the end of the view that holds it.
+    while at < end {
+        let Some(view) = views
+            .iter()
+            .find(|v| v.base <= at && at < v.base + v.bytes.len() as u64)
+        else {
+            return Some(unmapped(at));
+        };
+        if let Some(region) = view.write_refused_by {
+            return Some(cellgov_mem::MemError::ReservedWrite { addr: at, region });
+        }
+        at = view.base + view.bytes.len() as u64;
+    }
+    None
 }
 
 /// Refuse a store of `len` bytes at `ea` that no one view holds, or
@@ -285,7 +368,8 @@ pub(crate) fn check_store(
 /// a reservation, so `lwarx; stw <neighbour>; stwcx.` succeeds.
 ///
 /// A store that [`check_store`] refuses faults here, and nothing goes
-/// to the buffer.
+/// to the buffer. So does an unaligned store in caching-inhibited
+/// storage, as [`inhibited_store`] orders it.
 ///
 /// [PPC-Book2 p:10 s:1.7.3.1] a reservation is lost to another processor's store or dcbz to the granule, not to the holder's own stores.
 #[inline]
@@ -296,6 +380,13 @@ pub(crate) fn buffer_store(
     size: u8,
     value: u64,
 ) -> ExecuteVerdict {
+    // `check_store` refuses a store that runs from one view into
+    // another. An operand that runs from a cacheable view into an
+    // inhibited one takes the alignment interrupt, so this check runs
+    // first.
+    if unaligned_inhibited(views, ea, size) {
+        return inhibited_store(views, ea, ea, u64::from(size));
+    }
     if let Err(e) = check_store(views, ea, u64::from(size)) {
         return ExecuteVerdict::StoreFault(e);
     }

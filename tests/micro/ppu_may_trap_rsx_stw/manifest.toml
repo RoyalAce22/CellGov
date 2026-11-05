@@ -1,0 +1,25 @@
+[test]
+name = "ppu_may_trap_rsx_stw"
+
+# A hardware probe: a misaligned stw inside RSX local memory once libgcm has
+# brought up an RSX context. It may end or stop the process, so a
+# progress record names it before it runs. The console capture is the
+# answer; no emulator runs it.
+
+[observe]
+# 6 big-endian u64 (48 bytes): DONE or PROG, the step the progress
+# record names, rsxInit rc, the local memory address, the stw EA,
+# SKIP (a store loads nothing).
+memory_regions = [
+  { name = "result", addr = 0, size = 48 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+# The access stops the process and the title never returns to the XMB,
+# so the runner keeps no capture. The same reason is the test's row in
+# tests/micro/ps3_gaps.tsv.
+portable = false
+not_portable_reason = "the misaligned stw at RSX local memory + 0x81 stops the game process after the progress record that names it; the title hangs until webMAN's exit clears it"

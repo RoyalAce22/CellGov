@@ -43,6 +43,7 @@ mod console_ppu_quadword;
 mod console_ppu_quickened_cmpd;
 mod console_ppu_quickened_lis;
 mod console_ppu_reservation_lv2;
+mod console_ppu_rsx_local;
 mod console_ppu_sc_reserved_bits;
 mod console_ppu_storage;
 mod console_ppu_sync_l3;

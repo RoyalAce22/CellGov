@@ -243,6 +243,14 @@ pub(super) fn load(
     if matches!(dest, Dest::Fpr(_)) && !word_aligned(addr) {
         return ExecuteVerdict::Fault(PpuFault::alignment(addr, false));
     }
+    // [CBE-Handbook p:253 s:9.5.8] In caching-inhibited storage the PPE refuses lha, lhau, lhaux, lhax, lwa, lwaux and lwax at any EA.
+    let inhibited = match dest {
+        Dest::Sign(_) => port.inhibited(addr, u64::from(width.bytes())),
+        Dest::Zero(_) | Dest::Reversed(_) | Dest::Fpr(_) => port.unaligned_inhibited(addr, width),
+    };
+    if inhibited {
+        return ExecuteVerdict::Fault(PpuFault::alignment(addr, false));
+    }
     let loaded = match dest {
         Dest::Sign(_) => load_se(port, addr, width),
         Dest::Zero(_) | Dest::Reversed(_) | Dest::Fpr(_) => load_ze(port, addr, width),
@@ -272,6 +280,9 @@ pub(super) fn load(
 ///
 /// The writeback follows a staged store only, so a `BufferFull`
 /// verdict leaves RA intact for the retry.
+///
+/// [`buffer_store`] refuses an unaligned store in caching-inhibited
+/// storage.
 #[inline]
 pub(super) fn store(
     state: &mut PpuState,

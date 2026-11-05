@@ -12,7 +12,7 @@
 use crate::exec::alu::{mask64, rotl32};
 use crate::exec::branch::branch_condition;
 use crate::exec::mem::store_prechecked;
-use crate::exec::memory_helpers::{buffer_store, load_ze, LoadPort, Width};
+use crate::exec::memory_helpers::{buffer_store, load_ze_checked, LoadPort, Width};
 use crate::exec::ExecuteVerdict;
 use crate::instruction::{branch_target, FusedPair, PpuInstruction};
 use crate::state::{cmp_cr_field, effective_address, PpuState};
@@ -152,7 +152,7 @@ fn execute_pair(
             cmp_imm,
         } => {
             let ea = state.ea_d_form(ra_load, offset);
-            match load_ze(
+            match load_ze_checked(
                 &mut LoadPort::new(region_views, store_buf, effects, unit_id),
                 ea,
                 Width::B4,
@@ -162,7 +162,7 @@ fn execute_pair(
                     cmpw(state, bf, val as i32, cmp_imm as i32);
                     ExecuteVerdict::Continue
                 }
-                Err(ea) => ExecuteVerdict::MemFault(ea),
+                Err(v) => v,
             }
         }
         // [PPC-Book1 p:51 s:3.3.8 Add Immediate] addi (li when RA=0): RT <- EXTS(SI); the li mnemonic forces RA=0.
@@ -197,7 +197,7 @@ fn execute_pair(
             offset,
         } => {
             let ea = state.ea_d_form(ra_load, offset);
-            match load_ze(
+            match load_ze_checked(
                 &mut LoadPort::new(region_views, store_buf, effects, unit_id),
                 ea,
                 Width::B4,
@@ -207,7 +207,7 @@ fn execute_pair(
                     state.set_lr(val);
                     ExecuteVerdict::Continue
                 }
-                Err(ea) => ExecuteVerdict::MemFault(ea),
+                Err(v) => v,
             }
         }
         // [PPC-Book1 p:81 s:3.3.13 Move From Special Purpose Register] mfspr (mflr when SPR=8): RS <- LR (full 64 bits).
@@ -229,7 +229,7 @@ fn execute_pair(
             offset,
         } => {
             let ea = state.ea_d_form(ra_load, offset);
-            match load_ze(
+            match load_ze_checked(
                 &mut LoadPort::new(region_views, store_buf, effects, unit_id),
                 ea,
                 Width::B8,
@@ -239,7 +239,7 @@ fn execute_pair(
                     state.set_lr(val);
                     ExecuteVerdict::Continue
                 }
-                Err(ea) => ExecuteVerdict::MemFault(ea),
+                Err(v) => v,
             }
         }
         // [PPC-Book1 p:39 s:3.3.2 Load Doubleword] ld: RT <- MEM(EA,8); EA = (r1)+EXTS(DS||0b00).
@@ -257,7 +257,7 @@ fn execute_pair(
             rc,
         } => {
             let ea = state.ea_d_form(1, offset);
-            match load_ze(
+            match load_ze_checked(
                 &mut LoadPort::new(region_views, store_buf, effects, unit_id),
                 ea,
                 Width::B8,
@@ -267,7 +267,7 @@ fn execute_pair(
                     rlwinm(state, ra, rs, sh, mb, me, rc);
                     ExecuteVerdict::Continue
                 }
-                Err(ea) => ExecuteVerdict::MemFault(ea),
+                Err(v) => v,
             }
         }
         // [PPC-Book1 p:43 s:3.3.3 Store Doubleword] std (x2): MEM(EA,8) <- (RS) for each store; the second EA is constrained to EA1+8 by the fuser.
@@ -300,17 +300,17 @@ fn execute_pair(
         } => {
             let ea1 = state.ea_d_form(ra, offset1);
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
-            let first = match load_ze(&mut port, ea1, Width::B8) {
+            let first = match load_ze_checked(&mut port, ea1, Width::B8) {
                 Ok(val) => val,
-                Err(ea) => return ExecuteVerdict::MemFault(ea),
+                Err(v) => return v,
             };
             state.set_gpr(rt1 as usize, first);
-            match load_ze(&mut port, ea1.wrapping_add(8), Width::B8) {
+            match load_ze_checked(&mut port, ea1.wrapping_add(8), Width::B8) {
                 Ok(val) => {
                     state.set_gpr(rt2 as usize, val);
                     ExecuteVerdict::Continue
                 }
-                Err(ea) => ExecuteVerdict::MemFault(ea),
+                Err(v) => v,
             }
         }
         // [PPC-Book1 p:67 s:3.3.11 OR] or: RA <- (RS) | (RB).
@@ -353,17 +353,17 @@ fn execute_pair(
             let ea1 = state.ea_d_form(ra1, off1);
             let ea2 = state.ea_d_form(ra2, off2);
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
-            let first = match load_ze(&mut port, ea1, Width::B4) {
+            let first = match load_ze_checked(&mut port, ea1, Width::B4) {
                 Ok(val) => val,
-                Err(ea) => return ExecuteVerdict::MemFault(ea),
+                Err(v) => return v,
             };
-            match load_ze(&mut port, ea2, Width::B4) {
+            match load_ze_checked(&mut port, ea2, Width::B4) {
                 Ok(second) => {
                     state.set_gpr(rt1 as usize, first);
                     state.set_gpr(rt2 as usize, second);
                     ExecuteVerdict::Continue
                 }
-                Err(ea) => ExecuteVerdict::MemFault(ea),
+                Err(v) => v,
             }
         }
         // [PPC-Book1 p:34 s:3.3.2 Load Byte and Zero with Update] lbzu: RT <- 56 zeros || MEM(EA,1); RA <- EA; EA = (RA)+EXTS(D).
@@ -376,7 +376,7 @@ fn execute_pair(
             cmp_ra,
         } => {
             let ea = state.ea_d_form(ra, offset);
-            match load_ze(
+            match load_ze_checked(
                 &mut LoadPort::new(region_views, store_buf, effects, unit_id),
                 ea,
                 Width::B1,
@@ -387,7 +387,7 @@ fn execute_pair(
                     cmpw(state, bf, state.gpr[cmp_ra as usize] as i32, 0);
                     ExecuteVerdict::Continue
                 }
-                Err(ea) => ExecuteVerdict::MemFault(ea),
+                Err(v) => v,
             }
         }
         // [PPC-Book1 p:39 s:3.3.2 Load Doubleword with Update] ldu: RT <- MEM(EA,8); RA <- EA; EA = (RA)+EXTS(DS||0b00).
@@ -409,13 +409,13 @@ fn execute_pair(
             };
             let ea2 = base2.wrapping_add(off2 as i64 as u64);
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
-            let first = match load_ze(&mut port, ea1, Width::B8) {
+            let first = match load_ze_checked(&mut port, ea1, Width::B8) {
                 Ok(val) => val,
-                Err(ea) => return ExecuteVerdict::MemFault(ea),
+                Err(v) => return v,
             };
-            let second = match load_ze(&mut port, ea2, Width::B8) {
+            let second = match load_ze_checked(&mut port, ea2, Width::B8) {
                 Ok(val) => val,
-                Err(ea) => return ExecuteVerdict::MemFault(ea),
+                Err(v) => return v,
             };
             state.set_gpr(rt1 as usize, first);
             state.set_gpr(ra1 as usize, ea1);
@@ -591,7 +591,7 @@ fn execute_pair(
                 return stored;
             }
             let ea = state.ea_d_form(ra, offset);
-            match load_ze(
+            match load_ze_checked(
                 &mut LoadPort::new(region_views, store_buf, effects, unit_id),
                 ea,
                 Width::B4,
@@ -600,7 +600,7 @@ fn execute_pair(
                     state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
                 }
-                Err(ea) => ExecuteVerdict::MemFault(ea),
+                Err(v) => v,
             }
         }
         // [PPC-Book1 p:39 s:3.3.2 Load Doubleword] ld (x2): RT <- MEM(EA,8); EA = (RA|0)+EXTS(DS||0b00).
@@ -618,17 +618,17 @@ fn execute_pair(
             let ea1 = state.ea_d_form(ra1, off1);
             let ea2 = state.ea_d_form(ra2, off2);
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
-            let first = match load_ze(&mut port, ea1, Width::B8) {
+            let first = match load_ze_checked(&mut port, ea1, Width::B8) {
                 Ok(val) => val,
-                Err(ea) => return ExecuteVerdict::MemFault(ea),
+                Err(v) => return v,
             };
-            match load_ze(&mut port, ea2, Width::B8) {
+            match load_ze_checked(&mut port, ea2, Width::B8) {
                 Ok(second) => {
                     state.set_gpr(rt1 as usize, first);
                     state.set_gpr(rt2 as usize, second);
                     ExecuteVerdict::Continue
                 }
-                Err(ea) => ExecuteVerdict::MemFault(ea),
+                Err(v) => v,
             }
         }
         // [PPC-Book1 p:67 s:3.3.11 OR] or: RA <- (RS) | (RB); Rc = 1 sets CR0 from the result.
@@ -663,17 +663,17 @@ fn execute_pair(
             let ea1 = state.ea_d_form(ra1, off1);
             let ea2 = state.ea_d_form(ra2, off2);
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
-            let first = match load_ze(&mut port, ea1, Width::B1) {
+            let first = match load_ze_checked(&mut port, ea1, Width::B1) {
                 Ok(val) => val,
-                Err(ea) => return ExecuteVerdict::MemFault(ea),
+                Err(v) => return v,
             };
-            match load_ze(&mut port, ea2, Width::B1) {
+            match load_ze_checked(&mut port, ea2, Width::B1) {
                 Ok(second) => {
                     state.set_gpr(rt1 as usize, first);
                     state.set_gpr(rt2 as usize, second);
                     ExecuteVerdict::Continue
                 }
-                Err(ea) => ExecuteVerdict::MemFault(ea),
+                Err(v) => v,
             }
         }
         // [PPC-Book1 p:81 s:3.3.13 Move To Special Purpose Register] mtspr (mtlr when SPR=8): LR <- (RS).
@@ -791,13 +791,13 @@ fn execute_pair(
                 r => state.gpr[r as usize],
             };
             let ea = effective_address(base.wrapping_add(offset as i64 as u64));
-            let val = match load_ze(
+            let val = match load_ze_checked(
                 &mut LoadPort::new(region_views, store_buf, effects, unit_id),
                 ea,
                 Width::B4,
             ) {
                 Ok(v) => v,
-                Err(ea) => return ExecuteVerdict::MemFault(ea),
+                Err(v) => return v,
             };
             state.set_gpr(ra as usize, result);
             if rc {
@@ -824,13 +824,13 @@ fn execute_pair(
             imm,
         } => {
             let ea = state.ea_d_form(1, offset);
-            let val = match load_ze(
+            let val = match load_ze_checked(
                 &mut LoadPort::new(region_views, store_buf, effects, unit_id),
                 ea,
                 Width::B8,
             ) {
                 Ok(v) => v,
-                Err(ea) => return ExecuteVerdict::MemFault(ea),
+                Err(v) => return v,
             };
             state.set_gpr(rt as usize, val);
             let base = if addi_ra == 0 {
@@ -853,7 +853,7 @@ fn execute_pair(
             rc,
         } => {
             let ea = state.ea_d_form(ra, offset);
-            match load_ze(
+            match load_ze_checked(
                 &mut LoadPort::new(region_views, store_buf, effects, unit_id),
                 ea,
                 Width::B4,
@@ -863,7 +863,7 @@ fn execute_pair(
                     or(state, or_ra, or_rs, or_rb, rc);
                     ExecuteVerdict::Continue
                 }
-                Err(ea) => ExecuteVerdict::MemFault(ea),
+                Err(v) => v,
             }
         }
     }
