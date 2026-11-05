@@ -455,6 +455,38 @@ pub const PPU_SMT_SHARED_STALL_CYCLES: u64 = 13;
 /// instructions this cap covers.
 pub const PPU_SMT_MICROCODE_STALL_CYCLES: u64 = 10;
 
+/// The cycles a sibling that spends all its cycles on `mtvscr` adds to
+/// each of a thread's instructions, of any class but a store, past the
+/// cycle the instruction is ready.
+///
+/// [CBE-Handbook p:742 s:A.3.2] an `mtvscr` stalls at issue until every
+/// older instruction completes. [CBE-Handbook p:301 s:10.2.3.1] a stall
+/// at the shared issue point stalls both threads.
+///
+/// Beside a sibling of back-to-back `mtvscr` a run's cycles move with how
+/// the two threads line up, so the figures here are the mean of each
+/// chain's five runs. Each instruction of a chain waits these cycles more
+/// than beside a sibling of `addi`:
+///
+/// - independent `vaddubm` in the `ppu_issue_vscr_smt` capture: 22.5;
+/// - independent `addi` in the same capture: 19.0;
+/// - dependent `fadd` in the same capture: 24.9;
+/// - `lwz` in the `ppu_issue_vscr_smt_lsu` capture: 20.3;
+/// - `lvx` in the same capture: 23.2.
+///
+/// With 22, the model times the eight chains of the two captures beside
+/// that sibling within 23% of the mean.
+pub const PPU_SMT_MTVSCR_STALL_CYCLES: u64 = 22;
+
+/// The share of [`PPU_SMT_MTVSCR_STALL_CYCLES`], as a fraction numerator
+/// over denominator, that a sibling's `mtvscr` adds to each store.
+///
+/// In the `ppu_issue_vscr_smt_lsu` capture each `stw` of a chain beside a
+/// sibling of back-to-back `mtvscr` waits 9.1 cycles more than beside a
+/// sibling of `addi`. That figure, the mean of five runs, is about half
+/// of a load's 20.3.
+pub const PPU_SMT_MTVSCR_STORE_STALL_SHARE: (u64, u64) = (1, 2);
+
 /// The share of a sibling's mean wait past its in-order floor, for its
 /// operands or a busy unit, as a fraction numerator over denominator,
 /// that it adds to each of a thread's instructions, up to

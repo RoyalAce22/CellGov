@@ -56,3 +56,7 @@ mod line_cross_tests;
 #[cfg(test)]
 #[path = "tests/range_registers_tests.rs"]
 mod range_registers_tests;
+
+#[cfg(test)]
+#[path = "tests/vsu_queue_pressure_tests.rs"]
+mod vsu_queue_pressure_tests;

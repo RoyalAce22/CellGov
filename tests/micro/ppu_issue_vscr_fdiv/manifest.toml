@@ -1,0 +1,19 @@
+[test]
+name = "ppu_issue_vscr_fdiv"
+
+# A hardware probe of what an FP divide or square root costs when an
+# mtvscr fence holds it, and whether fixed-point instructions after it
+# issue past it, timed with mftb. The console capture is the answer;
+# ppu/main.c's header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 184 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 184 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

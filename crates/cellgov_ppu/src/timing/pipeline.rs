@@ -49,6 +49,12 @@ const AHEAD_RING: usize = 32;
 /// When an instruction issues, and how much of its wait a sibling added.
 struct Scheduled {
     issue: u64,
+    /// The cycle the op leaves the VSU issue queue and runs. It is the
+    /// issue cycle unless the queue holds the op past IS2.
+    exec: u64,
+    /// The cycles a drain waits while the VSU issue queue still holds ops
+    /// of this thread.
+    queued: u64,
     /// The cycles of the wait the sibling's hold and stall added.
     sibling: u64,
     /// The sibling's stall alone.
@@ -96,8 +102,14 @@ pub(crate) struct Core {
     /// The cycle each unit is free again, indexed by unit bit.
     unit_free: [u64; 5],
     /// The earliest cycle a vector-scalar instruction other than an
-    /// `mtvscr` can issue at, after the last `mtvscr`.
+    /// `mtvscr` can leave the VSU issue queue and run at, after the last
+    /// `mtvscr`.
     vsu_fence: u64,
+    /// The cycle after the last op that the VSU issue queue held runs, and
+    /// so the earliest cycle the next held op runs. It stays zero until
+    /// the queue holds an op. A drain issues no earlier than one cycle
+    /// after it.
+    vsu_queue: u64,
     /// The share of this thread's recent cycles, out of [`SHARE_ONE`],
     /// spent on divides and square roots. Each instruction weighs by its
     /// cycles, over a window of [`PRESSURE_WINDOW_CYCLES`].
@@ -106,11 +118,23 @@ pub(crate) struct Core {
     /// instructions that issue alone for long (`issues_alone_for_long`),
     /// weighed as [`Core::divide_share`] is.
     alone_share: u32,
+    /// The share of this thread's recent cycles spent on `mtvscr`
+    /// instructions, past their wait for the ops the VSU issue queue held,
+    /// weighed as [`Core::divide_share`] is.
+    vscr_share: u32,
     /// This thread's recent mean wait past its in-order floor, in 1/256
     /// cycle, over its other instructions: a wait for operands or for a
     /// busy unit. Each instruction weighs one in
     /// [`PRESSURE_WINDOW_INSTRUCTIONS`].
     operand_wait: u32,
+    /// This thread's recent mean cycles, in 1/256 cycle, that its VSU
+    /// work holds the head of the VSU issue queue. An op holds the head
+    /// while it waits for its operands, its unit or the fence, past the op
+    /// before it in the queue. Each instruction weighs one in
+    /// [`PRESSURE_WINDOW_INSTRUCTIONS`].
+    queue_wait: u32,
+    /// The part of [`Core::queue_wait`] that its ops held at the fence take.
+    fence_wait: u32,
     /// This thread's recent mean cycles between its own issues, in 1/256
     /// cycle, past what a sibling added. Each instruction weighs one in
     /// [`PRESSURE_WINDOW_INSTRUCTIONS`].
@@ -304,9 +328,13 @@ impl PpeTiming {
                 miss: [0; REGS],
                 unit_free: [0; 5],
                 vsu_fence: 0,
+                vsu_queue: 0,
                 divide_share: 0,
                 alone_share: 0,
+                vscr_share: 0,
                 operand_wait: 0,
+                queue_wait: 0,
+                fence_wait: 0,
                 interval: 0,
                 gate: 0,
                 syscall: None,
@@ -371,6 +399,12 @@ impl PpeTiming {
                 cap,
             ),
             multiply_hold_share: (c.divide_share * 256 + SHARE_ONE / 2) / SHARE_ONE,
+            vscr_cycles: whole(
+                share(k::PPU_SMT_MTVSCR_STALL_CYCLES, c.vscr_share),
+                k::PPU_SMT_MTVSCR_STALL_CYCLES,
+            ),
+            queue_cycles: whole(u64::from(c.queue_wait), cap),
+            fence_cycles: whole(u64::from(c.fence_wait), cap),
             issue_interval: c.interval,
         }
     }
@@ -427,6 +461,7 @@ impl PpeTiming {
             _ => (c.floor, true),
         };
         let mut t = floor.max(fetched);
+        let mut queued = 0;
         for (r, after) in op.reads() {
             t = t.max(c.ready[r as usize].saturating_sub(after));
         }
@@ -440,33 +475,52 @@ impl PpeTiming {
         for r in op.writes() {
             t = t.max(c.miss[r as usize]).max(c.ready[r as usize]);
         }
-        for u in unit_slots(op.units) {
+        // [CBE-Handbook p:756 s:A.6.2] a VSU instruction leaves IS2 for the
+        // VSU issue queue and waits at VQ8. So the fence holds the op past
+        // IS2, and the younger instructions continue to issue. In the
+        // `ppu_issue_vscr_queue` capture `mtvscr; vaddubm` and the same with
+        // up to 32 `addi` after it each take 58 cycles an iteration. An op
+        // the fence holds waits in the queue for its VSU unit too, and the
+        // queue releases the ops it holds in order, one a cycle.
+        let fenced = uses_vsu(op) && op.kind != Kind::VscrWrite;
+        let queued_units = if fenced && c.vsu_fence > floor {
+            op.units & (unit::VSU1 | unit::VSU2)
+        } else {
+            0
+        };
+        for u in unit_slots(op.units & !queued_units) {
             t = t.max(c.unit_free[u]);
+        }
+        let mut fence = if fenced {
+            c.vsu_fence.max(c.vsu_queue)
+        } else {
+            0
+        };
+        for u in unit_slots(queued_units) {
+            fence = fence.max(c.unit_free[u]);
         }
         if matches!(
             op.kind,
             Kind::Drain | Kind::Refetch | Kind::VscrWrite | Kind::Syscall { .. }
         ) {
             let all = c.ready.iter().chain(c.unit_free.iter()).copied().max();
-            t = t.max(all.unwrap_or(0));
-        }
-        if uses_vsu(op) && op.kind != Kind::VscrWrite {
-            t = t.max(c.vsu_fence);
+            // [CBE-Handbook p:742 s:A.3.2] a drain issues once every older
+            // instruction completes. An op that the queue held completes a
+            // cycle after it runs.
+            // A queue that never held an op leaves `vsu_queue` at zero.
+            let after_queue = if c.vsu_queue == 0 { 0 } else { c.vsu_queue + 1 };
+            let drained = t.max(all.unwrap_or(0)).max(after_queue);
+            if c.vsu_queue > floor {
+                queued = drained - floor;
+            }
+            t = drained;
         }
         if let Kind::Store { ea, len, .. } = op.kind {
             t = queue_room(&self.tables, t, ea, len);
         }
-        // [CBE-Handbook p:301 s:10.2.3.1] the sibling's stalls at IS2
-        // stall this thread too. In the `ppu_issue_units` capture the
-        // younger of a pair waits the stall as well.
         let s = &self.shared_stall;
-        let stalled = match multiply_hold(op) {
-            Some(hold) => {
-                u64::from(s.multiply_cycles) + (hold * u64::from(s.multiply_hold_share) + 128) / 256
-            }
-            None if issues_to_vsu(op) => u64::from(s.vsu_cycles),
-            None => u64::from(s.cycles),
-        };
+        let own_vscr = op.kind == Kind::VscrWrite || (fenced && c.vsu_fence > c.floor);
+        let stalled = sibling_stall(op, s, own_vscr);
         // A new dispatch group: the sibling's group issues between. The
         // sibling's stall covers the hold, and so does any wait of this
         // thread's own; only the rest of the hold is the sibling's.
@@ -496,8 +550,25 @@ impl PpeTiming {
         if op.words != 0 {
             t += k::PPU_MICROCODE_ROM_CYCLES;
         }
+        // [CBE-Handbook p:301 s:10.2.3.1] the VSU-issue stall point, VQ8,
+        // is not separate for each thread. An op the fence holds leaves the
+        // queue behind the sibling's VSU work, and any other VSU op behind
+        // the sibling's ops its fence holds. In the `ppu_issue_vscr_smt`
+        // capture, the sibling of an `mtvscr` and seven `vaddubm` keeps 0.33
+        // of its rate beside a chain of an `mtvscr` and four `vaddubm`, and
+        // 0.40 beside eight dependent `fadd`. Without the wait the model
+        // gives 0.45 and 0.66, with it 0.37 and 0.37.
+        let exec = if fence > t {
+            fence + u64::from(s.queue_cycles)
+        } else if fenced {
+            t + u64::from(s.fence_cycles)
+        } else {
+            t
+        };
         Scheduled {
             issue: t,
+            exec,
+            queued,
             sibling: held + stalled + gated,
             stalled,
             began,
@@ -539,6 +610,8 @@ impl PpeTiming {
     fn retire(&mut self, pc: u64, op: &Op, next_pc: u64) -> u64 {
         let Scheduled {
             issue: t,
+            exec,
+            queued,
             sibling,
             stalled,
             began,
@@ -558,7 +631,24 @@ impl PpeTiming {
 
         let last = t + u64::from(op.span.saturating_sub(1));
         c.floor = c.floor.max(last + 1);
-        note_pressure(c, op, (c.floor - before).saturating_sub(sibling));
+        // `head.0` is the cycles the op holds the head of the VSU issue
+        // queue, past the op before it there. `head.1` is the same count
+        // for an op that this thread's own fence holds, and zero otherwise.
+        let head = if uses_vsu(op) && op.kind != Kind::VscrWrite {
+            let head = exec
+                .saturating_sub(c.vsu_queue.max(before))
+                .saturating_sub(sibling);
+            (head, if c.vsu_fence > before { head } else { 0 })
+        } else {
+            (0, 0)
+        };
+        note_pressure(
+            c,
+            op,
+            (c.floor - before).saturating_sub(sibling),
+            queued,
+            head,
+        );
         c.older = (pc.is_multiple_of(8) && op.words == 0).then_some(Older {
             pc,
             issue: t,
@@ -567,10 +657,13 @@ impl PpeTiming {
         c.ahead[(c.retired % AHEAD_RING as u64) as usize] = t;
         c.retired += 1;
 
-        mark_destinations(c, op, t);
+        if exec > t {
+            c.vsu_queue = exec + 1;
+        }
+        mark_destinations(c, op, exec);
         if let Kind::Unpipelined(cycles) = op.kind {
             for u in unit_slots(op.units) {
-                c.unit_free[u] = t + u64::from(cycles);
+                c.unit_free[u] = exec + u64::from(cycles);
             }
         }
         if op.kind == Kind::VscrWrite {
@@ -581,8 +674,8 @@ impl PpeTiming {
         }
 
         match op.kind {
-            Kind::Load { ea, len, class } => self.load(t, op, ea, len, class),
-            Kind::Store { ea, len, .. } => queue_store(&mut self.tables, t, op, ea, len),
+            Kind::Load { ea, len, class } => self.load(exec, op, ea, len, class),
+            Kind::Store { ea, len, .. } => queue_store(&mut self.tables, exec, op, ea, len),
             Kind::ZeroLine { ea } => self.tables.caches.zero(ea),
             Kind::Touch { ea } => self.tables.caches.touch(t, ea),
             Kind::Flush { ea } => self.tables.caches.flush(t, ea),
@@ -887,6 +980,36 @@ fn multiply_hold(op: &Op) -> Option<u64> {
     }
 }
 
+/// The cycles the sibling's stalls in `s` add to `op`, where `own_vscr`
+/// marks this thread's own `mtvscr` or a wait at its own `mtvscr` fence.
+fn sibling_stall(op: &Op, s: &PpeIssuePressure, own_vscr: bool) -> u64 {
+    // [CBE-Handbook p:301 s:10.2.3.1] the sibling's stalls at IS2
+    // stall this thread too. In the `ppu_issue_units` capture the
+    // younger of a pair waits the stall as well.
+    let stalled = match multiply_hold(op) {
+        Some(hold) => {
+            u64::from(s.multiply_cycles) + (hold * u64::from(s.multiply_hold_share) + 128) / 256
+        }
+        None if issues_to_vsu(op) => u64::from(s.vsu_cycles),
+        None => u64::from(s.cycles),
+    };
+    // A sibling's `mtvscr` stall overlaps this thread's own `mtvscr`
+    // and its wait at its own fence. The `ppu_issue_vscr_smt` capture
+    // times a loop of an `mtvscr` and four `vaddubm` beside a sibling of
+    // `mtvscr`. On the mean of five runs, the model with the overlap lies
+    // 22% over the console, and with no overlap 37% over.
+    if own_vscr {
+        return stalled;
+    }
+    let vscr = if matches!(op.kind, Kind::Store { .. }) {
+        let (num, den) = k::PPU_SMT_MTVSCR_STORE_STALL_SHARE;
+        u64::from(s.vscr_cycles) * num / den
+    } else {
+        u64::from(s.vscr_cycles)
+    };
+    stalled.max(vscr)
+}
+
 /// One instruction's `w` cycles in a share averaged over
 /// [`PRESSURE_WINDOW_CYCLES`]: toward [`SHARE_ONE`] when `counts`, toward
 /// zero otherwise.
@@ -1106,16 +1229,33 @@ fn queue_store(tables: &mut Tables, t: u64, op: &Op, ea: u64, len: u8) {
     }
 }
 
-/// Add an instruction that took `own` cycles of this thread's own to the
-/// averages [`PpeTiming::pressure`] reads.
-fn note_pressure(c: &mut Core, op: &Op, own: u64) {
+/// Add an instruction to the averages [`PpeTiming::pressure`] reads.
+///
+/// The instruction took `own` cycles of this thread's own. A drain spent
+/// `queued` of them on the ops the VSU issue queue held. The instruction's
+/// VSU work held the head of that queue `head.0` cycles, `head.1` of them
+/// at the fence.
+fn note_pressure(c: &mut Core, op: &Op, own: u64, queued: u64, head: (u64, u64)) {
     let n = PRESSURE_WINDOW_INSTRUCTIONS;
+    let mean = |mean: u32, w: u64| {
+        let w = w.saturating_mul(256).min(u64::from(u32::MAX));
+        ((u64::from(mean) * u64::from(n - 1) + w) / u64::from(n)) as u32
+    };
     let interval = own.saturating_mul(256).min(u64::from(u32::MAX));
     c.interval = ((u64::from(c.interval) * u64::from(n - 1) + interval) / u64::from(n)) as u32;
+    c.queue_wait = mean(c.queue_wait, head.0);
+    c.fence_wait = mean(c.fence_wait, head.1);
     let divide = divides(op);
     let alone = issues_alone_for_long(op);
     c.divide_share = weigh(c.divide_share, own, divide);
     c.alone_share = weigh(c.alone_share, own, alone);
+    // An `mtvscr` that drains its own thread's held vector work leaves the
+    // sibling its issue slots: in the `ppu_issue_vscr_smt` capture a
+    // sibling of an `mtvscr` and seven `vaddubm` slows a `vaddubm` chain
+    // from 17.9 to 61.4 cycles, and one of back-to-back `mtvscr` to 220.
+    let queued = queued.min(own);
+    c.vscr_share = weigh(c.vscr_share, queued, false);
+    c.vscr_share = weigh(c.vscr_share, own - queued, op.kind == Kind::VscrWrite);
     if divide || alone {
         return;
     }

@@ -33,6 +33,9 @@ fn pressure(
         vsu_cycles: vsu_cycles as u32,
         multiply_cycles: multiply_cycles as u32,
         multiply_hold_share,
+        vscr_cycles: 0,
+        queue_cycles: 0,
+        fence_cycles: 0,
         issue_interval: 0,
     }
 }
@@ -179,10 +182,15 @@ fn a_thread_of_dependent_multiplies_presses_by_a_share_of_its_wait() {
 #[test]
 fn a_thread_of_dependent_fadds_presses_by_half_its_wait_in_the_vsu_queue() {
     // Each fadd waits 9 cycles past its floor in the VSU queue, which
-    // counts half: 4.5. Half of that is 2, and half again 1.
+    // counts half: 4.5. Half of that is 2, and half again 1. The whole 9
+    // cycles hold the head of the queue, and no fence holds them.
     let mut timing = PpeTiming::new();
     run(&mut timing, &state(), &[fadd(0, 12); 8], 4);
-    assert_eq!(stalls(&timing), pressure(2, 1, 3, 0));
+    let want = PpeIssuePressure {
+        queue_cycles: 9,
+        ..pressure(2, 1, 3, 0)
+    };
+    assert_eq!(stalls(&timing), want);
 }
 
 #[test]

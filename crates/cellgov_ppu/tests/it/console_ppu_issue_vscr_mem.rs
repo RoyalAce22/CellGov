@@ -91,8 +91,11 @@ fn cellgov_cycles(k: usize, body: &[u32]) -> f64 {
     replay(&r, 0).expect("the loop replays")
 }
 
-/// The loops of an `mtvscr` and then an `lvx`, an `stvx` or an `lfd`.
-const FENCED_ACCESSES: [usize; 3] = [2, 4, 6];
+/// The loops of an `mtvscr` and then:
+///
+/// - an `lvx`, an `stvx` or an `lfd`;
+/// - an `lvx` and four `addi`, which issue past the fenced `lvx`.
+const FENCED_ACCESSES: [usize; 4] = [2, 4, 6, 10];
 
 /// The largest share of a fenced access loop's fastest console run the
 /// model may fall short by: the `stvx` loop falls 2.6% short.
@@ -114,21 +117,17 @@ fn an_mtvscr_holds_each_vmx_load_and_store_and_an_fp_load_after_it_within_the_ga
     }
 }
 
-/// Two loops the model does not time to the console:
-///
-/// - an `stfd` after an `mtvscr` costs the console about twelve cycles
-///   more than the other fenced accesses;
-/// - four `addi` after the fenced `lvx` cost the model about three cycles
-///   more than the console.
+/// A loop the model does not time to the console: an `stfd` after an
+/// `mtvscr` costs the console about twelve cycles more than the other
+/// fenced accesses.
 ///
 /// The test fails when the model drops the fence for the `stfd` or when
-/// either difference closes. Then move that loop into `FENCED_ACCESSES`.
+/// the difference closes. Then move the loop into `FENCED_ACCESSES`.
 #[test]
-fn the_fenced_stfd_and_the_addi_after_the_fenced_lvx_are_known_differences() {
+fn the_fenced_stfd_is_a_known_difference() {
     let w = console_words();
     let lvx = console_cycles(&w, 2);
     let stfd = (cellgov_cycles(8, &bodies()[8]), console_cycles(&w, 8));
-    let addi = (cellgov_cycles(10, &bodies()[10]), console_cycles(&w, 10));
     assert!(
         stfd.0 <= lvx && (lvx - stfd.0) / lvx <= GAP,
         "loop 8: CellGov {:.2}, not held at the fence the console's fenced lvx loop \
@@ -140,11 +139,5 @@ fn the_fenced_stfd_and_the_addi_after_the_fenced_lvx_are_known_differences() {
         "loop 8: CellGov {:.2}, the console's fastest {:.2}",
         stfd.0,
         stfd.1
-    );
-    assert!(
-        addi.0 > addi.1,
-        "loop 10: CellGov {:.2}, the console's fastest {:.2}",
-        addi.0,
-        addi.1
     );
 }

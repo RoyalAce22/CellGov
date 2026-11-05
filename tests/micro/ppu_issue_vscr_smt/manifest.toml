@@ -1,0 +1,23 @@
+[test]
+name = "ppu_issue_vscr_smt"
+
+# A hardware probe of whether one PPU thread's mtvscr stalls the
+# vector-scalar work of the sibling thread beside it: five chains
+# (independent vaddubm, mtvscr alone and before vaddubm, independent
+# addi, dependent fadd), alone and beside a sibling running independent
+# vaddubm, mtvscr alone or before vaddubm, or independent addi, in a loop
+# that counts its rounds in memory and reads no time base. The console
+# capture is the answer; ppu/main.c's header lists the phases and the
+# payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 1088 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 1088 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 120000
