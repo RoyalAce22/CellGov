@@ -1,0 +1,99 @@
+id	asm	words	inputs	record	may_end_process
+lfs_d0_pzero	lfs f3, 0(r10)	0xc06a0000	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x000000001a2b3c4d5e6f700123456709	f3	0
+lfs_d4_nzero	lfs f3, 4(r10)	0xc06a0004	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x12345678800000005e6f700123456709	f3	0
+lfs_d12_pden	lfs f3, 12(r10)	0xc06a000c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d5e6f700100000001	f3	0
+lfs_neg_nden	addi r4, r10, 16; lfs f3, -4(r4); subf r4, r10, r4	0x388a0010,0xc064fffc,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d5e6f700180400000	f3,r4	0
+lfs_d0_pnorm	lfs f3, 0(r10)	0xc06a0000	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x3fa000001a2b3c4d5e6f700123456709	f3	0
+lfs_d4_pnorm	lfs f3, 4(r10)	0xc06a0004	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456783fa000005e6f700123456709	f3	0
+lfs_d12_pnorm	lfs f3, 12(r10)	0xc06a000c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d5e6f70013fa00000	f3	0
+lfs_neg_pnorm	addi r4, r10, 16; lfs f3, -4(r4); subf r4, r10, r4	0x388a0010,0xc064fffc,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d5e6f70013fa00000	f3,r4	0
+lfs_d4_nnorm	lfs f3, 4(r10)	0xc06a0004	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x12345678bfa000005e6f700123456709	f3	0
+lfs_d12_pinf	lfs f3, 12(r10)	0xc06a000c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d5e6f70017f800000	f3	0
+lfs_neg_ninf	addi r4, r10, 16; lfs f3, -4(r4); subf r4, r10, r4	0x388a0010,0xc064fffc,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d5e6f7001ff800000	f3,r4	0
+lfs_d0_qnan	lfs f3, 0(r10)	0xc06a0000	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x7fc00aaa1a2b3c4d5e6f700123456709	f3	0
+lfs_d4_snan	lfs f3, 4(r10)	0xc06a0004	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456787f800bbb5e6f700123456709	f3	0
+lfsu_u0_pzero	addi r4, r10, 8; lfsu f3, 0(r4); subf r4, r10, r4	0x388a0008,0xc4640000,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d0000000023456709	f3,r4	0
+lfsu_up_nzero	addi r4, r10, 4; lfsu f3, 4(r4); subf r4, r10, r4	0x388a0004,0xc4640004,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d8000000023456709	f3,r4	0
+lfsu_un_pden	addi r4, r10, 8; lfsu f3, -4(r4); subf r4, r10, r4	0x388a0008,0xc464fffc,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x12345678000000015e6f700123456709	f3,r4	0
+lfsu_u0_nden	addi r4, r10, 8; lfsu f3, 0(r4); subf r4, r10, r4	0x388a0008,0xc4640000,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d8040000023456709	f3,r4	0
+lfsu_u0_pnorm	addi r4, r10, 8; lfsu f3, 0(r4); subf r4, r10, r4	0x388a0008,0xc4640000,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d3fa0000023456709	f3,r4	0
+lfsu_up_pnorm	addi r4, r10, 4; lfsu f3, 4(r4); subf r4, r10, r4	0x388a0004,0xc4640004,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d3fa0000023456709	f3,r4	0
+lfsu_un_pnorm	addi r4, r10, 8; lfsu f3, -4(r4); subf r4, r10, r4	0x388a0008,0xc464fffc,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456783fa000005e6f700123456709	f3,r4	0
+lfsu_un_nnorm	addi r4, r10, 8; lfsu f3, -4(r4); subf r4, r10, r4	0x388a0008,0xc464fffc,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x12345678bfa000005e6f700123456709	f3,r4	0
+lfsu_u0_pinf	addi r4, r10, 8; lfsu f3, 0(r4); subf r4, r10, r4	0x388a0008,0xc4640000,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d7f80000023456709	f3,r4	0
+lfsu_up_ninf	addi r4, r10, 4; lfsu f3, 4(r4); subf r4, r10, r4	0x388a0004,0xc4640004,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4dff80000023456709	f3,r4	0
+lfsu_un_qnan	addi r4, r10, 8; lfsu f3, -4(r4); subf r4, r10, r4	0x388a0008,0xc464fffc,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456787fc00aaa5e6f700123456709	f3,r4	0
+lfsu_u0_snan	addi r4, r10, 8; lfsu f3, 0(r4); subf r4, r10, r4	0x388a0008,0xc4640000,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d7f800bbb23456709	f3,r4	0
+lfsx_x0_pzero	lfsx f3, r10, r5	0x7c6a2c2e	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x000000001a2b3c4d5e6f700123456709,r5=0x0	f3	0
+lfsx_x4_nzero	lfsx f3, r10, r5	0x7c6a2c2e	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x12345678800000005e6f700123456709,r5=0x4	f3	0
+lfsx_x12_pden	lfsx f3, r10, r5	0x7c6a2c2e	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d5e6f700100000001,r5=0xc	f3	0
+lfsx_ra0_nden	addi r4, r10, 4; lfsx f3, r0, r4; subf r4, r10, r4	0x388a0004,0x7c60242e,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x12345678804000005e6f700123456709	f3,r4	0
+lfsx_x0_pnorm	lfsx f3, r10, r5	0x7c6a2c2e	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x3fa000001a2b3c4d5e6f700123456709,r5=0x0	f3	0
+lfsx_x4_pnorm	lfsx f3, r10, r5	0x7c6a2c2e	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456783fa000005e6f700123456709,r5=0x4	f3	0
+lfsx_x12_pnorm	lfsx f3, r10, r5	0x7c6a2c2e	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d5e6f70013fa00000,r5=0xc	f3	0
+lfsx_ra0_pnorm	addi r4, r10, 4; lfsx f3, r0, r4; subf r4, r10, r4	0x388a0004,0x7c60242e,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456783fa000005e6f700123456709	f3,r4	0
+lfsx_x4_nnorm	lfsx f3, r10, r5	0x7c6a2c2e	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x12345678bfa000005e6f700123456709,r5=0x4	f3	0
+lfsx_x12_pinf	lfsx f3, r10, r5	0x7c6a2c2e	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d5e6f70017f800000,r5=0xc	f3	0
+lfsx_ra0_ninf	addi r4, r10, 4; lfsx f3, r0, r4; subf r4, r10, r4	0x388a0004,0x7c60242e,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x12345678ff8000005e6f700123456709	f3,r4	0
+lfsx_x0_qnan	lfsx f3, r10, r5	0x7c6a2c2e	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x7fc00aaa1a2b3c4d5e6f700123456709,r5=0x0	f3	0
+lfsx_x4_snan	lfsx f3, r10, r5	0x7c6a2c2e	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456787f800bbb5e6f700123456709,r5=0x4	f3	0
+lfsux_u0_pzero	addi r4, r10, 8; lfsux f3, r4, r5; subf r4, r10, r4	0x388a0008,0x7c642c6e,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d0000000023456709,r5=0x0	f3,r4	0
+lfsux_up_nzero	addi r4, r10, 4; lfsux f3, r4, r5; subf r4, r10, r4	0x388a0004,0x7c642c6e,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d8000000023456709,r5=0x4	f3,r4	0
+lfsux_un_pden	addi r4, r10, 8; lfsux f3, r4, r5; subf r4, r10, r4	0x388a0008,0x7c642c6e,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x12345678000000015e6f700123456709,r5=0xfffffffffffffffc	f3,r4	0
+lfsux_u0_nden	addi r4, r10, 8; lfsux f3, r4, r5; subf r4, r10, r4	0x388a0008,0x7c642c6e,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d8040000023456709,r5=0x0	f3,r4	0
+lfsux_u0_pnorm	addi r4, r10, 8; lfsux f3, r4, r5; subf r4, r10, r4	0x388a0008,0x7c642c6e,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d3fa0000023456709,r5=0x0	f3,r4	0
+lfsux_up_pnorm	addi r4, r10, 4; lfsux f3, r4, r5; subf r4, r10, r4	0x388a0004,0x7c642c6e,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d3fa0000023456709,r5=0x4	f3,r4	0
+lfsux_un_pnorm	addi r4, r10, 8; lfsux f3, r4, r5; subf r4, r10, r4	0x388a0008,0x7c642c6e,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456783fa000005e6f700123456709,r5=0xfffffffffffffffc	f3,r4	0
+lfsux_un_nnorm	addi r4, r10, 8; lfsux f3, r4, r5; subf r4, r10, r4	0x388a0008,0x7c642c6e,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x12345678bfa000005e6f700123456709,r5=0xfffffffffffffffc	f3,r4	0
+lfsux_u0_pinf	addi r4, r10, 8; lfsux f3, r4, r5; subf r4, r10, r4	0x388a0008,0x7c642c6e,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d7f80000023456709,r5=0x0	f3,r4	0
+lfsux_up_ninf	addi r4, r10, 4; lfsux f3, r4, r5; subf r4, r10, r4	0x388a0004,0x7c642c6e,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4dff80000023456709,r5=0x4	f3,r4	0
+lfsux_un_qnan	addi r4, r10, 8; lfsux f3, r4, r5; subf r4, r10, r4	0x388a0008,0x7c642c6e,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456787fc00aaa5e6f700123456709,r5=0xfffffffffffffffc	f3,r4	0
+lfsux_u0_snan	addi r4, r10, 8; lfsux f3, r4, r5; subf r4, r10, r4	0x388a0008,0x7c642c6e,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d7f800bbb23456709,r5=0x0	f3,r4	0
+lfd_d0_pzero	lfd f3, 0(r10)	0xc86a0000	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x00000000000000005e6f700123456709	f3	0
+lfd_d8_nzero	lfd f3, 8(r10)	0xc86a0008	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d8000000000000000	f3	0
+lfd_neg_pden	addi r4, r10, 16; lfd f3, -8(r4); subf r4, r10, r4	0x388a0010,0xc864fff8,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d0008000000000001	f3,r4	0
+lfd_d0_nden	lfd f3, 0(r10)	0xc86a0000	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x80080000000000015e6f700123456709	f3	0
+lfd_d0_pnorm	lfd f3, 0(r10)	0xc86a0000	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x3ff40000000000005e6f700123456709	f3	0
+lfd_d8_pnorm	lfd f3, 8(r10)	0xc86a0008	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d3ff4000000000000	f3	0
+lfd_neg_pnorm	addi r4, r10, 16; lfd f3, -8(r4); subf r4, r10, r4	0x388a0010,0xc864fff8,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d3ff4000000000000	f3,r4	0
+lfd_neg_nnorm	addi r4, r10, 16; lfd f3, -8(r4); subf r4, r10, r4	0x388a0010,0xc864fff8,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4dbff4000000000000	f3,r4	0
+lfd_d0_pinf	lfd f3, 0(r10)	0xc86a0000	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x7ff00000000000005e6f700123456709	f3	0
+lfd_d8_ninf	lfd f3, 8(r10)	0xc86a0008	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4dfff0000000000000	f3	0
+lfd_neg_qnan	addi r4, r10, 16; lfd f3, -8(r4); subf r4, r10, r4	0x388a0010,0xc864fff8,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d7ff8000000000aaa	f3,r4	0
+lfd_d0_snan	lfd f3, 0(r10)	0xc86a0000	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x7ff0000000000bbb5e6f700123456709	f3	0
+lfdu_u0_pzero	addi r4, r10, 8; lfdu f3, 0(r4); subf r4, r10, r4	0x388a0008,0xcc640000,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d0000000000000000	f3,r4	0
+lfdu_up_nzero	addi r4, r10, 0; lfdu f3, 8(r4); subf r4, r10, r4	0x388a0000,0xcc640008,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d8000000000000000	f3,r4	0
+lfdu_un_pden	addi r4, r10, 8; lfdu f3, -8(r4); subf r4, r10, r4	0x388a0008,0xcc64fff8,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x00080000000000015e6f700123456709	f3,r4	0
+lfdu_u0_nden	addi r4, r10, 8; lfdu f3, 0(r4); subf r4, r10, r4	0x388a0008,0xcc640000,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d8008000000000001	f3,r4	0
+lfdu_u0_pnorm	addi r4, r10, 8; lfdu f3, 0(r4); subf r4, r10, r4	0x388a0008,0xcc640000,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d3ff4000000000000	f3,r4	0
+lfdu_up_pnorm	addi r4, r10, 0; lfdu f3, 8(r4); subf r4, r10, r4	0x388a0000,0xcc640008,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d3ff4000000000000	f3,r4	0
+lfdu_un_pnorm	addi r4, r10, 8; lfdu f3, -8(r4); subf r4, r10, r4	0x388a0008,0xcc64fff8,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x3ff40000000000005e6f700123456709	f3,r4	0
+lfdu_un_nnorm	addi r4, r10, 8; lfdu f3, -8(r4); subf r4, r10, r4	0x388a0008,0xcc64fff8,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0xbff40000000000005e6f700123456709	f3,r4	0
+lfdu_u0_pinf	addi r4, r10, 8; lfdu f3, 0(r4); subf r4, r10, r4	0x388a0008,0xcc640000,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d7ff0000000000000	f3,r4	0
+lfdu_up_ninf	addi r4, r10, 0; lfdu f3, 8(r4); subf r4, r10, r4	0x388a0000,0xcc640008,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4dfff0000000000000	f3,r4	0
+lfdu_un_qnan	addi r4, r10, 8; lfdu f3, -8(r4); subf r4, r10, r4	0x388a0008,0xcc64fff8,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x7ff8000000000aaa5e6f700123456709	f3,r4	0
+lfdu_u0_snan	addi r4, r10, 8; lfdu f3, 0(r4); subf r4, r10, r4	0x388a0008,0xcc640000,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d7ff0000000000bbb	f3,r4	0
+lfdx_x0_pzero	lfdx f3, r10, r5	0x7c6a2cae	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x00000000000000005e6f700123456709,r5=0x0	f3	0
+lfdx_x8_nzero	lfdx f3, r10, r5	0x7c6a2cae	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d8000000000000000,r5=0x8	f3	0
+lfdx_ra0_pden	addi r4, r10, 8; lfdx f3, r0, r4; subf r4, r10, r4	0x388a0008,0x7c6024ae,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d0008000000000001	f3,r4	0
+lfdx_x0_nden	lfdx f3, r10, r5	0x7c6a2cae	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x80080000000000015e6f700123456709,r5=0x0	f3	0
+lfdx_x0_pnorm	lfdx f3, r10, r5	0x7c6a2cae	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x3ff40000000000005e6f700123456709,r5=0x0	f3	0
+lfdx_x8_pnorm	lfdx f3, r10, r5	0x7c6a2cae	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d3ff4000000000000,r5=0x8	f3	0
+lfdx_ra0_pnorm	addi r4, r10, 8; lfdx f3, r0, r4; subf r4, r10, r4	0x388a0008,0x7c6024ae,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d3ff4000000000000	f3,r4	0
+lfdx_ra0_nnorm	addi r4, r10, 8; lfdx f3, r0, r4; subf r4, r10, r4	0x388a0008,0x7c6024ae,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4dbff4000000000000	f3,r4	0
+lfdx_x0_pinf	lfdx f3, r10, r5	0x7c6a2cae	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x7ff00000000000005e6f700123456709,r5=0x0	f3	0
+lfdx_x8_ninf	lfdx f3, r10, r5	0x7c6a2cae	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4dfff0000000000000,r5=0x8	f3	0
+lfdx_ra0_qnan	addi r4, r10, 8; lfdx f3, r0, r4; subf r4, r10, r4	0x388a0008,0x7c6024ae,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d7ff8000000000aaa	f3,r4	0
+lfdx_x0_snan	lfdx f3, r10, r5	0x7c6a2cae	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x7ff0000000000bbb5e6f700123456709,r5=0x0	f3	0
+lfdux_u0_pzero	addi r4, r10, 8; lfdux f3, r4, r5; subf r4, r10, r4	0x388a0008,0x7c642cee,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d0000000000000000,r5=0x0	f3,r4	0
+lfdux_up_nzero	addi r4, r10, 0; lfdux f3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642cee,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d8000000000000000,r5=0x8	f3,r4	0
+lfdux_un_pden	addi r4, r10, 8; lfdux f3, r4, r5; subf r4, r10, r4	0x388a0008,0x7c642cee,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x00080000000000015e6f700123456709,r5=0xfffffffffffffff8	f3,r4	0
+lfdux_u0_nden	addi r4, r10, 8; lfdux f3, r4, r5; subf r4, r10, r4	0x388a0008,0x7c642cee,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d8008000000000001,r5=0x0	f3,r4	0
+lfdux_u0_pnorm	addi r4, r10, 8; lfdux f3, r4, r5; subf r4, r10, r4	0x388a0008,0x7c642cee,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d3ff4000000000000,r5=0x0	f3,r4	0
+lfdux_up_pnorm	addi r4, r10, 0; lfdux f3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642cee,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d3ff4000000000000,r5=0x8	f3,r4	0
+lfdux_un_pnorm	addi r4, r10, 8; lfdux f3, r4, r5; subf r4, r10, r4	0x388a0008,0x7c642cee,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x3ff40000000000005e6f700123456709,r5=0xfffffffffffffff8	f3,r4	0
+lfdux_un_nnorm	addi r4, r10, 8; lfdux f3, r4, r5; subf r4, r10, r4	0x388a0008,0x7c642cee,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0xbff40000000000005e6f700123456709,r5=0xfffffffffffffff8	f3,r4	0
+lfdux_u0_pinf	addi r4, r10, 8; lfdux f3, r4, r5; subf r4, r10, r4	0x388a0008,0x7c642cee,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d7ff0000000000000,r5=0x0	f3,r4	0
+lfdux_up_ninf	addi r4, r10, 0; lfdux f3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642cee,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4dfff0000000000000,r5=0x8	f3,r4	0
+lfdux_un_qnan	addi r4, r10, 8; lfdux f3, r4, r5; subf r4, r10, r4	0x388a0008,0x7c642cee,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x7ff8000000000aaa5e6f700123456709,r5=0xfffffffffffffff8	f3,r4	0
+lfdux_u0_snan	addi r4, r10, 8; lfdux f3, r4, r5; subf r4, r10, r4	0x388a0008,0x7c642cee,0x7c8a2050	cr=0x9abcdef0,xer=0x0,fpscr=0x0,mem=0x123456781a2b3c4d7ff0000000000bbb,r5=0x0	f3,r4	0

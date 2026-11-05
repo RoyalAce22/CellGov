@@ -1,0 +1,19 @@
+[test]
+name = "ppu_fpscr_rules"
+
+# A hardware probe of the FPSCR's own rules over two or three words.
+# cases.tsv lists the 12 cases. The console capture is the answer;
+# no emulator runs it.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case.
+memory_regions = [
+  { name = "result", addr = 0, size = 1552 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

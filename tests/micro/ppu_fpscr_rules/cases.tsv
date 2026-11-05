@@ -1,0 +1,13 @@
+id	asm	words	inputs	record	may_end_process
+fpscr/sticky-xx	fadd f4, f1, f2; fadd f4, f1, f2	0xfc81102a,0xfc81102a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f2=0x3fd5555555555555	f4	0
+fpscr/sticky-vxisi-then-clean	fadd f4, f1, f2; mtfsb0 8; fadd f4, f1, f2	0xfc81102a,0xfd00008c,0xfc81102a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x7ff0000000000000,f2=0xfff0000000000000	f4	0
+fpscr/fx-clear-keeps-xx	fadd f4, f1, f2; mtfsb0 0	0xfc81102a,0xfc00008c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f2=0x3fd5555555555555	f4	0
+fpscr/vx-summary-cleared	fadd f4, f1, f2; mtfsb0 8	0xfc81102a,0xfd00008c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x7ff0000000000000,f2=0xfff0000000000000	f4	0
+fpscr/fex-from-enable	fadd f4, f1, f2; mtfsb1 24	0xfc81102a,0xff00004c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x7ff0000000000000,f2=0xfff0000000000000	f4	0
+fpscr/fex-enable-first	mtfsb1 24; fadd f4, f1, f2	0xff00004c,0xfc81102a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x7ff0000000000000,f2=0xfff0000000000000	f4	0
+fpscr/fex-cleared-by-enable	fadd f4, f1, f2; mtfsb0 24	0xfc81102a,0xff00008c	cr=0x9abcdef0,xer=0x0,fpscr=0x80,f1=0x7ff0000000000000,f2=0xfff0000000000000	f4	0
+fpscr/record-copies-cr1	fadd f4, f1, f2; fadd. f4, f1, f2	0xfc81102a,0xfc81102b	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x7ff0000000000000,f2=0xfff0000000000000	f4	0
+fpscr/record-after-mtfsfi	mtfsfi cr0, 8; fadd. f4, f1, f2	0xfc00810c,0xfc81102b	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f2=0x3ff0000000000000	f4	0
+fpscr/mtfsb1-fx-twice	mtfsb1 3; mtfsb1 3	0xfc60004c,0xfc60004c	cr=0x9abcdef0,xer=0x0,fpscr=0x0	-	0
+fpscr/mtfsf-fx-from-frb	mtfsf 0x80, f2; mtfsb1 6	0xfd00158e,0xfcc0004c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f2=0x0	-	0
+fpscr/mcrfs-clears-then-fadd	mcrfs cr1, cr1; fadd f4, f1, f2	0xfc840080,0xfc81102a	cr=0x9abcdef0,xer=0x0,fpscr=0x9ff80700,f1=0x3ff0000000000000,f2=0x3fd5555555555555	f4	0

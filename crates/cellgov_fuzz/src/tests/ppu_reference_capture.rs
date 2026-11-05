@@ -1,7 +1,8 @@
 //! The converter from a table-probe console capture to PPU reference
 //! vector sets: one set per unit, each vector one captured case.
 //!
-//! A vector starts from the state the case loads. Its expected end takes
+//! A vector starts from the state the case loads, with the FPSCR as the
+//! probe routine's `mtfsf 0xFF` leaves it. Its expected end takes
 //! each recorded slot, CR, XER and FPSCR from the capture, and every
 //! other GPR at its start value: the case's words write only the
 //! registers the case records. LR, CTR and VRSAVE end at their start
@@ -26,6 +27,10 @@
 //! - it records memory past the data;
 //! - its words store and it leaves a data doubleword unrecorded.
 //!
+//! A probe whose console run ended the process gives no vector. The
+//! exception is a one-case probe of a floating-point load or store: its
+//! vector expects a fault stop and nothing else.
+//!
 //! No expected value comes from CellGov, and none from host floating-point
 //! arithmetic.
 
@@ -40,6 +45,7 @@ use cellgov_testkit::console_cases::{capture, parse_table, Capture, Case, Reg, R
 
 use super::floor::{features, floor};
 use super::fp::FP_UNITS;
+use super::multiple::ended_case_vector;
 use crate::ppu_reference::{
     word_unit, PpuReferenceInputState, PpuReferenceObservation, PpuReferenceProvenance,
     PpuReferenceSet, PpuReferenceState, PpuReferenceStateBase, PpuReferenceStop, PpuReferenceUnit,
@@ -75,13 +81,23 @@ pub(super) const UNITS: [&str; 85] = [
     "crorc", "crxor", "mcrf", "mfcr", "mfocrf", "mtcrf", "mtocrf", "mfspr", "mtspr",
 ];
 
-/// The integer loads and stores this converter fills.
-pub(super) const MEMORY_UNITS: [&str; 45] = [
+/// The integer and floating-point loads and stores this converter fills.
+pub(super) const MEMORY_UNITS: [&str; 62] = [
     "lbz", "lbzu", "lbzux", "lbzx", "lhz", "lhzu", "lhzux", "lhzx", "lha", "lhau", "lhaux", "lhax",
     "lwz", "lwzu", "lwzux", "lwzx", "lwa", "lwaux", "lwax", "ld", "ldu", "ldux", "ldx", "lhbrx",
     "lwbrx", "ldbrx", "stb", "stbu", "stbux", "stbx", "sth", "sthu", "sthux", "sthx", "stw",
-    "stwu", "stwux", "stwx", "std", "stdu", "stdux", "stdx", "sthbrx", "stwbrx", "sdbrx",
+    "stwu", "stwux", "stwx", "std", "stdu", "stdux", "stdx", "sthbrx", "stwbrx", "sdbrx", "lfs",
+    "lfsu", "lfsux", "lfsx", "lfd", "lfdu", "lfdux", "lfdx", "stfs", "stfsu", "stfsux", "stfsx",
+    "stfd", "stfdu", "stfdux", "stfdx", "stfiwx",
 ];
+
+/// Whether a load or store unit moves a floating-point register.
+pub(super) fn is_float_access(unit: &str) -> bool {
+    unit.starts_with("lf") || unit.starts_with("stf")
+}
+
+/// The probes whose cases fill a facility, never an instruction unit.
+pub(super) const FACILITY_PROBES: [&str; 1] = ["ppu_fpscr_rules"];
 
 /// The documented units whose sets also take the converted cases: the
 /// console settles the form the document leaves undefined.
@@ -139,15 +155,16 @@ fn micro_dir() -> PathBuf {
 }
 
 /// Every PPU probe with a case table and a committed capture under the
-/// reference profile, in name order.
+/// reference profile, in name order, except the [`FACILITY_PROBES`].
 pub(super) fn captured_probes() -> Vec<String> {
     let mut probes: Vec<String> = std::fs::read_dir(micro_dir())
         .expect("tests/micro reads")
         .map(|entry| entry.expect("a directory entry").path())
         .filter(|dir| {
-            dir.file_name()
-                .is_some_and(|name| name.to_string_lossy().starts_with("ppu_"))
-                && dir.join("cases.tsv").is_file()
+            dir.file_name().is_some_and(|name| {
+                let name = name.to_string_lossy();
+                name.starts_with("ppu_") && !FACILITY_PROBES.contains(&name.as_ref())
+            }) && dir.join("cases.tsv").is_file()
                 && dir
                     .join("ps3")
                     .join(PROFILE)
@@ -353,7 +370,7 @@ fn recorded(case: &Case, (s, bytes): &(PpuStateSnapshot, Vec<u8>)) -> Vec<u64> {
 fn floating(case: &Case) -> bool {
     case_units(case)
         .iter()
-        .any(|u| FP_UNITS.contains(&u.as_str()))
+        .any(|u| FP_UNITS.contains(&u.as_str()) || is_float_access(u))
 }
 
 /// `start` with every routine register set to a value no case loads.
@@ -459,6 +476,16 @@ fn convertible(
     if case_units(case).is_empty() {
         return Err(Skip::OtherUnit);
     }
+    representable(case, start, runs)
+}
+
+/// The special-purpose register values a case ends with, or why a vector
+/// cannot represent it, whatever units its words belong to.
+fn representable(
+    case: &Case,
+    start: &PpuStateSnapshot,
+    runs: &[Run; 2],
+) -> Result<Vec<(Spr, u64)>, Skip> {
     if has_flow(case) {
         return Err(Skip::Flow);
     }
@@ -518,7 +545,7 @@ fn input_state(case: &Case, start: &PpuStateSnapshot) -> PpuReferenceInputState 
         lr: 0,
         ctr: 0,
         xer: case.xer,
-        fpscr: Some(case.fpscr),
+        fpscr: Some(start.fpscr),
         vrsave: 0,
         vscr: Some(ENTRY_VSCR),
         tb: 0,
@@ -633,20 +660,13 @@ fn convert_probe(probe: &str, out: &mut Conversion) {
     let runs = match capture(probe, cases.len()) {
         Capture::Done(runs) => runs,
         Capture::Ended { .. } => {
-            for case in &cases {
-                let skip = if !case_units(case).is_empty() {
-                    Skip::Ended
-                } else {
-                    Skip::OtherUnit
-                };
-                *out.skipped.entry(skip).or_default() += 1;
-            }
+            ended_probe(probe, &cases, out);
             return;
         }
     };
     let source = capture_source(probe);
     for (index, (case, runs)) in cases.iter().zip(&runs).enumerate() {
-        let start = case.initial(index, MEMORY_BASE);
+        let start = case_start(case, index);
         let sprs = match convertible(case, &start, runs) {
             Ok(sprs) => sprs,
             Err(skip) => {
@@ -661,6 +681,110 @@ fn convert_probe(probe: &str, out: &mut Conversion) {
                 .or_default()
                 .push(converted.clone());
         }
+    }
+}
+
+/// The state case `index` starts from on the console: the table's, with
+/// the FPSCR as the probe routine's load leaves it.
+fn case_start(case: &Case, index: usize) -> PpuStateSnapshot {
+    let mut s = case.initial(index, MEMORY_BASE);
+    s.fpscr = loaded_fpscr(s.fpscr);
+    s
+}
+
+/// [PPC-Book1 p:87 s:4.2.2] FPSCR bit 1 is FEX, set when an exception bit
+/// and its enable bit are both set; bit 2 is VX, the OR of the invalid
+/// operation bits.
+const FEX: u32 = 0x4000_0000;
+const VX: u32 = 0x2000_0000;
+/// [PPC-Book1 p:88 s:4.2.2] The invalid operation bits VXSNAN to VXVC,
+/// VXSOFT and VXSQRT.
+/// [PPC-Book1 p:89 s:4.2.2] VXCVI is the last invalid operation bit.
+const VX_BITS: u32 = 0x01f8_0700;
+/// [PPC-Book1 p:89 s:4.2.2] The enable bits VE, OE, UE, ZE and XE, in the
+/// order of the exception bits VX, OX, UX, ZX and XX.
+const ENABLES: [(u32, u32); 5] = [
+    (VX, 0x80),
+    (0x1000_0000, 0x40),
+    (0x0800_0000, 0x20),
+    (0x0400_0000, 0x10),
+    (0x0200_0000, 0x08),
+];
+/// NI and bit 20, which no FPSCR write sets on the PPE: the
+/// `ppu_fpscr_ni_write` capture shows each one clear after every write.
+const UNSET_BITS: u32 = 0x0000_0804;
+
+/// The FPSCR the probe routine's `mtfsf 0xFF` of `raw` leaves.
+///
+/// [PPC-Book1 p:121 s:4.6.8] `mtfsf` sets FEX and VX by the usual rule.
+fn loaded_fpscr(raw: u32) -> u32 {
+    let mut v = raw & !(FEX | VX | UNSET_BITS);
+    if v & VX_BITS != 0 {
+        v |= VX;
+    }
+    if ENABLES
+        .iter()
+        .any(|&(exception, enable)| v & exception != 0 && v & enable != 0)
+    {
+        v |= FEX;
+    }
+    v
+}
+
+/// Every case of a [`FACILITY_PROBES`] probe as a vector, in case order.
+///
+/// # Panics
+///
+/// Panics if:
+///
+/// - the console run ended;
+/// - a vector cannot represent a case.
+pub(super) fn facility_vectors(probe: &str) -> Vec<PpuReferenceVector> {
+    let path = micro_dir().join(probe).join("cases.tsv");
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let cases = parse_table(&text).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let Capture::Done(runs) = capture(probe, cases.len()) else {
+        panic!("{probe}: the console run ended inside a case");
+    };
+    let source = capture_source(probe);
+    cases
+        .iter()
+        .zip(&runs)
+        .enumerate()
+        .map(|(index, (case, runs))| {
+            let start = case_start(case, index);
+            let sprs = representable(case, &start, runs)
+                .unwrap_or_else(|skip| panic!("{probe} {}: {skip:?}", case.id));
+            vector(probe, &source, case, &start, &runs[0], &sprs)
+        })
+        .collect()
+}
+
+/// The cases of a probe whose console run ended the process.
+///
+/// A one-case probe of a floating-point load or store gives a vector that
+/// expects a fault stop and nothing else: its misaligned access ends the
+/// process. The function counts every other case as a skip.
+fn ended_probe(probe: &str, cases: &[Case], out: &mut Conversion) {
+    let units: Vec<String> = cases.iter().flat_map(case_units).collect();
+    if let [unit] = &units[..] {
+        if is_float_access(unit) {
+            // The shared ended vector keeps only the case's GPR inputs. The
+            // console also loaded the case's FPRs: the store's source or the
+            // load's preset target. So take that bank from the case's start.
+            let mut v = ended_case_vector(probe);
+            v.initial_state.fpr = input_state(&cases[0], &case_start(&cases[0], 0)).fpr;
+            out.candidates.entry(unit.clone()).or_default().push(v);
+            return;
+        }
+    }
+    for case in cases {
+        let skip = if !case_units(case).is_empty() {
+            Skip::Ended
+        } else {
+            Skip::OtherUnit
+        };
+        *out.skipped.entry(skip).or_default() += 1;
     }
 }
 

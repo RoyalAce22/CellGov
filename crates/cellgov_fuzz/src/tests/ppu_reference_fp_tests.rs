@@ -26,11 +26,14 @@ fn committed_set(unit: &str) -> PpuReferenceSet {
 fn each_floating_point_file_is_its_captures_converted() {
     let conversion = convert(&captured_probes());
     let mut stale = Vec::new();
-    for unit in FP_UNITS {
-        let set = fp_set(unit, &conversion);
-        assert!(!set.vectors.is_empty(), "{unit}: no captured case");
+    let sets = FP_UNITS
+        .iter()
+        .map(|unit| (file_name(unit), fp_set(unit, &conversion)))
+        .chain([("facility_fpscr.json".to_owned(), fpscr_facility_set())]);
+    for (name, set) in sets {
+        assert!(!set.vectors.is_empty(), "{name}: no captured case");
         let want = render(&set);
-        let path = fixtures().join(file_name(unit));
+        let path = fixtures().join(&name);
         if write_if_asked(&path, &want) {
             continue;
         }

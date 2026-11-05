@@ -50,7 +50,8 @@ fn the_converter_skips_only_other_units_and_the_cases_it_cannot_represent() {
     let conversion = convert(&captured_probes());
     let skipped: Vec<(Skip, usize)> = conversion.skipped.into_iter().collect();
     // - WritesUnrecorded: the lswx case that copies the buffer's address
-    //   into a register it does not record.
+    //   into a register it does not record, and the 14 stfs cases of the
+    //   older float probes that record one data doubleword of the region.
     // - Ended: the tdi and twi cases that trapped; the lq and lswi cases,
     //   whose address move is an `or`; the four invalid or unmapped lswx
     //   forms; and the lwz and stw cases at a null or low address. Each
@@ -59,12 +60,60 @@ fn the_converter_skips_only_other_units_and_the_cases_it_cannot_represent() {
     assert_eq!(
         skipped,
         [
-            (Skip::OtherUnit, 613),
-            (Skip::WritesUnrecorded, 1),
+            (Skip::OtherUnit, 548),
+            (Skip::WritesUnrecorded, 15),
             (Skip::Ended, 11),
             (Skip::Flow, 2)
         ]
     );
+}
+
+#[test]
+fn an_ended_floating_point_access_starts_from_the_fprs_its_case_loads() {
+    use cellgov_testkit::console_cases::{parse_table, Reg};
+    let micro = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/micro");
+    let probes: Vec<String> = captured_probes()
+        .into_iter()
+        .filter(|p| p.starts_with("ppu_may_trap_stf") || p.starts_with("ppu_may_trap_lf"))
+        .collect();
+    let conversion = convert(&probes);
+    let vectors: Vec<_> = conversion.candidates.values().flatten().collect();
+    let mut checked = 0;
+    for probe in &probes {
+        let text = std::fs::read_to_string(micro.join(probe).join("cases.tsv")).unwrap();
+        let [case] = &parse_table(&text).unwrap()[..] else {
+            panic!("{probe}: one case");
+        };
+        // The console loads the inputs and a preset for each recorded
+        // register no input names.
+        let loads = case.loads(0);
+        let want: Vec<(u8, u64)> = loads
+            .iter()
+            .filter_map(|&(r, v)| match r {
+                Reg::Fpr(n) if v != 0 => Some((n, v as u64)),
+                _ => None,
+            })
+            .collect();
+        assert!(!want.is_empty(), "{probe}: the case loads no FPR");
+        let id = probe.trim_start_matches("ppu_may_trap_").replace('_', "-");
+        let v = vectors
+            .iter()
+            .find(|v| v.name == id)
+            .unwrap_or_else(|| panic!("{probe}: no vector {id}"));
+        let have: Vec<(u8, u64)> = v.initial_state.fpr.iter().map(|(&n, &x)| (n, x)).collect();
+        assert_eq!(have, want, "{probe}");
+        for &(r, x) in &loads {
+            if let Reg::Gpr(n) = r {
+                assert_eq!(
+                    v.initial_state.gpr.get(&n),
+                    Some(&(x as u64)),
+                    "{probe} r{n}"
+                );
+            }
+        }
+        checked += 1;
+    }
+    assert_eq!(checked, 27);
 }
 
 #[test]
@@ -138,7 +187,7 @@ fn a_one_bit_change_to_an_expected_gpr_fails_each_converted_file() {
 #[test]
 fn a_stored_byte_expected_at_its_start_value_fails_each_converted_store_file() {
     let stores: Vec<&str> = MEMORY_UNITS.into_iter().filter(|u| is_store(u)).collect();
-    assert_eq!(stores.len(), 19);
+    assert_eq!(stores.len(), 28);
     for unit in stores {
         let mut set = committed_set(unit);
         // The first vector whose store changes a data byte, and that byte.

@@ -25,11 +25,15 @@ pub use replay::{cellgov_after, replay, varies};
 /// The table-driven probes, each with its own `cases.tsv`.
 /// `ppu_reference_vectors` takes its table from the `cellgov_fuzz`
 /// module `ppu_documented`, which replays its capture.
-pub const PROBES: [&str; 105] = [
+pub const PROBES: [&str; 109] = [
     "ppu_int_edges",
     "ppu_fp_arith",
     "ppu_fp_fma",
     "ppu_fp_unary",
+    "ppu_fp_loads",
+    "ppu_fp_stores",
+    "ppu_fpscr_ops",
+    "ppu_fpscr_rules",
     "ppu_int_loads",
     "ppu_int_stores",
     "ppu_int_misaligned",

@@ -58,17 +58,21 @@ pub enum PpuReferenceFacility {
     StoreForwarding,
     /// A string load or store across a page boundary.
     StringAcrossPage,
+    /// The FPSCR's own rules: sticky exception bits, the FX, FEX and VX
+    /// summaries, and the record forms' copy into CR1.
+    Fpscr,
 }
 
 impl PpuReferenceFacility {
     /// Every facility, in declaration order.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::ThreadEntry,
         Self::Reservation,
         Self::DcbzWidth,
         Self::TimeBase,
         Self::StoreForwarding,
         Self::StringAcrossPage,
+        Self::Fpscr,
     ];
 
     /// The name a reference file writes.
@@ -80,6 +84,7 @@ impl PpuReferenceFacility {
             Self::TimeBase => "time_base",
             Self::StoreForwarding => "store_forwarding",
             Self::StringAcrossPage => "string_across_page",
+            Self::Fpscr => "fpscr",
         }
     }
 }

@@ -8,7 +8,8 @@
 //! - a rounding mode that left the result inexact;
 //! - an FPSCR exception bit the word set;
 //! - the record form or the plain form;
-//! - a compare's outcome.
+//! - a compare's outcome;
+//! - the FPSCR field, bit or field mask an FPSCR move names.
 //!
 //! A unit's floor is the features its set must show. No expected
 //! value comes from a host floating-point operation: the module reads
@@ -18,18 +19,19 @@
 
 use std::collections::BTreeSet;
 
-use super::capture::{select_by, Conversion};
+use super::capture::{facility_vectors, select_by, Conversion, FACILITY_PROBES};
 use crate::ppu_reference::{
-    word_unit, PpuReferenceSet, PpuReferenceUnit, PpuReferenceVector, ReferenceField,
-    PPU_REFERENCE_SET_SCHEMA_VERSION,
+    word_unit, PpuReferenceFacility, PpuReferenceSet, PpuReferenceUnit, PpuReferenceVector,
+    ReferenceField, PPU_REFERENCE_SET_SCHEMA_VERSION,
 };
 
-/// The scalar floating-point units this module fills.
-pub(super) const FP_UNITS: [&str; 33] = [
+/// The scalar floating-point units this module fills: the arithmetic,
+/// round, convert, compare and move units, then the FPSCR moves.
+pub(super) const FP_UNITS: [&str; 38] = [
     "fadd", "fadds", "fsub", "fsubs", "fmul", "fmuls", "fdiv", "fdivs", "fmadd", "fmadds", "fmsub",
     "fmsubs", "fnmadd", "fnmadds", "fnmsub", "fnmsubs", "fsqrt", "fsqrts", "fres", "frsqrte",
     "fsel", "fmr", "fneg", "fabs", "fnabs", "frsp", "fctid", "fctidz", "fctiw", "fctiwz", "fcfid",
-    "fcmpu", "fcmpo",
+    "fcmpu", "fcmpo", "mcrfs", "mffs", "mtfsb0", "mtfsf", "mtfsfi",
 ];
 
 /// [PPC-Book1 p:87 s:4.2.2] FPSCR bits 3 to 6 are the exception bits OX,
@@ -112,6 +114,43 @@ pub(super) struct FpFloor {
     /// Whether the unit compares into a CR field; the set shows each
     /// outcome.
     compare: bool,
+    /// The FPSCR move the unit is, if it is one.
+    moves: Option<Move>,
+}
+
+/// An FPSCR move, and what its set shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Move {
+    /// `mcrfs`: each source field, and a copied exception bit cleared.
+    Mcrfs,
+    /// `mffs`: a zero FPSCR and one with bits set.
+    Mffs,
+    /// `mtfsb0`: each bit.
+    Mtfsb,
+    /// `mtfsf`: no field, one field, several and all of them.
+    Mtfsf,
+    /// `mtfsfi`: each field.
+    Mtfsfi,
+}
+
+/// [PPC-Book1 p:87 s:4.2.2] The FPSCR exception bits: FX, OX to VXVC, and
+/// VXSOFT, VXSQRT and VXCVI.
+const EXCEPTION_BITS: u32 = 0x9ff8_0700;
+
+/// The FPSCR move floors.
+///
+/// [PPC-Book1 p:120 s:4.6.8] `mcrfs` copies FPSCR field BFA into CR field
+/// BF and clears the exception bits it copied; `mffs` places the FPSCR in
+/// FRT.
+/// [PPC-Book1 p:121 s:4.6.8] `mtfsfi` writes field BF; `mtfsf` writes the
+/// fields FLM names.
+/// [PPC-Book1 p:122 s:4.6.8] `mtfsb0` clears bit BT.
+const fn fpscr_move(moves: Move) -> FpFloor {
+    FpFloor {
+        rc: !matches!(moves, Move::Mcrfs),
+        moves: Some(moves),
+        ..plain(&[], &[])
+    }
 }
 
 const AB: &[Source] = &[Source::A, Source::B];
@@ -166,6 +205,7 @@ const fn arith(sources: &'static [Source], format: Format, flags: &'static [Flag
         flags,
         rc: true,
         compare: false,
+        moves: None,
     }
 }
 
@@ -177,6 +217,7 @@ const fn plain(sources: &'static [Source], flags: &'static [Flag]) -> FpFloor {
         flags,
         rc: true,
         compare: false,
+        moves: None,
     }
 }
 
@@ -244,13 +285,18 @@ pub(super) fn fp_floor(unit: &str) -> FpFloor {
                 },
             )
         },
+        "mcrfs" => fpscr_move(Move::Mcrfs),
+        "mffs" => fpscr_move(Move::Mffs),
+        "mtfsb0" => fpscr_move(Move::Mtfsb),
+        "mtfsf" => fpscr_move(Move::Mtfsf),
+        "mtfsfi" => fpscr_move(Move::Mtfsfi),
         other => panic!("no floating-point floor for {other}"),
     }
 }
 
 /// The operand classes every source must take in a double or single
 /// format.
-const CLASSES: [&str; 10] = [
+pub(super) const CLASSES: [&str; 10] = [
     "pzero", "nzero", "pden", "nden", "pnorm", "nnorm", "pinf", "ninf", "qnan", "snan",
 ];
 
@@ -263,9 +309,25 @@ const INTEGER_CLASSES: [&str; 6] = ["zero", "one", "m1", "smax64", "smin64", "in
 /// which the double format biases to 897.
 const SINGLE_NORMAL_EXP: u64 = 897;
 
+/// The class of a single-format word.
+pub(super) fn single_class(w: u32) -> &'static str {
+    let negative = w >> 31 == 1;
+    let exp = (w >> 23) & 0xff;
+    let frac = w & ((1 << 23) - 1);
+    let signed = |p: &'static str, n: &'static str| if negative { n } else { p };
+    match (exp, frac) {
+        (0, 0) => signed("pzero", "nzero"),
+        (0, _) => signed("pden", "nden"),
+        (0xff, 0) => signed("pinf", "ninf"),
+        (0xff, f) if f >> 22 == 1 => "qnan",
+        (0xff, _) => "snan",
+        _ => signed("pnorm", "nnorm"),
+    }
+}
+
 /// The class of a double-format value; under `single`, a nonzero value
 /// below the single normal range is a denormal.
-fn class(v: u64, single: bool) -> &'static str {
+pub(super) fn class(v: u64, single: bool) -> &'static str {
     let negative = v >> 63 == 1;
     let exp = (v >> 52) & 0x7ff;
     let frac = v & ((1 << 52) - 1);
@@ -352,6 +414,15 @@ pub(super) fn fp_features(floor: &FpFloor, unit: &str, v: &PpuReferenceVector) -
     }
     let start = v.initial_state.fpscr.unwrap_or_default();
     let end = expected_fpscr(v);
+    if let Some(moves) = floor.moves {
+        out.insert(move_feature(moves, word, start));
+        if moves == Move::Mcrfs {
+            let field = 0xf000_0000 >> (4 * ((word >> 18) & 7));
+            if start & field & EXCEPTION_BITS != 0 && end & field & EXCEPTION_BITS == 0 {
+                out.insert("clears".into());
+            }
+        }
+    }
     if floor.rounds && end & FI != 0 {
         out.insert(format!("rn{}-inexact", start & RN));
     }
@@ -377,9 +448,51 @@ pub(super) fn fp_features(floor: &FpFloor, unit: &str, v: &PpuReferenceVector) -
     out
 }
 
+/// The feature an FPSCR move's word shows: the field or bit it names, the
+/// kind of field mask, or whether the FPSCR it reads is zero.
+fn move_feature(moves: Move, word: u32, start: u32) -> String {
+    match moves {
+        Move::Mcrfs => format!("bfa:{}", (word >> 18) & 7),
+        Move::Mffs => if start == 0 {
+            "fpscr:zero"
+        } else {
+            "fpscr:set"
+        }
+        .into(),
+        Move::Mtfsb => format!("bt:{}", (word >> 21) & 31),
+        Move::Mtfsf => match ((word >> 17) & 0xff).count_ones() {
+            0 => "flm:none",
+            1 => "flm:one",
+            8 => "flm:all",
+            _ => "flm:several",
+        }
+        .into(),
+        Move::Mtfsfi => format!("bf:{}", (word >> 23) & 7),
+    }
+}
+
+/// The features an FPSCR move's set must show.
+fn move_required(moves: Move) -> Vec<String> {
+    match moves {
+        Move::Mcrfs => (0..8)
+            .map(|n| format!("bfa:{n}"))
+            .chain(["clears".to_owned()])
+            .collect(),
+        Move::Mffs => vec!["fpscr:zero".into(), "fpscr:set".into()],
+        Move::Mtfsb => (0..32).map(|n| format!("bt:{n}")).collect(),
+        Move::Mtfsf => ["none", "one", "several", "all"]
+            .map(|k| format!("flm:{k}"))
+            .into(),
+        Move::Mtfsfi => (0..8).map(|n| format!("bf:{n}")).collect(),
+    }
+}
+
 /// The features a floating-point unit's set must show.
 pub(super) fn fp_required(floor: &FpFloor) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
+    if let Some(moves) = floor.moves {
+        out.extend(move_required(moves));
+    }
     let classes: &[&str] = match floor.format {
         Format::Integer => &INTEGER_CLASSES,
         _ => &CLASSES,
@@ -400,6 +513,21 @@ pub(super) fn fp_required(floor: &FpFloor) -> BTreeSet<String> {
         out.extend(["lt", "gt", "eq", "un"].map(|c| format!("cc:{c}")));
     }
     out
+}
+
+/// The `fpscr` facility's set: every case of the [`FACILITY_PROBES`]
+/// captures, each over two or three words.
+pub(super) fn fpscr_facility_set() -> PpuReferenceSet {
+    PpuReferenceSet {
+        schema_version: PPU_REFERENCE_SET_SCHEMA_VERSION,
+        unit: PpuReferenceUnit::Facility {
+            name: PpuReferenceFacility::Fpscr,
+        },
+        vectors: FACILITY_PROBES
+            .iter()
+            .flat_map(|probe| facility_vectors(probe))
+            .collect(),
+    }
 }
 
 /// The set written for floating-point `unit`, from the converter's

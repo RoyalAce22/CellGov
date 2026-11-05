@@ -31,8 +31,8 @@ The units come from the documents:
 - one unit for the instructions the PPE does not implement, one for the
   Book III instructions, and one for the words no instruction selects;
 - the facilities no single instruction exercises: `thread_entry`,
-  `reservation`, `dcbz_width`, `time_base`, `store_forwarding` and
-  `string_across_page`.
+  `reservation`, `dcbz_width`, `time_base`, `store_forwarding`,
+  `string_across_page` and `fpscr`.
 
 Each decoded instruction kind belongs to one of these units, and a test
 fails when a kind has none. A file for a unit deletes that unit's line
@@ -84,6 +84,14 @@ memory is one region, where a page edge is no boundary, and the console
 capture of a word load across a 64 KiB page shows the load completing as
 any misaligned one does.
 
+The floating-point load and store files are converted the same way, from
+the `ppu_fp_loads` and `ppu_fp_stores` probes and the earlier float
+probes. Each set shows a loaded datum or a stored FPR value in each
+operand class, single format for `lfs` and `stfs`; `stfiwx` stores a
+zero, all ones and a word with its top bit set. On the console a
+misaligned floating-point access ends the process, so each one-case
+probe of one expects a fault stop and nothing else.
+
 The scalar floating-point files come from the `ppu_reference::fp_tests`
 drift test, from the same converted cases. Most come from the
 `ppu_fp_arith`, `ppu_fp_fma` and `ppu_fp_unary` probes. A vector of a
@@ -96,7 +104,15 @@ the console's, every other at its start value. Each set shows:
 - an inexact result in each rounding mode, where the unit rounds;
 - each FPSCR exception the instruction can set;
 - the record and plain forms;
-- for a compare, each outcome.
+- for a compare, each outcome;
+- for an FPSCR move (`ppu_fpscr_ops`), each field or bit it moves, and
+  for `mcrfs` each exception bit it clears.
+
+Each case loads its FPSCR with `mtfsf 0xFF`, which sets FEX and VX from
+the other bits and never sets NI or bit 20, so a vector starts from the
+FPSCR that load leaves. `facility_fpscr` holds the `ppu_fpscr_rules`
+sequences: sticky exception bits, the FEX and VX summaries after a
+write, and CR1 after a record form.
 
 The probes also raise each exception with its enable bit set. A PS3
 process runs with MSR[FE0:FE1] = 0, so the console sets FEX and takes

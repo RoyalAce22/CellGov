@@ -14,6 +14,7 @@
 
 use std::collections::BTreeSet;
 
+use super::fp::{class, single_class, CLASSES};
 use crate::ppu_reference::{word_unit, PpuReferenceUnit, PpuReferenceVector, ReferenceField};
 
 /// [PPC-Book1 p:32 s:3.2.2] XER bit 32 is SO, bit 33 OV, bit 34 CA.
@@ -103,6 +104,20 @@ pub(super) struct Access {
     pub(super) store: bool,
     /// Whether the unit reverses the bytes it moves.
     pub(super) reverse: bool,
+    pub(super) data: Data,
+}
+
+/// The register and format a load or store moves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Data {
+    /// A GPR's bytes.
+    Int,
+    /// A single-format value, widened into or narrowed from an FPR.
+    Single,
+    /// A double-format value in an FPR.
+    Double,
+    /// The low word of an FPR, as `stfiwx` stores it.
+    FprWord,
 }
 
 /// How a load or store word forms its effective address.
@@ -141,10 +156,22 @@ const NONE: Floor = Floor {
     access: None,
 };
 
-/// The floor of a load or store unit.
+/// The floor of an integer load or store unit.
 ///
 /// A non-update indexed form reads `(RA|0)`, so its set shows RA = 0.
 const fn access(size: u64, form: AddressForm, update: bool, store: bool, reverse: bool) -> Floor {
+    moves(size, form, update, store, reverse, Data::Int)
+}
+
+/// The floor of a load or store unit that moves `data`.
+const fn moves(
+    size: u64,
+    form: AddressForm,
+    update: bool,
+    store: bool,
+    reverse: bool,
+    data: Data,
+) -> Floor {
     Floor {
         ra0: matches!(form, AddressForm::Index) && !update,
         access: Some(Access {
@@ -153,9 +180,19 @@ const fn access(size: u64, form: AddressForm, update: bool, store: bool, reverse
             update,
             store,
             reverse,
+            data,
         }),
         ..NONE
     }
+}
+
+/// The floor of a floating-point load or store unit.
+const fn float(data: Data, form: AddressForm, update: bool, store: bool) -> Floor {
+    let size = match data {
+        Data::Double => 8,
+        _ => 4,
+    };
+    moves(size, form, update, store, false, data)
 }
 
 const fn load(size: u64, form: AddressForm, update: bool) -> Floor {
@@ -327,6 +364,41 @@ fn memory_floor(unit: &str) -> Option<Floor> {
         "sthbrx" => access(2, X, false, true, true),
         "stwbrx" => access(4, X, false, true, true),
         "sdbrx" => access(8, X, false, true, true),
+        other => return float_floor(other),
+    })
+}
+
+/// The floor of a floating-point load or store unit, or `None` for any
+/// other unit.
+///
+/// [PPC-Book1 p:104 s:4.6.2] `lfs` widens a single-format word into an
+/// FPR.
+/// [PPC-Book1 p:105 s:4.6.2] `lfd` loads a doubleword unchanged.
+/// [PPC-Book1 p:107 s:4.6.3] `stfs` narrows an FPR to a single-format
+/// word.
+/// [PPC-Book1 p:108 s:4.6.3] `stfd` stores the doubleword unchanged.
+/// [PPC-Book1 p:109 s:4.6.3] `stfiwx` stores the FPR's low word.
+fn float_floor(unit: &str) -> Option<Floor> {
+    use AddressForm::{Displacement as D, Index as X};
+    use Data::{Double, FprWord, Single};
+    Some(match unit {
+        "lfs" => float(Single, D, false, false),
+        "lfsu" => float(Single, D, true, false),
+        "lfsx" => float(Single, X, false, false),
+        "lfsux" => float(Single, X, true, false),
+        "lfd" => float(Double, D, false, false),
+        "lfdu" => float(Double, D, true, false),
+        "lfdx" => float(Double, X, false, false),
+        "lfdux" => float(Double, X, true, false),
+        "stfs" => float(Single, D, false, true),
+        "stfsu" => float(Single, D, true, true),
+        "stfsx" => float(Single, X, false, true),
+        "stfsux" => float(Single, X, true, true),
+        "stfd" => float(Double, D, false, true),
+        "stfdu" => float(Double, D, true, true),
+        "stfdx" => float(Double, X, false, true),
+        "stfdux" => float(Double, X, true, true),
+        "stfiwx" => float(FprWord, X, false, true),
         _ => return None,
     })
 }
@@ -356,7 +428,8 @@ fn bank_at(v: &PpuReferenceVector, at: usize) -> [u64; 32] {
 
 /// The features a load or store word shows: its address form's operand
 /// sign, the alignment of its address, and the datum's top bit or the
-/// stored value's class.
+/// stored value's class. A floating-point move shows the class of the
+/// datum it loads or the FPR it stores.
 fn access_features(a: &Access, v: &PpuReferenceVector, at: usize, out: &mut BTreeSet<String>) {
     let word = v.words[at];
     let g = bank_at(v, at);
@@ -395,17 +468,48 @@ fn access_features(a: &Access, v: &PpuReferenceVector, at: usize, out: &mut BTre
             .into(),
         );
     }
-    if a.store {
-        out.insert(format!("rs:{}", operand_class(g[Field::Rs.of(word)])));
-        return;
-    }
-    let first = if a.reverse {
-        ea + a.size as usize - 1
-    } else {
-        ea
+    let frs = || {
+        v.initial_state
+            .fpr
+            .get(&(Field::Rs.of(word) as u8))
+            .copied()
+            .unwrap_or_default()
     };
-    if let Some(byte) = v.initial_memory.get(first) {
-        out.insert(format!("msb:{}", byte >> 7));
+    match (a.data, a.store) {
+        (Data::Int, true) => {
+            out.insert(format!("rs:{}", operand_class(g[Field::Rs.of(word)])));
+        }
+        (Data::FprWord, true) => {
+            out.insert(format!("frs:{}", operand_class(frs())));
+        }
+        (data, true) => {
+            out.insert(format!("frs:{}", class(frs(), data == Data::Single)));
+        }
+        (Data::Int, false) => {
+            let first = if a.reverse {
+                ea + a.size as usize - 1
+            } else {
+                ea
+            };
+            if let Some(byte) = v.initial_memory.get(first) {
+                out.insert(format!("msb:{}", byte >> 7));
+            }
+        }
+        (data, false) => {
+            let Some(bytes) = v.initial_memory.get(ea..ea + a.size as usize) else {
+                return;
+            };
+            let name = match data {
+                Data::Single => single_class(u32::from_be_bytes(
+                    bytes.try_into().expect("a single is 4 bytes"),
+                )),
+                _ => class(
+                    u64::from_be_bytes(bytes.try_into().expect("a double is 8 bytes")),
+                    false,
+                ),
+            };
+            out.insert(format!("data:{name}"));
+        }
     }
 }
 
@@ -420,10 +524,12 @@ fn access_required(a: &Access, out: &mut BTreeSet<String>) {
     if a.size > 1 {
         add(&["ea:aligned", "ea:misaligned"]);
     }
-    if a.store {
-        add(&["rs:zero", "rs:m1", "rs:hi"]);
-    } else {
-        add(&["msb:0", "msb:1"]);
+    match (a.data, a.store) {
+        (Data::Int, true) => add(&["rs:zero", "rs:m1", "rs:hi"]),
+        (Data::Int, false) => add(&["msb:0", "msb:1"]),
+        (Data::FprWord, _) => add(&["frs:zero", "frs:m1", "frs:hi"]),
+        (_, true) => out.extend(CLASSES.map(|c| format!("frs:{c}"))),
+        (_, false) => out.extend(CLASSES.map(|c| format!("data:{c}"))),
     }
 }
 
