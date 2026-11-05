@@ -268,9 +268,14 @@ pub(super) fn fused_effect_and_outcome(
 ) -> (&'static [EffectKind], &'static [PpuOutcomeClass]) {
     use FusedPairKind as F;
     match kind {
-        F::LwzCmpwi | F::LwzMtlr | F::LdMtlr | F::LdLd | F::LbzuCmpwi | F::LduLdu | F::LdRlwinm => {
-            (READ_EFFECTS, LOAD)
-        }
+        F::LwzCmpwi
+        | F::LwzMtlr
+        | F::LdMtlr
+        | F::LdLd
+        | F::LbzuCmpwi
+        | F::LduLdu
+        | F::LdRlwinm
+        | F::LwzLwz => (READ_EFFECTS, LOAD),
         F::LiStw | F::MflrStw | F::MflrStd | F::StdStd => (WRITE_EFFECTS, STORE),
         F::CmpwiBc | F::CmpwBc | F::CmpdiBc | F::CmpdBc | F::CmplwBc | F::AddiBc | F::ExtswBlr => {
             (NO_EFFECTS, BRANCH)

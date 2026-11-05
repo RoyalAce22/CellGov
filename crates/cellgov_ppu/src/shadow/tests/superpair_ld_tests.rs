@@ -80,8 +80,10 @@ fn a_fused_ld_pair_disassembles_as_its_halves() {
 }
 
 #[test]
-fn adjacent_same_base_lwzs_do_not_fuse() {
+fn adjacent_same_base_lwzs_fuse_as_word_loads() {
     let shadow = build_from_words(0, &[lwz_raw(3, 1, 0), lwz_raw(4, 1, 4)]);
-    assert!(matches!(shadow.get(0), Some(I::Lwz { .. })));
-    assert!(matches!(shadow.get(4), Some(I::Lwz { .. })));
+    assert!(matches!(
+        shadow.get(0),
+        Some(I::Fused(FusedPair::LwzLwz { .. }))
+    ));
 }

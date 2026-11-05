@@ -876,6 +876,18 @@ pub(super) fn render(
                 let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
                 write!(f, "; bc {bo}, {bi}, 0x{target:x}")
             }
+            FusedPair::LwzLwz {
+                rt1,
+                ra1,
+                off1,
+                rt2,
+                ra2,
+                off2,
+            } => {
+                mem_d(f, "lwz", 'r', rt1, off1, ra1)?;
+                f.write_str("; ")?;
+                mem_d(f, "lwz", 'r', rt2, off2, ra2)
+            }
             FusedPair::LdRlwinm {
                 rt,
                 offset,

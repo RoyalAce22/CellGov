@@ -368,6 +368,28 @@ fn fuse(a: PpuInstruction, b: PpuInstruction) -> Option<FusedPair> {
             bi,
             target_offset: offset,
         }),
+        // lwz rT1, off1(rA1) + lwz rT2, off2(rA2). A second base equal to a
+        // nonzero RT1 does not fuse, because EA2 then depends on the first
+        // load's value.
+        (
+            PpuInstruction::Lwz {
+                rt: rt1,
+                ra: ra1,
+                imm: off1,
+            },
+            PpuInstruction::Lwz {
+                rt: rt2,
+                ra: ra2,
+                imm: off2,
+            },
+        ) if ra2 == 0 || ra2 != rt1 => Some(FusedPair::LwzLwz {
+            rt1,
+            ra1,
+            off1,
+            rt2,
+            ra2,
+            off2,
+        }),
         // ld rT, off(r1) + rlwinm in any form, recording or not.
         (
             PpuInstruction::Ld { rt, ra: 1, imm },
@@ -511,3 +533,7 @@ mod addi_bc_tests;
 #[cfg(test)]
 #[path = "tests/superpair_ld_rlwinm_tests.rs"]
 mod ld_rlwinm_tests;
+
+#[cfg(test)]
+#[path = "tests/superpair_lwz_pair_tests.rs"]
+mod lwz_pair_tests;

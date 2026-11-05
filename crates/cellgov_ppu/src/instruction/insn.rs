@@ -1915,6 +1915,18 @@ pub enum FusedPair {
         bi: u8,
         target_offset: i16,
     },
+    /// `lwz rT1, off1(rA1)` followed by `lwz rT2, off2(rA2)`.
+    ///
+    /// The shadow fuses the pair only when `ra2` is 0 or not `rt1`, so EA2
+    /// does not depend on the first load's value.
+    LwzLwz {
+        rt1: u8,
+        ra1: u8,
+        off1: i16,
+        rt2: u8,
+        ra2: u8,
+        off2: i16,
+    },
     /// `ld rT, offset(r1)` followed by `rlwinm rA, rS, sh, mb, me` (or a
     /// quickened form of it), with `rc` the rlwinm's Rc bit.
     LdRlwinm {

@@ -126,8 +126,16 @@ mod fused_addi_bc_tests;
 mod fused_ld_rlwinm_tests;
 
 #[cfg(test)]
+#[path = "tests/fused_lwz_pair_tests.rs"]
+mod fused_lwz_pair_tests;
+
+#[cfg(test)]
 #[path = "tests/ld_ld_console_tests.rs"]
 mod ld_ld_console_tests;
+
+#[cfg(test)]
+#[path = "tests/lwz_lwz_console_tests.rs"]
+mod lwz_lwz_console_tests;
 
 #[cfg(test)]
 #[path = "tests/ld_rlwinm_console_tests.rs"]

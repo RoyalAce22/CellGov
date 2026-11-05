@@ -1,0 +1,24 @@
+[test]
+name = "ppu_lwz_lwz_pair"
+
+# A hardware probe: the 64-bit registers two adjacent "lwz" loads leave,
+# from one base into two registers or one, through a branch into the
+# second load, through a first load that overwrites the second load's
+# base, through a first load that overwrites its own base while the
+# second load reads another, and from two bases with negative
+# displacements. The console capture is the answer; no emulator runs it.
+
+[observe]
+# 22 big-endian u32 words, as ppu/main.c lists: 88 bytes.
+#   0 failed step, 1 its return code; then each register as a high word
+#   and a low word: 2-3 r5 and 4-5 r6 of the plain pair, 6-7 r5 loaded
+#   twice, 8-9 r5 and 10-11 r6 after the branch into the second load,
+#   12-13 r6 after the first load overwrote the second load's base,
+#   14-15 r4 and 16-17 r6 after the first load overwrote its own base,
+#   18-19 r5 and 20-21 r6 of the two-base negative-displacement pair.
+memory_regions = [
+  { name = "result", addr = 0, size = 88 },
+]
+
+[expect]
+outcome = "completed"

@@ -310,6 +310,37 @@ fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
                     quicken_insn(rlwinm).unwrap_or(rlwinm),
                 )
             }),
+        // A second base equal to a nonzero RT1 does not fuse, so this arm
+        // moves it off RT1. Half the cases share one base.
+        (
+            reg(),
+            reg(),
+            displacement(),
+            reg(),
+            reg(),
+            displacement(),
+            any::<bool>()
+        )
+            .prop_map(|(rt1, ra1, off1, rt2, ra2, off2, same)| {
+                let ra2 = if same { ra1 } else { ra2 };
+                let ra2 = if ra2 != 0 && ra2 == rt1 {
+                    ra2 % 31 + 1
+                } else {
+                    ra2
+                };
+                (
+                    PpuInstruction::Lwz {
+                        rt: rt1,
+                        ra: ra1,
+                        imm: off1,
+                    },
+                    PpuInstruction::Lwz {
+                        rt: rt2,
+                        ra: ra2,
+                        imm: off2,
+                    },
+                )
+            }),
     ]
 }
 
@@ -393,7 +424,7 @@ fn aim_compare(
 }
 
 proptest! {
-    // Seven of the twenty-four arms are compares that need an aimed
+    // Seven of the twenty-five arms are compares that need an aimed
     // operand to show an off-by-one. Four times the default count
     // makes one such case near certain per run.
     #![proptest_config(ProptestConfig::with_cases(1024))]
@@ -425,10 +456,15 @@ proptest! {
 
         prop_assert_eq!(&verdict_pair, &verdict_halves);
         let refused = !matches!(verdict_pair, ExecuteVerdict::Continue | ExecuteVerdict::Branch);
-        if refused && matches!(fused, PpuInstruction::Fused(FusedPair::LduLdu { .. })) {
-            // The ldu pair's first half writes the base it reads, so a
-            // refused pair leaves the state it began in. The batch's
-            // split rerun reaches the halves' state from there.
+        if refused
+            && matches!(
+                fused,
+                PpuInstruction::Fused(FusedPair::LduLdu { .. } | FusedPair::LwzLwz { .. })
+            )
+        {
+            // The ldu and lwz pairs write no register until both loads
+            // pass, so a refused pair leaves the state it began in. The
+            // batch's split rerun reaches the halves' state from there.
             prop_assert_eq!(pair.fingerprint(), seed.state().fingerprint());
         } else {
             prop_assert_eq!(pair.fingerprint(), halves.fingerprint());
