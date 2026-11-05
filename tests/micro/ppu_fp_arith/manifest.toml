@@ -1,0 +1,19 @@
+[test]
+name = "ppu_fp_arith"
+
+# A hardware probe of the scalar floating-point add, subtract, multiply and divide.
+# cases.tsv lists the 266 cases. The console capture is the answer;
+# no emulator runs it.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case.
+memory_regions = [
+  { name = "result", addr = 0, size = 34064 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

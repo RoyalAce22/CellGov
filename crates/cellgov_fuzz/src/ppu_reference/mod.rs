@@ -59,3 +59,11 @@ mod system;
 #[cfg(test)]
 #[path = "../tests/ppu_reference_system_tests.rs"]
 mod system_tests;
+
+#[cfg(test)]
+#[path = "../tests/ppu_reference_fp.rs"]
+mod fp;
+
+#[cfg(test)]
+#[path = "../tests/ppu_reference_fp_tests.rs"]
+mod fp_tests;

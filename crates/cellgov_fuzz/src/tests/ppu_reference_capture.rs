@@ -6,7 +6,9 @@
 //! other GPR at its start value: the case's words write only the
 //! registers the case records. LR, CTR and VRSAVE end at their start
 //! values. The exception is one the words change: the case's last word
-//! reads it back into a recorded GPR, and that read is its end value.
+//! reads it back into a recorded GPR, and that read is its end value. A
+//! case of a floating-point unit also expects the FPR bank: each recorded
+//! FPR has the console's value, and every other FPR keeps its start value.
 //!
 //! A vector's data is the first [`DATA_BYTES`] bytes of the case's memory
 //! buffer, at [`MEMORY_BASE`]. Its expected data takes each recorded
@@ -15,7 +17,7 @@
 //! CellGov runs each case for three checks:
 //!
 //! - its recorded result reads no register the routine keeps;
-//! - its words write no GPR and no data byte the case leaves unrecorded;
+//! - its words write no GPR, FPR or data byte the case leaves unrecorded;
 //! - its words change no LR, CTR or VRSAVE they do not read back.
 //!
 //! The converter also skips each case of these kinds:
@@ -24,7 +26,10 @@
 //! - it records memory past the data;
 //! - its words store and it leaves a data doubleword unrecorded.
 //!
-//! No expected value comes from CellGov.
+//! No expected value comes from CellGov, and none from host floating-point
+//! arithmetic.
+
+#![deny(clippy::float_arithmetic)]
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -34,6 +39,7 @@ use cellgov_ppu::instruction::PpuInstruction as I;
 use cellgov_testkit::console_cases::{capture, parse_table, Capture, Case, Reg, Run, PROFILE};
 
 use super::floor::{features, floor};
+use super::fp::FP_UNITS;
 use crate::ppu_reference::{
     word_unit, PpuReferenceInputState, PpuReferenceObservation, PpuReferenceProvenance,
     PpuReferenceSet, PpuReferenceState, PpuReferenceStateBase, PpuReferenceStop, PpuReferenceUnit,
@@ -109,7 +115,8 @@ pub(super) enum Skip {
     Refused,
     /// The result depends on a register the routine keeps for itself.
     ReadsRoutineRegister,
-    /// The words can write a GPR or data doubleword the case does not record.
+    /// The words can write a GPR, FPR or data doubleword the case does not
+    /// record.
     WritesUnrecorded,
     /// The console run ended the process, so the capture did not complete.
     Ended,
@@ -217,7 +224,7 @@ fn case_units(case: &Case) -> Vec<String> {
         let listed = if any_memory {
             memory(&mnemonic)
         } else {
-            UNITS.contains(&mnemonic.as_str())
+            UNITS.contains(&mnemonic.as_str()) || FP_UNITS.contains(&mnemonic.as_str())
         };
         if listed && !units.contains(&mnemonic) {
             units.push(mnemonic);
@@ -324,20 +331,29 @@ fn doubleword(bytes: &[u8], off: usize) -> u64 {
     u64::from_be_bytes(bytes[off..off + 8].try_into().expect("8 bytes"))
 }
 
-/// The recorded components of an end: each recorded GPR and data
-/// doubleword, then CR and XER.
+/// The recorded components of an end: each recorded GPR, FPR and data
+/// doubleword, then CR, XER and the FPSCR.
 fn recorded(case: &Case, (s, bytes): &(PpuStateSnapshot, Vec<u8>)) -> Vec<u64> {
     let mut out: Vec<u64> = case
         .record
         .iter()
         .filter_map(|r| match *r {
             Reg::Gpr(n) => Some(s.gpr[usize::from(n)]),
+            Reg::Fpr(n) => Some(s.fpr[usize::from(n)]),
             Reg::Mem(off) => Some(doubleword(bytes, usize::from(off))),
-            _ => None,
+            Reg::Vr(_) => None,
         })
         .collect();
-    out.extend([u64::from(s.cr), s.xer]);
+    out.extend([u64::from(s.cr), s.xer, u64::from(s.fpscr)]);
     out
+}
+
+/// Whether the case covers a floating-point unit, so its vector expects
+/// the whole FPR bank.
+fn floating(case: &Case) -> bool {
+    case_units(case)
+        .iter()
+        .any(|u| FP_UNITS.contains(&u.as_str()))
 }
 
 /// `start` with every routine register set to a value no case loads.
@@ -367,6 +383,18 @@ fn expected_gprs(case: &Case, start: &PpuStateSnapshot, run: &Run) -> Vec<u64> {
     gpr
 }
 
+/// The expected FPR bank: the start values, with each recorded FPR set to
+/// the console's value.
+fn expected_fprs(case: &Case, start: &PpuStateSnapshot, run: &Run) -> Vec<u64> {
+    let mut fpr = start.fpr.to_vec();
+    for (r, slot) in case.slots() {
+        if let Reg::Fpr(n) = r {
+            fpr[usize::from(n)] = run.slots[slot];
+        }
+    }
+    fpr
+}
+
 /// The expected data: the start bytes, with each recorded doubleword set
 /// to the console's value.
 fn expected_data(case: &Case, run: &Run) -> Vec<u8> {
@@ -380,8 +408,8 @@ fn expected_data(case: &Case, run: &Run) -> Vec<u8> {
     bytes
 }
 
-/// Whether CellGov's end leaves every unrecorded GPR and data byte at its
-/// start value.
+/// Whether CellGov's end leaves every unrecorded GPR, FPR and data byte at
+/// its start value.
 fn writes_only_recorded(
     case: &Case,
     start: &PpuStateSnapshot,
@@ -391,6 +419,8 @@ fn writes_only_recorded(
     let in_record = |i: usize| recorded.iter().any(|&off| (off..off + 8).contains(&i));
     (0..start.gpr.len())
         .all(|n| start.gpr[n] == end.gpr[n] || case.record.contains(&Reg::Gpr(n as u8)))
+        && (0..start.fpr.len())
+            .all(|n| start.fpr[n] == end.fpr[n] || case.record.contains(&Reg::Fpr(n as u8)))
         && data(case)
             .iter()
             .zip(bytes)
@@ -528,8 +558,16 @@ fn expected(
     PpuReferenceObservation {
         state: PpuReferenceState {
             gpr: value(expected_gprs(case, start, run)),
-            fpr: unsupported("the fixed-point case records no floating-point register"),
-            vr_hex: unsupported("the fixed-point case records no vector register"),
+            fpr: if floating(case) {
+                value(expected_fprs(case, start, run))
+            } else {
+                unsupported("the fixed-point case records no floating-point register")
+            },
+            vr_hex: unsupported(if floating(case) {
+                "the floating-point case records no vector register"
+            } else {
+                "the fixed-point case records no vector register"
+            }),
             pc: value(4 * words),
             cr: value(run.cr),
             lr: value(spr(Spr::Lr)),
@@ -626,19 +664,29 @@ fn convert_probe(probe: &str, out: &mut Conversion) {
     }
 }
 
-/// Up to [`MAX_PPU_REFERENCE_VECTORS`] of `candidates`, in candidate order.
-///
-/// The selection takes two passes:
-///
-/// 1. The cover: each pick is the candidate that shows the most floor
-///    features not yet shown, until no candidate adds one.
-/// 2. The fill: `spread` order over the rest, up to the cap.
+/// Up to [`MAX_PPU_REFERENCE_VECTORS`] of `candidates`, chosen by the
+/// floor features of `unit`.
 fn select(unit: &str, candidates: &[PpuReferenceVector]) -> Vec<PpuReferenceVector> {
     let floor = floor(unit);
     let shown: Vec<BTreeSet<String>> = candidates
         .iter()
         .map(|v| features(&floor, unit, v))
         .collect();
+    select_by(candidates, &shown)
+}
+
+/// Up to [`MAX_PPU_REFERENCE_VECTORS`] of `candidates`, in candidate order;
+/// `shown[i]` is the features candidate `i` shows.
+///
+/// The selection takes two passes:
+///
+/// 1. The cover: each pick is the candidate that shows the most features
+///    not yet shown, until no candidate adds one.
+/// 2. The fill: `spread` order over the rest, up to the cap.
+pub(super) fn select_by(
+    candidates: &[PpuReferenceVector],
+    shown: &[BTreeSet<String>],
+) -> Vec<PpuReferenceVector> {
     let mut taken = vec![false; candidates.len()];
     let mut covered: BTreeSet<&String> = BTreeSet::new();
     let mut count = 0;

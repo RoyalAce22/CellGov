@@ -59,7 +59,7 @@ fn the_converter_skips_only_other_units_and_the_cases_it_cannot_represent() {
     assert_eq!(
         skipped,
         [
-            (Skip::OtherUnit, 814),
+            (Skip::OtherUnit, 613),
             (Skip::WritesUnrecorded, 1),
             (Skip::Ended, 11),
             (Skip::Flow, 2)
@@ -68,7 +68,7 @@ fn the_converter_skips_only_other_units_and_the_cases_it_cannot_represent() {
 }
 
 #[test]
-fn a_case_that_leaves_changed_data_unrecorded_or_records_past_the_data_is_skipped() {
+fn a_case_that_leaves_a_changed_fpr_or_data_unrecorded_or_records_past_the_data_is_skipped() {
     use cellgov_testkit::console_cases::{parse_table, Run};
     let run = Run {
         slots: [0; 4],
@@ -76,18 +76,20 @@ fn a_case_that_leaves_changed_data_unrecorded_or_records_past_the_data_is_skippe
         cr: 0,
         fpscr: 0,
     };
-    // stw r3,0(r10); stfd f1,0(r10) then add r3,r4,r5.
+    // stw r3,0(r10); stfd f1,0(r10) then add r3,r4,r5; fadd f3,f1,f2.
     let rows = [
         ("0x906a0000", "m0", Err(Skip::WritesUnrecorded)),
         ("0x906a0000", "m0,m8", Ok(())),
         ("0x906a0000", "m0,m8,m16", Err(Skip::Memory)),
         ("0xd82a0000,0x7c642a14", "r3", Err(Skip::WritesUnrecorded)),
         ("0xd82a0000,0x7c642a14", "r3,m0,m8", Ok(())),
+        ("0xfc61102a", "-", Err(Skip::WritesUnrecorded)),
+        ("0xfc61102a", "f3", Ok(())),
     ];
     for (words, record, want) in rows {
         let text = format!(
             "id\tasm\twords\tinputs\trecord\tmay_end_process\n\
-             c\t-\t{words}\tmem=0x0102030405060708,r3=0x1\t{record}\t0\n"
+             c\t-\t{words}\tmem=0x0102030405060708,r3=0x1,f1=0x3ff0000000000000\t{record}\t0\n"
         );
         let cases = parse_table(&text).expect("the row parses");
         let start = cases[0].initial(0, MEMORY_BASE);
