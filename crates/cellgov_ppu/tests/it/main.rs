@@ -39,6 +39,7 @@ mod console_ppu_mcrfs_ox;
 mod console_ppu_mulhwu_high_bit;
 mod console_ppu_ocrf_fxm;
 mod console_ppu_quadword;
+mod console_ppu_quickened_lis;
 mod console_ppu_reservation_lv2;
 mod console_ppu_sc_reserved_bits;
 mod console_ppu_storage;

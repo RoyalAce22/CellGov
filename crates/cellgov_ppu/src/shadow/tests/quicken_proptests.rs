@@ -69,7 +69,13 @@ fn quickenable() -> impl Strategy<Value = PpuInstruction> {
             mb: n,
             rc: false,
         }),
+        (reg(), immediate()).prop_map(|(rt, imm)| PpuInstruction::Addis { rt, ra: 0, imm }),
     ]
+}
+
+/// A 16-bit immediate, with the sign-bit and all-ones values drawn often.
+fn immediate() -> impl Strategy<Value = i16> {
+    prop_oneof![any::<i16>(), Just(i16::MIN), Just(-1), Just(i16::MAX)]
 }
 
 /// `ori rA,rA,0` for every rA: the `ori 0,0,0` rule quickens only rA 0.

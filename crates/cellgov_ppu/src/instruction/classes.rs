@@ -244,6 +244,7 @@ impl PpuInstruction {
             | PpuInstruction::Clrldi { .. }
             | PpuInstruction::Sldi { .. }
             | PpuInstruction::Srdi { .. }
+            | PpuInstruction::Lis { .. }
             | PpuInstruction::Consumed
             | PpuInstruction::Dcbz { .. }
             | PpuInstruction::Dcbst { .. }

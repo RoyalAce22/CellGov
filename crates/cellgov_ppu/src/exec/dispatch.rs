@@ -292,6 +292,7 @@ pub fn execute(
         | PpuInstruction::Clrldi { .. }
         | PpuInstruction::Sldi { .. }
         | PpuInstruction::Srdi { .. }
+        | PpuInstruction::Lis { .. }
         | PpuInstruction::LwzCmpwi { .. }
         | PpuInstruction::LiStw { .. }
         | PpuInstruction::MflrStw { .. }

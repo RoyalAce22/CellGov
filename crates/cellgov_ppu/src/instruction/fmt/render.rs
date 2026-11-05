@@ -645,6 +645,7 @@ pub(super) fn render(
         // -- Quickened forms (shadow-builder only; never from decode) --
         I::Li { rt, imm } => op(f, "li", format_args!("r{rt}, {imm}")),
         I::Mr { ra, rs } => op(f, "mr", format_args!("r{ra}, r{rs}")),
+        I::Lis { rt, imm } => op(f, "lis", format_args!("r{rt}, {imm}")),
         I::Slwi { ra, rs, n } => op(f, "slwi", format_args!("r{ra}, r{rs}, {n}")),
         I::Srwi { ra, rs, n } => op(f, "srwi", format_args!("r{ra}, r{rs}, {n}")),
         I::Clrlwi { ra, rs, n } => op(f, "clrlwi", format_args!("r{ra}, r{rs}, {n}")),

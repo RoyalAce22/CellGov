@@ -1235,7 +1235,7 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
             frc,
             rc,
         } => one(fp59(op, frt, fra, frb, frc, rc)),
-        I::Li { rt, .. } => one(fx(gpr(rt))),
+        I::Li { rt, .. } | I::Lis { rt, .. } => one(fx(gpr(rt))),
         I::Mr { ra, rs }
         | I::Slwi { ra, rs, .. }
         | I::Srwi { ra, rs, .. }

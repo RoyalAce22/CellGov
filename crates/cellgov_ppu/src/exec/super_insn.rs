@@ -74,6 +74,10 @@ pub(crate) fn execute(
             state.set_gpr(ra as usize, state.gpr[rs as usize] >> n);
             ExecuteVerdict::Continue
         }
+        PpuInstruction::Lis { rt, imm } => {
+            state.set_gpr(rt as usize, (imm as i64 as u64) << 16);
+            ExecuteVerdict::Continue
+        }
 
         // Superinstructions (compound 2-instruction pairs)
         // [PPC-Book1 p:37 s:3.3.2 Load Word and Zero] lwz: RT <- 32 zeros || MEM(EA,4); EA = (RA|0)+EXTS(D).

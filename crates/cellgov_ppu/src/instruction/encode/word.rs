@@ -682,6 +682,8 @@ pub fn encode(insn: &PpuInstruction) -> Result<u32, EncodeError> {
         I::Li { rt: t, imm } => d(14, t, 0, imm as u16),
         // [PPC-Book1 p:163 s:B.9 Move Register] mr Rx,Ry == or Rx,Ry,Ry.
         I::Mr { ra: a, rs } => x(rs, a, rs, 444, false),
+        // [PPC-Book1 p:162 s:B.9 Load Immediate] lis Rx,value == addis Rx,0,value.
+        I::Lis { rt: t, imm } => d(15, t, 0, imm as u16),
         // [PPC-Book1 p:160 s:B.7.2 Table 10] slwi n == rlwinm n,0,31-n; srwi n == rlwinm 32-n,n,31; clrlwi n == rlwinm 0,n,31.
         I::Slwi { ra: a, rs, n } => m(21, rs, a, n, 0, 31 - n, false),
         I::Srwi { ra: a, rs, n } => m(21, rs, a, 32 - n, n, 31, false),

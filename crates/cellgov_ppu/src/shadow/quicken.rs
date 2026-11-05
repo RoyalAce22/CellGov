@@ -106,6 +106,10 @@ pub(super) fn quicken_insn(insn: PpuInstruction) -> Option<PpuInstruction> {
             mb,
             rc: false,
         } if sh != 0 && mb == 64 - sh => Some(PpuInstruction::Srdi { ra, rs, n: mb }),
+        // addis rT, 0, imm => Lis. With RA = 0 the base is a literal 0.
+        // [PPC-Book1 p:162 s:B.9 Load Immediate] lis Rx,value == addis Rx,0,value.
+        // [PPC-Book1 p:51 s:3.3.8] addis: RT <- (RA|0) + (SI || 0x0000).
+        PpuInstruction::Addis { rt, ra: 0, imm } => Some(PpuInstruction::Lis { rt, imm }),
         _ => None,
     }
 }
@@ -117,3 +121,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/quicken_proptests.rs"]
 mod proptests;
+
+#[cfg(test)]
+#[path = "tests/quicken_lis_tests.rs"]
+mod lis_tests;

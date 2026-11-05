@@ -1558,6 +1558,11 @@ pub enum PpuInstruction {
         rs: u8,
         n: u8,
     },
+    /// Quickened form of `addis rT, 0, imm`.
+    Lis {
+        rt: u8,
+        imm: i16,
+    },
 
     // -- Superinstructions (compound 2-instruction pairs) --
     LwzCmpwi {

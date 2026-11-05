@@ -58,7 +58,7 @@ The `PpuInstruction` set covers:
 
 The variant count also includes:
 
-- the shadow's quickening rewrites (`Mr`, `Li`,
+- the shadow's quickening rewrites (`Mr`, `Li`, `Lis`,
   `Slwi`/`Srwi`/`Sldi`/`Srdi`, `Clrlwi`/`Clrldi`, `Nop`,
   `CmpwZero`);
 - the super-pair fusions (`LwzCmpwi`, `LwzMtlr`, `MflrStw`,
@@ -271,6 +271,7 @@ Common idioms rewrite into specialized variants that skip redundant
 work:
 
 - `addi rT, 0, imm` -> `Li`
+- `addis rT, 0, imm` -> `Lis`
 - `or rA, rS, rS` -> `Mr`
 - `rlwinm` subsets -> `Slwi`/`Srwi`/`Clrlwi`
 - `ori 0, 0, 0` -> `Nop`

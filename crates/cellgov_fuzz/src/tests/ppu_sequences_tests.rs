@@ -150,7 +150,14 @@ fn each_family_generates_its_documented_words_state_and_features() {
                 None,
             ),
             PpuSequenceFamily::Quickening => (
-                vec![ori(3, 3, 0), addi(3, 3, 1)],
+                vec![
+                    ori(3, 3, 0),
+                    addi(3, 3, 1),
+                    lis(6, value),
+                    ori(7, 6, 0),
+                    addi(8, 7, 0),
+                    nor(9, 8, 8),
+                ],
                 BTreeSet::from(mapped),
                 u64::from(value ^ 0x55),
                 false,
