@@ -748,6 +748,23 @@ pub(super) fn render(
             let offset2 = offset1 as i32 + 8;
             write!(f, "; ld r{rt2}, {offset2}(r{ra})")
         }
+        I::OrAdd {
+            ra,
+            rs,
+            rb,
+            rt,
+            add_ra,
+            add_rb,
+        } => {
+            // [PPC-Book1 p:163 s:B.9] mr rX,rY is or rX,rY,rY, as the
+            // standalone `or` and the quickened `mr` both render.
+            if rs == rb {
+                op(f, "mr", format_args!("r{ra}, r{rs}"))?;
+            } else {
+                op(f, "or", format_args!("r{ra}, r{rs}, r{rb}"))?;
+            }
+            write!(f, "; add r{rt}, r{add_ra}, r{add_rb}")
+        }
         I::LisOri { rt, value } => {
             op(f, "lis", format_args!("r{rt}, {}", (value >> 16) as i16))?;
             write!(f, "; ori r{rt}, r{rt}, 0x{:x}", value as u16)

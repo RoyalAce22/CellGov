@@ -1355,6 +1355,17 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
             )
         }
         I::LisOri { rt, .. } => two(fx(gpr(rt)), fx(gpr(rt)).src(gpr(rt))),
+        I::OrAdd {
+            ra,
+            rs,
+            rb,
+            rt,
+            add_ra,
+            add_rb,
+        } => two(
+            logical(Op::on(unit::FXU).src(gpr(rs)).src(gpr(rb)), ra, false),
+            add_form(rt, &[add_ra, add_rb], false, false),
+        ),
         I::CmpwiBc {
             bf,
             ra,

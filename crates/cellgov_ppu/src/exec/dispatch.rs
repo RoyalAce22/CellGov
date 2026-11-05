@@ -307,6 +307,7 @@ pub fn execute(
         | PpuInstruction::LdMtlr { .. }
         | PpuInstruction::StdStd { .. }
         | PpuInstruction::LdLd { .. }
+        | PpuInstruction::OrAdd { .. }
         | PpuInstruction::LisOri { .. }
         | PpuInstruction::CmpwiBc { .. }
         | PpuInstruction::CmpwBc { .. }

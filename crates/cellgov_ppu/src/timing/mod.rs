@@ -36,3 +36,7 @@ mod branch_prediction_tests;
 #[cfg(test)]
 #[path = "tests/fused_retire_tests.rs"]
 mod fused_retire_tests;
+
+#[cfg(test)]
+#[path = "tests/fused_or_add_tests.rs"]
+mod fused_or_add_tests;

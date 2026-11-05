@@ -174,6 +174,30 @@ fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
                 },
             )
         }),
+        // The shadow quickens `or rA, rS, rS` to `mr` before pairing, so
+        // this arm gives that shape as `Mr`.
+        (reg(), reg(), reg(), reg(), reg(), reg()).prop_map(|(ra, rs, rb, rt, add_ra, add_rb)| {
+            let or = if rs == rb {
+                PpuInstruction::Mr { ra, rs }
+            } else {
+                PpuInstruction::Or {
+                    ra,
+                    rs,
+                    rb,
+                    rc: false,
+                }
+            };
+            (
+                or,
+                PpuInstruction::Add {
+                    rt,
+                    ra: add_ra,
+                    rb: add_rb,
+                    oe: false,
+                    rc: false,
+                },
+            )
+        }),
     ]
 }
 
@@ -254,7 +278,7 @@ fn aim_compare(
 }
 
 proptest! {
-    // Six of the seventeen arms are compares that need an aimed
+    // Six of the eighteen arms are compares that need an aimed
     // operand to show an off-by-one. Four times the default count
     // makes one such case near certain per run.
     #![proptest_config(ProptestConfig::with_cases(1024))]

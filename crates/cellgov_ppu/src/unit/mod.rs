@@ -110,6 +110,10 @@ mod ld_ld_console_tests;
 mod lis_ori_console_tests;
 
 #[cfg(test)]
+#[path = "tests/or_add_console_tests.rs"]
+mod or_add_console_tests;
+
+#[cfg(test)]
 #[path = "tests/store_fault_tests.rs"]
 mod store_fault_tests;
 

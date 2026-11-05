@@ -116,6 +116,49 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
                 offset1: off1,
             })
         }
+        // or rA, rS, rB (or mr rA, rS) + add rT, rA2, rB2. Neither half sets
+        // Rc, and the add has OE = 0.
+        // [PPC-Book1 p:67 s:3.3.11 OR] or with RS = RA = RB is a priority hint;
+        // like the quickener, the pass keeps that form as a raw `or`.
+        (
+            PpuInstruction::Or {
+                ra,
+                rs,
+                rb,
+                rc: false,
+            },
+            PpuInstruction::Add {
+                rt,
+                ra: add_ra,
+                rb: add_rb,
+                oe: false,
+                rc: false,
+            },
+        ) if !(ra == rs && rs == rb) => Some(PpuInstruction::OrAdd {
+            ra,
+            rs,
+            rb,
+            rt,
+            add_ra,
+            add_rb,
+        }),
+        (
+            PpuInstruction::Mr { ra, rs },
+            PpuInstruction::Add {
+                rt,
+                ra: add_ra,
+                rb: add_rb,
+                oe: false,
+                rc: false,
+            },
+        ) => Some(PpuInstruction::OrAdd {
+            ra,
+            rs,
+            rb: rs,
+            rt,
+            add_ra,
+            add_rb,
+        }),
         // lis rT, hi + ori rT, rT, lo. The shadow quickens `ori 0, 0, 0` to
         // Nop first, so that shape never reaches this arm.
         (PpuInstruction::Lis { rt, imm: hi }, PpuInstruction::Ori { ra, rs, imm: lo })
@@ -305,3 +348,7 @@ mod lis_tests;
 #[cfg(test)]
 #[path = "tests/superpair_ld_tests.rs"]
 mod ld_tests;
+
+#[cfg(test)]
+#[path = "tests/superpair_or_add_tests.rs"]
+mod or_add_tests;

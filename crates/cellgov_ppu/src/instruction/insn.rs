@@ -1659,6 +1659,16 @@ pub enum PpuInstruction {
         ra: u8,
         offset1: i16,
     },
+    /// `or rA, rS, rB` (or its quickened `mr`) followed by
+    /// `add rT, rA2, rB2`. Neither half sets Rc, and the `add` has OE = 0.
+    OrAdd {
+        ra: u8,
+        rs: u8,
+        rb: u8,
+        rt: u8,
+        add_ra: u8,
+        add_rb: u8,
+    },
     /// `lis rT, hi` followed by `ori rT, rT, lo`. `value` is `hi || lo`.
     LisOri {
         rt: u8,

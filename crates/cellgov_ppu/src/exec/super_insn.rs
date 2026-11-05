@@ -259,6 +259,21 @@ pub(crate) fn execute(
                 Err(ea) => ExecuteVerdict::MemFault(ea),
             }
         }
+        // [PPC-Book1 p:67 s:3.3.11 OR] or: RA <- (RS) | (RB).
+        // [PPC-Book1 p:52 s:3.3.8 Add] add: RT <- (RA) + (RB), read after the or wrote its RA.
+        PpuInstruction::OrAdd {
+            ra,
+            rs,
+            rb,
+            rt,
+            add_ra,
+            add_rb,
+        } => {
+            state.set_gpr(ra as usize, state.gpr[rs as usize] | state.gpr[rb as usize]);
+            let sum = state.gpr[add_ra as usize].wrapping_add(state.gpr[add_rb as usize]);
+            state.set_gpr(rt as usize, sum);
+            ExecuteVerdict::Continue
+        }
         // [PPC-Book1 p:51 s:3.3.8 Add Immediate Shifted] addis (lis when RA=0): RT <- EXTS(SI || 0x0000).
         // [PPC-Book1 p:66 s:3.3.11 OR Immediate] ori: RA <- (RS) | (48 zeros || UI), so the word is hi || lo, sign-extended.
         PpuInstruction::LisOri { rt, value } => {

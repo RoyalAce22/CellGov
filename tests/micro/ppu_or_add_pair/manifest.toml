@@ -1,0 +1,21 @@
+[test]
+name = "ppu_or_add_pair"
+
+# A hardware probe: the 64-bit registers "or rA,rS,rB" then
+# "add rT,rA2,rB2" leave, and the registers a branch over the or into
+# the add leaves. The console capture is the answer; no emulator runs
+# it.
+
+[observe]
+# 18 big-endian u32 words, as ppu/main.c lists: 72 bytes.
+#   0 failed step, 1 its return code; then each register as a high word
+#   and a low word: 2-3 r5 and 4-5 r8 after or + add reading RA,
+#   6-7 r5 and 8-9 r8 after mr + add, 10-11 r5 and 12-13 r8 after the
+#   branch into the add, 14-15 r5 after or + add into the or's RA,
+#   16-17 r8 after or + add reading RB.
+memory_regions = [
+  { name = "result", addr = 0, size = 72 },
+]
+
+[expect]
+outcome = "completed"
