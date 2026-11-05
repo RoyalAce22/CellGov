@@ -372,6 +372,7 @@ impl PpuExecutionUnit {
             let reached_window = window_span.is_some_and(|span| {
                 touches_window(
                     span,
+                    ctx.memory(),
                     effects.get(effects_before..).unwrap_or_default(),
                     self.store_buf.stores_from(stores_before),
                 )
@@ -801,14 +802,21 @@ impl<'a> RegionTable<'a> {
     }
 }
 
-/// Whether one instruction's new read intents or staged stores reach
-/// `[start, end)`.
+/// Whether one instruction's new read intents or staged stores reach a
+/// window of `mem`.
+///
+/// `[start, end)` holds every window, so the function reads the window
+/// list only for an access inside it.
 fn touches_window(
     (start, end): (u64, u64),
+    mem: &cellgov_mem::GuestMemory,
     new_effects: &[Effect],
     mut new_stores: impl Iterator<Item = (u64, u8)>,
 ) -> bool {
-    let overlaps = |addr: u64, len: u64| addr < end && addr.saturating_add(len) > start;
+    let overlaps = |addr: u64, len: u64| {
+        let last = addr.saturating_add(len);
+        addr < end && last > start && mem.window_ranges().any(|(lo, hi)| addr < hi && last > lo)
+    };
     new_effects.iter().any(|e| match e {
         Effect::SharedReadIntent { range, .. } => overlaps(range.start().raw(), range.length()),
         _ => false,

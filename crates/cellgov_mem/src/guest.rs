@@ -758,6 +758,15 @@ impl GuestMemory {
         Some((first.base, last.end()))
     }
 
+    /// Every window that [`Self::map_window`] carved, as `[start, end)`,
+    /// in base-address order.
+    pub fn window_ranges(&self) -> impl Iterator<Item = (u64, u64)> + '_ {
+        self.regions
+            .iter()
+            .filter(|r| r.window.is_some())
+            .map(|r| (r.base, r.end()))
+    }
+
     /// Number of 4 KiB pages currently marked dirty across every region.
     /// O(bitmap words), not O(pages).
     pub fn dirty_page_count(&self) -> u64 {
