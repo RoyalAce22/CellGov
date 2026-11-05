@@ -193,41 +193,17 @@ fn a_sibling_with_no_mtvscr_adds_no_mtvscr_stall_to_any_chain_within_the_band_of
     }
 }
 
-/// The chain the model does not yet time beside a sibling of an `mtvscr`
-/// and seven `vaddubm` (phase 3): the independent `vaddubm` chain. On the
-/// console it takes about 1.4 times the model's cycles.
-///
-/// The test fails once the chain comes inside [`BAND`] of the console, so
-/// the chain moves into the held set.
-const FENCED_SIBLING_DIFFERENCES: [usize; 1] = [0];
-
 #[test]
-fn the_mtvscr_addi_and_fadd_chains_beside_fenced_vector_work_lie_within_the_band_of_the_mean_run() {
+fn each_chain_beside_fenced_vector_work_lies_within_the_band_of_the_mean_run() {
     let w = console_words();
     let rows: Vec<(usize, f64, f64)> = (0..CHAINS)
-        .filter(|c| !FENCED_SIBLING_DIFFERENCES.contains(c))
         .map(|c| (c, cellgov_beside(3, c), console_mean(&w, 3, c)))
         .collect();
-    assert_eq!(rows.len(), CHAINS - FENCED_SIBLING_DIFFERENCES.len());
     for &(c, cellgov, console) in &rows {
         assert!(
             (cellgov - console).abs() / console <= BAND,
             "phase 3 chain {c}: CellGov {cellgov:.2} cycles an iteration, the console's \
              mean {console:.2}, more than {BAND} of it apart: {rows:?}",
-        );
-    }
-}
-
-#[test]
-fn the_chains_beside_fenced_vector_work_are_known_differences() {
-    let w = console_words();
-    for c in FENCED_SIBLING_DIFFERENCES {
-        let cell = (cellgov_beside(3, c), console_mean(&w, 3, c));
-        assert!(
-            cell.0 < (1.0 - BAND) * cell.1,
-            "phase 3 chain {c}: CellGov {:.2}, the console's mean {:.2}",
-            cell.0,
-            cell.1
         );
     }
 }

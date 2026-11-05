@@ -69,11 +69,9 @@ pub struct PpeIssuePressure {
     /// The cycles the thread's recent `mtvscr` drains add on top of [`Self::vscr_cycles`].
     ///
     /// A drain is the wait of an `mtvscr` for its own thread's held VSU
-    /// work. A store waits all of it. These instructions of the receiving
-    /// thread do not wait it:
-    ///
-    /// - an instruction that issues to the VSU alone;
-    /// - an instruction that does not wait [`Self::vscr_cycles`].
+    /// work. A store waits all of it. An instruction that issues to the VSU
+    /// alone waits only the part past its own wait at issue. An instruction
+    /// that does not wait [`Self::vscr_cycles`] does not wait it.
     pub drain_cycles: u32,
     /// The thread's recent mean cycles an instruction that its VSU work
     /// holds the head of the shared VSU issue queue.

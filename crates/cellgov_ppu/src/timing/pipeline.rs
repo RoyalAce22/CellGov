@@ -570,7 +570,8 @@ impl PpeTiming {
         }
         let s = &self.shared_stall;
         let own_vscr = op.kind == Kind::VscrWrite || (fenced && c.vsu_fence > c.floor);
-        let stalled = sibling_stall(op, s, own_vscr);
+        let own_wait = t.saturating_sub(floor.max(fetched));
+        let stalled = sibling_stall(op, s, own_vscr, own_wait);
         // A new dispatch group: the sibling's group issues between. The
         // sibling's stall covers the hold, and so does any wait of this
         // thread's own; only the rest of the hold is the sibling's.
@@ -1063,9 +1064,12 @@ fn multiply_hold(op: &Op) -> Option<u64> {
     }
 }
 
-/// The cycles the sibling's stalls in `s` add to `op`, where `own_vscr`
-/// marks this thread's own `mtvscr` or a wait at its own `mtvscr` fence.
-fn sibling_stall(op: &Op, s: &PpeIssuePressure, own_vscr: bool) -> u64 {
+/// The cycles the sibling's stalls in `s` add to `op`.
+///
+/// `own_vscr` marks this thread's own `mtvscr` or a wait at its own
+/// `mtvscr` fence. `own_wait` is the cycles `op` already waits past its
+/// in-order floor and its fetch.
+fn sibling_stall(op: &Op, s: &PpeIssuePressure, own_vscr: bool, own_wait: u64) -> u64 {
     // [CBE-Handbook p:301 s:10.2.3.1] the sibling's stalls at IS2
     // stall this thread too. In the `ppu_issue_units` capture the
     // younger of a pair waits the stall as well.
@@ -1084,13 +1088,17 @@ fn sibling_stall(op: &Op, s: &PpeIssuePressure, own_vscr: bool) -> u64 {
     if own_vscr {
         return stalled;
     }
-    // A VSU instruction waits for the sibling's held ops at the queue head
-    // ([`PpeIssuePressure::fence_cycles`]), so only the other instructions
-    // wait the sibling's drain at IS2. A store waits all of the drain and
-    // only a share of the `mtvscr` stall (the `ppu_issue_vscr_smt_drain`
-    // capture).
+    // Each instruction waits the sibling's drain at IS2. A VSU instruction
+    // waits it only past its own wait at issue: for its operands, its
+    // unit, or an older `mfvscr` or drain. In the
+    // `ppu_issue_vscr_smt_runs` capture the sibling runs an `mtvscr` and
+    // seven `vaddubm`. Beside it, 8 independent `vaddubm` take 63.54 cycles
+    // an iteration on the median shared run, and 8 `li` take 57.84. In the
+    // `ppu_issue_vscr_smt` capture 8 dependent `fadd` beside that sibling
+    // take 117.40. A store waits all of the drain and only a share of the
+    // `mtvscr` stall (the `ppu_issue_vscr_smt_drain` capture).
     let drain = if issues_to_vsu(op) {
-        0
+        u64::from(s.drain_cycles).saturating_sub(own_wait)
     } else {
         u64::from(s.drain_cycles)
     };

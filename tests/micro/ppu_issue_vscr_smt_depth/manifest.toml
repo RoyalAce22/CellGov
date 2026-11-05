@@ -1,0 +1,22 @@
+[test]
+name = "ppu_issue_vscr_smt_depth"
+
+# A hardware probe of how a sibling thread's vector work, held behind its
+# own mtvscr, slows the main thread's vaddubm: five chains (2, 4, 8 and
+# 16 independent vaddubm, 8 dependent vaddubm), alone and beside a
+# sibling running an mtvscr and 1, 3, 7 or 15 independent vaddubm, in a
+# loop that counts its rounds in memory and reads no time base. The
+# console capture is the answer; ppu/main.c's header lists the phases and
+# the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 1088 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 1088 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 120000
