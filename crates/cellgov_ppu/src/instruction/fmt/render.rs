@@ -1061,6 +1061,26 @@ pub(super) fn render(
                 };
                 render(&second, addr.wrapping_add(4), symbols, f)
             }
+            FusedPair::OriAnd {
+                ra,
+                rs,
+                imm,
+                and_ra,
+                and_rs,
+                and_rb,
+                rc,
+            } => {
+                // The ori renders as it does unfused, as `nop` for `ori 0,0,0`.
+                render(&I::Ori { ra, rs, imm }, addr, symbols, f)?;
+                f.write_str("; ")?;
+                let and = I::And {
+                    ra: and_ra,
+                    rs: and_rs,
+                    rb: and_rb,
+                    rc,
+                };
+                render(&and, addr.wrapping_add(4), symbols, f)
+            }
         },
         I::Consumed => op0(f, ".consumed"),
 

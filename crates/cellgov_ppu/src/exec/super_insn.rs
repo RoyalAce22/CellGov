@@ -701,6 +701,25 @@ fn execute_pair(
             rldicl(state, ra2, rs2, sh2, mb2, rc & 2 != 0);
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:66 s:3.3.11] ori: RA <- (RS) | (48 zeros || UI).
+        // [PPC-Book1 p:67 s:3.3.11] and: RA <- (RS) & (RB), read after the ori wrote its RA; Rc = 1 sets CR0.
+        FusedPair::OriAnd {
+            ra,
+            rs,
+            imm,
+            and_ra,
+            and_rs,
+            and_rb,
+            rc,
+        } => {
+            state.set_gpr(ra as usize, state.gpr[rs as usize] | u64::from(imm));
+            let result = state.gpr[and_rs as usize] & state.gpr[and_rb as usize];
+            state.set_gpr(and_ra as usize, result);
+            if rc {
+                state.set_cr0_from_result(result);
+            }
+            ExecuteVerdict::Continue
+        }
     }
 }
 

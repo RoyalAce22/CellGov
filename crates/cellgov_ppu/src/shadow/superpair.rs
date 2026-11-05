@@ -630,6 +630,42 @@ fn fuse(a: PpuInstruction, b: PpuInstruction) -> Option<FusedPair> {
             }),
             _ => None,
         },
+        // ori rA, rS, imm (or the nop the shadow quickens ori 0,0,0 to) + and
+        // in any form. The ori neither faults nor branches.
+        (
+            PpuInstruction::Ori { ra, rs, imm },
+            PpuInstruction::And {
+                ra: and_ra,
+                rs: and_rs,
+                rb: and_rb,
+                rc,
+            },
+        ) => Some(FusedPair::OriAnd {
+            ra,
+            rs,
+            imm,
+            and_ra,
+            and_rs,
+            and_rb,
+            rc,
+        }),
+        (
+            PpuInstruction::Nop,
+            PpuInstruction::And {
+                ra: and_ra,
+                rs: and_rs,
+                rb: and_rb,
+                rc,
+            },
+        ) => Some(FusedPair::OriAnd {
+            ra: 0,
+            rs: 0,
+            imm: 0,
+            and_ra,
+            and_rs,
+            and_rb,
+            rc,
+        }),
         _ => None,
     }
 }
@@ -764,3 +800,7 @@ mod mtlr_addi_tests;
 #[cfg(test)]
 #[path = "tests/superpair_rldicl_pair_tests.rs"]
 mod rldicl_pair_tests;
+
+#[cfg(test)]
+#[path = "tests/superpair_ori_and_tests.rs"]
+mod ori_and_tests;

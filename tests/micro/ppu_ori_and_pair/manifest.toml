@@ -1,0 +1,25 @@
+[test]
+name = "ppu_ori_and_pair"
+
+# A hardware probe: the registers and CR0 that an "ori" followed by an
+# "and" leave: chained with the and recording, the nop before a recording
+# and, one register overwritten twice, a recorded zero result, through a
+# branch over the ori into the and, with the and writing the ori's
+# source, and recording under XER[SO]. The console capture is the answer;
+# no emulator runs it.
+
+[observe]
+# 31 big-endian u32 words, as ppu/main.c lists: 124 bytes.
+#   0 failed step, 1 its return code; each register is a high word and a
+#   low word, each CR0 one word holding LT GT EQ SO in bits 3..0:
+#   2-3 r3, 4-5 r5, 6 CR0 of the chained pair; 7-8 r5, 9 CR0 of nop then
+#   and.; 10-11 r4, 12 CR0 of ori 4,4,0 then and into r4; 13-14 r3, 15-16
+#   r5, 17 CR0 of the zero result; 18-19 r3, 20-21 r5 after the branch
+#   into the and; 22-23 r3, 24-25 r4 when the and writes the ori's source;
+#   26-27 r3, 28-29 r5, 30 CR0 with the and recording under XER[SO].
+memory_regions = [
+  { name = "result", addr = 0, size = 124 },
+]
+
+[expect]
+outcome = "completed"

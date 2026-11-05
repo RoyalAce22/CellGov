@@ -533,6 +533,42 @@ fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
                     )
                 }
             ),
+        // The ori takes the form the shadow gives it: nop for ori 0,0,0, which
+        // a sixth of the cases hold. Half the cases read the ori's RA in the and.
+        (
+            reg(),
+            reg(),
+            any::<u16>(),
+            (reg(), reg(), reg(), any::<bool>()),
+            any::<bool>(),
+            0u8..6
+        )
+            .prop_map(
+                |(ra, rs, imm, (and_ra, and_rs, and_rb, rc), chained, nop)| {
+                    let ori = if nop == 0 {
+                        PpuInstruction::Ori {
+                            ra: 0,
+                            rs: 0,
+                            imm: 0,
+                        }
+                    } else {
+                        PpuInstruction::Ori { ra, rs, imm }
+                    };
+                    let and_rs = match ori {
+                        PpuInstruction::Ori { ra, .. } if chained => ra,
+                        _ => and_rs,
+                    };
+                    (
+                        quicken_insn(ori).unwrap_or(ori),
+                        PpuInstruction::And {
+                            ra: and_ra,
+                            rs: and_rs,
+                            rb: and_rb,
+                            rc,
+                        },
+                    )
+                }
+            ),
     ]
 }
 
@@ -616,7 +652,7 @@ fn aim_compare(
 }
 
 proptest! {
-    // Seven of the thirty-two arms are compares that need an aimed
+    // Seven of the thirty-three arms are compares that need an aimed
     // operand to show an off-by-one. Four times the default count
     // makes one such case near certain per run.
     #![proptest_config(ProptestConfig::with_cases(1024))]

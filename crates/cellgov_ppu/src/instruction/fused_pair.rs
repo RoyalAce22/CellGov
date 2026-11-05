@@ -279,4 +279,15 @@ pub enum FusedPair {
         mb2: u8,
         rc: u8,
     },
+    /// `ori rA, rS, imm` (or its quickened `nop`) followed by
+    /// `and rA2, rS2, rB2`, with `rc` the and's Rc bit.
+    OriAnd {
+        ra: u8,
+        rs: u8,
+        imm: u16,
+        and_ra: u8,
+        and_rs: u8,
+        and_rb: u8,
+        rc: bool,
+    },
 }

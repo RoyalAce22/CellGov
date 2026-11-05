@@ -287,9 +287,13 @@ pub(super) fn fused_effect_and_outcome(
         }
         // [PPC-Book1 p:24 s:2.4] a b always branches, so the pair never falls through.
         F::OrB => (NO_EFFECTS, UNCONDITIONAL_BRANCH),
-        F::OrAdd | F::LisOri | F::CmpdNor | F::OrRlwinm | F::MtlrAddi | F::RldiclRldicl => {
-            (NO_EFFECTS, CONTINUE)
-        }
+        F::OrAdd
+        | F::LisOri
+        | F::CmpdNor
+        | F::OrRlwinm
+        | F::MtlrAddi
+        | F::RldiclRldicl
+        | F::OriAnd => (NO_EFFECTS, CONTINUE),
     }
 }
 
