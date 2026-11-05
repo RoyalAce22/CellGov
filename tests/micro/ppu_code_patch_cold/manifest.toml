@@ -1,0 +1,17 @@
+[test]
+name = "ppu_code_patch_cold"
+
+# A hardware probe: a store over an unrun instruction in its own text, dcbst and sync only, then a call. The console capture is the answer; no
+# emulator runs it.
+
+[observe]
+# 16 big-endian u32 words, as ppu/main.c lists: 64 bytes. Word 0 is the
+# done or progress marker, word 1 the trial a progress record names,
+# word 2 the address of the first patched function, word 3 the trials
+# run, words 4..11 each trial's result.
+memory_regions = [
+  { name = "result", addr = 0, size = 64 },
+]
+
+[expect]
+outcome = "completed"

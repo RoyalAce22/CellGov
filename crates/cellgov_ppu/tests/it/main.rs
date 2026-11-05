@@ -4,6 +4,7 @@
 mod console_cases;
 mod console_ppu_addc_xer;
 mod console_ppu_alignment;
+mod console_ppu_code_patch;
 mod console_ppu_cr_spr_moves;
 mod console_ppu_ctrl_threads;
 mod console_ppu_divw_quotient;
