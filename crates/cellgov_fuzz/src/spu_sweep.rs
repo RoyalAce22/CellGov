@@ -1,5 +1,5 @@
 //! The long SPU sweep: the campaigns the scheduled fuzz workflow runs over
-//! every SPU engine and strategy.
+//! every SPU engine and strategy. [`crate::ppu_sweep`] holds the PPU sweep.
 //!
 //! A campaign's budget is a count of cases per registry kind. The sweep
 //! then grows with the registry, and each kind keeps the same expected
@@ -7,9 +7,8 @@
 //! campaign with its engine and strategy. Its seeds differ from the smoke
 //! set's, so a sweep reaches cases the smoke set never runs.
 
-use crate::registry::spu_descriptors;
 use crate::report::FuzzRun;
-use crate::smoke::{SmokeCampaign, SMOKE_CAMPAIGNS};
+use crate::smoke::{registry_kinds, SmokeCampaign, SMOKE_CAMPAIGNS};
 use crate::{
     CampaignSchedule, CampaignShard, CaseRange, FuzzConfig, FuzzTarget, GenerationStrategy,
     RetentionConfig, CAMPAIGN_VERSION,
@@ -21,7 +20,7 @@ const SWEEP_MAX_FINDINGS: u32 = 64;
 /// Instruction words per sequence case, as in the smoke set.
 const SWEEP_SEQUENCE_WORDS: u32 = 32;
 
-/// One campaign of the long SPU sweep.
+/// One campaign of a long sweep.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SweepCampaign {
     /// Name the workflow output and the tests use.
@@ -32,7 +31,7 @@ pub struct SweepCampaign {
     pub strategy: GenerationStrategy,
     /// Master seed.
     pub seed: u64,
-    /// Cases per kind of the SPU registry.
+    /// Cases per kind of the target's registry.
     pub cases_per_kind: u64,
     /// Words per case on a sequence engine.
     pub sequence_words: u32,
@@ -76,10 +75,10 @@ pub const SPU_SWEEP: [SweepCampaign; 4] = [
 
 impl SweepCampaign {
     /// Case indices the campaign considers: its per-kind budget times the
-    /// SPU registry size.
+    /// size of its target's registry.
     #[must_use]
     pub fn cases(&self) -> u64 {
-        spu_descriptors().len() as u64 * self.cases_per_kind
+        registry_kinds(self.target) * self.cases_per_kind
     }
 
     /// The configuration this campaign runs under.

@@ -15,6 +15,7 @@ pub mod ppu_documented;
 pub mod ppu_paths;
 pub mod ppu_reference;
 pub mod ppu_sequences;
+pub mod ppu_sweep;
 pub mod ppu_trace;
 pub mod raw_decode;
 pub mod reduce;

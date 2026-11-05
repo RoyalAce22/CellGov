@@ -45,4 +45,12 @@ pub(crate) enum SeededDefect {
     LateWorld,
     /// The world lands every get with its first byte wrong.
     MisLandedGet,
+    /// A record-form `add.` writes a wrong RT.
+    PpuRecordFormGpr,
+    /// A record-form primary-63 floating-point operation writes a wrong FRT.
+    PpuRecordFormFpr,
+    /// A record-form vector compare writes a wrong VT.
+    PpuRecordFormVr,
+    /// An `addo` writes a wrong RT.
+    PpuOverflowFormGpr,
 }

@@ -2,6 +2,8 @@ use super::*;
 
 use std::collections::BTreeSet;
 
+use crate::registry::spu_descriptors;
+
 #[test]
 fn the_sweep_runs_every_spu_engine_and_strategy_once_past_the_smoke_set() {
     let pairs = SPU_SWEEP

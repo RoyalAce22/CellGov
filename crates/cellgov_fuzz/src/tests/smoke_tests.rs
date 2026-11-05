@@ -50,14 +50,19 @@ fn the_set_names_every_engine_and_strategy_once() {
             "{}",
             campaign.name
         );
-        let relations = match campaign.target {
-            FuzzTarget::SpuInstruction => RelationFloor::InstructionCatalog,
-            FuzzTarget::SpuSequence => RelationFloor::SequenceCatalog,
-            FuzzTarget::PpuInstruction | FuzzTarget::PpuSequence => RelationFloor::None,
+        let relations = match (campaign.target, campaign.strategy) {
+            (FuzzTarget::SpuInstruction, _) => RelationFloor::InstructionCatalog,
+            (FuzzTarget::SpuSequence, _) => RelationFloor::SequenceCatalog,
+            (FuzzTarget::PpuInstruction, GenerationStrategy::Structured) => {
+                RelationFloor::PpuInstructionCatalog
+            }
+            (FuzzTarget::PpuInstruction, GenerationStrategy::RawWords)
+            | (FuzzTarget::PpuSequence, _) => RelationFloor::None,
         };
         assert_eq!(
             campaign.floor.relations, relations,
-            "{}: each SPU engine runs its whole relation catalog",
+            "{}: each SPU engine and the structured PPU instruction campaign run their \
+             whole relation catalog",
             campaign.name
         );
         assert_eq!(

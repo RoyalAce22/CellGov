@@ -13,6 +13,7 @@ mod ppu_path_differential;
 mod ppu_path_read_footprint;
 mod ppu_path_stop_attribution;
 mod ppu_reference_artifact;
+mod ppu_sweep;
 mod raw_decode_campaign;
 mod semantic_sweep;
 mod spu_layered_reference_integration;

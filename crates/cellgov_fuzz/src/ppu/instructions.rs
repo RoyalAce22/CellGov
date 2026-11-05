@@ -522,6 +522,22 @@ fn fault_class(verdict: &ExecuteVerdict) -> Option<cellgov_ppu::PpuFaultClass> {
     }
 }
 
+/// The check of each metamorphic relation that a registry kind declares, except replay.
+pub(crate) fn declared_relation_checks() -> BTreeSet<CheckIdentity> {
+    crate::registry::ppu_descriptors()
+        .iter()
+        .filter_map(|descriptor| {
+            let raw = descriptor.canonical_word;
+            cellgov_ppu::decode::decode(raw)
+                .ok()
+                .map(|instruction| instruction.fuzz_descriptor(raw).relations)
+        })
+        .flat_map(|relations| relations.iter().copied())
+        .filter(|relation| *relation != PpuMetamorphicRelation::Deterministic)
+        .map(relation_check)
+        .collect()
+}
+
 fn relation_check(relation: PpuMetamorphicRelation) -> CheckIdentity {
     match relation {
         PpuMetamorphicRelation::Deterministic => CheckIdentity::DeterministicReplay,

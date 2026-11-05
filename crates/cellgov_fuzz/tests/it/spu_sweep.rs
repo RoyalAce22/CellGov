@@ -3,15 +3,14 @@
 use std::path::Path;
 
 use cellgov_fuzz::regression;
-use cellgov_fuzz::spu_sweep::SPU_SWEEP;
+use cellgov_fuzz::spu_sweep::{SweepCampaign, SPU_SWEEP};
 use cellgov_fuzz::{FindingKind, RunOutcome};
 
-#[test]
-#[ignore = "runs the long SPU sweep; the scheduled fuzz workflow runs it"]
-fn the_spu_sweep_reaches_the_smoke_floors_and_every_finding_is_promoted() {
+/// Holds each campaign of `sweep` to its smoke floor and the promoted regressions.
+pub(crate) fn hold_to_the_smoke_floors(sweep: &[SweepCampaign]) {
     let regressions = regression::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("regressions"))
         .expect("the tracked regressions load");
-    for campaign in &SPU_SWEEP {
+    for campaign in sweep {
         let run = campaign.run();
         assert!(
             !matches!(run.outcome, RunOutcome::HarnessFailure(_)),
@@ -49,4 +48,10 @@ fn the_spu_sweep_reaches_the_smoke_floors_and_every_finding_is_promoted() {
             campaign.name
         );
     }
+}
+
+#[test]
+#[ignore = "runs the long SPU sweep; the scheduled fuzz workflow runs it"]
+fn the_spu_sweep_reaches_the_smoke_floors_and_every_finding_is_promoted() {
+    hold_to_the_smoke_floors(&SPU_SWEEP);
 }

@@ -88,6 +88,20 @@ spu() {
     esac
 }
 
+# The long PPU sweep, as the SPU one: 1024 cases per PPU descriptor on
+# each instruction engine and 256 on each sequence engine. At 396
+# descriptors (1,013,760 cases) its release run took 47 s on Windows on
+# one workstation (2026-10-29).
+ppu() {
+    fresh "$out/ppu"
+    cargo test --release -p cellgov_fuzz --locked --test it -- --ignored ppu_sweep:: 2>&1 \
+        | tee "$out/ppu/sweep.log"
+    case "$(< "$out/ppu/sweep.log")" in
+        *"test result: ok. 1 passed"*) ;;
+        *) echo "fuzz ppu: the sweep test did not run" >&2; return 1 ;;
+    esac
+}
+
 # Names a job's outcome from its exit status: clean, a timeout, killed
 # (out of memory), or a finding with the files the uploaded artifact
 # holds for it. A job that failed before it wrote its output has no
@@ -117,9 +131,10 @@ case "${1:-}" in
     evaluate) evaluate ;;
     reach) reach ;;
     spu) spu ;;
+    ppu) ppu ;;
     smoke) smoke ;;
     *)
-        echo "usage: $0 {campaigns|raw|evaluate|reach|spu|smoke|outcome <job> <status> <artifact>}" >&2
+        echo "usage: $0 {campaigns|raw|evaluate|reach|spu|ppu|smoke|outcome <job> <status> <artifact>}" >&2
         exit 2
         ;;
 esac

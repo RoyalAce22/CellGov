@@ -25,6 +25,17 @@
 //! - the sequence campaigns against the scripted world;
 //! - the metamorphic relations those campaigns check;
 //! - the replay of the committed reference fixtures ([`SMOKE_REFERENCE`]).
+//!
+//! The PPU part has four campaigns:
+//!
+//! - the structured instruction campaign, which executes every registry
+//!   kind and every relation a kind declares;
+//! - the raw-word instruction campaign;
+//! - the structured sequence campaign;
+//! - the raw-word sequence campaign.
+//!
+//! The PPU sequence engine checks deterministic replay and no metamorphic
+//! relation, so its campaigns carry no relation floor.
 
 use std::path::Path;
 
@@ -74,6 +85,8 @@ pub enum KindFloor {
 pub enum RelationFloor {
     /// The campaign needs no relation.
     None,
+    /// Every metamorphic relation a kind of the PPU registry declares.
+    PpuInstructionCatalog,
     /// Every metamorphic relation a kind of the SPU registry declares.
     InstructionCatalog,
     /// Every row of the SPU sequence-relation catalog.
@@ -135,24 +148,32 @@ pub struct SmokeCampaign {
 
 /// Every campaign of the smoke set, in run order.
 ///
-/// The SPU floors are the values a run at these settings reached. A run is
-/// deterministic, so it reaches them exactly, and any loss fails the set.
+/// Every floor is the value a run at these settings reached. A run is
+/// deterministic, so it reaches each floor exactly, and any loss fails the
+/// set.
 pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
+    // A structured case draws its kind uniformly, so the budget is the
+    // least that reaches every kind. At that budget every declared relation
+    // also runs. A release run of the whole smoke set takes 1.08 s at this
+    // budget and 0.95 s at 300 cases (one workstation, 2026-10-29).
     SmokeCampaign {
         name: "ppu-instruction-structured",
         target: FuzzTarget::PpuInstruction,
         strategy: GenerationStrategy::Structured,
         seed: 1,
-        cases: 300,
+        cases: 2836,
         sequence_words: SMOKE_SEQUENCE_WORDS,
         floor: CoverageFloor {
             registry_kinds: PPU_REGISTRY_KINDS,
-            eligible: 150,
-            instruction_kinds: KindFloor::AtLeast(40),
-            relations: RelationFloor::None,
+            eligible: 2409,
+            instruction_kinds: KindFloor::EveryKind,
+            relations: RelationFloor::PpuInstructionCatalog,
             facilities: NO_FACILITIES,
         },
     },
+    // A raw word reaches a kind in proportion to its share of the word
+    // space, so no small budget reaches the vector compares or the OE
+    // forms. The structured campaign holds the relation catalog.
     SmokeCampaign {
         name: "ppu-instruction-raw-words",
         target: FuzzTarget::PpuInstruction,
@@ -162,12 +183,15 @@ pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
         sequence_words: SMOKE_SEQUENCE_WORDS,
         floor: CoverageFloor {
             registry_kinds: PPU_REGISTRY_KINDS,
-            eligible: 150,
-            instruction_kinds: KindFloor::AtLeast(40),
+            eligible: 231,
+            instruction_kinds: KindFloor::AtLeast(58),
             relations: RelationFloor::None,
             facilities: NO_FACILITIES,
         },
     },
+    // A structured sequence draws only kinds whose flow is linear or a
+    // control transfer, so no budget reaches more than 291 registry kinds.
+    // The structured instruction campaign holds every kind.
     SmokeCampaign {
         name: "ppu-sequence-structured",
         target: FuzzTarget::PpuSequence,
@@ -177,8 +201,8 @@ pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
         sequence_words: SMOKE_SEQUENCE_WORDS,
         floor: CoverageFloor {
             registry_kinds: PPU_REGISTRY_KINDS,
-            eligible: 250,
-            instruction_kinds: KindFloor::AtLeast(40),
+            eligible: 300,
+            instruction_kinds: KindFloor::AtLeast(223),
             relations: RelationFloor::None,
             facilities: NO_FACILITIES,
         },
@@ -192,8 +216,8 @@ pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
         sequence_words: SMOKE_SEQUENCE_WORDS,
         floor: CoverageFloor {
             registry_kinds: PPU_REGISTRY_KINDS,
-            eligible: 250,
-            instruction_kinds: KindFloor::AtLeast(40),
+            eligible: 300,
+            instruction_kinds: KindFloor::AtLeast(63),
             relations: RelationFloor::None,
             facilities: NO_FACILITIES,
         },
@@ -271,7 +295,7 @@ pub const SMOKE_CAMPAIGNS: [SmokeCampaign; 8] = [
 ];
 
 /// Generation descriptors in the registry `target` draws from.
-fn registry_kinds(target: FuzzTarget) -> u64 {
+pub(crate) fn registry_kinds(target: FuzzTarget) -> u64 {
     match target {
         FuzzTarget::PpuInstruction | FuzzTarget::PpuSequence => ppu_descriptors().len() as u64,
         FuzzTarget::SpuInstruction | FuzzTarget::SpuSequence => spu_descriptors().len() as u64,
@@ -371,6 +395,10 @@ impl SmokeCampaign {
         }
         let (metric, catalog): (_, Vec<CheckIdentity>) = match self.floor.relations {
             RelationFloor::None => return Ok(()),
+            RelationFloor::PpuInstructionCatalog => (
+                "instruction_relations",
+                crate::ppu::declared_relation_checks().into_iter().collect(),
+            ),
             RelationFloor::InstructionCatalog => (
                 "instruction_relations",
                 crate::spu::declared_relation_checks().into_iter().collect(),
@@ -554,3 +582,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/smoke_tier_tests.rs"]
 mod tier_tests;
+
+#[cfg(test)]
+#[path = "tests/smoke_ppu_tier_tests.rs"]
+mod ppu_tier_tests;

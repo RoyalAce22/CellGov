@@ -101,6 +101,7 @@ pub(super) fn run_once(
         &mut effects,
         &mut stores,
     );
+    seeded::ppu_relation_defect(instruction, &mut state);
     let observation = finish_fuzz_observation(PpuObservationInput {
         initial_state: initial,
         final_state: &state,
@@ -397,6 +398,7 @@ pub(super) fn run_sequence_tracked(
             &mut effects,
             &mut stores,
         );
+        seeded::ppu_relation_defect(&instruction, &mut state);
         terminal_verdict = Some(verdict.clone());
         // The runtime retries `BufferFull`.
         if verdict != ExecuteVerdict::BufferFull {
@@ -467,3 +469,7 @@ pub(super) fn outcome_identity(outcome: PpuOutcomeClass) -> OutcomeIdentity {
 #[cfg(test)]
 #[path = "tests/execute_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/execute_relation_seed_tests.rs"]
+mod relation_seed_tests;

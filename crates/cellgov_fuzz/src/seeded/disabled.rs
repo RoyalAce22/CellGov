@@ -4,6 +4,7 @@ use cellgov_effects::EffectKind;
 use cellgov_ppu::instruction::fuzz::PpuOutcomeClass;
 use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::observation::PpuObservation;
+use cellgov_ppu::state::PpuState;
 use cellgov_spu::fuzz::{SpuOutcomeClass, SpuSequenceRelation};
 use cellgov_spu::instruction::SpuInstruction;
 use cellgov_spu::observation::SpuObservation;
@@ -75,6 +76,10 @@ pub(crate) fn spu_observed(
     _state: &mut SpuState,
 ) {
 }
+
+/// Applies a PPU relation defect to the state after one execution.
+#[inline(always)]
+pub(crate) fn ppu_relation_defect(_instruction: &PpuInstruction, _state: &mut PpuState) {}
 
 /// The program counter an SPU sequence ends at.
 #[inline(always)]

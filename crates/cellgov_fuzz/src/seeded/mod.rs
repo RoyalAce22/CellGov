@@ -39,6 +39,10 @@
 //! |                               | `SequencePartnerLane`                |                             |
 //! | sequence replay world only    | `LateWorld`                          | deterministic replay        |
 //! | world get landing             | `MisLandedGet`                       | none: the reference tier    |
+//! | PPU result, one form          | `PpuRecordFormGpr`                   | record CR0 relation         |
+//! |                               | `PpuRecordFormFpr`                   | record CR1 relation         |
+//! |                               | `PpuRecordFormVr`                    | record CR6 relation         |
+//! |                               | `PpuOverflowFormGpr`                 | overflow-enable relation    |
 //!
 //! [Chen2018 p:4:8 s:4.1] Faults seeded into a program measure how many a
 //! metamorphic relation detects. [JiaHarman2011 p:4 s:II.B] A seeded

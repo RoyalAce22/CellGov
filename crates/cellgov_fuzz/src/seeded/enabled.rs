@@ -6,6 +6,7 @@ use cellgov_effects::EffectKind;
 use cellgov_ppu::instruction::fuzz::PpuOutcomeClass;
 use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::observation::PpuObservation;
+use cellgov_ppu::state::PpuState;
 use cellgov_spu::fuzz::{SpuOutcomeClass, SpuSequencePartner, SpuSequenceRelation};
 use cellgov_spu::instruction::SpuInstruction;
 use cellgov_spu::observation::{SpuAllowedFootprint, SpuObservation};
@@ -217,6 +218,34 @@ fn spu_relation_defect(
             if outcome == SpuOutcomeClass::Continue =>
         {
             state.pc = state.pc.wrapping_add(4);
+        }
+        _ => {}
+    }
+}
+
+/// Applies a PPU relation defect: a wrong result in one instruction form.
+///
+/// Only the partner of one metamorphic relation computes the result
+/// differently. Each defect writes only the register the instruction
+/// writes, the same way on every run of the same input, so the outcome,
+/// effect and replay
+/// checks stay clean. A partner that keeps the form, as the `add.`
+/// overflow partner keeps Rc, carries the same wrong value.
+pub(crate) fn ppu_relation_defect(instruction: &PpuInstruction, state: &mut PpuState) {
+    let corrupt = u64::from(CORRUPTION);
+    match (active(), *instruction) {
+        (Some(SeededDefect::PpuRecordFormGpr), PpuInstruction::Add { rt, rc: true, .. })
+        | (Some(SeededDefect::PpuOverflowFormGpr), PpuInstruction::Add { rt, oe: true, .. }) => {
+            let rt = usize::from(rt);
+            state.set_gpr(rt, state.gpr[rt] ^ corrupt);
+        }
+        (Some(SeededDefect::PpuRecordFormFpr), PpuInstruction::Fp63 { frt, rc: true, .. }) => {
+            let frt = usize::from(frt);
+            state.set_fpr(frt, state.fpr[frt] ^ corrupt);
+        }
+        (Some(SeededDefect::PpuRecordFormVr), PpuInstruction::Vx { vt, rc: true, .. }) => {
+            let vt = usize::from(vt);
+            state.set_vr(vt, state.vr[vt] ^ u128::from(CORRUPTION));
         }
         _ => {}
     }
