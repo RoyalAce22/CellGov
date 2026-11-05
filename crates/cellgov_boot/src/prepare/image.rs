@@ -134,41 +134,11 @@ pub(super) fn load_image(
         }
         .into());
     }
-    let mut mem = cellgov_mem::GuestMemory::from_regions(vec![
-        cellgov_mem::Region::new(0, mem_size, "main", cellgov_mem::PageSize::Page64K),
-        cellgov_mem::Region::new(
-            PS3_RSX_IOMAP_BASE,
-            PS3_RSX_IOMAP_SIZE,
-            "rsx_iomap",
-            cellgov_mem::PageSize::Page64K,
-        ),
-        cellgov_mem::Region::new(
-            PS3_PRIMARY_STACK_BASE,
-            PS3_PRIMARY_STACK_SIZE,
-            "stack",
-            cellgov_mem::PageSize::Page4K,
-        ),
-        cellgov_mem::Region::new(
-            PS3_CHILD_STACKS_BASE,
-            PS3_CHILD_STACKS_SIZE,
-            "child_stacks",
-            cellgov_mem::PageSize::Page4K,
-        ),
-        cellgov_mem::Region::with_access(
-            PS3_RSX_BASE,
-            PS3_RSX_SIZE,
-            "rsx",
-            cellgov_mem::PageSize::Page64K,
-            rsx_access,
-        ),
-        cellgov_mem::Region::with_access(
-            PS3_SPU_RESERVED_BASE,
-            PS3_SPU_RESERVED_SIZE,
-            "spu_reserved",
-            cellgov_mem::PageSize::Page64K,
-            reserved_access,
-        ),
-    ])
+    let mut mem = cellgov_mem::GuestMemory::from_regions(image_regions(
+        mem_size,
+        rsx_access,
+        reserved_access,
+    ))
     .map_err(|source| ImageError::Layout { source })?;
 
     let t_mem_alloc = t_start.elapsed();
@@ -200,6 +170,52 @@ pub(super) fn load_image(
     })
 }
 
+/// The regions of the guest address space, with `mem_size` bytes of main memory.
+fn image_regions(
+    mem_size: usize,
+    rsx_access: cellgov_mem::RegionAccess,
+    reserved_access: cellgov_mem::RegionAccess,
+) -> Vec<cellgov_mem::Region> {
+    vec![
+        cellgov_mem::Region::new(0, mem_size, "main", cellgov_mem::PageSize::Page64K),
+        cellgov_mem::Region::new(
+            PS3_RSX_IOMAP_BASE,
+            PS3_RSX_IOMAP_SIZE,
+            "rsx_iomap",
+            cellgov_mem::PageSize::Page64K,
+        ),
+        cellgov_mem::Region::new(
+            PS3_PRIMARY_STACK_BASE,
+            PS3_PRIMARY_STACK_SIZE,
+            "stack",
+            cellgov_mem::PageSize::Page4K,
+        ),
+        cellgov_mem::Region::new(
+            PS3_CHILD_STACKS_BASE,
+            PS3_CHILD_STACKS_SIZE,
+            "child_stacks",
+            cellgov_mem::PageSize::Page4K,
+        ),
+        // RSX local memory is caching-inhibited for a game process, in
+        // every access mode: see `PS3_RSX_BASE`.
+        cellgov_mem::Region::with_access(
+            PS3_RSX_BASE,
+            PS3_RSX_SIZE,
+            "rsx",
+            cellgov_mem::PageSize::Page64K,
+            rsx_access,
+        )
+        .with_caching_inhibited(),
+        cellgov_mem::Region::with_access(
+            PS3_SPU_RESERVED_BASE,
+            PS3_SPU_RESERVED_SIZE,
+            "spu_reserved",
+            cellgov_mem::PageSize::Page64K,
+            reserved_access,
+        ),
+    ]
+}
+
 /// Walk the title ELF's executable PT_LOAD segments through the
 /// PPU decoder and report the gaps. Firmware PRX text is out
 /// of scope; gaps there surface at execution time.
@@ -215,3 +231,7 @@ fn emit_prescan_report(elf_data: &[u8], elf_path: &str, sink: &dyn crate::BootSi
         sink.warn(&line);
     }
 }
+
+#[cfg(test)]
+#[path = "tests/image_regions_tests.rs"]
+mod image_regions_tests;

@@ -15,6 +15,7 @@ impl GuestMemory {
     /// The bytes must lie inside one reserved region, which no write
     /// reaches, so its bytes are all zero. This call splits that region
     /// around the window. Each piece keeps its label, page size and access.
+    /// Each piece and the window keep the region's caching attribute.
     ///
     /// # Errors
     ///
@@ -36,6 +37,7 @@ impl GuestMemory {
         }
         let (host_base, host_end) = (host.base, host.end());
         let (host_label, page_size, access) = (host.label, host.page_size, host.access);
+        let caching_inhibited = host.caching_inhibited;
         let end = base + size as u64;
         let mut pieces = Vec::with_capacity(3);
         if host_base < base {
@@ -58,6 +60,9 @@ impl GuestMemory {
                 page_size,
                 access,
             ));
+        }
+        for piece in &mut pieces {
+            piece.caching_inhibited = caching_inhibited;
         }
         self.replace_regions(idx..idx + 1, pieces);
         Ok(())
@@ -88,6 +93,7 @@ impl GuestMemory {
         };
         let window = &self.regions[idx];
         let (window_base, window_end, page_size) = (window.base, window.end(), window.page_size);
+        let caching_inhibited = window.caching_inhibited;
         // Raw SPU windows sit side by side, so a neighbour can be another
         // window: only a non-window piece of the same reserved region joins.
         let joins = |other: &Region| {
@@ -109,13 +115,14 @@ impl GuestMemory {
             .unwrap_or(idx);
         let joined_base = self.regions[first].base;
         let joined_end = self.regions[last].end();
-        let joined = Region::with_access(
+        let mut joined = Region::with_access(
             joined_base,
             (joined_end - joined_base) as usize,
             label,
             page_size,
             access,
         );
+        joined.caching_inhibited = caching_inhibited;
         self.replace_regions(first..last + 1, vec![joined]);
         Ok(())
     }
@@ -136,3 +143,7 @@ impl GuestMemory {
 #[cfg(test)]
 #[path = "tests/guest_window_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/caching_attribute_tests.rs"]
+mod caching_attribute_tests;

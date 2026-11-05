@@ -33,6 +33,12 @@ const STORE: &[PpuOutcomeClass] = &[
     PpuOutcomeClass::MemoryFault,
     PpuOutcomeClass::BufferFull,
 ];
+const STORE_OR_FAULT: &[PpuOutcomeClass] = &[
+    PpuOutcomeClass::Continue,
+    PpuOutcomeClass::Fault,
+    PpuOutcomeClass::MemoryFault,
+    PpuOutcomeClass::BufferFull,
+];
 const ATOMIC_LOAD: &[PpuOutcomeClass] = &[
     PpuOutcomeClass::Continue,
     PpuOutcomeClass::Fault,
@@ -245,11 +251,12 @@ pub(super) fn effect_and_outcome(
         | K::Stfiwx
         | K::Stfsx
         | K::Stfdx
-        | K::Dcbz
         | K::LiStw
         | K::MflrStw
         | K::MflrStd
         | K::StdStd => (WRITE_EFFECTS, STORE),
+        // A block in a caching-inhibited view takes an alignment interrupt.
+        K::Dcbz => (WRITE_EFFECTS, STORE_OR_FAULT),
         K::Ldarx | K::Lwarx => (RESERVATION_READ_EFFECTS, ATOMIC_LOAD),
         K::Stdcx | K::Stwcx => (ATOMIC_STORE_EFFECTS, ATOMIC_STORE),
         K::Mftb | K::Mftbu => (CLOCK_EFFECTS, CONTINUE),

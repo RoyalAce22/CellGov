@@ -201,6 +201,9 @@ pub struct Region {
     label: &'static str,
     page_size: PageSize,
     access: RegionAccess,
+    /// Whether the region is caching-inhibited storage. The flag is
+    /// independent of `access`.
+    caching_inhibited: bool,
     dirty_pages: DirtyPages,
     /// The label and access of the reserved region that
     /// [`GuestMemory::map_window`] carved this region from, or `None`
@@ -231,9 +234,28 @@ impl Region {
             label,
             page_size,
             access,
+            caching_inhibited: false,
             dirty_pages: DirtyPages::new(num_pages),
             window: None,
         }
+    }
+
+    /// The same region, marked caching-inhibited.
+    ///
+    /// The PPE refuses some accesses to caching-inhibited storage with an
+    /// alignment interrupt. A [`RegionView`] carries the attribute to the
+    /// execution unit, and the execution unit decides.
+    #[inline]
+    #[must_use]
+    pub fn with_caching_inhibited(mut self) -> Self {
+        self.caching_inhibited = true;
+        self
+    }
+
+    /// Whether the region is caching-inhibited storage.
+    #[inline]
+    pub fn is_caching_inhibited(&self) -> bool {
+        self.caching_inhibited
     }
 
     /// Zero every 4 KiB page written since the most recent reset (or
@@ -322,10 +344,12 @@ pub struct RegionView<'a> {
     pub provisional: Option<&'a GuestMemory>,
     /// The region's label when its access mode refuses writes.
     pub write_refused_by: Option<&'static str>,
+    /// Whether the region is caching-inhibited storage.
+    pub caching_inhibited: bool,
 }
 
 impl<'a> RegionView<'a> {
-    /// A `ReadWrite` view: reads are ordinary and unlogged.
+    /// A cacheable `ReadWrite` view: reads are ordinary and unlogged.
     #[inline]
     pub const fn plain(base: u64, bytes: &'a [u8]) -> Self {
         Self {
@@ -333,6 +357,7 @@ impl<'a> RegionView<'a> {
             bytes,
             provisional: None,
             write_refused_by: None,
+            caching_inhibited: false,
         }
     }
 
@@ -664,6 +689,7 @@ impl GuestMemory {
             bytes: r.bytes(),
             provisional: (r.access() == RegionAccess::ReservedZeroReadable).then_some(self),
             write_refused_by: (r.access() != RegionAccess::ReadWrite).then_some(r.label()),
+            caching_inhibited: r.caching_inhibited,
         })
     }
 

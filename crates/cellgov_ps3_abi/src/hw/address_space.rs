@@ -79,10 +79,14 @@ const _: () = assert!(PS3_PRIMARY_STACK_START.is_multiple_of(0x1000));
 /// Smallest `primary_stacksize` the kernel adopts.
 ///
 /// The reference console gives a declared 0x800 or 0xC00 the
-/// [`PS3_PRIMARY_STACK_SIZE_DEFAULT`] and a declared 0x1800 0x2000
-/// (`tests/micro/lv2_process_stack_*`). The 0x10..0x70 values some
-/// tables read as size codes are declarations below this, and get the
-/// default too.
+/// [`PS3_PRIMARY_STACK_SIZE_DEFAULT`] and a declared 0x1800 a 0x2000
+/// stack (`tests/micro/lv2_process_stack_*`).
+///
+/// The 0x10..0x70 values some tables read as size codes are byte
+/// counts below this, and get the default too. A declared 0x10 and a
+/// declared 0x40, which those tables read as 32 KiB and 128 KiB, each
+/// get 64 KiB (`lv2_process_stack_sentinel`,
+/// `lv2_process_stack_sentinel_128k`).
 pub const PS3_PRIMARY_STACK_SIZE_MIN: u32 = 0x1000;
 
 /// Largest `primary_stacksize` the kernel adopts.
@@ -146,6 +150,15 @@ pub const PS3_RSX_IOMAP_SIZE: usize = 0x0550_0000;
 /// allocated: `0xEA0_0000` bytes in 1 MiB pages, read-write, and a word
 /// written there reads back (`lv2_address_space`). Before that nothing
 /// maps here (`lv2_process_layout`).
+///
+/// The mapping is caching-inhibited. On the reference console, each of
+/// these stops the game process at the instruction, as an alignment
+/// interrupt does:
+///
+/// - a `dcbz` at `0xC000_0040` (`ppu_may_trap_rsx_window`)
+/// - a misaligned `lwz` at `0xC000_0081` (`ppu_may_trap_rsx_lwz`)
+///
+/// Neither probe run ends, so neither has a capture.
 pub const PS3_RSX_BASE: u64 = 0xC000_0000;
 
 /// Size in bytes of CellGov's RSX region. It holds the console's local
@@ -171,8 +184,8 @@ pub const PS3_SPU_RESERVED_SIZE: usize = 0x2000_0000;
 pub const PS3_USER_TEXT_FLOOR: u64 = 0x0001_0000;
 
 // The boot-composed regions must tile the address space without
-// overlapping. Each bound below is checked against the *end* of the
-// region beneath it, not its base: the primary stack starts exactly at
+// overlapping. Each assert below checks a bound against the *end* of
+// the region beneath it. The primary-stack region starts exactly at
 // PS3_RSX_BASE + PS3_RSX_SIZE, so growing the RSX window by one page
 // would overlap it with no other signal.
 const _: () = assert!(PS3_RSX_IOMAP_BASE + PS3_RSX_IOMAP_SIZE as u64 <= PS3_RSX_BASE);
@@ -189,10 +202,8 @@ const _: () = assert!(
 );
 const _: () =
     assert!(PS3_CHILD_STACKS_BASE + PS3_CHILD_STACKS_SIZE as u64 <= PS3_SPU_RESERVED_BASE);
-// The topmost region must not wrap past the end of the address space.
-const _: () = assert!(PS3_SPU_RESERVED_BASE
-    .checked_add(PS3_SPU_RESERVED_SIZE as u64)
-    .is_some());
+// The topmost region must end within the 32-bit address space.
+const _: () = assert!(PS3_SPU_RESERVED_BASE + PS3_SPU_RESERVED_SIZE as u64 <= 1 << 32);
 // The user-text floor sits below every mapped region, so a diagnostic
 // walk rejecting addresses under it cannot reject a real one.
 const _: () = assert!(PS3_USER_TEXT_FLOOR < PS3_RSX_IOMAP_BASE);

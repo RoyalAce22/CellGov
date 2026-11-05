@@ -233,6 +233,16 @@ pub(crate) fn check_block_translates(
     }
 }
 
+/// Whether the view that holds `ea` is caching-inhibited storage. An
+/// address that no view holds returns `false`.
+#[inline]
+pub(crate) fn caching_inhibited(views: &[RegionView<'_>], ea: u64) -> bool {
+    views
+        .iter()
+        .find(|view| ea >= view.base && ea - view.base < view.bytes.len() as u64)
+        .is_some_and(|view| view.caching_inhibited)
+}
+
 /// Refuse a store of `len` bytes at `ea` that no one view holds, or
 /// that reaches a view whose region refuses writes.
 ///

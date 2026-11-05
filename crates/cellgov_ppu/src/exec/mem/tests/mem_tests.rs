@@ -20,6 +20,8 @@ mod altivec;
 mod atomics;
 #[path = "mem_dcbz_console_tests.rs"]
 mod dcbz_console;
+#[path = "mem_dcbz_rsx_tests.rs"]
+mod dcbz_rsx;
 #[path = "mem_float_tests.rs"]
 mod floats;
 #[path = "mem_lmw_form_tests.rs"]

@@ -1,8 +1,8 @@
 //! The memory-instruction dispatch: one match over every load, store, atomic and cache-block form.
 
 use crate::exec::memory_helpers::{
-    buffer_conditional_store, buffer_store, check_block_translates, check_store, load_ze, LoadPort,
-    Width,
+    buffer_conditional_store, buffer_store, caching_inhibited, check_block_translates, check_store,
+    load_ze, LoadPort, Width,
 };
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::PpuInstruction;
@@ -349,12 +349,18 @@ pub(crate) fn execute(
         // Cache control
         // [PPC-Book2 p:20 s:3.2] Data Cache Block set to Zero (dcbz, X-form): zero the block of size n containing EA; treated as a Store.
         PpuInstruction::Dcbz { ra, rb } => {
-            let ea = state.ea_x_form(ra, rb) & !(DCBZ_BLOCK_BYTES as u64 - 1);
+            let target = state.ea_x_form(ra, rb);
+            let ea = target & !(DCBZ_BLOCK_BYTES as u64 - 1);
+            // A block that no region holds faults as unmapped first. An
+            // untranslated page has no caching attribute.
+            if let Err(e) = check_store(region_views, ea, DCBZ_BLOCK_BYTES as u64) {
+                return ExecuteVerdict::StoreFault(e);
+            }
+            // [CBE-Handbook p:147 s:6.1.6.4] A dcbz to caching-inhibited storage takes an alignment interrupt.
+            if caching_inhibited(region_views, ea) {
+                return ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(target));
+            }
             state.dcbz_executed = state.dcbz_executed.wrapping_add(1);
-            debug_assert!(
-                !(0xC000_0000..0xC010_0000).contains(&ea),
-                "dcbz into RSX MMIO window at 0x{ea:x} likely indicates pointer corruption",
-            );
             // Capacity pre-check prevents a partial block from
             // committing on `BufferFull` mid-loop.
             const DCBZ_STORES: usize = DCBZ_BLOCK_BYTES / 8;
