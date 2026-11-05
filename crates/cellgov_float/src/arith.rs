@@ -71,6 +71,59 @@ pub(crate) fn product(a: Exact, b: Exact) -> Exact {
     )
 }
 
+/// The quotient `a / b` of two nonzero operands that `unpack` decodes:
+/// at least 62 significant bits, sticky when the division leaves a
+/// remainder.
+///
+/// The function widens the dividend to 115 bits and the divisor to 53
+/// bits, so the integer quotient lies between 2^61 and 2^63.
+pub(crate) fn quotient(a: Exact, b: Exact) -> Exact {
+    debug_assert!(
+        operand(a)
+            && operand(b)
+            && a.significand != 0
+            && b.significand != 0
+            && significant_bits(b.significand) <= 53
+    );
+    let shift_a = 115 - significant_bits(a.significand);
+    let shift_b = 53 - significant_bits(b.significand);
+    let (dividend, divisor) = (a.significand << shift_a, b.significand << shift_b);
+    Exact::from_parts(
+        a.negative != b.negative,
+        dividend / divisor,
+        (a.exponent - shift_a as i32) - (b.exponent - shift_b as i32),
+        dividend % divisor != 0,
+    )
+}
+
+/// The square root of a positive nonzero operand that `unpack` decodes:
+/// at least 60 significant bits, sticky when the root is not exact.
+///
+/// The function widens the operand to 120 or 121 bits with an even
+/// exponent, so its integer root has 60 or 61 bits.
+///
+/// A sticky root lies strictly between two integers, so it is never a
+/// tie at any precision. An exact root can be a tie: fsqrts rounds the
+/// root of a double operand to single, and the root of (2^24 + 1)^2 lies
+/// halfway between two singles.
+///
+/// [Verdonk2001Basic p:111 s:7.2] the square root of a t-bit number is never exactly halfway between two t-bit numbers.
+pub(crate) fn square_root(a: Exact) -> Exact {
+    debug_assert!(operand(a) && a.significand != 0 && significant_bits(a.significand) <= 53);
+    let mut shift = 120 - significant_bits(a.significand);
+    if (a.exponent - shift as i32) % 2 != 0 {
+        shift += 1;
+    }
+    let widened = a.significand << shift;
+    let root = widened.isqrt();
+    Exact::from_parts(
+        false,
+        root,
+        (a.exponent - shift as i32) / 2,
+        root * root != widened,
+    )
+}
+
 /// The sum of two exact values: exact, or sticky when the smaller operand
 /// lies partly below the larger's 126-bit precision.
 ///

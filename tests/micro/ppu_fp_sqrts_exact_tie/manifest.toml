@@ -1,0 +1,19 @@
+[test]
+name = "ppu_fp_sqrts_exact_tie"
+
+# A hardware probe of fsqrts on the double (2^24 + 1)^2, whose exact root
+# 2^24 + 1 lies halfway between two singles, in each FPSCR rounding mode;
+# and fsqrt of the same operand for the exact double root. The console
+# capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u32 words, as ppu/main.c lists: 3 header words (failed
+# step, its code, case count), then 11 words per case (operation, FPSCR
+# before, FRA, FRB, FRC and FRT as high/low pairs, FPSCR after): 5
+# cases, 58 words, 232 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 232 },
+]
+
+[expect]
+outcome = "completed"

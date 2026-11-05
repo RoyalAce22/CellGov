@@ -10,12 +10,12 @@ vector registers.
 The FPSCR move instructions read and write FPSCR, except the reserved
 bit 20 and NI, which the PPE does not implement and which read 0, so
 results always follow IEEE 754. A floating-point record form copies
-FPSCR bits 0:3 to CR1. Of the arithmetic, only `fadd`, `fsub` and
-`fmul` read the rounding mode. The arithmetic and estimate instructions
-write their FPSCR status, except, outside `fadd`, `fsub` and `fmul`,
-FR, FI, OX, UX and XX of a result the operands do not make exact; the
-compares set FPCC, VXSNAN and VXVC, and the conversions set no FPSCR
-status bit.
+FPSCR bits 0:3 to CR1. Of the arithmetic, only
+`fadd`, `fsub`, `fmul`, `fdiv` and `fsqrt` read the rounding mode. The arithmetic and
+estimate instructions write their FPSCR status, except, outside `fadd`,
+`fsub`, `fmul`, `fdiv` and `fsqrt`, FR, FI, OX, UX and XX of a result the operands do
+not make exact; the compares set FPCC, VXSNAN and VXVC, and the
+conversions set no FPSCR status bit.
 
 The `PpuInstruction` set covers:
 

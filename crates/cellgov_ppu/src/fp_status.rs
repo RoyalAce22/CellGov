@@ -1,11 +1,10 @@
 //! The FPSCR status each computational FP instruction reports, from its
 //! operands and its result.
 //!
-//! The estimates report their full status. A host-computed arithmetic
+//! The estimates report their full status. A host-computed multiply-add
 //! arm reports the bits its operands and result decide:
 //!
 //! - the invalid-operation causes;
-//! - ZX;
 //! - FPRF;
 //! - FR and FI of a result the operands make exact.
 //!
@@ -16,8 +15,8 @@
 //! and the operand `fsel` selects.
 
 use cellgov_float::{
-    ppc_invalid_product, ppc_invalid_quotient, ppc_invalid_sqrt, ppc_invalid_sum, ppc_is_nan,
-    PpcInvalid, PpcPrecision, PpcStatus,
+    ppc_invalid_product, ppc_invalid_sqrt, ppc_invalid_sum, ppc_is_nan, PpcInvalid, PpcPrecision,
+    PpcStatus,
 };
 
 use crate::fpscr::{write_status, Fprf, FrFi};
@@ -42,10 +41,6 @@ fn is_nonzero_finite(bits: u64) -> bool {
 /// operands FRA, FRB and FRC.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HostArith {
-    /// FRA / FRB.
-    Divide,
-    /// The square root of FRB.
-    SquareRoot,
     /// FRA x FRC + FRB, or FRA x FRC - FRB when `subtract`; a negated
     /// form has the same causes.
     MultiplyAdd {
@@ -64,29 +59,21 @@ pub(crate) fn write_host_arith_status(
     precision: PpcPrecision,
 ) {
     let status = host_arith_status(op, a, b, c);
-    let exact = host_arith_exact(op, a, b, c);
+    let exact = host_arith_exact(a, b, c);
     write_host_status(state, &status, exact, bits, precision);
 }
 
-/// The invalid-operation causes and ZX of `op` on operands `a`, `b` and
-/// `c`. Only the operands `op` names take part.
+/// The invalid-operation causes of `op` on operands `a`, `b` and `c`.
 ///
 /// [PPC-Book1 p:97 s:4.4.1] the invalid operations: an SNaN operand, infinity minus infinity, infinity over infinity, zero over zero, infinity times zero, the square root of a negative number.
-/// [PPC-Book1 p:97 s:4.4.2] a zero divide is a zero divisor with a finite nonzero dividend.
 /// [PPC-Book1 p:92 s:4.3.3] a multiply-add applies the rules to the product first, then to the sum.
 fn host_arith_status(op: HostArith, a: u64, b: u64, c: u64) -> PpcStatus {
-    let invalid = match op {
-        HostArith::Divide => PpcInvalid::signaling(&[a, b]).or(ppc_invalid_quotient(a, b)),
-        HostArith::SquareRoot => PpcInvalid::signaling(&[b]).or(ppc_invalid_sqrt(b)),
-        HostArith::MultiplyAdd { subtract } => {
-            let addend = if subtract { b ^ SIGN } else { b };
-            PpcInvalid::signaling(&[a, b, c])
-                .or(ppc_invalid_product(a, c))
-                .or(ppc_invalid_sum(infinite_product(a, c), addend))
-        }
-    };
+    let HostArith::MultiplyAdd { subtract } = op;
+    let addend = if subtract { b ^ SIGN } else { b };
+    let invalid = PpcInvalid::signaling(&[a, b, c])
+        .or(ppc_invalid_product(a, c))
+        .or(ppc_invalid_sum(infinite_product(a, c), addend));
     PpcStatus {
-        zx: op == HostArith::Divide && is_zero(b) && is_nonzero_finite(a),
         invalid,
         ..PpcStatus::default()
     }
@@ -110,29 +97,12 @@ fn infinite_product(a: u64, c: u64) -> u64 {
     }
 }
 
-/// Whether the operands alone make `op`'s result exact.
+/// Whether the operands alone make the result exact: a NaN or an infinity
+/// operand, which gives a NaN or an infinity.
 ///
-/// They do for:
-///
-/// - a NaN or an infinity operand;
-/// - a zero dividend of [`HostArith::Divide`];
-/// - the square root of a zero.
-///
-/// The result is then a NaN, an infinity or a zero.
-///
-/// The ppu_fp_status_writeback console capture reads FR = FI = 0 after a QNaN operand, an infinity operand, infinity over zero and the square root of -0.
-fn host_arith_exact(op: HostArith, a: u64, b: u64, c: u64) -> bool {
-    let read: &[u64] = match op {
-        HostArith::Divide => &[a, b],
-        HostArith::SquareRoot => &[b],
-        HostArith::MultiplyAdd { .. } => &[a, b, c],
-    };
-    read.iter().any(|&x| x & INFINITY == INFINITY)
-        || match op {
-            HostArith::Divide => is_zero(a),
-            HostArith::SquareRoot => is_zero(b),
-            _ => false,
-        }
+/// The ppu_fp_status_writeback console capture reads FR = FI = 0 after a QNaN operand and an infinity operand.
+fn host_arith_exact(a: u64, b: u64, c: u64) -> bool {
+    [a, b, c].iter().any(|&x| x & INFINITY == INFINITY)
 }
 
 /// Writes a host-computed arm's status for its result `bits`.
@@ -140,13 +110,11 @@ fn host_arith_exact(op: HostArith, a: u64, b: u64, c: u64) -> bool {
 /// It clears FR and FI after:
 ///
 /// - an invalid operation;
-/// - a zero divide;
 /// - an `exact` result.
 ///
 /// Any other result leaves FR and FI unchanged.
 ///
 /// [PPC-Book1 p:97 s:4.4.1] a disabled invalid operation sets FR and FI to zero.
-/// [PPC-Book1 p:98 s:4.4.2] a disabled zero divide sets FR and FI to zero.
 fn write_host_status(
     state: &mut PpuState,
     status: &PpcStatus,
@@ -154,7 +122,7 @@ fn write_host_status(
     bits: u64,
     precision: PpcPrecision,
 ) {
-    let fr_fi = if exact || status.invalid.any() || status.zx {
+    let fr_fi = if exact || status.invalid.any() {
         FrFi::Set
     } else {
         FrFi::Unchanged
@@ -265,3 +233,7 @@ mod fp_status_console_tests;
 #[cfg(test)]
 #[path = "tests/fp_addmul_console_tests.rs"]
 mod fp_addmul_console_tests;
+
+#[cfg(test)]
+#[path = "tests/fp_divsqrt_console_tests.rs"]
+mod fp_divsqrt_console_tests;

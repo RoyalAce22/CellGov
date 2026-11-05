@@ -4,17 +4,19 @@
 //!
 //! The FPSCR move instructions read and write the register
 //! ([`crate::fpscr`]), and a record form copies FPSCR bits 0:3 to CR1.
-//! `fadd`, `fsub` and `fmul`, in both widths, compute on the
-//! `cellgov_float` engine in the rounding mode `FPSCR[RN]` selects, with
-//! every exception disabled. The other computational arms round to
-//! nearest on the host, and write their status through
+//! `fadd`, `fsub`, `fmul`, `fdiv` and `fsqrt`, in both widths, compute
+//! on the `cellgov_float` engine in the rounding mode `FPSCR[RN]`
+//! selects, with every exception disabled. The other computational arms
+//! round to nearest on the host, and write their status through
 //! [`crate::fp_status`], which names the bits a host-computed result
 //! leaves unchanged. The compares write FPCC and their invalid
 //! causes through [`crate::fpscr::write_compare_status`]. The
 //! conversions, `fsel` and the moves leave the FPSCR unchanged.
 // [PPC-Book1 p:89 s:4.2.2] FPSCR[RN] encoding: 0b00 selects Round to Nearest.
 
-use cellgov_float::{ppc_add, ppc_mul, ppc_sub, PpcPrecision, PpcResult};
+use cellgov_float::{
+    ppc_add, ppc_div, ppc_div_sqrt_precision, ppc_mul, ppc_sqrt, ppc_sub, PpcPrecision, PpcResult,
+};
 
 use crate::exec::ExecuteVerdict;
 use crate::fp_status::{
@@ -31,8 +33,6 @@ fn fp63_arith(op: Fp63Op) -> Option<HostArith> {
     match op {
         Fp63Op::Fmadd | Fp63Op::Fnmadd => Some(HostArith::MultiplyAdd { subtract: false }),
         Fp63Op::Fmsub | Fp63Op::Fnmsub => Some(HostArith::MultiplyAdd { subtract: true }),
-        Fp63Op::Fdiv => Some(HostArith::Divide),
-        Fp63Op::Fsqrt => Some(HostArith::SquareRoot),
         _ => None,
     }
 }
@@ -43,9 +43,12 @@ fn fp59_arith(op: Fp59Op) -> Option<HostArith> {
     match op {
         Fp59Op::Fmadds | Fp59Op::Fnmadds => Some(HostArith::MultiplyAdd { subtract: false }),
         Fp59Op::Fmsubs | Fp59Op::Fnmsubs => Some(HostArith::MultiplyAdd { subtract: true }),
-        Fp59Op::Fdivs => Some(HostArith::Divide),
-        Fp59Op::Fsqrts => Some(HostArith::SquareRoot),
-        Fp59Op::Fmuls | Fp59Op::Fadds | Fp59Op::Fsubs | Fp59Op::Fres => None,
+        Fp59Op::Fmuls
+        | Fp59Op::Fadds
+        | Fp59Op::Fsubs
+        | Fp59Op::Fdivs
+        | Fp59Op::Fsqrts
+        | Fp59Op::Fres => None,
     }
 }
 
@@ -115,7 +118,11 @@ pub fn execute_fp63(
             }
         }
         // [PPC-Book1 p:112 s:4.6.5.1] fdiv: FRT <- FRA / FRB.
-        Fp63Op::Fdiv => nan_resolved_bits(a / b, &[a, b]),
+        Fp63Op::Fdiv => {
+            let rounding = fpscr::rounding(state.fpscr());
+            let result = ppc_div(PpcPrecision::Double, rounding, ra, rb);
+            return write_engine_result(state, frt, result, PpcPrecision::Double);
+        }
         // [PPC-Book1 p:111 s:4.6.5.1] fadd: FRT <- FRA + FRB.
         Fp63Op::Fadd => {
             let rounding = fpscr::rounding(state.fpscr());
@@ -197,11 +204,12 @@ pub fn execute_fp63(
             let i = state.fpr[frb as usize] as i64;
             (i as f64).to_bits()
         }
-        // The square root of a negative operand is an Invalid
-        // Operation, and the host hands back a sign-bit-set QNaN that
-        // the architecture does not allow.
         // [PPC-Book1 p:125 s:5.2.1.1] fsqrt: FRT <- square root of FRB.
-        Fp63Op::Fsqrt => nan_resolved_bits(b.sqrt(), &[b]),
+        Fp63Op::Fsqrt => {
+            let rounding = fpscr::rounding(state.fpscr());
+            let result = ppc_sqrt(PpcPrecision::Double, rounding, rb);
+            return write_engine_result(state, frt, result, PpcPrecision::Double);
+        }
         // [PPC-Book1 p:126 s:5.2.1.1] frsqrte: an estimate within one part in 32 of 1/sqrt(FRB); the special-operand table fixes -inf and < 0 to QNaN, -0 to -inf, +0 to +inf, +inf to +0.
         // The PPE's own table, read back by the ppu_fp_estimate_readout capture.
         Fp63Op::Frsqrte => {
@@ -277,16 +285,18 @@ pub fn execute_fp59(
     let c64 = f64::from_bits(rc);
     // A NaN operand is stored in FRT as-is, at full double width --
     // only frsp truncates the propagated NaN's low-order bits -- so the
-    // precedence walk runs on the register values, not on the f32
-    // narrowings below. Each arm lists only its architected operands;
-    // FRB in fmuls and FRC in the others are reserved instruction
-    // fields, and a NaN parked in one must not win the walk.
+    // precedence walk runs on the register values and ignores the f32
+    // narrowings below. The engine arms and fres return before the walk
+    // and list no operands.
     // [PPC-Book1 p:91 s:4.3.2] Propagated NaN stored unchanged; only frsp clears the low 29 bits.
     let operands: &[f64] = match op {
         Fp59Op::Fmadds | Fp59Op::Fmsubs | Fp59Op::Fnmadds | Fp59Op::Fnmsubs => &[a64, b64, c64],
-        Fp59Op::Fmuls => &[a64, c64],
-        Fp59Op::Fdivs | Fp59Op::Fadds | Fp59Op::Fsubs => &[a64, b64],
-        Fp59Op::Fsqrts | Fp59Op::Fres => &[b64],
+        Fp59Op::Fmuls
+        | Fp59Op::Fadds
+        | Fp59Op::Fsubs
+        | Fp59Op::Fdivs
+        | Fp59Op::Fsqrts
+        | Fp59Op::Fres => &[],
     };
     let a = a64 as f32;
     let b = b64 as f32;
@@ -307,9 +317,21 @@ pub fn execute_fp59(
             };
             return write_engine_result(state, frt, result, PpcPrecision::Single);
         }
-        Fp59Op::Fdivs => a / b,
+        // An operand outside the single exponent range makes the engine
+        // round to double precision. The status and FPRF then use double
+        // precision.
         // [PPC-Book1 p:125 s:5.2.1.1] fsqrts: FRT <- square root of FRB, single precision.
-        Fp59Op::Fsqrts => b.sqrt(),
+        Fp59Op::Fdivs | Fp59Op::Fsqrts => {
+            let rounding = fpscr::rounding(state.fpscr());
+            let (result, precision) = if op == Fp59Op::Fdivs {
+                let precision = ppc_div_sqrt_precision(PpcPrecision::Single, &[ra, rb]);
+                (ppc_div(precision, rounding, ra, rb), precision)
+            } else {
+                let precision = ppc_div_sqrt_precision(PpcPrecision::Single, &[rb]);
+                (ppc_sqrt(precision, rounding, rb), precision)
+            };
+            return write_engine_result(state, frt, result, precision);
+        }
         // [PPC-Book1 p:125 s:5.2.1.1] fres: an estimate within one part in 256 of 1/FRB; the special-operand table fixes -inf to -0, -0 to -inf, +0 to +inf, +inf to +0.
         // The PPE's own table, read back by the ppu_fp_estimate_readout capture.
         Fp59Op::Fres => {

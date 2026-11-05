@@ -55,7 +55,7 @@ pub use ppc::{
     ppc_is_nan, ppc_is_snan, ppc_nan_result, ppc_round, ppc_sum, PpcEnabled, PpcEnables,
     PpcInvalid, PpcPrecision, PpcResult, PpcStatus, PPC_GENERATED_NAN,
 };
-pub use ppc_arith::{ppc_add, ppc_mul, ppc_sub};
+pub use ppc_arith::{ppc_add, ppc_div, ppc_div_sqrt_precision, ppc_mul, ppc_sqrt, ppc_sub};
 pub use round::{round_pack, Exact, Flags, Packed, Policy, Rounding};
 pub use vmx::{
     vmx_add, vmx_compare, vmx_flush, vmx_from_integer, vmx_madd, vmx_nan, vmx_nmsub, vmx_round,
@@ -125,3 +125,7 @@ mod ppc_console_tests;
 #[cfg(test)]
 #[path = "tests/ppc_arith_tests.rs"]
 mod ppc_arith_tests;
+
+#[cfg(test)]
+#[path = "tests/ppc_divsqrt_tests.rs"]
+mod ppc_divsqrt_tests;

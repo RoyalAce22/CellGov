@@ -244,22 +244,22 @@ fn a_single_arm_classes_its_result_in_single_precision() {
 /// [PPC-Book1 p:97 s:4.4.1] a disabled invalid operation sets FR and FI to zero.
 /// The `ppu_fp_status_writeback` capture holds FR = FI = 0 after an infinity operand.
 #[test]
-fn a_host_arm_clears_fr_and_fi_on_an_invalid_zero_divide_or_operand_exact_result() {
+fn a_host_arm_clears_fr_and_fi_on_an_invalid_or_operand_exact_result() {
     let run = |op, a, b| {
         let mut s = PpuState::new();
         s.set_fpscr(PPC_FPSCR_FR | PPC_FPSCR_FI | PPC_FPSCR_XX);
         s.set_fpr(1, a);
         s.set_fpr(2, b);
+        s.set_fpr(3, ONE);
         execute_fp63(&mut s, op, 0, 1, 2, 3);
         s.fpscr() & (PPC_FPSCR_FR | PPC_FPSCR_FI)
     };
-    assert_eq!(run(Fp63Op::Fdiv, INF, INF), 0);
-    assert_eq!(run(Fp63Op::Fdiv, ONE, 0), 0);
-    assert_eq!(run(Fp63Op::Fdiv, INF, TWO), 0);
-    assert_eq!(run(Fp63Op::Fdiv, 0, TWO), 0);
-    // 1 / 3: a finite result the operands do not make exact.
+    // FRA x FRC + FRB with FRC = 1.
+    assert_eq!(run(Fp63Op::Fmadd, INF, NEG | INF), 0);
+    assert_eq!(run(Fp63Op::Fmadd, INF, TWO), 0);
+    // 1 x 1 + 2^-60: a finite result the operands do not make exact.
     assert_eq!(
-        run(Fp63Op::Fdiv, ONE, 0x4008_0000_0000_0000),
+        run(Fp63Op::Fmadd, ONE, 0x3C30_0000_0000_0000),
         PPC_FPSCR_FR | PPC_FPSCR_FI
     );
 }

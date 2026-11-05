@@ -232,20 +232,9 @@ const KNOWN_CONTRADICTED: &[(&str, &str, &str)] = &[
         "the console sign-extends the converted word into FRT[0:31]",
     ),
     (
-        "fp59-wide-operand/fdivs/",
-        "f3.all",
-        "the console computes on the whole double operand",
-    ),
-    (
-        "fp59-wide-operand/fdivs/",
+        "fp59-wide-operand/fmadds/",
         "fpscr.status",
-        "the console sets the status bits of that result",
-    ),
-    ("fp59-wide-operand/fmadds/", "fpscr.status", "as above"),
-    (
-        "fpscr-ni/",
-        "f3.all",
-        "the console rounds in the mode FPSCR RN selects; CellGov rounds to nearest outside fadd, fsub and fmul",
+        "the console sets the status bits of the result it computes on the whole double operand",
     ),
     (
         "lve-other-lanes/",

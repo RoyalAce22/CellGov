@@ -1,0 +1,20 @@
+[test]
+name = "ppu_fp_divsqrt_modes"
+
+# A hardware probe of fdiv, fdivs, fsqrt and fsqrts in each FPSCR
+# rounding mode: their special operands, the single-precision forms on
+# operands that single format cannot hold, overflow and tiny results,
+# FR and FI before an exact result, and a NaN in a reserved field. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u32 words, as ppu/main.c lists: 3 header words (failed
+# step, its code, case count), then 11 words per case (operation, FPSCR
+# before, FRA, FRB, FRC and FRT as high/low pairs, FPSCR after): 85
+# cases, 938 words, 3752 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 3752 },
+]
+
+[expect]
+outcome = "completed"
