@@ -1,0 +1,1041 @@
+{
+  "schema": 1,
+  "titles": [
+    {
+      "content_id": "BCES00664",
+      "images": 2,
+      "words": 2038212,
+      "unread": 0
+    },
+    {
+      "content_id": "BCUS98103",
+      "images": 1,
+      "words": 1943240,
+      "unread": 0
+    },
+    {
+      "content_id": "NPUA80001",
+      "images": 1,
+      "words": 2104598,
+      "unread": 0
+    },
+    {
+      "content_id": "NPUA80068",
+      "images": 1,
+      "words": 1734016,
+      "unread": 0
+    },
+    {
+      "content_id": "VSH",
+      "skipped": "ships inside the firmware",
+      "images": 0,
+      "words": 0,
+      "unread": 0
+    }
+  ],
+  "units": {
+    "instruction:add": {
+      "implemented": 84604,
+      "not_recognized": 0
+    },
+    "instruction:adde": {
+      "implemented": 70,
+      "not_recognized": 0
+    },
+    "instruction:addi": {
+      "implemented": 859238,
+      "not_recognized": 0
+    },
+    "instruction:addic": {
+      "implemented": 42,
+      "not_recognized": 0
+    },
+    "instruction:addic.": {
+      "implemented": 213,
+      "not_recognized": 0
+    },
+    "instruction:addis": {
+      "implemented": 26811,
+      "not_recognized": 0
+    },
+    "instruction:addze": {
+      "implemented": 1091,
+      "not_recognized": 0
+    },
+    "instruction:and": {
+      "implemented": 7679,
+      "not_recognized": 0
+    },
+    "instruction:andc": {
+      "implemented": 487,
+      "not_recognized": 0
+    },
+    "instruction:andi.": {
+      "implemented": 19,
+      "not_recognized": 0
+    },
+    "instruction:b": {
+      "implemented": 481148,
+      "not_recognized": 0
+    },
+    "instruction:bc": {
+      "implemented": 473848,
+      "not_recognized": 0
+    },
+    "instruction:bcctr": {
+      "implemented": 45250,
+      "not_recognized": 0
+    },
+    "instruction:bclr": {
+      "implemented": 99068,
+      "not_recognized": 0
+    },
+    "instruction:cmp": {
+      "implemented": 82440,
+      "not_recognized": 0
+    },
+    "instruction:cmpi": {
+      "implemented": 302589,
+      "not_recognized": 0
+    },
+    "instruction:cmpl": {
+      "implemented": 30680,
+      "not_recognized": 0
+    },
+    "instruction:cmpli": {
+      "implemented": 19328,
+      "not_recognized": 0
+    },
+    "instruction:cntlzd": {
+      "implemented": 324,
+      "not_recognized": 0
+    },
+    "instruction:cntlzw": {
+      "implemented": 161,
+      "not_recognized": 0
+    },
+    "instruction:creqv": {
+      "implemented": 1,
+      "not_recognized": 0
+    },
+    "instruction:crnor": {
+      "implemented": 82,
+      "not_recognized": 0
+    },
+    "instruction:cror": {
+      "implemented": 1117,
+      "not_recognized": 0
+    },
+    "instruction:dcbst": {
+      "implemented": 16,
+      "not_recognized": 0
+    },
+    "instruction:dcbt": {
+      "implemented": 171,
+      "not_recognized": 0
+    },
+    "instruction:dcbtst": {
+      "implemented": 57,
+      "not_recognized": 0
+    },
+    "instruction:dcbz": {
+      "implemented": 11,
+      "not_recognized": 0
+    },
+    "instruction:divd": {
+      "implemented": 100,
+      "not_recognized": 0
+    },
+    "instruction:divdu": {
+      "implemented": 144,
+      "not_recognized": 0
+    },
+    "instruction:divw": {
+      "implemented": 619,
+      "not_recognized": 0
+    },
+    "instruction:divwu": {
+      "implemented": 775,
+      "not_recognized": 0
+    },
+    "instruction:eieio": {
+      "implemented": 1,
+      "not_recognized": 0
+    },
+    "instruction:extsb": {
+      "implemented": 12428,
+      "not_recognized": 0
+    },
+    "instruction:extsh": {
+      "implemented": 3373,
+      "not_recognized": 0
+    },
+    "instruction:extsw": {
+      "implemented": 52084,
+      "not_recognized": 0
+    },
+    "instruction:fabs": {
+      "implemented": 1290,
+      "not_recognized": 0
+    },
+    "instruction:fadd": {
+      "implemented": 908,
+      "not_recognized": 0
+    },
+    "instruction:fadds": {
+      "implemented": 14527,
+      "not_recognized": 0
+    },
+    "instruction:fcfid": {
+      "implemented": 7787,
+      "not_recognized": 0
+    },
+    "instruction:fcmpu": {
+      "implemented": 25359,
+      "not_recognized": 0
+    },
+    "instruction:fctid": {
+      "implemented": 13,
+      "not_recognized": 0
+    },
+    "instruction:fctidz": {
+      "implemented": 1096,
+      "not_recognized": 0
+    },
+    "instruction:fctiwz": {
+      "implemented": 2060,
+      "not_recognized": 0
+    },
+    "instruction:fdiv": {
+      "implemented": 590,
+      "not_recognized": 0
+    },
+    "instruction:fdivs": {
+      "implemented": 5176,
+      "not_recognized": 0
+    },
+    "instruction:fmadd": {
+      "implemented": 411,
+      "not_recognized": 0
+    },
+    "instruction:fmadds": {
+      "implemented": 17746,
+      "not_recognized": 0
+    },
+    "instruction:fmr": {
+      "implemented": 26949,
+      "not_recognized": 0
+    },
+    "instruction:fmsub": {
+      "implemented": 117,
+      "not_recognized": 0
+    },
+    "instruction:fmsubs": {
+      "implemented": 2986,
+      "not_recognized": 0
+    },
+    "instruction:fmul": {
+      "implemented": 605,
+      "not_recognized": 0
+    },
+    "instruction:fmuls": {
+      "implemented": 31903,
+      "not_recognized": 0
+    },
+    "instruction:fnabs": {
+      "implemented": 91,
+      "not_recognized": 0
+    },
+    "instruction:fneg": {
+      "implemented": 3373,
+      "not_recognized": 0
+    },
+    "instruction:fnmadds": {
+      "implemented": 54,
+      "not_recognized": 0
+    },
+    "instruction:fnmsub": {
+      "implemented": 232,
+      "not_recognized": 0
+    },
+    "instruction:fnmsubs": {
+      "implemented": 935,
+      "not_recognized": 0
+    },
+    "instruction:frsp": {
+      "implemented": 10251,
+      "not_recognized": 0
+    },
+    "instruction:frsqrte": {
+      "implemented": 271,
+      "not_recognized": 0
+    },
+    "instruction:fsel": {
+      "implemented": 4289,
+      "not_recognized": 0
+    },
+    "instruction:fsqrt": {
+      "implemented": 290,
+      "not_recognized": 0
+    },
+    "instruction:fsqrts": {
+      "implemented": 1656,
+      "not_recognized": 0
+    },
+    "instruction:fsub": {
+      "implemented": 590,
+      "not_recognized": 0
+    },
+    "instruction:fsubs": {
+      "implemented": 16889,
+      "not_recognized": 0
+    },
+    "instruction:isync": {
+      "implemented": 284,
+      "not_recognized": 0
+    },
+    "instruction:lbz": {
+      "implemented": 90287,
+      "not_recognized": 0
+    },
+    "instruction:lbzu": {
+      "implemented": 271,
+      "not_recognized": 0
+    },
+    "instruction:lbzx": {
+      "implemented": 462,
+      "not_recognized": 0
+    },
+    "instruction:ld": {
+      "implemented": 509163,
+      "not_recognized": 0
+    },
+    "instruction:ldarx": {
+      "implemented": 30,
+      "not_recognized": 0
+    },
+    "instruction:ldu": {
+      "implemented": 14,
+      "not_recognized": 0
+    },
+    "instruction:ldx": {
+      "implemented": 129,
+      "not_recognized": 0
+    },
+    "instruction:lfd": {
+      "implemented": 27813,
+      "not_recognized": 0
+    },
+    "instruction:lfdu": {
+      "implemented": 2,
+      "not_recognized": 0
+    },
+    "instruction:lfdx": {
+      "implemented": 6,
+      "not_recognized": 0
+    },
+    "instruction:lfs": {
+      "implemented": 144407,
+      "not_recognized": 0
+    },
+    "instruction:lfsu": {
+      "implemented": 744,
+      "not_recognized": 0
+    },
+    "instruction:lfsx": {
+      "implemented": 2076,
+      "not_recognized": 0
+    },
+    "instruction:lhz": {
+      "implemented": 19408,
+      "not_recognized": 0
+    },
+    "instruction:lhzu": {
+      "implemented": 58,
+      "not_recognized": 0
+    },
+    "instruction:lhzx": {
+      "implemented": 90,
+      "not_recognized": 0
+    },
+    "instruction:lswi": {
+      "implemented": 92,
+      "not_recognized": 0
+    },
+    "instruction:lvebx": {
+      "implemented": 97,
+      "not_recognized": 0
+    },
+    "instruction:lvehx": {
+      "implemented": 16,
+      "not_recognized": 0
+    },
+    "instruction:lvewx": {
+      "implemented": 5916,
+      "not_recognized": 0
+    },
+    "instruction:lvlx": {
+      "implemented": 1003,
+      "not_recognized": 0
+    },
+    "instruction:lvsl": {
+      "implemented": 1958,
+      "not_recognized": 0
+    },
+    "instruction:lvsr": {
+      "implemented": 502,
+      "not_recognized": 0
+    },
+    "instruction:lvx": {
+      "implemented": 67832,
+      "not_recognized": 0
+    },
+    "instruction:lwa": {
+      "implemented": 482,
+      "not_recognized": 0
+    },
+    "instruction:lwarx": {
+      "implemented": 157,
+      "not_recognized": 0
+    },
+    "instruction:lwax": {
+      "implemented": 34,
+      "not_recognized": 0
+    },
+    "instruction:lwbrx": {
+      "implemented": 38,
+      "not_recognized": 0
+    },
+    "instruction:lwz": {
+      "implemented": 1056285,
+      "not_recognized": 0
+    },
+    "instruction:lwzu": {
+      "implemented": 2708,
+      "not_recognized": 0
+    },
+    "instruction:lwzx": {
+      "implemented": 3932,
+      "not_recognized": 0
+    },
+    "instruction:mcrf": {
+      "implemented": 81,
+      "not_recognized": 0
+    },
+    "instruction:mfcr": {
+      "implemented": 1410,
+      "not_recognized": 0
+    },
+    "instruction:mffs": {
+      "implemented": 5,
+      "not_recognized": 0
+    },
+    "instruction:mfocrf": {
+      "implemented": 1139,
+      "not_recognized": 0
+    },
+    "instruction:mfspr": {
+      "implemented": 60678,
+      "not_recognized": 0
+    },
+    "instruction:mftb": {
+      "implemented": 123,
+      "not_recognized": 0
+    },
+    "instruction:mtcrf": {
+      "implemented": 5,
+      "not_recognized": 0
+    },
+    "instruction:mtfsb1": {
+      "implemented": 10,
+      "not_recognized": 0
+    },
+    "instruction:mtfsf": {
+      "implemented": 5,
+      "not_recognized": 0
+    },
+    "instruction:mtocrf": {
+      "implemented": 2101,
+      "not_recognized": 0
+    },
+    "instruction:mtspr": {
+      "implemented": 130255,
+      "not_recognized": 0
+    },
+    "instruction:mulhd": {
+      "implemented": 74,
+      "not_recognized": 0
+    },
+    "instruction:mulhdu": {
+      "implemented": 74,
+      "not_recognized": 0
+    },
+    "instruction:mulhw": {
+      "implemented": 629,
+      "not_recognized": 0
+    },
+    "instruction:mulhwu": {
+      "implemented": 730,
+      "not_recognized": 0
+    },
+    "instruction:mulld": {
+      "implemented": 473,
+      "not_recognized": 0
+    },
+    "instruction:mulli": {
+      "implemented": 3418,
+      "not_recognized": 0
+    },
+    "instruction:mullw": {
+      "implemented": 5033,
+      "not_recognized": 0
+    },
+    "instruction:neg": {
+      "implemented": 2016,
+      "not_recognized": 0
+    },
+    "instruction:nor": {
+      "implemented": 2541,
+      "not_recognized": 0
+    },
+    "instruction:or": {
+      "implemented": 462005,
+      "not_recognized": 0
+    },
+    "instruction:orc": {
+      "implemented": 100,
+      "not_recognized": 0
+    },
+    "instruction:ori": {
+      "implemented": 332238,
+      "not_recognized": 0
+    },
+    "instruction:oris": {
+      "implemented": 5444,
+      "not_recognized": 0
+    },
+    "instruction:rldcl": {
+      "implemented": 8,
+      "not_recognized": 0
+    },
+    "instruction:rldic": {
+      "implemented": 2337,
+      "not_recognized": 0
+    },
+    "instruction:rldicl": {
+      "implemented": 461049,
+      "not_recognized": 0
+    },
+    "instruction:rldicr": {
+      "implemented": 6377,
+      "not_recognized": 0
+    },
+    "instruction:rldimi": {
+      "implemented": 27443,
+      "not_recognized": 0
+    },
+    "instruction:rlwimi": {
+      "implemented": 836,
+      "not_recognized": 0
+    },
+    "instruction:rlwinm": {
+      "implemented": 110346,
+      "not_recognized": 0
+    },
+    "instruction:rlwnm": {
+      "implemented": 124,
+      "not_recognized": 0
+    },
+    "instruction:sc": {
+      "implemented": 1425,
+      "not_recognized": 0
+    },
+    "instruction:sld": {
+      "implemented": 463,
+      "not_recognized": 0
+    },
+    "instruction:slw": {
+      "implemented": 2010,
+      "not_recognized": 0
+    },
+    "instruction:srad": {
+      "implemented": 3,
+      "not_recognized": 0
+    },
+    "instruction:sradi": {
+      "implemented": 3051,
+      "not_recognized": 0
+    },
+    "instruction:sraw": {
+      "implemented": 520,
+      "not_recognized": 0
+    },
+    "instruction:srawi": {
+      "implemented": 11613,
+      "not_recognized": 0
+    },
+    "instruction:srd": {
+      "implemented": 163,
+      "not_recognized": 0
+    },
+    "instruction:srw": {
+      "implemented": 456,
+      "not_recognized": 0
+    },
+    "instruction:stb": {
+      "implemented": 93031,
+      "not_recognized": 0
+    },
+    "instruction:stbu": {
+      "implemented": 271,
+      "not_recognized": 0
+    },
+    "instruction:stbx": {
+      "implemented": 225,
+      "not_recognized": 0
+    },
+    "instruction:std": {
+      "implemented": 413483,
+      "not_recognized": 0
+    },
+    "instruction:stdcx.": {
+      "implemented": 30,
+      "not_recognized": 0
+    },
+    "instruction:stdu": {
+      "implemented": 60259,
+      "not_recognized": 0
+    },
+    "instruction:stdux": {
+      "implemented": 240,
+      "not_recognized": 0
+    },
+    "instruction:stdx": {
+      "implemented": 127,
+      "not_recognized": 0
+    },
+    "instruction:stfd": {
+      "implemented": 17678,
+      "not_recognized": 0
+    },
+    "instruction:stfdx": {
+      "implemented": 2,
+      "not_recognized": 0
+    },
+    "instruction:stfiwx": {
+      "implemented": 1655,
+      "not_recognized": 0
+    },
+    "instruction:stfs": {
+      "implemented": 90248,
+      "not_recognized": 0
+    },
+    "instruction:stfsu": {
+      "implemented": 200,
+      "not_recognized": 0
+    },
+    "instruction:stfsx": {
+      "implemented": 403,
+      "not_recognized": 0
+    },
+    "instruction:sth": {
+      "implemented": 13838,
+      "not_recognized": 0
+    },
+    "instruction:sthu": {
+      "implemented": 3,
+      "not_recognized": 0
+    },
+    "instruction:sthx": {
+      "implemented": 31,
+      "not_recognized": 0
+    },
+    "instruction:stswi": {
+      "implemented": 92,
+      "not_recognized": 0
+    },
+    "instruction:stvebx": {
+      "implemented": 5,
+      "not_recognized": 0
+    },
+    "instruction:stvewx": {
+      "implemented": 1725,
+      "not_recognized": 0
+    },
+    "instruction:stvx": {
+      "implemented": 52290,
+      "not_recognized": 0
+    },
+    "instruction:stw": {
+      "implemented": 485649,
+      "not_recognized": 0
+    },
+    "instruction:stwbrx": {
+      "implemented": 4,
+      "not_recognized": 0
+    },
+    "instruction:stwcx.": {
+      "implemented": 157,
+      "not_recognized": 0
+    },
+    "instruction:stwu": {
+      "implemented": 902,
+      "not_recognized": 0
+    },
+    "instruction:stwx": {
+      "implemented": 1494,
+      "not_recognized": 0
+    },
+    "instruction:subf": {
+      "implemented": 27596,
+      "not_recognized": 0
+    },
+    "instruction:subfc": {
+      "implemented": 144,
+      "not_recognized": 0
+    },
+    "instruction:subfe": {
+      "implemented": 174,
+      "not_recognized": 0
+    },
+    "instruction:subfic": {
+      "implemented": 2096,
+      "not_recognized": 0
+    },
+    "instruction:sync": {
+      "implemented": 211,
+      "not_recognized": 0
+    },
+    "instruction:tw": {
+      "implemented": 2577,
+      "not_recognized": 0
+    },
+    "instruction:vaddfp": {
+      "implemented": 13202,
+      "not_recognized": 0
+    },
+    "instruction:vaddubm": {
+      "implemented": 210,
+      "not_recognized": 0
+    },
+    "instruction:vadduhm": {
+      "implemented": 63,
+      "not_recognized": 0
+    },
+    "instruction:vadduwm": {
+      "implemented": 535,
+      "not_recognized": 0
+    },
+    "instruction:vand": {
+      "implemented": 4464,
+      "not_recognized": 0
+    },
+    "instruction:vandc": {
+      "implemented": 607,
+      "not_recognized": 0
+    },
+    "instruction:vcfsx": {
+      "implemented": 1869,
+      "not_recognized": 0
+    },
+    "instruction:vcfux": {
+      "implemented": 180,
+      "not_recognized": 0
+    },
+    "instruction:vcmpbfp": {
+      "implemented": 192,
+      "not_recognized": 0
+    },
+    "instruction:vcmpeqfp": {
+      "implemented": 995,
+      "not_recognized": 0
+    },
+    "instruction:vcmpequb": {
+      "implemented": 37,
+      "not_recognized": 0
+    },
+    "instruction:vcmpequh": {
+      "implemented": 14,
+      "not_recognized": 0
+    },
+    "instruction:vcmpequw": {
+      "implemented": 1113,
+      "not_recognized": 0
+    },
+    "instruction:vcmpgefp": {
+      "implemented": 375,
+      "not_recognized": 0
+    },
+    "instruction:vcmpgtfp": {
+      "implemented": 2231,
+      "not_recognized": 0
+    },
+    "instruction:vcmpgtsw": {
+      "implemented": 31,
+      "not_recognized": 0
+    },
+    "instruction:vcmpgtub": {
+      "implemented": 4,
+      "not_recognized": 0
+    },
+    "instruction:vcmpgtuw": {
+      "implemented": 55,
+      "not_recognized": 0
+    },
+    "instruction:vctsxs": {
+      "implemented": 284,
+      "not_recognized": 0
+    },
+    "instruction:vctuxs": {
+      "implemented": 30,
+      "not_recognized": 0
+    },
+    "instruction:vexptefp": {
+      "implemented": 3,
+      "not_recognized": 0
+    },
+    "instruction:vlogefp": {
+      "implemented": 3,
+      "not_recognized": 0
+    },
+    "instruction:vmaddfp": {
+      "implemented": 41010,
+      "not_recognized": 0
+    },
+    "instruction:vmaxfp": {
+      "implemented": 516,
+      "not_recognized": 0
+    },
+    "instruction:vmaxsw": {
+      "implemented": 26,
+      "not_recognized": 0
+    },
+    "instruction:vmaxuw": {
+      "implemented": 4,
+      "not_recognized": 0
+    },
+    "instruction:vminfp": {
+      "implemented": 627,
+      "not_recognized": 0
+    },
+    "instruction:vminsw": {
+      "implemented": 25,
+      "not_recognized": 0
+    },
+    "instruction:vminuw": {
+      "implemented": 5,
+      "not_recognized": 0
+    },
+    "instruction:vmrghh": {
+      "implemented": 617,
+      "not_recognized": 0
+    },
+    "instruction:vmrghw": {
+      "implemented": 1733,
+      "not_recognized": 0
+    },
+    "instruction:vmrglw": {
+      "implemented": 1578,
+      "not_recognized": 0
+    },
+    "instruction:vnmsubfp": {
+      "implemented": 5259,
+      "not_recognized": 0
+    },
+    "instruction:vnor": {
+      "implemented": 36,
+      "not_recognized": 0
+    },
+    "instruction:vor": {
+      "implemented": 7652,
+      "not_recognized": 0
+    },
+    "instruction:vperm": {
+      "implemented": 9691,
+      "not_recognized": 0
+    },
+    "instruction:vpkuhum": {
+      "implemented": 1,
+      "not_recognized": 0
+    },
+    "instruction:vpkuwum": {
+      "implemented": 8,
+      "not_recognized": 0
+    },
+    "instruction:vrefp": {
+      "implemented": 467,
+      "not_recognized": 0
+    },
+    "instruction:vrfim": {
+      "implemented": 1,
+      "not_recognized": 0
+    },
+    "instruction:vrfip": {
+      "implemented": 2,
+      "not_recognized": 0
+    },
+    "instruction:vrfiz": {
+      "implemented": 2,
+      "not_recognized": 0
+    },
+    "instruction:vrlh": {
+      "implemented": 34,
+      "not_recognized": 0
+    },
+    "instruction:vrlw": {
+      "implemented": 154,
+      "not_recognized": 0
+    },
+    "instruction:vrsqrtefp": {
+      "implemented": 2732,
+      "not_recognized": 0
+    },
+    "instruction:vsel": {
+      "implemented": 9654,
+      "not_recognized": 0
+    },
+    "instruction:vsl": {
+      "implemented": 61,
+      "not_recognized": 0
+    },
+    "instruction:vslb": {
+      "implemented": 728,
+      "not_recognized": 0
+    },
+    "instruction:vsldoi": {
+      "implemented": 14110,
+      "not_recognized": 0
+    },
+    "instruction:vslh": {
+      "implemented": 4,
+      "not_recognized": 0
+    },
+    "instruction:vslo": {
+      "implemented": 87,
+      "not_recognized": 0
+    },
+    "instruction:vslw": {
+      "implemented": 513,
+      "not_recognized": 0
+    },
+    "instruction:vspltb": {
+      "implemented": 249,
+      "not_recognized": 0
+    },
+    "instruction:vsplth": {
+      "implemented": 75,
+      "not_recognized": 0
+    },
+    "instruction:vspltisb": {
+      "implemented": 294,
+      "not_recognized": 0
+    },
+    "instruction:vspltish": {
+      "implemented": 999,
+      "not_recognized": 0
+    },
+    "instruction:vspltisw": {
+      "implemented": 3007,
+      "not_recognized": 0
+    },
+    "instruction:vspltw": {
+      "implemented": 35525,
+      "not_recognized": 0
+    },
+    "instruction:vsr": {
+      "implemented": 26,
+      "not_recognized": 0
+    },
+    "instruction:vsrab": {
+      "implemented": 28,
+      "not_recognized": 0
+    },
+    "instruction:vsraw": {
+      "implemented": 76,
+      "not_recognized": 0
+    },
+    "instruction:vsrb": {
+      "implemented": 42,
+      "not_recognized": 0
+    },
+    "instruction:vsro": {
+      "implemented": 125,
+      "not_recognized": 0
+    },
+    "instruction:vsrw": {
+      "implemented": 142,
+      "not_recognized": 0
+    },
+    "instruction:vsubcuw": {
+      "implemented": 8,
+      "not_recognized": 0
+    },
+    "instruction:vsubfp": {
+      "implemented": 5869,
+      "not_recognized": 0
+    },
+    "instruction:vsububm": {
+      "implemented": 45,
+      "not_recognized": 0
+    },
+    "instruction:vsubuhm": {
+      "implemented": 61,
+      "not_recognized": 0
+    },
+    "instruction:vsubuwm": {
+      "implemented": 82,
+      "not_recognized": 0
+    },
+    "instruction:vsum2sws": {
+      "implemented": 1,
+      "not_recognized": 0
+    },
+    "instruction:vsum4sbs": {
+      "implemented": 2,
+      "not_recognized": 0
+    },
+    "instruction:vsum4ubs": {
+      "implemented": 20,
+      "not_recognized": 0
+    },
+    "instruction:vsumsws": {
+      "implemented": 3,
+      "not_recognized": 0
+    },
+    "instruction:vupkhsh": {
+      "implemented": 305,
+      "not_recognized": 0
+    },
+    "instruction:vupklsh": {
+      "implemented": 262,
+      "not_recognized": 0
+    },
+    "instruction:vxor": {
+      "implemented": 7577,
+      "not_recognized": 0
+    },
+    "instruction:xor": {
+      "implemented": 9283,
+      "not_recognized": 0
+    },
+    "instruction:xori": {
+      "implemented": 2109,
+      "not_recognized": 0
+    },
+    "instruction:xoris": {
+      "implemented": 2395,
+      "not_recognized": 0
+    },
+    "ppe_unimplemented": {
+      "implemented": 0,
+      "refused": {
+        "illegal": 175
+      },
+      "not_recognized": 0
+    },
+    "unassigned_opcodes": {
+      "implemented": 0,
+      "not_recognized": 20987
+    }
+  }
+}

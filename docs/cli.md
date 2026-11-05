@@ -1665,6 +1665,63 @@ SCE-wrapped input:
   this build reads; rebuild with --features decrypt to read one.
 ```
 
+#### `cellgov dev ppu-census`
+
+Count the PPU instruction words of installed titles by architectural unit and by what CellGov does with each.
+
+```console
+$ cellgov dev ppu-census --all
+$ cellgov dev ppu-census --title flow --format json
+```
+
+```
+Usage: cellgov dev ppu-census [OPTIONS] <--all|--title <NAME>>
+```
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--all` | -- | Every title in the registry. |
+| `--title` | `NAME` | One title, by short name. |
+
+```
+Scope:
+  Every installed version of each title: the base tree and each update
+  tree. Each ELF, SELF or SPRX file in them is read; a SELF this build
+  cannot decrypt is listed as unread. Each PPU ELF found is counted once,
+  however many files hold it: the words of its executable sections, or of
+  its executable PT_LOAD segments when it has no section table. A title
+  that ships inside the firmware is skipped.
+
+Counts:
+  Each word is counted under its architectural unit, as the PPU reference
+  set names units: implemented (it decodes and CellGov runs it), refused
+  (it decodes and every execution faults, by fault class), or not
+  recognized (the decoder rejects it). --format json prints the census
+  record that dev ppu-coverage-gen reads from docs/ppu_census.json.
+
+SCE-wrapped input:
+  this build has no decrypt support: plaintext ELF / PRX only. An
+  SCE-wrapped input is refused by name, and --vfs-root names no path
+  this build reads; rebuild with --features decrypt to read one.
+```
+
+#### `cellgov dev ppu-coverage-gen`
+
+Regenerate `docs/ppu_coverage.md` from the tracked PPU evidence.
+
+```console
+$ cellgov dev ppu-coverage-gen
+```
+
+```
+Usage: cellgov dev ppu-coverage-gen [OPTIONS]
+```
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--census` | `PATH` | The census record to read. Default `docs/ppu_census.json`. |
+| `--output` | `PATH` | The coverage table to write. Default `docs/ppu_coverage.md`. |
+
 #### `cellgov dev prx-imports`
 
 Print a PRX or executable's import table.
