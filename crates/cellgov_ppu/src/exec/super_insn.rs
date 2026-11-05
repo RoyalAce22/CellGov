@@ -308,6 +308,13 @@ fn execute_pair(
                 Err(ea) => ExecuteVerdict::MemFault(ea),
             }
         }
+        // [PPC-Book1 p:69 s:3.3.11 Extend Sign Word] extsw: RA <- EXTS((RS)32:63).
+        // [PPC-Book1 p:25 s:2.4 Branch Conditional to Link Register] bclr with BO 1z1zz: NIA <- LR[0:61] || 0b00.
+        FusedPair::ExtswBlr { ra, rs, .. } => {
+            state.set_gpr(ra as usize, state.gpr[rs as usize] as i32 as i64 as u64);
+            state.pc = state.lr() & !3;
+            ExecuteVerdict::Branch
+        }
         // [PPC-Book1 p:67 s:3.3.11 OR] or: RA <- (RS) | (RB).
         // [PPC-Book1 p:52 s:3.3.8 Add] add: RT <- (RA) + (RB), read after the or wrote its RA.
         FusedPair::OrAdd {

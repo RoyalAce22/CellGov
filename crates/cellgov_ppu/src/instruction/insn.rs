@@ -1824,6 +1824,14 @@ pub enum FusedPair {
         bf: u8,
         cmp_ra: u8,
     },
+    /// `extsw rA, rS` with Rc = 0, followed by a branch-always `bclr`
+    /// (the quickened `blr`).
+    ExtswBlr {
+        ra: u8,
+        rs: u8,
+        bo: u8,
+        bi: u8,
+    },
     /// `or rA, rS, rB` (or its quickened `mr`) followed by
     /// `add rT, rA2, rB2`. Neither half sets Rc, and the `add` has OE = 0.
     OrAdd {

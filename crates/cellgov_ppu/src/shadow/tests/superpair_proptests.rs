@@ -211,6 +211,17 @@ fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
                 )
             }
         ),
+        // The shadow quickens a bclr to Blr only when BO is 1z1zz.
+        (
+            reg(),
+            reg(),
+            prop::sample::select(vec![20u8, 21, 22, 23, 28, 29, 30, 31]),
+            reg()
+        )
+            .prop_map(|(ra, rs, bo, bi)| (
+                PpuInstruction::Extsw { ra, rs, rc: false },
+                PpuInstruction::Blr { bo, bi },
+            )),
     ]
 }
 
@@ -291,7 +302,7 @@ fn aim_compare(
 }
 
 proptest! {
-    // Six of the nineteen arms are compares that need an aimed
+    // Six of the twenty arms are compares that need an aimed
     // operand to show an off-by-one. Four times the default count
     // makes one such case near certain per run.
     #![proptest_config(ProptestConfig::with_cases(1024))]

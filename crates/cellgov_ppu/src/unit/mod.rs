@@ -106,6 +106,10 @@ mod fused_ld_provisional_tests;
 mod fused_lbzu_cmpwi_tests;
 
 #[cfg(test)]
+#[path = "tests/fused_extsw_blr_tests.rs"]
+mod fused_extsw_blr_tests;
+
+#[cfg(test)]
 #[path = "tests/ld_ld_console_tests.rs"]
 mod ld_ld_console_tests;
 

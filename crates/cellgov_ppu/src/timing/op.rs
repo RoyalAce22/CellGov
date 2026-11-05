@@ -1367,6 +1367,10 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
                 update(int_load(ea_d(state, ra, offset), 1, rt).base(ra), ra),
                 cmp(bf, cmp_ra, None),
             ),
+            FusedPair::ExtswBlr { ra, rs, bo, bi } => two(
+                logical(Op::on(unit::FXU).src(gpr(rs)), ra, false),
+                branch(bo, bi, false, Target::Link, branches(state, bo, bi)),
+            ),
             FusedPair::LisOri { rt, .. } => two(fx(gpr(rt)), fx(gpr(rt)).src(gpr(rt))),
             FusedPair::OrAdd {
                 ra,

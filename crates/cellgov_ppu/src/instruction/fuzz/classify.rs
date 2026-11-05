@@ -270,7 +270,9 @@ pub(super) fn fused_effect_and_outcome(
     match kind {
         F::LwzCmpwi | F::LwzMtlr | F::LdMtlr | F::LdLd | F::LbzuCmpwi => (READ_EFFECTS, LOAD),
         F::LiStw | F::MflrStw | F::MflrStd | F::StdStd => (WRITE_EFFECTS, STORE),
-        F::CmpwiBc | F::CmpwBc | F::CmpdiBc | F::CmpdBc | F::CmplwBc => (NO_EFFECTS, BRANCH),
+        F::CmpwiBc | F::CmpwBc | F::CmpdiBc | F::CmpdBc | F::CmplwBc | F::ExtswBlr => {
+            (NO_EFFECTS, BRANCH)
+        }
         F::OrAdd | F::LisOri => (NO_EFFECTS, CONTINUE),
     }
 }

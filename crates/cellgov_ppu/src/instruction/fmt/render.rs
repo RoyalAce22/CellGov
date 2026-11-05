@@ -763,6 +763,10 @@ pub(super) fn render(
                     write!(f, "; cmpwi cr{bf}, r{cmp_ra}, 0")
                 }
             }
+            FusedPair::ExtswBlr { ra, rs, bo, bi } => {
+                op(f, "extsw", format_args!("r{ra}, r{rs}"))?;
+                write!(f, "; bclr {bo}, {bi}")
+            }
             FusedPair::OrAdd {
                 ra,
                 rs,

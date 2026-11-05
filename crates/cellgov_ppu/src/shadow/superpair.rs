@@ -134,6 +134,11 @@ fn fuse(a: PpuInstruction, b: PpuInstruction) -> Option<FusedPair> {
                 cmp_ra,
             })
         }
+        // extsw rA, rS + blr. The shadow quickens only a branch-always bclr
+        // to Blr.
+        (PpuInstruction::Extsw { ra, rs, rc: false }, PpuInstruction::Blr { bo, bi }) => {
+            Some(FusedPair::ExtswBlr { ra, rs, bo, bi })
+        }
         // or rA, rS, rB (or mr rA, rS) + add rT, rA2, rB2. Neither half sets
         // Rc, and the add has OE = 0.
         // [PPC-Book1 p:67 s:3.3.11 OR] or with RS = RA = RB is a priority hint;
@@ -371,3 +376,7 @@ mod or_add_tests;
 #[cfg(test)]
 #[path = "tests/superpair_lbzu_tests.rs"]
 mod lbzu_tests;
+
+#[cfg(test)]
+#[path = "tests/superpair_extsw_tests.rs"]
+mod extsw_tests;
