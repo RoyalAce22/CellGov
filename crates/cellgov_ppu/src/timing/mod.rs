@@ -32,3 +32,7 @@ mod priority_tests;
 #[cfg(test)]
 #[path = "tests/branch_prediction_tests.rs"]
 mod branch_prediction_tests;
+
+#[cfg(test)]
+#[path = "tests/fused_retire_tests.rs"]
+mod fused_retire_tests;

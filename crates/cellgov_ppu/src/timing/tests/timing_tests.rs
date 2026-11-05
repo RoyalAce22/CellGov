@@ -4,15 +4,16 @@ use crate::state::PpuState;
 
 /// Retire `insns` from `pc` up as straight-line code, and return the
 /// issue cycle of each op.
+///
+/// A fused pair falls through past both of its words. The `Consumed`
+/// word after the pair retires nothing.
 fn issue_all(timing: &mut PpeTiming, state: &PpuState, pc: u64, insns: &[I]) -> Vec<u64> {
     let mut cycles = Vec::new();
     for (i, insn) in insns.iter().enumerate() {
         let at = pc + 4 * i as u64;
         let (ops, n) = classify(insn, state);
-        for op in &ops[..n] {
-            cycles.push(timing.issue_cycle(at, op));
-            timing.retire(at, op, at + 4);
-        }
+        let issued = timing.retire_instruction(at, &ops[..n], at + 4 * n.max(1) as u64);
+        cycles.extend_from_slice(&issued[..n]);
     }
     cycles
 }

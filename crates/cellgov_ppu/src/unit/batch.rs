@@ -60,21 +60,6 @@ impl PpuExecutionUnit {
         InstructionCost::new(self.timing.now() - entry.cycle)
     }
 
-    /// Retires the ops of the instruction at `pc` in the issue model.
-    /// `next_pc` is the address the unit runs next.
-    ///
-    /// A fused pair's second op is the instruction at `pc + 4`.
-    fn retire_timing(&mut self, pc: u64, ops: &[crate::timing::Op], next_pc: u64) {
-        match ops {
-            [op] => self.timing.retire(pc, op, next_pc),
-            [first, second] => {
-                self.timing.retire(pc, first, pc + 4);
-                self.timing.retire(pc + 4, second, next_pc);
-            }
-            _ => {}
-        }
-    }
-
     /// Run one batch and report each dispatch to `tap`.
     ///
     /// The compiler builds one copy per tap type, so the [`NoTap`] copy
@@ -241,7 +226,7 @@ impl PpuExecutionUnit {
                     // Its records hold the state at the yield. The next
                     // batch applies the return value and the step past it.
                     self.note_fetch(step_pc);
-                    self.retire_timing(step_pc, ops, step_pc + 4);
+                    self.timing.retire_instruction(step_pc, ops, step_pc + 4);
                     if ctx.trace_per_step() {
                         self.per_step_hashes
                             .push((step_pc, self.state.state_hash()));
@@ -298,7 +283,7 @@ impl PpuExecutionUnit {
             // The unit publishes a fetch once its instruction retires, so
             // a block that ends at a fault names no text it did not run.
             self.note_fetch(step_pc);
-            self.retire_timing(step_pc, ops, self.state.pc);
+            self.timing.retire_instruction(step_pc, ops, self.state.pc);
 
             if self.profile_mode {
                 self.profile_dispatch(&insn);

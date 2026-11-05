@@ -15,10 +15,8 @@ fn run(timing: &mut PpeTiming, state: &PpuState, insns: &[I], times: usize) -> V
         for (i, insn) in insns.iter().enumerate() {
             let at = 0x1000 + 4 * i as u64;
             let (ops, n) = classify(insn, state);
-            for op in &ops[..n] {
-                cycles.push(timing.issue_cycle(at, op));
-                timing.retire(at, op, at + 4);
-            }
+            let issued = timing.retire_instruction(at, &ops[..n], at + 4 * n.max(1) as u64);
+            cycles.extend_from_slice(&issued[..n]);
         }
     }
     cycles

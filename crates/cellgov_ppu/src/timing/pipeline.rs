@@ -450,11 +450,38 @@ impl PpeTiming {
         }
     }
 
-    /// Issue `op` at `pc`.
+    /// Issue each op of the instruction at `pc`, and return its issue cycle.
+    ///
+    /// `next_pc` is the address the thread runs after the instruction. A
+    /// fused pair's second op is the instruction at `pc + 4`. The first op
+    /// has `pc + 4` as its next address, and the second has `next_pc`. A
+    /// slot with no op holds 0.
+    #[inline]
+    pub(crate) fn retire_instruction(&mut self, pc: u64, ops: &[Op], next_pc: u64) -> [u64; 2] {
+        let mut issued = [0; 2];
+        debug_assert!(
+            ops.len() <= issued.len(),
+            "an instruction cracks into at most {} ops, got {}",
+            issued.len(),
+            ops.len()
+        );
+        for (index, (op, slot)) in ops.iter().zip(&mut issued).enumerate() {
+            let at = pc.wrapping_add(4 * index as u64);
+            let next = if index + 1 == ops.len() {
+                next_pc
+            } else {
+                at.wrapping_add(4)
+            };
+            *slot = self.retire(at, op, next);
+        }
+        issued
+    }
+
+    /// Issue `op` at `pc`, and return the cycle it issues at.
     ///
     /// `next_pc` is the address the thread runs next. It gives the
     /// direction of a branch whose `taken` is `None`.
-    pub(crate) fn retire(&mut self, pc: u64, op: &Op, next_pc: u64) {
+    fn retire(&mut self, pc: u64, op: &Op, next_pc: u64) -> u64 {
         let Scheduled {
             issue: t,
             sibling,
@@ -510,11 +537,11 @@ impl PpeTiming {
             } => {
                 let taken = taken.unwrap_or(next_pc != pc.wrapping_add(4));
                 self.branch(pc, t, bo, link, target, taken, next_pc);
-                return;
+                return t;
             }
             Kind::Refetch => {
                 self.end_block(t + k::PPU_BRANCH_MISS_CYCLES);
-                return;
+                return t;
             }
             Kind::Syscall { number } => {
                 let back = t + number.map_or(
@@ -523,7 +550,7 @@ impl PpeTiming {
                 );
                 self.core.floor = self.core.floor.max(back);
                 self.end_block(back);
-                return;
+                return t;
             }
             Kind::Plain | Kind::Unpipelined(_) | Kind::Drain | Kind::VscrWrite => {}
         }
@@ -532,6 +559,7 @@ impl PpeTiming {
             let next = c.block_cycle + k::PPU_FETCH_INTERVAL_CYCLES;
             self.end_block(next);
         }
+        t
     }
 
     fn end_block(&mut self, next_block: u64) {
