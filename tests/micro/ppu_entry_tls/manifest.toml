@@ -1,0 +1,18 @@
+[test]
+name = "ppu_entry_tls"
+
+# A hardware probe: every register the main thread and a child thread
+# start with, stored before any compiled code runs on either, in an
+# image with a TLS segment. The console capture is the answer; no
+# emulator runs it.
+
+[observe]
+# A 16-byte header, the main and the child save areas of 1088 bytes
+# each, then 32 bytes of TLS words and addresses, as ppu/main.c lists:
+# 2224 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 2224 },
+]
+
+[expect]
+outcome = "completed"

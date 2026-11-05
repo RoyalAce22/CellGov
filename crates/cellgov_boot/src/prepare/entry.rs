@@ -24,22 +24,36 @@ pub(super) struct ProcessStart {
     pub tls: TlsArea,
 }
 
+/// Seed the entry registers other than r1 and the arguments in r3..r5,
+/// which the caller seeds first.
+///
+/// The `ppu_entry_state` and `ppu_entry_tls` console captures settle
+/// each value, with and without a TLS segment in the image. LR and r7
+/// on the console are addresses in the code that LV2 maps above the
+/// image and that calls the entry. CellGov does not run that code, so
+/// it leaves these 0:
+/// - LR, the return site in that code;
+/// - r7, the termination function it passes;
+/// - r10, which no document names. It is below the image's top
+///   segment and differs between the two captures.
 fn seed_process_start_registers(
     state: &mut cellgov_ppu::state::PpuState,
-    tls_info: Option<cellgov_ppu::loader::TlsInfo>,
     malloc_pagesize: u32,
     start: ProcessStart,
 ) {
     state.set_lr(0);
     state.set_gpr(6, 0);
-    // No termination function is installed for the primary entry.
-    // [CBE-Handbook p:396 s:14.3.1.2] R7 is the termination-function pointer.
+    // [CBE-Handbook p:396 s:14.3.1.2] R7 is the termination-function pointer; zero asks for no action.
     state.set_gpr(7, 0);
-    state.set_gpr(8, tls_info.map(|t| t.vaddr).unwrap_or(0));
-    state.set_gpr(9, tls_info.map(|t| t.filesz).unwrap_or(0));
-    state.set_gpr(10, tls_info.map(|t| t.memsz).unwrap_or(0));
-    state.set_gpr(11, start.entry);
+    state.set_gpr(8, start.entry);
+    state.set_gpr(9, 0);
+    state.set_gpr(10, 0);
+    state.set_gpr(11, cellgov_ps3_abi::lv2::process::PRIMARY_ENTRY_R11);
     state.set_gpr(12, malloc_pagesize as u64);
+    // The code that calls the entry keeps argv, argc and envp in these.
+    state.set_gpr(28, state.gpr[4]);
+    state.set_gpr(29, state.gpr[3]);
+    state.set_gpr(31, state.gpr[5]);
     // r13 is the PS3 PPC64 ABI TLS pointer; LV2 seeds it at process
     // creation and sys_initialize_tls does not touch it.
     state.set_gpr(13, start.tls.thread_pointer());
@@ -85,7 +99,7 @@ pub enum EntryError {
 /// argument block: the caller's guest args, or the one argument the
 /// console passes.
 ///
-/// r3..r10 follow the PS3 LV2 process-start convention; the args-block
+/// The registers follow the console's process start; the args-block
 /// layout lives in [`crate::guest_args`]. Called before the primary
 /// unit is registered so `module_start` aliases bind to the real entry
 /// state.
@@ -127,7 +141,7 @@ pub(super) fn seed_primary_entry_state(
     state.set_gpr(3, block.argc);
     state.set_gpr(4, block.argv_addr);
     state.set_gpr(5, block.envp_addr);
-    seed_process_start_registers(state, params.tls_info, params.malloc_pagesize, start);
+    seed_process_start_registers(state, params.malloc_pagesize, start);
     Ok(())
 }
 
@@ -309,3 +323,7 @@ mod shadow_choice_tests;
 #[cfg(test)]
 #[path = "tests/entry_argv_console_tests.rs"]
 mod entry_argv_console_tests;
+
+#[cfg(test)]
+#[path = "tests/entry_registers_console_tests.rs"]
+mod entry_registers_console_tests;

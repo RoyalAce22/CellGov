@@ -24,6 +24,12 @@ pub const BOOT_PROCESS_PID: u32 = 0x0100_0500;
 // and not for a vsh boot, which has no captured parent.
 pub const BOOT_PROCESS_PPID: u32 = 0x0100_0300;
 
+/// r11 at a process's primary entry.
+// The ppu_entry_state and ppu_entry_tls captures both read 0x80, one
+// image with a TLS segment and one without. No document names the
+// value.
+pub const PRIMARY_ENTRY_R11: u64 = 0x80;
+
 /// `sys_process_get_status` return value for a live process.
 // The lv2_process_queries capture reads 2 for the calling process and
 // for its parent.
