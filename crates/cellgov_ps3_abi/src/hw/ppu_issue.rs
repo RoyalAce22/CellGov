@@ -15,7 +15,7 @@
 //! replays the loops of both probes through the issue model. The
 //! documented values carry the page that states them.
 
-use crate::lv2::syscall;
+use crate::lv2::{errno, syscall};
 
 /// PPE core cycles per time-base tick.
 ///
@@ -191,7 +191,14 @@ pub const PPU_SYSCALL_ROUND_TRIP_CYCLES: u64 = 929;
 /// cycles. A call on a semaphore, event flag or mutex that writes no
 /// result takes 2161 to 2587, and `sys_ppu_thread_yield` with no other
 /// thread runnable takes 1451.
-pub const PPU_SYSCALL_ROUND_TRIPS: [(u64, u64); 14] = [
+///
+/// The `ppu_lv2_call_paths` capture times `sys_process_getpid` and
+/// `sys_memory_get_page_attribute` the same way: each loop's fastest run,
+/// less the 15 cycles the rest of that probe's loop takes beside the
+/// cheapest call's round trip.
+pub const PPU_SYSCALL_ROUND_TRIPS: [(u64, u64); 16] = [
+    (syscall::PROCESS_GETPID, 1129),
+    (syscall::MEMORY_GET_PAGE_ATTRIBUTE, 8506),
     (syscall::TIME_GET_TIMEBASE_FREQUENCY, 929),
     (syscall::TIME_GET_CURRENT_TIME, 8956),
     (syscall::MEMORY_GET_USER_MEMORY_SIZE, 8298),
@@ -219,6 +226,115 @@ pub const fn ppu_syscall_round_trip_cycles(number: u64) -> u64 {
         i += 1;
     }
     PPU_SYSCALL_ROUND_TRIP_CYCLES
+}
+
+/// The round trip of each call the `ppu_lv2_call_paths` and
+/// `ppu_lv2_call_refusals` captures time on its error path, as
+/// `(syscall number, cycles)`: each call names an object ID the kernel
+/// never issued and returns ESRCH.
+///
+/// Each entry is its loop's fastest run, less the cycles the rest of
+/// that probe's loop takes beside the cheapest call's round trip: 15 in
+/// the first capture, 13 in the second. A call that takes no result
+/// pointer refuses the ID in 1263 to 1473 cycles, about half its success
+/// path. `sys_event_flag_get` and `sys_event_flag_trywait` take 5775 and
+/// 5269, as many as a success that writes a result.
+///
+/// The second capture repeats the first's `sys_semaphore_post` loop and
+/// times it 114 cycles slower, so its three entries can sit up to that
+/// far above the first capture's.
+pub const PPU_SYSCALL_ERROR_ROUND_TRIPS: [(u64, u64); 13] = [
+    (syscall::SEMAPHORE_POST, 1269),
+    (syscall::SEMAPHORE_GET_VALUE, 1276),
+    (syscall::MUTEX_LOCK, 1358),
+    (syscall::MUTEX_UNLOCK, 1352),
+    (syscall::EVENT_FLAG_GET, 5775),
+    (syscall::EVENT_FLAG_SET, 1371),
+    (syscall::EVENT_FLAG_TRY_WAIT, 5269),
+    (syscall::EVENT_QUEUE_TRY_RECEIVE, 1309),
+    (syscall::COND_SIGNAL, 1263),
+    (syscall::EVENT_PORT_SEND, 1275),
+    (syscall::SEMAPHORE_TRY_WAIT, 1429),
+    (syscall::EVENT_FLAG_CLEAR, 1415),
+    (syscall::MUTEX_TRYLOCK, 1473),
+];
+
+/// The round trip of each call that finds its object and then refuses,
+/// from the `ppu_lv2_call_live_errors` capture, as `(syscall number,
+/// error code, cycles)`.
+///
+/// Each entry is its loop's fastest run, less the 20 cycles the rest of
+/// that probe's loop takes beside the cheapest call's round trip. A
+/// semaphore or mutex call refused after the lookup takes 2150 to 2475
+/// cycles, 4 to 112 fewer than its success path. A post of a negative
+/// count takes 2051, 422 fewer than a post that succeeds.
+/// `sys_event_flag_trywait` whose bits do not match takes 6471, as many
+/// as a call that writes a result.
+pub const PPU_SYSCALL_LIVE_ERROR_ROUND_TRIPS: [(u64, u32, u64); 7] = [
+    (syscall::SEMAPHORE_TRY_WAIT, errno::CELL_EBUSY.code, 2475),
+    (syscall::SEMAPHORE_POST, errno::CELL_EBUSY.code, 2452),
+    (syscall::SEMAPHORE_POST, errno::CELL_EINVAL.code, 2051),
+    (syscall::MUTEX_LOCK, errno::CELL_EDEADLK.code, 2298),
+    (syscall::MUTEX_TRYLOCK, errno::CELL_EDEADLK.code, 2302),
+    (syscall::MUTEX_UNLOCK, errno::CELL_EPERM.code, 2150),
+    (syscall::EVENT_FLAG_TRY_WAIT, errno::CELL_EBUSY.code, 6471),
+];
+
+/// The round trip of each call the `ppu_lv2_call_arg_refusals` capture
+/// times, as `(syscall number, error code, cycles)`: five calls refused
+/// for a null result pointer, and a mutex trylock refused because another
+/// thread holds the mutex.
+///
+/// Each entry is its loop's fastest run, less the 17 cycles the rest of
+/// that probe's loop takes beside the cheapest call's round trip. A call
+/// refused for its result pointer takes 955 to 5425 cycles fewer than its
+/// success path. The trylock takes 157 more than a trylock that succeeds,
+/// and 218 more than one refused because the caller holds the mutex.
+pub const PPU_SYSCALL_REFUSAL_ROUND_TRIPS: [(u64, u32, u64); 6] = [
+    (
+        syscall::TIME_GET_CURRENT_TIME,
+        errno::CELL_EFAULT.code,
+        3531,
+    ),
+    (
+        syscall::MEMORY_GET_USER_MEMORY_SIZE,
+        errno::CELL_EFAULT.code,
+        6433,
+    ),
+    (syscall::SEMAPHORE_GET_VALUE, errno::CELL_EFAULT.code, 4526),
+    (syscall::EVENT_FLAG_GET, errno::CELL_EFAULT.code, 4414),
+    (
+        syscall::EVENT_QUEUE_TRY_RECEIVE,
+        errno::CELL_EFAULT.code,
+        5436,
+    ),
+    (syscall::MUTEX_TRYLOCK, errno::CELL_EBUSY.code, 2520),
+];
+
+/// The round trip of the call `number` selects when it returns `code`.
+///
+/// An error with an entry in [`PPU_SYSCALL_LIVE_ERROR_ROUND_TRIPS`] or
+/// [`PPU_SYSCALL_REFUSAL_ROUND_TRIPS`] takes that entry. ESRCH takes the
+/// call's entry in [`PPU_SYSCALL_ERROR_ROUND_TRIPS`]. Any other return
+/// takes [`ppu_syscall_round_trip_cycles`]. The lookup compares the low
+/// 32 bits of `code`, because the kernel sign-extends an error into r3.
+pub fn ppu_syscall_outcome_round_trip_cycles(number: u64, code: u64) -> u64 {
+    let code = code as u32;
+    if let Some(&(_, _, cycles)) = PPU_SYSCALL_LIVE_ERROR_ROUND_TRIPS
+        .iter()
+        .chain(&PPU_SYSCALL_REFUSAL_ROUND_TRIPS)
+        .find(|&&(n, c, _)| n == number && c == code)
+    {
+        return cycles;
+    }
+    let refused_id = code == errno::CELL_ESRCH.code;
+    PPU_SYSCALL_ERROR_ROUND_TRIPS
+        .iter()
+        .find(|&&(n, _)| refused_id && n == number)
+        .map_or_else(
+            || ppu_syscall_round_trip_cycles(number),
+            |&(_, cycles)| cycles,
+        )
 }
 
 /// Eight independent `addi` and their `bdnz`, in cycles an iteration, with
@@ -621,3 +737,7 @@ pub const PPU_GLOBAL_HISTORY_BITS: u32 = 6;
 
 /// The entries of a thread's link stack.
 pub const PPU_LINK_STACK_ENTRIES: usize = 4;
+
+#[cfg(test)]
+#[path = "tests/ppu_issue_tests.rs"]
+mod tests;

@@ -1,0 +1,21 @@
+[test]
+name = "ppu_lv2_call_arg_refusals"
+
+# A hardware probe of the LV2 round trip of a call refused for a null
+# result pointer, and of a mutex trylock refused because another thread
+# holds the mutex: seven loops of one syscall each, timed with mftb. The
+# probe creates two semaphores, one event flag, one event queue, one mutex
+# and one helper thread, and destroys or joins them before it writes its
+# result. ppu/main.c's header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 512 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 512 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

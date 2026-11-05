@@ -1,0 +1,20 @@
+[test]
+name = "ppu_lv2_call_paths"
+
+# A hardware probe of the LV2 round trip on paths the uncontended-cost
+# probe did not time: thirteen loops of one syscall each, timed with
+# mftb. Ten loops name an object ID the kernel never issued, so each call
+# returns ESRCH; the probe creates no kernel object. ppu/main.c's header
+# lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 512 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 512 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

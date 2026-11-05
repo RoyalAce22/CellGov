@@ -506,6 +506,7 @@ ordinal	packet	name	source	ref	fw_from	fw_to
 350	none	sys_memory_allocate_from_container	cellgov	cellgov_ps3_abi::lv2::syscall::MEMORY_ALLOCATE_FROM_CONTAINER	none	none
 350	none	sys_memory_allocate_from_container	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 350	none	sys_memory_allocate_from_container	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_MEMORY_ALLOCATE_FROM_CONTAINER	none	none
+351	none	sys_memory_get_page_attribute	cellgov	cellgov_ps3_abi::lv2::syscall::MEMORY_GET_PAGE_ATTRIBUTE	none	none
 351	none	sys_memory_get_page_attribute	psdevwiki	https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls	none	none
 351	none	sys_memory_get_page_attribute	psl1ght	ppu/include/lv2/syscalls.h:SYSCALL_MEMORY_GET_PAGE_ATTRIBUTE	none	none
 352	none	sys_memory_get_user_memory_size	cellgov	cellgov_ps3_abi::lv2::syscall::MEMORY_GET_USER_MEMORY_SIZE	none	none

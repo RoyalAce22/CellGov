@@ -376,6 +376,8 @@ lv2_syscalls! {
     MEMORY_FREE = 349 => "sys_memory_free";
     /// `sys_memory_allocate_from_container`.
     MEMORY_ALLOCATE_FROM_CONTAINER = 350 => "sys_memory_allocate_from_container";
+    /// `sys_memory_get_page_attribute`.
+    MEMORY_GET_PAGE_ATTRIBUTE = 351 => "sys_memory_get_page_attribute";
     /// `sys_memory_get_user_memory_size`.
     MEMORY_GET_USER_MEMORY_SIZE = 352 => "sys_memory_get_user_memory_size";
 

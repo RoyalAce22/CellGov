@@ -664,6 +664,11 @@ pub(crate) fn replay_shadowed(r: &Replay) -> Option<f64> {
     replay_counted(r, 0, &PROBE_SIBLING, REPLAY_ITERATIONS, true).map(|m| m.cycles)
 }
 
+/// The loop's r3 at the exit of a [`replay`] alone.
+pub(crate) fn replay_r3(r: &Replay) -> Option<u64> {
+    replay_counted(r, 0, &PROBE_SIBLING, REPLAY_ITERATIONS, false).map(|m| m.r3)
+}
+
 /// What [`replay_measured`] times over the loop's second half.
 pub(crate) struct Measured {
     /// The loop's cycles an iteration.
@@ -671,6 +676,8 @@ pub(crate) struct Measured {
     /// The first sibling's own cycles an iteration of its loop, or `None`
     /// with no sibling or none of its iterations in the half.
     pub(crate) sibling_cycles: Option<f64>,
+    /// The loop's r3 when it exits.
+    pub(crate) r3: u64,
 }
 
 /// [`replay_beside`] at `REPLAY_ITERATIONS`, with the first sibling's
@@ -843,6 +850,7 @@ fn replay_counted(
     Some(Measured {
         cycles: (rt.registry().clock(unit).raw() - halfway) as f64 / iterations as f64,
         sibling_cycles,
+        r3: state(&rt).gpr[3],
     })
 }
 

@@ -7,7 +7,7 @@
 //! with cr4 clear, so it skips the check's two instructions, which the
 //! console runs while every call so far returned 0.
 
-use crate::console_ppu_issue_timing::{replay, Replay, Seed};
+use crate::console_ppu_issue_timing::{replay, replay_r3, Replay, Seed, ONE_LINE};
 use cellgov_ps3_abi::hw::ppu_issue::{
     ppu_syscall_round_trip_cycles, PPU_CYCLES_PER_TB_TICK, PPU_SYSCALL_ROUND_TRIPS,
     PPU_SYSCALL_ROUND_TRIP_CYCLES,
@@ -50,6 +50,9 @@ const YIELD_LOOP: usize = 3;
 /// The cycles the model's replay of the cheapest call's loop runs over
 /// the console's fastest run.
 const LOOP_GAP: f64 = 13.0;
+
+/// The first loop of [`LOOPS`] whose call names a kernel object.
+const OBJECT_LOOPS: usize = 4;
 
 /// The second loop of `sys_mutex_unlock`, a repeat of loop 11.
 const REPEAT_LOOP: usize = 13;
@@ -119,16 +122,26 @@ const CALL_LOOP: [u32; 16] = [
     0x4082_ffc4,
 ];
 
+/// The loop of `sys_time_get_current_time`.
+const TIME_LOOP: usize = 1;
+
+/// The loop of `sys_memory_get_user_memory_size`.
+const MEMORY_SIZE_LOOP: usize = 2;
+
 /// Each loop's seeds: its syscall number in r25 and the count in r31.
-/// The arguments stay zero: a replay times the round trip, and no LV2
-/// host answers the call.
-const SEEDS: [[Seed; 2]; 15] = {
-    let mut s = [[Seed::Counter(31); 2]; 15];
+/// The time and memory-size calls get result pointers in r26 and r27, as
+/// the probe passes them, so CellGov answers them 0. The other arguments
+/// stay zero, so an object call names no object.
+const SEEDS: [[Seed; 4]; 15] = {
+    let mut s = [[Seed::Counter(31); 4]; 15];
     let mut l = 0;
     while l < LOOPS.len() {
         s[l][0] = Seed::Gpr(25, LOOPS[l]);
         l += 1;
     }
+    s[TIME_LOOP][1] = Seed::Gpr(26, ONE_LINE);
+    s[TIME_LOOP][2] = Seed::Gpr(27, ONE_LINE + 8);
+    s[MEMORY_SIZE_LOOP][1] = Seed::Gpr(26, ONE_LINE);
     s
 };
 
@@ -165,7 +178,13 @@ fn each_timed_call_s_round_trip_is_its_fastest_run_less_the_loop_s_other_cycles(
         );
     }
     let mut timed: Vec<u64> = PPU_SYSCALL_ROUND_TRIPS.iter().map(|&(n, _)| n).collect();
-    let mut looped: Vec<u64> = LOOPS.to_vec();
+    // The `ppu_lv2_call_paths` console capture times `sys_process_getpid`
+    // and `sys_memory_get_page_attribute`.
+    let mut looped: Vec<u64> = [
+        &LOOPS[..],
+        &[sc::PROCESS_GETPID, sc::MEMORY_GET_PAGE_ATTRIBUTE],
+    ]
+    .concat();
     timed.sort_unstable();
     looped.sort_unstable();
     looped.dedup();
@@ -207,13 +226,28 @@ fn the_issue_model_times_each_call_loop_within_the_console_s_spread() {
         (cheapest - fastest - LOOP_GAP).abs() <= 2.0,
         "the cheapest call's loop: CellGov {cheapest:.1}, the console {fastest:.1}",
     );
-    for (l, &number) in LOOPS.iter().enumerate() {
+    // The replay's object calls name ID 0, which no object carries, so
+    // CellGov answers them ESRCH and times their error path. The console
+    // timed the success path. The table test above pins the success-path
+    // entries of those calls against the console capture.
+    for (l, &number) in LOOPS.iter().enumerate().take(OBJECT_LOOPS) {
         let (fastest, slowest) = console_cycles(&w, l);
         let cellgov = replay(&call_replay(l), 0).expect("the loop replays");
         assert!(
             (cellgov - fastest).abs() <= slowest - fastest,
             "syscall {number}, loop {l}: CellGov {cellgov:.1} cycles a call, the console \
              {fastest:.1} to {slowest:.1}",
+        );
+    }
+    // The model charges a call by its outcome, so the loops timed above
+    // must take the path the console took: each returned 0.
+    for l in [TIME_LOOP, MEMORY_SIZE_LOOP] {
+        let r3 = replay_r3(&call_replay(l)).expect("the loop replays");
+        assert_eq!(
+            r3,
+            w[32 + l],
+            "syscall {}, loop {l}: CellGov's return code against the console's",
+            LOOPS[l],
         );
     }
 }

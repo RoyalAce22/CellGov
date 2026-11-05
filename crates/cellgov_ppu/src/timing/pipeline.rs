@@ -118,6 +118,19 @@ pub(crate) struct Core {
     /// The earliest cycle, in 1/256 cycle, an outranking sibling leaves
     /// this thread's next instruction a dispatch slot at.
     gate: u64,
+    /// The LV2 call whose round trip the thread has yet to charge.
+    syscall: Option<PendingSyscall>,
+}
+
+/// An `sc` the thread retired, charged when the thread resumes after it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PendingSyscall {
+    /// The cycle the `sc` issued at.
+    issue: u64,
+    /// The syscall number.
+    number: u64,
+    /// The code the call returned, once the runtime commits it.
+    code: Option<u64>,
 }
 
 /// [`Core::divide_share`] for a thread that spends all its cycles on
@@ -279,6 +292,7 @@ impl PpeTiming {
                 operand_wait: 0,
                 interval: 0,
                 gate: 0,
+                syscall: None,
             },
             tables: Box::new(Tables {
                 caches: Caches::new(),
@@ -566,13 +580,22 @@ impl PpeTiming {
                 self.end_block(t + k::PPU_BRANCH_MISS_CYCLES);
                 return t;
             }
-            Kind::Syscall { number } => {
-                let back = t + number.map_or(
-                    k::PPU_SYSCALL_ROUND_TRIP_CYCLES,
-                    k::ppu_syscall_round_trip_cycles,
-                );
-                self.core.floor = self.core.floor.max(back);
-                self.end_block(back);
+            // An LV2 call's round trip depends on its outcome, which the
+            // runtime commits after the batch yields; the thread charges
+            // it when it resumes ([`PpeTiming::charge_syscall`]).
+            Kind::Syscall {
+                number: Some(number),
+            } => {
+                self.core.syscall = Some(PendingSyscall {
+                    issue: t,
+                    number,
+                    code: None,
+                });
+                self.end_block(t + 1);
+                return t;
+            }
+            Kind::Syscall { number: None } => {
+                self.return_from_call(t + k::PPU_SYSCALL_ROUND_TRIP_CYCLES);
                 return t;
             }
             Kind::Plain | Kind::Unpipelined(_) | Kind::Drain | Kind::VscrWrite => {}
@@ -583,6 +606,35 @@ impl PpeTiming {
             self.end_block(next);
         }
         t
+    }
+
+    /// Note the code the pending LV2 call returned.
+    pub(crate) fn note_syscall_return(&mut self, code: u64) {
+        if let Some(call) = self.core.syscall.as_mut() {
+            call.code = Some(code);
+        }
+    }
+
+    /// Charge the pending LV2 call's round trip, by its outcome: the next
+    /// instruction issues no earlier than the round trip after the `sc`.
+    /// A call with no committed return takes the round trip of its success
+    /// path.
+    pub(crate) fn charge_syscall(&mut self) {
+        let Some(call) = self.core.syscall.take() else {
+            return;
+        };
+        let trip = match call.code {
+            Some(code) => k::ppu_syscall_outcome_round_trip_cycles(call.number, code),
+            None => k::ppu_syscall_round_trip_cycles(call.number),
+        };
+        self.return_from_call(call.issue + trip);
+    }
+
+    /// Hold the next instruction until cycle `back`, when the call
+    /// returns, and fetch from there.
+    fn return_from_call(&mut self, back: u64) {
+        self.core.floor = self.core.floor.max(back);
+        self.end_block(back);
     }
 
     fn end_block(&mut self, next_block: u64) {

@@ -92,6 +92,9 @@ impl PpuExecutionUnit {
             cycle: self.timing.now(),
             timing: (max_budget > 1).then(|| self.timing.core()),
         };
+        // The round trip of the LV2 call the last batch yielded at counts
+        // toward this batch, which runs after it returns.
+        self.timing.charge_syscall();
 
         let regions = RegionTable::new(ctx.memory().region_views());
         let region_views = regions.as_slice();
@@ -251,7 +254,8 @@ impl PpuExecutionUnit {
                     // `sc` retires at the yield like any other instruction
                     // [PPC-Book1 p:26 s:2.4.2]: counted, hashed and charged.
                     // Its records hold the state at the yield. The next
-                    // batch applies the return value and the step past it.
+                    // batch applies the return value and the step past it,
+                    // and charges the call's round trip.
                     self.note_fetch(step_pc);
                     self.timing.retire_instruction(step_pc, ops, step_pc + 4);
                     if self.profile_mode {
@@ -463,6 +467,7 @@ impl PpuExecutionUnit {
         if let Some(code) = ctx.syscall_return() {
             self.state.set_gpr(3, code);
             self.state.pc += 4;
+            self.timing.note_syscall_return(code);
         }
         for &(reg, val) in ctx.register_writes() {
             if (reg as usize) < 32 {
