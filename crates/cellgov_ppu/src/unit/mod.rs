@@ -50,6 +50,10 @@ mod fused_entry_tests;
 mod top_of_address_space_tests;
 
 #[cfg(test)]
+#[path = "tests/fused_resume_invalidation_tests.rs"]
+mod fused_resume_invalidation_tests;
+
+#[cfg(test)]
 #[path = "tests/fused_entry_console_tests.rs"]
 mod fused_entry_console_tests;
 
