@@ -66,6 +66,15 @@ pub struct PpeIssuePressure {
     /// - its own `mtvscr`;
     /// - its VSU work before the fence of its own last `mtvscr` lifts.
     pub vscr_cycles: u32,
+    /// The cycles the thread's recent `mtvscr` drains add on top of [`Self::vscr_cycles`].
+    ///
+    /// A drain is the wait of an `mtvscr` for its own thread's held VSU
+    /// work. A store waits all of it. These instructions of the receiving
+    /// thread do not wait it:
+    ///
+    /// - an instruction that issues to the VSU alone;
+    /// - an instruction that does not wait [`Self::vscr_cycles`].
+    pub drain_cycles: u32,
     /// The thread's recent mean cycles an instruction that its VSU work
     /// holds the head of the shared VSU issue queue.
     ///
@@ -93,6 +102,7 @@ impl PpeIssuePressure {
         multiply_cycles: 0,
         multiply_hold_share: 0,
         vscr_cycles: 0,
+        drain_cycles: 0,
         queue_cycles: 0,
         fence_cycles: 0,
         issue_interval: 0,
@@ -107,6 +117,7 @@ impl PpeIssuePressure {
             multiply_cycles: self.multiply_cycles.max(other.multiply_cycles),
             multiply_hold_share: self.multiply_hold_share.max(other.multiply_hold_share),
             vscr_cycles: self.vscr_cycles.max(other.vscr_cycles),
+            drain_cycles: self.drain_cycles.max(other.drain_cycles),
             queue_cycles: self.queue_cycles.max(other.queue_cycles),
             fence_cycles: self.fence_cycles.max(other.fence_cycles),
             issue_interval: self.issue_interval.max(other.issue_interval),

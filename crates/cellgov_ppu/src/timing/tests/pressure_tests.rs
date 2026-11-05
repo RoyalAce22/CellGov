@@ -34,6 +34,7 @@ fn pressure(
         multiply_cycles: multiply_cycles as u32,
         multiply_hold_share,
         vscr_cycles: 0,
+        drain_cycles: 0,
         queue_cycles: 0,
         fence_cycles: 0,
         issue_interval: 0,

@@ -193,17 +193,16 @@ fn a_sibling_with_no_mtvscr_adds_no_mtvscr_stall_to_any_chain_within_the_band_of
     }
 }
 
-/// The chains the model does not yet time beside a sibling of an `mtvscr`
-/// and seven `vaddubm` (phase 3): the independent `vaddubm` and `addi`
-/// chains. On the console they take about 1.4 and 2.1 times the model's
-/// cycles.
+/// The chain the model does not yet time beside a sibling of an `mtvscr`
+/// and seven `vaddubm` (phase 3): the independent `vaddubm` chain. On the
+/// console it takes about 1.4 times the model's cycles.
 ///
-/// The test fails once a chain comes inside [`BAND`] of the console, so
+/// The test fails once the chain comes inside [`BAND`] of the console, so
 /// the chain moves into the held set.
-const FENCED_SIBLING_DIFFERENCES: [usize; 2] = [0, 3];
+const FENCED_SIBLING_DIFFERENCES: [usize; 1] = [0];
 
 #[test]
-fn the_mtvscr_and_fadd_chains_beside_fenced_vector_work_lie_within_the_band_of_the_mean_run() {
+fn the_mtvscr_addi_and_fadd_chains_beside_fenced_vector_work_lie_within_the_band_of_the_mean_run() {
     let w = console_words();
     let rows: Vec<(usize, f64, f64)> = (0..CHAINS)
         .filter(|c| !FENCED_SIBLING_DIFFERENCES.contains(c))

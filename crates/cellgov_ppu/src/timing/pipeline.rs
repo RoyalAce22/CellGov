@@ -131,6 +131,10 @@ pub(crate) struct Core {
     /// instructions, past their wait for the ops the VSU issue queue held,
     /// weighed as [`Core::divide_share`] is.
     vscr_share: u32,
+    /// The share of this thread's recent cycles in which its `mtvscr`
+    /// instructions wait for the ops the VSU issue queue holds, weighed as
+    /// [`Core::divide_share`] is.
+    drain_share: u32,
     /// This thread's recent mean wait past its in-order floor, in 1/256
     /// cycle, over its other instructions: a wait for operands or for a
     /// busy unit. Each instruction weighs one in
@@ -344,6 +348,7 @@ impl PpeTiming {
                 divide_share: 0,
                 alone_share: 0,
                 vscr_share: 0,
+                drain_share: 0,
                 operand_wait: 0,
                 queue_wait: 0,
                 fence_wait: 0,
@@ -415,6 +420,13 @@ impl PpeTiming {
                 share(k::PPU_SMT_MTVSCR_STALL_CYCLES, c.vscr_share),
                 k::PPU_SMT_MTVSCR_STALL_CYCLES,
             ),
+            drain_cycles: {
+                let (num, den) = k::PPU_SMT_MTVSCR_DRAIN_STALL_SHARE;
+                whole(
+                    share(k::PPU_SMT_MTVSCR_STALL_CYCLES, c.drain_share) * num / den,
+                    k::PPU_SMT_MTVSCR_STALL_CYCLES,
+                )
+            },
             queue_cycles: whole(u64::from(c.queue_wait), cap),
             fence_cycles: whole(u64::from(c.fence_wait), cap),
             issue_interval: c.interval,
@@ -1041,12 +1053,22 @@ fn sibling_stall(op: &Op, s: &PpeIssuePressure, own_vscr: bool) -> u64 {
     if own_vscr {
         return stalled;
     }
+    // A VSU instruction waits for the sibling's held ops at the queue head
+    // ([`PpeIssuePressure::fence_cycles`]), so only the other instructions
+    // wait the sibling's drain at IS2. A store waits all of the drain and
+    // only a share of the `mtvscr` stall (the `ppu_issue_vscr_smt_drain`
+    // capture).
+    let drain = if issues_to_vsu(op) {
+        0
+    } else {
+        u64::from(s.drain_cycles)
+    };
     let vscr = if matches!(op.kind, Kind::Store { .. }) {
         let (num, den) = k::PPU_SMT_MTVSCR_STORE_STALL_SHARE;
         u64::from(s.vscr_cycles) * num / den
     } else {
         u64::from(s.vscr_cycles)
-    };
+    } + drain;
     stalled.max(vscr)
 }
 
@@ -1290,12 +1312,17 @@ fn note_pressure(c: &mut Core, op: &Op, own: u64, queued: u64, head: (u64, u64))
     c.divide_share = weigh(c.divide_share, own, divide);
     c.alone_share = weigh(c.alone_share, own, alone);
     // An `mtvscr` that drains its own thread's held vector work leaves the
-    // sibling its issue slots: in the `ppu_issue_vscr_smt` capture a
-    // sibling of an `mtvscr` and seven `vaddubm` slows a `vaddubm` chain
-    // from 17.9 to 61.4 cycles, and one of back-to-back `mtvscr` to 220.
+    // sibling most of its issue slots, so the drain counts in a share of
+    // its own (`PPU_SMT_MTVSCR_DRAIN_STALL_SHARE`). In the
+    // `ppu_issue_vscr_smt` capture a sibling of an `mtvscr` and seven
+    // `vaddubm` slows a `vaddubm` chain from 17.9 to 61.4 cycles, and one
+    // of back-to-back `mtvscr` to 220.
     let queued = queued.min(own);
+    let vscr = op.kind == Kind::VscrWrite;
     c.vscr_share = weigh(c.vscr_share, queued, false);
-    c.vscr_share = weigh(c.vscr_share, own - queued, op.kind == Kind::VscrWrite);
+    c.vscr_share = weigh(c.vscr_share, own - queued, vscr);
+    c.drain_share = weigh(c.drain_share, own - queued, false);
+    c.drain_share = weigh(c.drain_share, queued, vscr);
     if divide || alone {
         return;
     }

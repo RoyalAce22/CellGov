@@ -487,6 +487,21 @@ pub const PPU_SMT_MTVSCR_STALL_CYCLES: u64 = 22;
 /// of a load's 20.3.
 pub const PPU_SMT_MTVSCR_STORE_STALL_SHARE: (u64, u64) = (1, 2);
 
+/// The share of [`PPU_SMT_MTVSCR_STALL_CYCLES`], as a fraction numerator
+/// over denominator, that a sibling's `mtvscr` adds for each of its recent
+/// cycles in which it waits for its own held VSU work.
+///
+/// The `ppu_issue_vscr_smt` capture fixes the share: beside a sibling of an
+/// `mtvscr` and seven `vaddubm`, 16 independent `addi` take 98.79 cycles
+/// an iteration on the mean of five runs. With a quarter the model gives
+/// 102, and with none 47.
+///
+/// A store waits all of this share. In the `ppu_issue_vscr_smt_drain`
+/// capture, 8 `stw` beside that sibling take 47.8 cycles an iteration on
+/// the mean of five runs. The model gives 52.8 with all of the share, and
+/// 30.7 with [`PPU_SMT_MTVSCR_STORE_STALL_SHARE`] of it.
+pub const PPU_SMT_MTVSCR_DRAIN_STALL_SHARE: (u64, u64) = (1, 4);
+
 /// The share of a sibling's mean wait past its in-order floor, for its
 /// operands or a busy unit, as a fraction numerator over denominator,
 /// that it adds to each of a thread's instructions, up to
