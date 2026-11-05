@@ -900,6 +900,7 @@ Usage: cellgov boot run [OPTIONS] <--title <NAME>|--content-id <ID>|--title-mani
 | `--save-state-trace` | `PATH` | Write the run's state trace here. |
 | `--save-spu-local-store` | `PATH` | Write one SPU unit's local store and PC here when the run stops. |
 | `--spu-unit` | `ID` | The SPU unit --save-spu-local-store captures, when the run holds several. |
+| `--save-operand-profile` | `PATH` | Count every retired PPU instruction by its operand classes, fused halves included, and write the ranking JSON here. |
 | `--guest-arg` | `VALUE` | One guest argv entry; repeat for more. Values may spell a flag. |
 | `--ppu-shadow` | `PASSES` | The predecode passes of the primary PPU thread's instruction shadow. Every choice must run the guest the same way. One of `off`, `quickened`, `fused`. Default `fused`. |
 | `--no-trivial-commit` | -- | Commit every step through the full commit path. The guest must run the same way. |
