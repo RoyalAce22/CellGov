@@ -22,6 +22,8 @@ mod console_ppu_int_loads_stores;
 mod console_ppu_issue_chain;
 mod console_ppu_issue_divide_forms;
 mod console_ppu_issue_divide_overflow;
+mod console_ppu_issue_fp_store_drain;
+mod console_ppu_issue_fp_store_vscr;
 mod console_ppu_issue_layout;
 mod console_ppu_issue_lha_place;
 mod console_ppu_issue_line_cross;

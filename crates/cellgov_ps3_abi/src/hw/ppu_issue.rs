@@ -616,6 +616,26 @@ pub const PPU_LOAD_FX_USE_CYCLES: u64 = 2;
 /// [CBE-Handbook p:720 s:A.1.2] `lfs lfsx lfd lfdx`: latency 1.
 pub const PPU_FP_LOAD_LATENCY_CYCLES: u64 = 1;
 
+/// The cycles from the cycle a floating-point store runs in the FPU to
+/// the cycle its data reaches the store queue.
+///
+/// [CBE-Handbook p:720 s:A.1.2] `stfs stfsx stfd stfdx`: dispatched to
+/// both the FPU and the LSU.
+///
+/// In the `ppu_issue_vscr_mem` and `ppu_issue_vscr_mem_forms` captures,
+/// a loop of an `mtvscr` and an `stfd`, `stfs` or `stfiwx` takes 70.62 to
+/// 71.34 cycles an iteration. That is 11.1 to 11.8 more than the 59.55
+/// with an `stvx`. The `mtvscr` waits for the older FP store's data.
+pub const PPU_FP_STORE_DATA_CYCLES: u64 = 13;
+
+/// The cycles from the cycle a floating-point store runs in the FPU to
+/// the cycle the store completes, for a drain that does not use the VSU.
+///
+/// In the `ppu_issue_fp_store_drain` capture, a `sync`, `lwsync`, `isync`
+/// or `sc` after an `stfd` takes 19 to 23 cycles an iteration more than
+/// after an `std`. An `mfvscr` takes 13 more.
+pub const PPU_FP_STORE_COMPLETE_CYCLES: u64 = 24;
+
 /// The cycles a double-precision divide takes and holds the
 /// floating-point unit.
 ///

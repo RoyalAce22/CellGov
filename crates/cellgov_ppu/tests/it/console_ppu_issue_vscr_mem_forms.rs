@@ -77,25 +77,20 @@ fn cellgov_cycles(k: usize) -> f64 {
     replay(&r, 0).expect("the loop replays")
 }
 
-/// The loops of an `mtvscr` and then an `lvsl`, an `lvebx`, an `lvlx` or
-/// an `lfdu`.
-const FENCED_HELD: [usize; 4] = [1, 3, 5, 13];
+/// The loops of an `mtvscr` and then an `lvsl`, an `lvebx`, an `lvlx`, an
+/// `stfs`, an `lfdu` or an `stfiwx`.
+const FENCED_HELD: [usize; 6] = [1, 3, 5, 11, 13, 15];
 
 /// The loops of an `mtvscr` and then an `stvebx` or an `lfs`, which the
 /// console holds about five cycles past the fence.
 const FENCED_LONGER: [usize; 2] = [7, 9];
-
-/// The loops of an `mtvscr` and then an `stfs` or an `stfiwx`, which the
-/// console holds about thirteen cycles past the fence, as it does an
-/// `stfd`.
-const FENCED_FP_STORES: [usize; 2] = [11, 15];
 
 /// The largest share of a fenced loop's fastest console run the model may
 /// fall short by: the `lvlx` loop falls 3.8% short.
 const GAP: f64 = 0.04;
 
 #[test]
-fn an_mtvscr_holds_lvsl_lvebx_lvlx_and_lfdu_after_it_within_the_gap() {
+fn an_mtvscr_holds_lvsl_lvebx_lvlx_lfdu_stfs_and_stfiwx_after_it_within_the_gap() {
     let w = console_words();
     let rows: Vec<(usize, f64, f64)> = FENCED_HELD
         .iter()
@@ -110,12 +105,12 @@ fn an_mtvscr_holds_lvsl_lvebx_lvlx_and_lfdu_after_it_within_the_gap() {
     }
 }
 
-/// The model holds the `FENCED_LONGER` and `FENCED_FP_STORES` loops at the
-/// fence and no longer, as it holds the `lvsl` loop. The console holds
-/// them longer. The test fails when the model drops the fence for them or
-/// when a difference closes. Then move that loop into `FENCED_HELD`.
+/// The model holds the `FENCED_LONGER` loops at the fence and no longer,
+/// as it holds the `lvsl` loop. The console holds them longer. The test
+/// fails when the model drops the fence for them or when a difference
+/// closes. Then move that loop into `FENCED_HELD`.
 #[test]
-fn the_fenced_stvebx_lfs_stfs_and_stfiwx_are_known_differences() {
+fn the_fenced_stvebx_and_lfs_are_known_differences() {
     let w = console_words();
     let lvsl = console_cycles(&w, 1);
     let check = |k: usize, short_by: f64| {
@@ -133,8 +128,5 @@ fn the_fenced_stvebx_lfs_stfs_and_stfiwx_are_known_differences() {
     };
     for k in FENCED_LONGER {
         check(k, 0.06);
-    }
-    for k in FENCED_FP_STORES {
-        check(k, 0.15);
     }
 }

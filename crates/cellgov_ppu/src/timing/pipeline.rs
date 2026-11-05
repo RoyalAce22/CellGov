@@ -36,7 +36,7 @@
 //! [`PPU_FETCH_AHEAD_INSTRUCTIONS`]: k::PPU_FETCH_AHEAD_INSTRUCTIONS
 
 use super::cache::{Caches, Level};
-use super::op::{unit, Kind, LoadClass, Op, Target, NO_REG, REGS};
+use super::op::{is_fpr, unit, Kind, LoadClass, Op, Target, NO_REG, REGS};
 use super::predictor::Predictor;
 use cellgov_exec::PpeIssuePressure;
 use cellgov_ps3_abi::hw::ppc_isa::PPC_BO_ALWAYS;
@@ -110,6 +110,15 @@ pub(crate) struct Core {
     /// the queue holds an op. A drain issues no earlier than one cycle
     /// after it.
     vsu_queue: u64,
+    /// The cycle the last floating-point store's data reaches the store
+    /// queue. A drain that uses the VSU issues no earlier.
+    fp_store_data: u64,
+    /// The cycle the last floating-point store completes. A drain that
+    /// does not use the VSU issues no earlier.
+    fp_store_done: u64,
+    /// The cycle the last `mfvscr` result is ready. A younger
+    /// floating-point store sends its data no earlier.
+    vscr_read: u64,
     /// The share of this thread's recent cycles, out of [`SHARE_ONE`],
     /// spent on divides and square roots. Each instruction weighs by its
     /// cycles, over a window of [`PRESSURE_WINDOW_CYCLES`].
@@ -329,6 +338,9 @@ impl PpeTiming {
                 unit_free: [0; 5],
                 vsu_fence: 0,
                 vsu_queue: 0,
+                fp_store_data: 0,
+                fp_store_done: 0,
+                vscr_read: 0,
                 divide_share: 0,
                 alone_share: 0,
                 vscr_share: 0,
@@ -509,7 +521,12 @@ impl PpeTiming {
             // cycle after it runs.
             // A queue that never held an op leaves `vsu_queue` at zero.
             let after_queue = if c.vsu_queue == 0 { 0 } else { c.vsu_queue + 1 };
-            let drained = t.max(all.unwrap_or(0)).max(after_queue);
+            let fp_store = if uses_vsu(op) {
+                c.fp_store_data
+            } else {
+                c.fp_store_done
+            };
+            let drained = t.max(all.unwrap_or(0)).max(after_queue).max(fp_store);
             if c.vsu_queue > floor {
                 queued = drained - floor;
             }
@@ -671,6 +688,29 @@ impl PpeTiming {
                 c.unit_free[u] = t + k::PPU_MTVSCR_HOLD_CYCLES;
             }
             c.vsu_fence = t + k::PPU_MTVSCR_YOUNGER_VSU_CYCLES;
+        }
+        // [CBE-Handbook p:720 s:A.1.2] a floating-point store goes to the
+        // FPU as well as the LSU.
+        // A drain that uses the VSU waits for its data to reach the store
+        // queue, as the `ppu_issue_vscr_mem` captures show
+        // (`PPU_FP_STORE_DATA_CYCLES`). Any other drain waits for the store
+        // to complete, as the `ppu_issue_fp_store_drain` capture shows
+        // (`PPU_FP_STORE_COMPLETE_CYCLES`).
+        //
+        // The store sends its data no earlier than an older `mfvscr`'s
+        // result is ready. In the `ppu_issue_fp_store_drain` capture a loop
+        // of an `stfd` and an `mfvscr` takes 53.00 cycles an iteration, 13
+        // more than with an `std`. The `ppu_issue_fp_store_vscr` capture
+        // gives the same for each floating-point store form. With `li`
+        // between the `mfvscr` and the store, the model gives a shorter
+        // wait than the console.
+        if matches!(op.kind, Kind::Store { .. }) && op.reads().any(|(r, _)| is_fpr(r)) {
+            let sent = exec.max(c.vscr_read);
+            c.fp_store_data = c.fp_store_data.max(sent + k::PPU_FP_STORE_DATA_CYCLES);
+            c.fp_store_done = c.fp_store_done.max(sent + k::PPU_FP_STORE_COMPLETE_CYCLES);
+        }
+        if op.is_vscr_read() {
+            c.vscr_read = exec + k::PPU_MFVSCR_LATENCY_CYCLES;
         }
 
         match op.kind {

@@ -16,8 +16,14 @@ pub(super) const fn gpr(n: u8) -> Reg {
 pub(super) const fn fpr(n: u8) -> Reg {
     32 + n
 }
+pub(in crate::timing) const fn is_fpr(r: Reg) -> bool {
+    r >= 32 && r < 64
+}
 pub(super) const fn vr(n: u8) -> Reg {
     64 + n
+}
+const fn is_vr(r: Reg) -> bool {
+    r >= 64 && r < 96
 }
 pub(super) const fn crf(n: u8) -> Reg {
     96 + n
@@ -278,6 +284,11 @@ impl Op {
             .filter(|r| **r != NO_REG)
             .map(|&r| (r, 0))
             .chain(run)
+    }
+
+    /// Whether this one is an `mfvscr`, the one drain that writes a VR.
+    pub(crate) fn is_vscr_read(&self) -> bool {
+        self.kind == Kind::Drain && self.writes().any(is_vr)
     }
 
     /// Whether this one reads a register `other` writes.

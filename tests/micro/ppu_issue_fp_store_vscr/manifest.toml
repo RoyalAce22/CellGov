@@ -1,0 +1,20 @@
+[test]
+name = "ppu_issue_fp_store_vscr"
+
+# A hardware probe of whether each floating-point store form waits for an
+# older mfvscr's result, and how that wait falls off as independent work
+# separates the mfvscr from the store, timed with mftb against an std in
+# the same place. The console capture is the answer; ppu/main.c's header
+# lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 232 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 232 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

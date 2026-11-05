@@ -93,16 +93,16 @@ fn cellgov_cycles(k: usize, body: &[u32]) -> f64 {
 
 /// The loops of an `mtvscr` and then:
 ///
-/// - an `lvx`, an `stvx` or an `lfd`;
+/// - an `lvx`, an `stvx`, an `lfd` or an `stfd`;
 /// - an `lvx` and four `addi`, which issue past the fenced `lvx`.
-const FENCED_ACCESSES: [usize; 4] = [2, 4, 6, 10];
+const FENCED_ACCESSES: [usize; 5] = [2, 4, 6, 8, 10];
 
 /// The largest share of a fenced access loop's fastest console run the
 /// model may fall short by: the `stvx` loop falls 2.6% short.
 const GAP: f64 = 0.04;
 
 #[test]
-fn an_mtvscr_holds_each_vmx_load_and_store_and_an_fp_load_after_it_within_the_gap() {
+fn an_mtvscr_holds_each_vmx_and_fp_load_and_store_after_it_within_the_gap() {
     let w = console_words();
     let rows: Vec<(usize, f64, f64)> = FENCED_ACCESSES
         .iter()
@@ -115,29 +115,4 @@ fn an_mtvscr_holds_each_vmx_load_and_store_and_an_fp_load_after_it_within_the_ga
              {fastest:.2}, more than {GAP} of it apart or above it: {rows:?}",
         );
     }
-}
-
-/// A loop the model does not time to the console: an `stfd` after an
-/// `mtvscr` costs the console about twelve cycles more than the other
-/// fenced accesses.
-///
-/// The test fails when the model drops the fence for the `stfd` or when
-/// the difference closes. Then move the loop into `FENCED_ACCESSES`.
-#[test]
-fn the_fenced_stfd_is_a_known_difference() {
-    let w = console_words();
-    let lvx = console_cycles(&w, 2);
-    let stfd = (cellgov_cycles(8, &bodies()[8]), console_cycles(&w, 8));
-    assert!(
-        stfd.0 <= lvx && (lvx - stfd.0) / lvx <= GAP,
-        "loop 8: CellGov {:.2}, not held at the fence the console's fenced lvx loop \
-         shows ({lvx:.2})",
-        stfd.0
-    );
-    assert!(
-        (stfd.1 - stfd.0) / stfd.1 > 0.10,
-        "loop 8: CellGov {:.2}, the console's fastest {:.2}",
-        stfd.0,
-        stfd.1
-    );
 }

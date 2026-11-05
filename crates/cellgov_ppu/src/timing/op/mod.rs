@@ -15,6 +15,7 @@ mod storage;
 mod vector;
 
 pub(crate) use classify::classify;
+pub(super) use model::is_fpr;
 #[cfg(test)]
 pub(super) use model::XER;
 pub(crate) use model::{unit, Kind, LoadClass, Op, Target, NO_REG, REGS};
