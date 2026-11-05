@@ -18,8 +18,8 @@
 //! result [SPU-ISA p:197 s:9.2], [SPU-ISA p:199 s:9.2.2]. [`Policy::PowerPc`]
 //! honours denormal operands and results; the vector unit's Java and
 //! non-Java modes build on it ([`VmxMode`]). [`ppc_round`] adds the scalar
-//! unit's FR and FI bits, its exception enables and its single-precision
-//! results in double format.
+//! unit's FR and FI bits, the scaled results of its overflow and
+//! underflow enables, and its single-precision results in double format.
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 #![cfg_attr(
@@ -47,14 +47,14 @@ mod vmx_estimate;
 
 pub use arith::{add, mul};
 pub use format::{Binary32, Binary64, Format};
-pub use fp_estimate::{fres_estimate, frsqrte_estimate};
+pub use fp_estimate::{fres_estimate, fres_scaled_estimate, frsqrte_estimate};
 pub use operand::{
     default_nan, extended_magnitude_key, extended_order_key, unpack, unpack_extended, Operand,
 };
 pub use ppc::{
     ppc_frsp_nan, ppc_invalid_product, ppc_invalid_quotient, ppc_invalid_sqrt, ppc_invalid_sum,
-    ppc_is_nan, ppc_is_snan, ppc_nan_result, ppc_round, ppc_sum, PpcEnabled, PpcEnables,
-    PpcInvalid, PpcPrecision, PpcResult, PpcStatus, PPC_GENERATED_NAN,
+    ppc_is_nan, ppc_is_snan, ppc_nan_result, ppc_round, ppc_sum, PpcControl, PpcEnabled,
+    PpcEnables, PpcInvalid, PpcPrecision, PpcResult, PpcStatus, PPC_GENERATED_NAN,
 };
 pub use ppc_arith::{
     ppc_add, ppc_div, ppc_div_sqrt_precision, ppc_madd, ppc_msub, ppc_mul, ppc_nmadd, ppc_nmsub,

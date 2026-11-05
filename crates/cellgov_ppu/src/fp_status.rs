@@ -5,6 +5,7 @@
 //! - the operand `fsel` selects.
 
 use cellgov_float::{ppc_invalid_sqrt, ppc_is_nan, PpcInvalid, PpcStatus};
+use cellgov_ps3_abi::hw::ppc_isa::PPC_SINGLE_MIN_NORMAL_F64;
 
 const SIGN: u64 = 1 << 63;
 const INFINITY: u64 = 0x7FF0_0000_0000_0000;
@@ -21,21 +22,25 @@ fn is_nonzero_finite(bits: u64) -> bool {
     !is_zero(bits) && bits & INFINITY != INFINITY
 }
 
-/// The status `fres` reports for operand `b` and result `result`.
+/// The status `fres` reports for operand `b`, result `result` and UE `ue`.
 ///
 /// - VXSNAN for an SNaN operand;
 /// - ZX for a zero operand;
-/// - OX when a nonzero finite operand gives an infinity.
+/// - OX when a nonzero finite operand gives an infinity;
+/// - UX when UE = 1 and the result is nonzero and below the smallest
+///   normal single.
 ///
 /// FR and FI are 0.
 ///
 /// [PPC-Book1 p:97 s:4.4.2] a reciprocal estimate of a zero is a zero divide.
 /// [PPC-Book1 p:94 s:4.3.6] the estimates set FR and FI to undefined values.
 /// The ppu_fp_estimate_readout console capture reads FR = FI = 0 after each special operand, OX and no XX for an overflowed reciprocal, and no UX for one that becomes 0.
-pub(crate) fn fres_status(b: u64, result: u64) -> PpcStatus {
+/// The ppu_fp_enabled_fres console capture reads UX for a reciprocal near 2^-127 under UE = 1 alone. It reads no UX for one that becomes 0 under UE = 1.
+pub(crate) fn fres_status(b: u64, result: u64, ue: bool) -> PpcStatus {
     PpcStatus {
         zx: is_zero(b),
         ox: is_nonzero_finite(b) && is_infinity(result),
+        ux: ue && is_nonzero_finite(result) && result & !SIGN < PPC_SINGLE_MIN_NORMAL_F64,
         invalid: PpcInvalid::signaling(&[b]),
         ..PpcStatus::default()
     }
@@ -136,3 +141,7 @@ mod fp_fma_console_tests;
 #[cfg(test)]
 #[path = "tests/fp_convert_console_tests.rs"]
 mod fp_convert_console_tests;
+
+#[cfg(test)]
+#[path = "tests/fp_enabled_console_tests.rs"]
+mod fp_enabled_console_tests;

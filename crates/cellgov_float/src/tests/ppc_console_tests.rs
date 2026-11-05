@@ -9,8 +9,8 @@ use crate::format::Binary64;
 use crate::operand::{unpack, Operand};
 use crate::ppc::{
     ppc_frsp_nan, ppc_invalid_product, ppc_invalid_quotient, ppc_invalid_sqrt, ppc_invalid_sum,
-    ppc_is_nan, ppc_nan_result, ppc_round, ppc_sum, PpcEnables, PpcInvalid, PpcPrecision,
-    PpcStatus, PPC_GENERATED_NAN,
+    ppc_is_nan, ppc_nan_result, ppc_round, ppc_sum, PpcInvalid, PpcPrecision, PpcStatus,
+    PPC_GENERATED_NAN,
 };
 use crate::round::{Exact, Policy, Rounding};
 use std::path::PathBuf;
@@ -104,14 +104,6 @@ fn invalid_bits(invalid: PpcInvalid) -> u32 {
     .fold(0, |acc, (_, bit)| acc | bit)
 }
 
-const NONE: PpcEnables = PpcEnables {
-    invalid: false,
-    overflow: false,
-    underflow: false,
-    zero_divide: false,
-    inexact: false,
-};
-
 /// One `ppu_fp_scalar_rules` case: the operation number `ppu/main.c`
 /// gives, the rounding and the operands.
 struct Case {
@@ -191,7 +183,7 @@ fn predict(case: &Case) -> Predicted {
     .flatten();
     match value {
         Some(x) => {
-            let r = ppc_round(precision, case.rounding, x, NONE).unwrap();
+            let r = ppc_round(precision, case.rounding, x);
             Predicted {
                 bits: Some(r.bits),
                 rounded: Some(rounding_bits(r.status)),
@@ -274,7 +266,7 @@ fn a_disabled_overflow_matches_the_ppu_reference_vectors_capture() {
             other => panic!("{}: {other:?}", fields[0]),
         };
         let x = mul(exact(input("f1")).unwrap(), exact(input("f2")).unwrap()).unwrap();
-        let want = ppc_round(precision, rounding(input("fpscr") as u32), x, NONE).unwrap();
+        let want = ppc_round(precision, rounding(input("fpscr") as u32), x);
         for run in 0..2 {
             let at = 16 + 128 * index + 64 * run;
             let f3 = u64::from_be_bytes(frame[at..at + 8].try_into().unwrap());

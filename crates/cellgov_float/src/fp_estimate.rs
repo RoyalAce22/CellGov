@@ -42,6 +42,8 @@ const RSQRT_ODD_POWER: [u64; 8] = [
     0x30_0000, 0x26_0000, 0x1E_0000, 0x18_0000, 0x10_0000, 0x0C_0000, 0x08_0000, 0x04_0000,
 ];
 
+use crate::ppc::{exponent_adjustment, PpcPrecision, PpcStatus};
+
 const SIGN: u64 = 1 << 63;
 const INFINITY: u64 = 0x7FF0_0000_0000_0000;
 const FRACTION: u64 = (1 << 52) - 1;
@@ -75,6 +77,23 @@ pub fn fres_estimate(b: u64) -> u64 {
         return sign;
     }
     sign | ((power + 1023) as u64) << 52 | RECIPROCAL[(b >> 45 & 0x7F) as usize] << 29
+}
+
+/// The `fres` estimate of the nonzero finite `b` under an enabled overflow or underflow.
+///
+/// The estimate skips its range edges and applies the single exponent
+/// adjustment. `status.ox` selects the overflow direction.
+///
+/// [PPC-Book1 p:98 s:4.4.3] with OE = 1 the exponent of a single result is reduced by 192.
+/// [PPC-Book1 p:99 s:4.4.4] with UE = 1 the exponent of a single result is increased by 192.
+/// The ppu_fp_enabled_fres console capture reads 2^829 and 2^881 for the fres of 2^-1022 and 2^-1074 under OE = 1.
+/// The estimate normalizes a denormal operand first.
+pub fn fres_scaled_estimate(b: u64, status: &PpcStatus) -> u64 {
+    let adjustment = exponent_adjustment(PpcPrecision::Single);
+    let shift = if status.ox { -adjustment } else { adjustment };
+    let (exponent, fraction) = normalized(b);
+    let power = -exponent - 1 + shift;
+    b & SIGN | ((power + 1023) as u64) << 52 | RECIPROCAL[(fraction >> 45) as usize] << 29
 }
 
 /// `frsqrte` of the double `b`.

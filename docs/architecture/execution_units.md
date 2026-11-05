@@ -14,7 +14,11 @@ record form copies FPSCR bits 0:3 to CR1. The arithmetic instructions,
 the multiply-add forms included, and the conversions read the rounding
 mode, except that the `z` forms round toward zero. The arithmetic, conversion and estimate instructions write their
 FPSCR status, except that a convert to integer leaves FPRF unchanged; the
-compares set FPCC, VXSNAN and VXVC.
+compares set FPCC, VXSNAN and VXVC. The exception enables change what
+these instructions write: with VE or ZE set, an invalid operation or a
+zero divide leaves the target register and FPRF unchanged; with OE or UE
+set, an overflowed or tiny result is written with its exponent adjusted
+by 1536, or 192 for a single result.
 
 The `PpuInstruction` set covers:
 

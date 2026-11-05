@@ -126,6 +126,11 @@ pub const PPC_CACHE_BLOCK_XOS: [u32; 8] = [54, 86, 246, 278, 342, 374, 822, 982]
 /// [PPC-Book1 p:90 s:4.3.1] bit 0 of the double format is the sign bit S.
 pub const PPC_F64_SIGN_BIT: u64 = 0x8000_0000_0000_0000;
 
+/// 2^-126, the smallest normalized single-format value, in double format.
+///
+/// [PPC-Book1 p:90 s:4.3.1] the minimum exponent of the single format is -126.
+pub const PPC_SINGLE_MIN_NORMAL_F64: u64 = 0x3810_0000_0000_0000;
+
 /// High-order fraction bit that distinguishes a QNaN from an SNaN in
 /// double format; setting it quiets a propagated SNaN.
 ///
@@ -275,6 +280,26 @@ pub const PPC_FPSCR_VX_BITS: u32 = 0x01F8_0700;
 ///
 /// [PPC-Book1 p:89 s:4.2.2] bit 24 is VE.
 pub const PPC_FPSCR_VE: u32 = 1 << 7;
+
+/// FPSCR bit 25, the overflow exception enable (OE).
+///
+/// [PPC-Book1 p:89 s:4.2.2] bit 25 is OE.
+pub const PPC_FPSCR_OE: u32 = 1 << 6;
+
+/// FPSCR bit 26, the underflow exception enable (UE).
+///
+/// [PPC-Book1 p:89 s:4.2.2] bit 26 is UE.
+pub const PPC_FPSCR_UE: u32 = 1 << 5;
+
+/// FPSCR bit 27, the zero divide exception enable (ZE).
+///
+/// [PPC-Book1 p:89 s:4.2.2] bit 27 is ZE.
+pub const PPC_FPSCR_ZE: u32 = 1 << 4;
+
+/// FPSCR bit 28, the inexact exception enable (XE).
+///
+/// [PPC-Book1 p:89 s:4.2.2] bit 28 is XE.
+pub const PPC_FPSCR_XE: u32 = 1 << 3;
 
 /// FPSCR bits 16:19, the floating-point condition code (FPCC): FL, FG,
 /// FE and FU.

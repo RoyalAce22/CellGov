@@ -50,13 +50,31 @@ pub struct PpcEnables {
     pub inexact: bool,
 }
 
-/// An enabled exception whose effect on the result this crate does not
-/// model. The operation refuses and returns no result.
+/// The FPSCR fields that an operation reads.
+///
+/// A [`Rounding`] converts to a control with every exception disabled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PpcControl {
+    /// The rounding mode, from `FPSCR[RN]`.
+    pub rounding: Rounding,
+    /// The exception enables.
+    pub enables: PpcEnables,
+}
+
+impl From<Rounding> for PpcControl {
+    fn from(rounding: Rounding) -> PpcControl {
+        PpcControl {
+            rounding,
+            enables: PpcEnables::default(),
+        }
+    }
+}
+
+/// An enabled exception that leaves the target register unchanged. The
+/// caller writes the status and keeps the old FRT and FPRF.
 ///
 /// [PPC-Book1 p:97 s:4.4.1] an enabled invalid operation leaves the target unchanged.
 /// [PPC-Book1 p:98 s:4.4.2] an enabled zero divide leaves the target unchanged.
-/// [PPC-Book1 p:98 s:4.4.3] an enabled overflow delivers the result with its exponent scaled down.
-/// [PPC-Book1 p:99 s:4.4.4] an enabled underflow delivers the result with its exponent scaled up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum PpcEnabled {
     /// VE = 1 and an invalid operation occurred.
@@ -65,12 +83,6 @@ pub enum PpcEnabled {
     /// ZE = 1 and a zero divide occurred.
     #[error("enabled zero divide exception (ZE = 1)")]
     ZeroDivide,
-    /// OE = 1 and the result overflowed.
-    #[error("enabled overflow exception (OE = 1)")]
-    Overflow,
-    /// UE = 1 and the result was tiny.
-    #[error("enabled underflow exception (UE = 1)")]
-    Underflow,
 }
 
 /// The invalid-operation causes, one per FPSCR VX bit an operation can set.
@@ -162,6 +174,16 @@ impl PpcStatus {
             None
         }
     }
+
+    /// Whether `enables` makes the result the scaled result of an overflow or underflow.
+    ///
+    /// A scaled single result can lie outside the single range, so its
+    /// FPRF class is a double class. The ppu_fp_enabled_results console
+    /// capture reads FPRF +normal for the frsp of 2^-1074 under UE = 1.
+    /// That scaled result is 2^-882.
+    pub fn scaled(&self, enables: PpcEnables) -> bool {
+        (enables.overflow && self.ox) || (enables.underflow && self.ux)
+    }
 }
 
 /// A double-format result and the status bits its operation reports.
@@ -173,71 +195,119 @@ pub struct PpcResult {
     pub status: PpcStatus,
 }
 
-/// Rounds `exact` to `precision` in `rounding` and delivers the result in double format.
+/// The exponent adjustment of an enabled overflow or underflow.
+///
+/// [PPC-Book1 p:98 s:4.4.3] with OE = 1 the exponent is reduced by 1536 for double-precision operations and by 192 for single-precision operations and frsp.
+/// [PPC-Book1 p:99 s:4.4.4] with UE = 1 the exponent is increased by the same amounts.
+pub(crate) fn exponent_adjustment(precision: PpcPrecision) -> i32 {
+    match precision {
+        PpcPrecision::Double => 1536,
+        PpcPrecision::Single => 192,
+    }
+}
+
+/// The format that a scaled single result rounds to.
+///
+/// The format has a 24-bit significand and the double exponent range. Its
+/// encoding is the double format without the low-order 29 fraction bits.
+/// The ppu_fp_enabled_results console capture reads these results:
+///
+/// - 2^832 for the frsp of the largest double under OE = 1;
+/// - 2^-882 for the frsp of 2^-1074 under UE = 1.
+///
+/// Both results lie outside the single range.
+struct SingleSignificand;
+
+impl Format for SingleSignificand {
+    const EXP_BITS: u32 = 11;
+    const FRAC_BITS: u32 = 23;
+}
+
+/// Rounds `exact` to `precision` under `control` and delivers the result in double format.
+///
+/// An enabled overflow or underflow adjusts the exponent of the exact
+/// value, then rounds it once. The adjusted value lies inside the range of
+/// the format, so this rounding cannot overflow or underflow again. FR and
+/// FI come from this rounding, and the result sets OX or UX.
 ///
 /// [PPC-Book1 p:94 s:4.3.6] FR is set when rounding increments the fraction, FI when the result is inexact.
 /// [PPC-Book1 p:98 s:4.4.3] a disabled overflow delivers infinity or the largest finite number by mode and sign, sets FI and leaves FR undefined; the ppu_reference_vectors console capture reads FR = 1 after every overflow, in every mode and both widths.
 /// [PPC-Book1 p:98 s:4.4.4] tininess is detected before rounding; with UE = 0 the value is denormalized and rounded, and UX is set only when the result is also inexact.
+/// [PPC-Book1 p:98 s:4.4.4] with UE = 1 an underflow is any tiny result, exact or not.
+/// [PPC-Book1 p:99 s:4.4.5] with OE = 1 or UE = 1, XX is set only when the rounded and the intermediate significands differ.
 /// [PPC-Book1 p:93 s:4.3.5.1] a single-precision result lies in single range and is stored in double format with the low-order 29 fraction bits zero.
-///
-/// # Errors
-///
-/// - [`PpcEnabled::Overflow`] when OE = 1 and the result overflows.
-/// - [`PpcEnabled::Underflow`] when UE = 1 and the value is tiny.
 pub fn ppc_round(
     precision: PpcPrecision,
-    rounding: Rounding,
+    control: impl Into<PpcControl>,
     exact: Exact,
-    enables: PpcEnables,
-) -> Result<PpcResult, PpcEnabled> {
-    match precision {
-        PpcPrecision::Double => ppc_round_in::<Binary64>(rounding, exact, enables),
+) -> PpcResult {
+    let PpcControl { rounding, enables } = control.into();
+    let (result, tiny) = match precision {
+        PpcPrecision::Double => round_disabled_in::<Binary64>(rounding, exact),
         PpcPrecision::Single => {
-            ppc_round_in::<Binary32>(rounding, exact, enables).map(|r| PpcResult {
-                bits: widen_single(r.bits),
-                ..r
-            })
+            let (r, tiny) = round_disabled_in::<Binary32>(rounding, exact);
+            let bits = widen_single(r.bits);
+            (PpcResult { bits, ..r }, tiny)
         }
-    }
+    };
+    let status = if enables.overflow && result.status.ox {
+        PpcStatus {
+            ox: true,
+            ..PpcStatus::default()
+        }
+    } else if enables.underflow && tiny {
+        PpcStatus {
+            ux: true,
+            ..PpcStatus::default()
+        }
+    } else {
+        return result;
+    };
+    let adjustment = exponent_adjustment(precision);
+    let shift = if status.ox { -adjustment } else { adjustment };
+    let adjusted = Exact::from_parts(
+        exact.negative,
+        exact.significand,
+        exact.exponent + shift,
+        exact.sticky,
+    );
+    round_adjusted(precision, rounding, adjusted, status)
 }
 
-/// [`ppc_round`] into format `F`, with the result in `F`'s own encoding.
-pub(crate) fn ppc_round_in<F: Format>(
-    rounding: Rounding,
-    exact: Exact,
-    enables: PpcEnables,
-) -> Result<PpcResult, PpcEnabled> {
-    let (result, tiny) = round_disabled_in::<F>(rounding, exact);
-    if enables.overflow && result.status.ox {
-        return Err(PpcEnabled::Overflow);
-    }
-    if enables.underflow && tiny {
-        return Err(PpcEnabled::Underflow);
-    }
-    Ok(result)
-}
-
-/// [`ppc_round`] with every exception disabled.
-pub(crate) fn ppc_round_disabled(
+/// Rounds the adjusted `exact` to `precision` and adds FR and FI to `status`.
+fn round_adjusted(
     precision: PpcPrecision,
     rounding: Rounding,
     exact: Exact,
+    status: PpcStatus,
 ) -> PpcResult {
-    match precision {
-        PpcPrecision::Double => round_disabled_in::<Binary64>(rounding, exact).0,
-        PpcPrecision::Single => {
-            let r = round_disabled_in::<Binary32>(rounding, exact).0;
-            PpcResult {
-                bits: widen_single(r.bits),
-                ..r
-            }
+    let (traced, bits) = match precision {
+        PpcPrecision::Double => {
+            let traced = round_ieee_traced::<Binary64>(rounding, exact);
+            let bits = traced.packed.bits;
+            (traced, bits)
         }
+        PpcPrecision::Single => {
+            let traced = round_ieee_traced::<SingleSignificand>(rounding, exact);
+            let packed = traced.packed.bits;
+            let sign = packed >> SingleSignificand::SIGN_SHIFT << 63;
+            let magnitude = packed & ((1 << SingleSignificand::SIGN_SHIFT) - 1);
+            (traced, sign | magnitude << 29)
+        }
+    };
+    PpcResult {
+        bits,
+        status: PpcStatus {
+            fr: traced.incremented,
+            fi: traced.packed.flags.inexact,
+            ..status
+        },
     }
 }
 
 /// `exact` rounded into format `F` with every exception disabled, in
 /// `F`'s own encoding, and whether the value is tiny.
-fn round_disabled_in<F: Format>(rounding: Rounding, exact: Exact) -> (PpcResult, bool) {
+pub(crate) fn round_disabled_in<F: Format>(rounding: Rounding, exact: Exact) -> (PpcResult, bool) {
     let traced = round_ieee_traced::<F>(rounding, exact);
     let flags = traced.packed.flags;
     let result = PpcResult {

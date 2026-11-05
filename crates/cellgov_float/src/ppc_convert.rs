@@ -1,13 +1,16 @@
-//! The PowerPC conversions, with every exception disabled:
+//! The PowerPC conversions:
 //!
 //! - a double to a 32-bit or 64-bit integer
 //! - a 64-bit integer to a double
 //! - a double to single precision
+//!
+//! An enabled invalid operation leaves the target unchanged, so the
+//! caller drops the result that [`PpcStatus::refusal`] names.
 
 use crate::format::Binary64;
 use crate::operand::{unpack, Operand};
 use crate::ppc::{
-    ppc_frsp_nan, ppc_round_disabled, PpcInvalid, PpcPrecision, PpcResult, PpcStatus,
+    ppc_frsp_nan, ppc_round, PpcControl, PpcInvalid, PpcPrecision, PpcResult, PpcStatus,
 };
 use crate::round::{Exact, Policy, Rounding};
 
@@ -141,17 +144,18 @@ fn round_to_integer(rounding: Rounding, x: Exact) -> (u128, bool, bool) {
 pub fn ppc_from_integer(rounding: Rounding, b: u64) -> PpcResult {
     let value = b as i64;
     let exact = Exact::from_parts(value < 0, u128::from(value.unsigned_abs()), 0, false);
-    ppc_round_disabled(PpcPrecision::Double, rounding, exact)
+    ppc_round(PpcPrecision::Double, rounding, exact)
 }
 
-/// The double-format `b` rounded once to single precision in `rounding`.
+/// The double-format `b` rounded once to single precision under
+/// `control`.
 ///
 /// The function returns a zero or an infinity unchanged. It quiets a NaN
 /// and clears the low-order 29 fraction bits. An SNaN also sets VXSNAN.
 ///
 /// [PPC-Book1 p:115 s:4.6.6] frsp rounds FRB to single precision by `FPSCR[RN]` and sets FPRF, FR, FI, FX, OX, UX, XX and VXSNAN.
 /// [PPC-Book1 p:140 s:A.1] a QNaN gives `FRB[0:34] || 0^29`; an SNaN with VE=0 gives `FRB[0:11] || 1 || FRB[13:34] || 0^29`.
-pub fn ppc_round_to_single(rounding: Rounding, b: u64) -> PpcResult {
+pub fn ppc_round_to_single(control: impl Into<PpcControl>, b: u64) -> PpcResult {
     let status = PpcStatus {
         invalid: PpcInvalid::signaling(&[b]),
         ..PpcStatus::default()
@@ -161,7 +165,7 @@ pub fn ppc_round_to_single(rounding: Rounding, b: u64) -> PpcResult {
             bits: ppc_frsp_nan(b),
             status,
         },
-        Operand::Finite(x) => ppc_round_disabled(PpcPrecision::Single, rounding, x),
+        Operand::Finite(x) => ppc_round(PpcPrecision::Single, control, x),
         Operand::Zero { .. } | Operand::Infinity { .. } => PpcResult { bits: b, status },
     }
 }

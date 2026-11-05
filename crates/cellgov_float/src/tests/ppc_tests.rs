@@ -2,13 +2,13 @@
 //! FR and FI, overflow and the enables, single precision in double
 //! format, NaN selection, the exact zero sum and the invalid causes.
 
-use super::oracle::{define, rounds_up, Tiny};
+use super::oracle::{below_smallest_normal, define, rounds_up, Tiny};
 use super::round_tests::{coverage, finite, product, sum};
 use crate::format::{Binary32, Binary64, Format};
 use crate::ppc::{
     ppc_frsp_nan, ppc_invalid_product, ppc_invalid_quotient, ppc_invalid_sqrt, ppc_invalid_sum,
-    ppc_nan_result, ppc_round, ppc_round_in, ppc_sum, PpcEnabled, PpcEnables, PpcInvalid,
-    PpcPrecision, PpcStatus, PPC_GENERATED_NAN,
+    ppc_nan_result, ppc_round, ppc_sum, round_disabled_in, PpcControl, PpcEnabled, PpcEnables,
+    PpcInvalid, PpcPrecision, PpcResult, PpcStatus, PPC_GENERATED_NAN,
 };
 use crate::round::{round_pack, Exact, Policy, Rounding};
 
@@ -27,12 +27,12 @@ const NONE: PpcEnables = PpcEnables {
     inexact: false,
 };
 
-/// Checks `ppc_round_in::<F>` on `x` in every mode against the
+/// Checks `round_disabled_in::<F>` on `x` in every mode against the
 /// definitional oracle: the bits, FR from the chosen magnitude, FI, OX
 /// and UX.
 fn check<F: Format>(x: Exact) {
     for rounding in MODES {
-        let got = ppc_round_in::<F>(rounding, x, NONE).unwrap();
+        let got = round_disabled_in::<F>(rounding, x).0;
         let want = define::<F>(Policy::PowerPc, rounding, x);
         assert_eq!(got.bits, want.bits, "{rounding:?} {x:?}");
         let fr = want.flags.overflow || rounds_up::<F>(x, want.bits);
@@ -115,7 +115,7 @@ fn a_disabled_overflow_rounds_by_mode_and_sets_fr_and_fi() {
                     Rounding::TowardNegative => !negative,
                 };
                 let magnitude = if toward_zero { max } else { DOUBLE_INF };
-                let got = ppc_round(precision, rounding, x, NONE).unwrap();
+                let got = ppc_round(precision, rounding, x);
                 assert_eq!(
                     got.bits,
                     u64::from(negative) << 63 | magnitude,
@@ -136,36 +136,162 @@ fn a_disabled_overflow_rounds_by_mode_and_sets_fr_and_fi() {
     }
 }
 
-/// [PPC-Book1 p:98 s:4.4.3] OE = 1 scales the exponent of an overflowed result.
-/// [PPC-Book1 p:98 s:4.4.4] with UE = 1 an underflow is any tiny result, exact or not.
-/// [PPC-Book1 p:99 s:4.4.4] UE = 1 scales the exponent of an underflowed result.
-/// [PPC-Book1 p:99 s:4.4.5] XE changes no result.
-#[test]
-fn an_enabled_overflow_or_underflow_refuses_and_xe_changes_nothing() {
-    let huge = Exact::new(false, 1, 2000).unwrap();
-    let tiny_exact = Exact::new(false, 1, -1050).unwrap();
-    let third = Exact::new(false, 0x5555_5555_5555_5555_5555, -80).unwrap();
-    let overflow = PpcEnables {
-        overflow: true,
-        ..NONE
+/// The oracle's format for a scaled single result: a 24-bit significand
+/// with the double exponent range.
+struct WideSingle;
+
+impl Format for WideSingle {
+    const EXP_BITS: u32 = 11;
+    const FRAC_BITS: u32 = 23;
+}
+
+/// The oracle's rounding of the adjusted value `x` to `precision`, in
+/// double format, with FR and FI.
+fn adjusted_oracle(precision: PpcPrecision, rounding: Rounding, x: Exact) -> (u64, bool, bool) {
+    match precision {
+        PpcPrecision::Double => {
+            let want = define::<Binary64>(Policy::PowerPc, rounding, x);
+            let fr = rounds_up::<Binary64>(x, want.bits);
+            (want.bits, fr, want.flags.inexact)
+        }
+        PpcPrecision::Single => {
+            let want = define::<WideSingle>(Policy::PowerPc, rounding, x);
+            let fr = rounds_up::<WideSingle>(x, want.bits);
+            let shift = WideSingle::SIGN_SHIFT;
+            let bits = want.bits >> shift << 63 | (want.bits & ((1 << shift) - 1)) << 29;
+            (bits, fr, want.flags.inexact)
+        }
+    }
+}
+
+/// Values at the edges of the overflow and underflow ranges of `precision`.
+///
+/// The values lie on each side of the largest finite binade and the
+/// smallest normal binade. They also reach the farthest binades of an
+/// operation:
+///
+/// - the largest double product and quotient;
+/// - the largest single quotient;
+/// - 2^1024, for an frsp of the largest double;
+/// - the smallest double denormal product or frsp operand.
+fn enabled_range_edges(precision: PpcPrecision) -> Vec<Exact> {
+    let significands = [
+        1u128,
+        3,
+        (1 << 24) - 1,
+        (1 << 53) - 1,
+        ((1 << 53) - 1) * ((1 << 53) - 1),
+        0x5555_5555_5555_5555_5555,
+    ];
+    let binades = match precision {
+        PpcPrecision::Double => [1023, 1024, 2047, 2097, -1022, -1023, -2148],
+        PpcPrecision::Single => [127, 128, 276, 1023, -126, -127, -1074],
     };
-    let underflow = PpcEnables {
+    let mut values = Vec::new();
+    for s in significands {
+        let width = (u128::BITS - s.leading_zeros()) as i32;
+        for binade in binades {
+            for negative in [false, true] {
+                values.push(Exact::new(negative, s, binade - width + 1).unwrap());
+            }
+        }
+    }
+    values
+}
+
+/// [PPC-Book1 p:98 s:4.4.3] OE = 1 reduces the exponent of an overflowed result by 1536 for a double and by 192 for a single, then rounds.
+/// [PPC-Book1 p:98 s:4.4.4] with UE = 1 an underflow is any tiny result, exact or not.
+/// [PPC-Book1 p:99 s:4.4.4] UE = 1 increases the exponent of an underflowed result by the same amounts, then rounds.
+/// [PPC-Book1 p:99 s:4.4.5] with OE = 1 or UE = 1, XX is set only when the rounded and the intermediate significands differ.
+#[test]
+fn an_enabled_overflow_or_underflow_rounds_the_adjusted_value() {
+    let enabled = PpcEnables {
+        overflow: true,
         underflow: true,
         ..NONE
     };
-    let inexact = PpcEnables {
+    let (mut overflows, mut underflows) = (0, 0);
+    for (precision, adjustment) in [(PpcPrecision::Double, 1536), (PpcPrecision::Single, 192)] {
+        for x in enabled_range_edges(precision) {
+            for rounding in MODES {
+                let disabled = ppc_round(precision, rounding, x);
+                let tiny = match precision {
+                    PpcPrecision::Double => below_smallest_normal::<Binary64>(x),
+                    PpcPrecision::Single => below_smallest_normal::<Binary32>(x),
+                };
+                let control = PpcControl {
+                    rounding,
+                    enables: enabled,
+                };
+                let got = ppc_round(precision, control, x);
+                let shift = if disabled.status.ox {
+                    overflows += 1;
+                    -adjustment
+                } else if tiny {
+                    underflows += 1;
+                    adjustment
+                } else {
+                    assert_eq!(got, disabled, "{precision:?} {rounding:?} {x:?}");
+                    continue;
+                };
+                let adjusted =
+                    Exact::from_parts(x.negative, x.significand, x.exponent + shift, x.sticky);
+                let (bits, fr, fi) = adjusted_oracle(precision, rounding, adjusted);
+                let want = PpcStatus {
+                    fr,
+                    fi,
+                    ox: shift < 0,
+                    ux: shift > 0,
+                    ..PpcStatus::default()
+                };
+                assert_eq!(
+                    got,
+                    PpcResult { bits, status: want },
+                    "{precision:?} {rounding:?} {x:?}"
+                );
+                assert!(got.status.scaled(enabled));
+                assert!(!disabled.status.scaled(NONE));
+            }
+        }
+    }
+    assert!(
+        overflows > 100 && underflows > 100,
+        "{overflows} {underflows}"
+    );
+}
+
+/// [PPC-Book1 p:98 s:4.4.4] with UE = 0 an exact tiny result sets no UX; UE = 1 does not change an overflow.
+/// [PPC-Book1 p:99 s:4.4.5] XE changes no result.
+#[test]
+fn each_enable_changes_only_its_own_exception() {
+    let huge = Exact::new(false, 1, 2000).unwrap();
+    let tiny_exact = Exact::new(false, 1, -1050).unwrap();
+    let third = Exact::new(false, 0x5555_5555_5555_5555_5555, -80).unwrap();
+    let only = |enables| PpcControl {
+        rounding: Rounding::NearestEven,
+        enables,
+    };
+    let overflow = only(PpcEnables {
+        overflow: true,
+        ..NONE
+    });
+    let underflow = only(PpcEnables {
+        underflow: true,
+        ..NONE
+    });
+    let inexact = only(PpcEnables {
         inexact: true,
         ..NONE
-    };
-    let round = |x, enables| ppc_round(PpcPrecision::Double, Rounding::NearestEven, x, enables);
-    assert_eq!(round(huge, overflow), Err(PpcEnabled::Overflow));
-    assert_eq!(round(tiny_exact, underflow), Err(PpcEnabled::Underflow));
-    assert!(round(huge, underflow).unwrap().status.ox);
-    let quiet = round(tiny_exact, NONE).unwrap();
-    assert_eq!(quiet.bits, 1 << (1074 - 1050));
-    assert_eq!(quiet.status, PpcStatus::default());
-    assert_eq!(round(third, inexact), round(third, NONE));
-    assert!(round(third, NONE).unwrap().status.fi);
+    });
+    let round = |x, control| ppc_round(PpcPrecision::Double, control, x);
+    let disabled = |x| ppc_round(PpcPrecision::Double, Rounding::NearestEven, x);
+    assert_eq!(round(huge, underflow), disabled(huge));
+    assert!(disabled(huge).status.ox);
+    assert_eq!(round(tiny_exact, overflow), disabled(tiny_exact));
+    assert_eq!(disabled(tiny_exact).bits, 1 << (1074 - 1050));
+    assert_eq!(disabled(tiny_exact).status, PpcStatus::default());
+    assert_eq!(round(third, inexact), disabled(third));
+    assert!(disabled(third).status.fi);
 }
 
 /// [PPC-Book1 p:93 s:4.3.5.1] a single-precision result is stored in double format with the low-order 29 fraction bits zero.
@@ -174,7 +300,7 @@ fn a_single_result_is_the_binary32_rounding_in_double_format() {
     let mut checked = 0;
     for x in coverage::<Binary32>(Policy::PowerPc) {
         for rounding in MODES {
-            let got = ppc_round(PpcPrecision::Single, rounding, x, NONE).unwrap();
+            let got = ppc_round(PpcPrecision::Single, rounding, x);
             assert_eq!(got.bits & ((1 << 29) - 1), 0, "{rounding:?} {x:?}");
             let single = round_pack::<Binary32>(Policy::PowerPc, rounding, x).bits;
             let (sign, rest) = (single >> 31, single & 0x7FFF_FFFF);
@@ -194,9 +320,7 @@ fn a_single_result_is_the_binary32_rounding_in_double_format() {
             PpcPrecision::Single,
             Rounding::NearestEven,
             Exact::new(false, s, -149).unwrap(),
-            NONE,
         )
-        .unwrap()
         .bits
     };
     assert_eq!(denormal(1), 0x36A0_0000_0000_0000);

@@ -1,25 +1,24 @@
 //! The PowerPC scalar add, subtract, multiply, divide, square root and
-//! multiply-add, with every exception disabled. The module owns these
-//! steps:
+//! multiply-add. The module owns these steps:
 //!
 //! - NaN selection;
 //! - the invalid-operation causes;
 //! - the single-precision operand range;
-//! - one rounding in the caller's mode.
+//! - one rounding under the caller's control.
 //!
-//! The result is the one a disabled exception gives. The status reports
-//! each exception that occurred, so a caller can tell when an enable bit
-//! would change the result.
+//! The rounding applies the overflow and underflow enables. An enabled
+//! invalid operation or zero divide leaves the target unchanged, so the
+//! caller drops the result that [`PpcStatus::refusal`] names.
 
 use crate::arith::{product, quotient, square_root, sum};
 use crate::format::Binary64;
 use crate::operand::{unpack, Operand};
 use crate::ppc::{
     ppc_invalid_product, ppc_invalid_quotient, ppc_invalid_sqrt, ppc_invalid_sum, ppc_is_nan,
-    ppc_nan_result, ppc_round_disabled, signed_zero_sum, PpcInvalid, PpcPrecision, PpcResult,
+    ppc_nan_result, ppc_round, signed_zero_sum, PpcControl, PpcInvalid, PpcPrecision, PpcResult,
     PpcStatus, PPC_GENERATED_NAN,
 };
-use crate::round::{Exact, Policy, Rounding};
+use crate::round::{Exact, Policy};
 
 const SIGN: u64 = 1 << 63;
 const INFINITY: u64 = 0x7FF0_0000_0000_0000;
@@ -29,29 +28,50 @@ const INFINITY: u64 = 0x7FF0_0000_0000_0000;
 /// largest single binade.
 const SINGLE_OPERAND_EXPONENTS: std::ops::RangeInclusive<i32> = -149..=127;
 
-/// The double-format `a + b`, rounded to `precision` in `rounding`.
+/// The double-format `a + b`, rounded to `precision` under `control`.
 ///
 /// [PPC-Book1 p:111 s:4.6.5.1] fadd and fadds: FRT <- FRA + FRB, rounded to the target precision by `FPSCR[RN]`.
-pub fn ppc_add(precision: PpcPrecision, rounding: Rounding, a: u64, b: u64) -> PpcResult {
-    arith(precision, rounding, Combine::Sum, (a, b), (a, b))
+pub fn ppc_add(
+    precision: PpcPrecision,
+    control: impl Into<PpcControl>,
+    a: u64,
+    b: u64,
+) -> PpcResult {
+    arith(precision, control.into(), Combine::Sum, (a, b), (a, b))
 }
 
-/// The double-format `a - b`, rounded to `precision` in `rounding`. A NaN
-/// in `b` keeps its sign.
+/// The double-format `a - b`, rounded to `precision` under `control`. A
+/// NaN in `b` keeps its sign.
 ///
 /// [PPC-Book1 p:111 s:4.6.5.1] fsub and fsubs: FRT <- FRA - FRB.
-pub fn ppc_sub(precision: PpcPrecision, rounding: Rounding, a: u64, b: u64) -> PpcResult {
-    arith(precision, rounding, Combine::Sum, (a, b), (a, b ^ SIGN))
+pub fn ppc_sub(
+    precision: PpcPrecision,
+    control: impl Into<PpcControl>,
+    a: u64,
+    b: u64,
+) -> PpcResult {
+    arith(
+        precision,
+        control.into(),
+        Combine::Sum,
+        (a, b),
+        (a, b ^ SIGN),
+    )
 }
 
-/// The double-format `a x c`, rounded to `precision` in `rounding`.
+/// The double-format `a x c`, rounded to `precision` under `control`.
 ///
 /// [PPC-Book1 p:112 s:4.6.5.1] fmul and fmuls: FRT <- FRA x FRC; FRB is not an operand.
-pub fn ppc_mul(precision: PpcPrecision, rounding: Rounding, a: u64, c: u64) -> PpcResult {
-    arith(precision, rounding, Combine::Product, (a, c), (a, c))
+pub fn ppc_mul(
+    precision: PpcPrecision,
+    control: impl Into<PpcControl>,
+    a: u64,
+    c: u64,
+) -> PpcResult {
+    arith(precision, control.into(), Combine::Product, (a, c), (a, c))
 }
 
-/// The double-format `a / b`, rounded to `precision` in `rounding`.
+/// The double-format `a / b`, rounded to `precision` under `control`.
 ///
 /// A finite nonzero `a` over a zero `b` is a zero divide: the result is
 /// an infinity with the exclusive OR of the signs, and the status has
@@ -60,7 +80,12 @@ pub fn ppc_mul(precision: PpcPrecision, rounding: Rounding, a: u64, c: u64) -> P
 /// [PPC-Book1 p:112 s:4.6.5.1] fdiv and fdivs: FRT <- FRA / FRB, rounded to the target precision by `FPSCR[RN]`.
 /// [PPC-Book1 p:98 s:4.4.2] a disabled zero divide gives an infinity signed by the operand signs, and sets FR and FI to zero.
 /// [PPC-Book1 p:97 s:4.4.1] infinity over infinity and zero over zero are invalid.
-pub fn ppc_div(precision: PpcPrecision, rounding: Rounding, a: u64, b: u64) -> PpcResult {
+pub fn ppc_div(
+    precision: PpcPrecision,
+    control: impl Into<PpcControl>,
+    a: u64,
+    b: u64,
+) -> PpcResult {
     let invalid = PpcInvalid::signaling(&[a, b]).or(ppc_invalid_quotient(a, b));
     let status = PpcStatus {
         invalid,
@@ -92,11 +117,11 @@ pub fn ppc_div(precision: PpcPrecision, rounding: Rounding, a: u64, b: u64) -> P
     if infinite(b) || zero(a) {
         return PpcResult { bits: sign, status };
     }
-    ppc_round_disabled(precision, rounding, quotient(finite(a), finite(b)))
+    ppc_round(precision, control, quotient(finite(a), finite(b)))
 }
 
-/// The square root of the double-format `b`, rounded to `precision` in
-/// `rounding`.
+/// The square root of the double-format `b`, rounded to `precision`
+/// under `control`.
 ///
 /// The root of a zero is that zero, and the root of +infinity is
 /// +infinity.
@@ -104,7 +129,7 @@ pub fn ppc_div(precision: PpcPrecision, rounding: Rounding, a: u64, b: u64) -> P
 /// [PPC-Book1 p:125 s:5.2.1.1] fsqrt and fsqrts: FRT <- the square root of FRB, rounded to the target precision by `FPSCR[RN]`.
 /// [PPC-Book1 p:92 s:4.3.3] the square root of -0 is -0.
 /// [PPC-Book1 p:97 s:4.4.1] the square root of a negative nonzero number, -infinity included, is invalid.
-pub fn ppc_sqrt(precision: PpcPrecision, rounding: Rounding, b: u64) -> PpcResult {
+pub fn ppc_sqrt(precision: PpcPrecision, control: impl Into<PpcControl>, b: u64) -> PpcResult {
     let invalid = PpcInvalid::signaling(&[b]).or(ppc_invalid_sqrt(b));
     let status = PpcStatus {
         invalid,
@@ -122,23 +147,35 @@ pub fn ppc_sqrt(precision: PpcPrecision, rounding: Rounding, b: u64) -> PpcResul
     if b & !SIGN == 0 || b == INFINITY {
         return PpcResult { bits: b, status };
     }
-    ppc_round_disabled(precision, rounding, square_root(finite(b)))
+    ppc_round(precision, control, square_root(finite(b)))
 }
 
-/// The double-format `a x c + b`, rounded once to `precision` in
-/// `rounding`.
+/// The double-format `a x c + b`, rounded once to `precision` under
+/// `control`.
 ///
 /// [PPC-Book1 p:113 s:4.6.5.2] fmadd and fmadds: FRT <- (FRA x FRC) + FRB, with one rounding.
-pub fn ppc_madd(precision: PpcPrecision, rounding: Rounding, a: u64, b: u64, c: u64) -> PpcResult {
-    multiply_add(precision, rounding, (a, b, c), false)
+pub fn ppc_madd(
+    precision: PpcPrecision,
+    control: impl Into<PpcControl>,
+    a: u64,
+    b: u64,
+    c: u64,
+) -> PpcResult {
+    multiply_add(precision, control.into(), (a, b, c), false)
 }
 
-/// The double-format `a x c - b`, rounded once to `precision` in
-/// `rounding`. A NaN in `b` keeps its sign.
+/// The double-format `a x c - b`, rounded once to `precision` under
+/// `control`. A NaN in `b` keeps its sign.
 ///
 /// [PPC-Book1 p:113 s:4.6.5.2] fmsub and fmsubs: FRT <- (FRA x FRC) - FRB.
-pub fn ppc_msub(precision: PpcPrecision, rounding: Rounding, a: u64, b: u64, c: u64) -> PpcResult {
-    multiply_add(precision, rounding, (a, b, c), true)
+pub fn ppc_msub(
+    precision: PpcPrecision,
+    control: impl Into<PpcControl>,
+    a: u64,
+    b: u64,
+    c: u64,
+) -> PpcResult {
+    multiply_add(precision, control.into(), (a, b, c), true)
 }
 
 /// [`ppc_madd`] with the rounded result negated. A NaN result keeps its
@@ -146,16 +183,28 @@ pub fn ppc_msub(precision: PpcPrecision, rounding: Rounding, a: u64, b: u64, c: 
 ///
 /// [PPC-Book1 p:114 s:4.6.5.2] fnmadd and fnmadds: FRT <- -((FRA x FRC) + FRB); QNaNs propagate with no effect on their sign bit.
 /// [PPC-Book1 p:114 s:4.6.5.2] A generated QNaN has sign 0; an SNaN quieted in its place keeps the SNaN's sign.
-pub fn ppc_nmadd(precision: PpcPrecision, rounding: Rounding, a: u64, b: u64, c: u64) -> PpcResult {
-    negate_unless_nan(ppc_madd(precision, rounding, a, b, c))
+pub fn ppc_nmadd(
+    precision: PpcPrecision,
+    control: impl Into<PpcControl>,
+    a: u64,
+    b: u64,
+    c: u64,
+) -> PpcResult {
+    negate_unless_nan(ppc_madd(precision, control, a, b, c))
 }
 
 /// [`ppc_msub`] with the rounded result negated. A NaN result keeps its
 /// sign.
 ///
 /// [PPC-Book1 p:114 s:4.6.5.2] fnmsub and fnmsubs: FRT <- -((FRA x FRC) - FRB).
-pub fn ppc_nmsub(precision: PpcPrecision, rounding: Rounding, a: u64, b: u64, c: u64) -> PpcResult {
-    negate_unless_nan(ppc_msub(precision, rounding, a, b, c))
+pub fn ppc_nmsub(
+    precision: PpcPrecision,
+    control: impl Into<PpcControl>,
+    a: u64,
+    b: u64,
+    c: u64,
+) -> PpcResult {
+    negate_unless_nan(ppc_msub(precision, control, a, b, c))
 }
 
 /// The precision a divide or square root of `operands` rounds to when its
@@ -223,7 +272,7 @@ enum Combine {
 /// [PPC-Book1 p:97 s:4.4.1] an SNaN operand, infinity minus infinity and infinity times zero are invalid.
 fn arith(
     precision: PpcPrecision,
-    rounding: Rounding,
+    control: PpcControl,
     combine: Combine,
     raw: (u64, u64),
     (x, y): (u64, u64),
@@ -259,10 +308,10 @@ fn arith(
     }
     let (ex, ey) = (finite(x), finite(y));
     let value = match combine {
-        Combine::Sum => signed_zero_sum(rounding, ex, ey, sum(ex, ey)),
+        Combine::Sum => signed_zero_sum(control.rounding, ex, ey, sum(ex, ey)),
         Combine::Product => product(ex, ey),
     };
-    ppc_round_disabled(precision, rounding, value)
+    ppc_round(precision, control, value)
 }
 
 /// The infinity `combine` gives when an operand is an infinity, or `None`.
@@ -291,7 +340,7 @@ fn infinite_result(combine: Combine, x: u64, y: u64) -> Option<u64> {
 /// [PPC-Book1 p:97 s:4.4.1] the invalid operations: an SNaN operand, infinity minus infinity, infinity times zero; a disabled invalid operation sets FR and FI to zero.
 fn multiply_add(
     precision: PpcPrecision,
-    rounding: Rounding,
+    control: PpcControl,
     (a, b, c): (u64, u64, u64),
     subtract: bool,
 ) -> PpcResult {
@@ -325,10 +374,10 @@ fn multiply_add(
         };
     }
     let (p, e) = (product(finite(a), finite(c)), finite(addend));
-    ppc_round_disabled(
+    ppc_round(
         precision,
-        rounding,
-        signed_zero_sum(rounding, p, e, sum(p, e)),
+        control,
+        signed_zero_sum(control.rounding, p, e, sum(p, e)),
     )
 }
 

@@ -6,20 +6,28 @@
 //! ([`crate::fpscr`]), and a record form copies FPSCR bits 0:3 to CR1.
 //! The arithmetic arms, the multiply-add forms included, and the
 //! rounding and conversion arms compute on the `cellgov_float` engine.
-//! The engine runs with every exception disabled. It rounds in the mode
-//! `FPSCR[RN]` selects; `fctiwz` and `fctidz` round toward zero. The
-//! other arms write the FPSCR as follows:
+//! The engine rounds in the mode `FPSCR[RN]` selects, and `fctiwz` and
+//! `fctidz` round toward zero. It applies the overflow and underflow
+//! enables. When VE or ZE is set and its exception occurs, the arm leaves
+//! FRT and FPRF unchanged. The other arms write the FPSCR as follows:
 //!
-//! - the estimates write the status [`crate::fp_status`] gives them;
+//! - the estimates write the status [`crate::fp_status`] gives them,
+//!   and VE and ZE suppress their write in the same way;
 //! - the compares write FPCC and their invalid causes through
 //!   [`crate::fpscr::write_compare_status`];
 //! - `fsel` and the moves leave the FPSCR unchanged.
+//!
+//! An enabled exception sets FEX and raises no interrupt: the guest runs
+//! in Ignore Exceptions mode (`MSR[FE0:FE1]` = 0). The
+//! ppu_fp_enabled_results console capture runs every enabled case to
+//! completion.
+// [PPC-Book1 p:96 s:4.4] FE0 and FE1 do not change whether a result is stored or its value; the FPSCR enable bits decide both.
 // [PPC-Book1 p:89 s:4.2.2] FPSCR[RN] encoding: 0b00 selects Round to Nearest.
 
 use cellgov_float::{
     ppc_add, ppc_convert_to_integer, ppc_div, ppc_div_sqrt_precision, ppc_from_integer, ppc_madd,
-    ppc_msub, ppc_mul, ppc_nmadd, ppc_nmsub, ppc_round_to_single, ppc_sqrt, ppc_sub, PpcInteger,
-    PpcPrecision, PpcResult, Rounding,
+    ppc_msub, ppc_mul, ppc_nmadd, ppc_nmsub, ppc_round_to_single, ppc_sqrt, ppc_sub, PpcEnables,
+    PpcInteger, PpcPrecision, PpcResult, Rounding,
 };
 
 use crate::exec::ExecuteVerdict;
@@ -30,17 +38,31 @@ use crate::fpscr::{self, write_status, Fprf};
 use crate::instruction::ops::{Fp59Op, Fp63Op};
 use crate::state::PpuState;
 
-/// Writes an engine `result` of `precision` to FRT and its status to the
-/// FPSCR.
+/// Writes an engine `result` to FRT and its status to the FPSCR.
+///
+/// FPRF classifies a scaled overflow or underflow result at double
+/// precision.
+///
+/// [PPC-Book1 p:97 s:4.4.1] with VE = 1 an invalid operation leaves FRT and FPRF unchanged and sets FR and FI to zero.
+/// [PPC-Book1 p:98 s:4.4.2] with ZE = 1 a zero divide leaves FRT and FPRF unchanged and sets FR and FI to zero.
 fn write_engine_result(
     state: &mut PpuState,
     frt: u8,
     result: PpcResult,
     precision: PpcPrecision,
+    enables: PpcEnables,
 ) -> ExecuteVerdict {
+    if result.status.refusal(enables).is_some() {
+        fpscr::write_status_keeping_fprf(state, &result.status);
+        return ExecuteVerdict::Continue;
+    }
     state.set_fpr(frt as usize, result.bits);
-    let fprf = Fprf::of(result.bits, precision);
-    write_status(state, &result.status, fprf);
+    let class = if result.status.scaled(enables) {
+        PpcPrecision::Double
+    } else {
+        precision
+    };
+    write_status(state, &result.status, Fprf::of(result.bits, class));
     ExecuteVerdict::Continue
 }
 
@@ -58,6 +80,8 @@ pub fn execute_fp63(
         state.fpr[frb as usize],
         state.fpr[frc as usize],
     );
+    let control = fpscr::control(state.fpscr());
+    let double = PpcPrecision::Double;
     let result_bits = match op {
         // [PPC-Book1 p:113 s:4.6.5.2] fmadd: FRT <- (FRA * FRC) + FRB, single rounding.
         // [PPC-Book1 p:113 s:4.6.5.2] fmsub: FRT <- (FRA * FRC) - FRB.
@@ -65,23 +89,20 @@ pub fn execute_fp63(
         // [PPC-Book1 p:114 s:4.6.5.2] fnmsub: FRT <- -((FRA * FRC) - FRB).
         // [PPC-Book1 p:114 s:4.6.5.2] QNaN sign preserved across fnmadd/fnmsub negation.
         Fp63Op::Fmadd | Fp63Op::Fmsub | Fp63Op::Fnmadd | Fp63Op::Fnmsub => {
-            let rounding = fpscr::rounding(state.fpscr());
-            let multiply_add = match op {
-                Fp63Op::Fmadd => ppc_madd,
-                Fp63Op::Fmsub => ppc_msub,
-                Fp63Op::Fnmadd => ppc_nmadd,
-                _ => ppc_nmsub,
+            let result = match op {
+                Fp63Op::Fmadd => ppc_madd(double, control, ra, rb, rc),
+                Fp63Op::Fmsub => ppc_msub(double, control, ra, rb, rc),
+                Fp63Op::Fnmadd => ppc_nmadd(double, control, ra, rb, rc),
+                _ => ppc_nmsub(double, control, ra, rb, rc),
             };
-            let result = multiply_add(PpcPrecision::Double, rounding, ra, rb, rc);
-            return write_engine_result(state, frt, result, PpcPrecision::Double);
+            return write_engine_result(state, frt, result, double, control.enables);
         }
         // FRB is a reserved field here, so it is not an operand: a NaN
         // parked in it does not win the NaN selection.
         // [PPC-Book1 p:112 s:4.6.5.1] fmul: FRT <- FRA * FRC.
         Fp63Op::Fmul => {
-            let rounding = fpscr::rounding(state.fpscr());
-            let result = ppc_mul(PpcPrecision::Double, rounding, ra, rc);
-            return write_engine_result(state, frt, result, PpcPrecision::Double);
+            let result = ppc_mul(double, control, ra, rc);
+            return write_engine_result(state, frt, result, double, control.enables);
         }
         // [PPC-Book1 p:126 s:5.2.2] fsel: FRT <- FRC if FRA >= 0 else FRB; it leaves the FPSCR unchanged.
         Fp63Op::Fsel => {
@@ -93,21 +114,18 @@ pub fn execute_fp63(
         }
         // [PPC-Book1 p:112 s:4.6.5.1] fdiv: FRT <- FRA / FRB.
         Fp63Op::Fdiv => {
-            let rounding = fpscr::rounding(state.fpscr());
-            let result = ppc_div(PpcPrecision::Double, rounding, ra, rb);
-            return write_engine_result(state, frt, result, PpcPrecision::Double);
+            let result = ppc_div(double, control, ra, rb);
+            return write_engine_result(state, frt, result, double, control.enables);
         }
         // [PPC-Book1 p:111 s:4.6.5.1] fadd: FRT <- FRA + FRB.
         Fp63Op::Fadd => {
-            let rounding = fpscr::rounding(state.fpscr());
-            let result = ppc_add(PpcPrecision::Double, rounding, ra, rb);
-            return write_engine_result(state, frt, result, PpcPrecision::Double);
+            let result = ppc_add(double, control, ra, rb);
+            return write_engine_result(state, frt, result, double, control.enables);
         }
         // [PPC-Book1 p:111 s:4.6.5.1] fsub: FRT <- FRA - FRB.
         Fp63Op::Fsub => {
-            let rounding = fpscr::rounding(state.fpscr());
-            let result = ppc_sub(PpcPrecision::Double, rounding, ra, rb);
-            return write_engine_result(state, frt, result, PpcPrecision::Double);
+            let result = ppc_sub(double, control, ra, rb);
+            return write_engine_result(state, frt, result, double, control.enables);
         }
         // [PPC-Book1 p:110 s:4.6.4] the moves copy FRB with bit 0 kept, flipped, cleared or set, a NaN like any value, and leave the FPSCR unchanged.
         Fp63Op::Fmr => rb,
@@ -120,16 +138,16 @@ pub fn execute_fp63(
         Fp63Op::Fcmpu | Fp63Op::Fcmpo => {
             let fpcc = compare_fpcc(ra, rb);
             state.set_cr_field((frt >> 2) & 7, fpcc);
-            let ve = state.fpscr() & PPC_FPSCR_VE != 0;
+            let ve = control.enables.invalid;
             let invalid = compare_invalid(ra, rb, op == Fp63Op::Fcmpo, ve);
             fpscr::write_compare_status(state, fpcc, &invalid);
             return ExecuteVerdict::Continue;
         }
         // [PPC-Book1 p:115 s:4.6.6] frsp: round FRB to single precision.
         Fp63Op::Frsp => {
-            let rounding = fpscr::rounding(state.fpscr());
-            let result = ppc_round_to_single(rounding, rb);
-            return write_engine_result(state, frt, result, PpcPrecision::Single);
+            let result = ppc_round_to_single(control, rb);
+            let single = PpcPrecision::Single;
+            return write_engine_result(state, frt, result, single, control.enables);
         }
         // The `z` forms round toward zero; the others round in the mode
         // FPSCR[RN] selects. FPRF keeps its value.
@@ -145,34 +163,34 @@ pub fn execute_fp63(
             };
             let rounding = match op {
                 Fp63Op::Fctiwz | Fp63Op::Fctidz => Rounding::TowardZero,
-                _ => fpscr::rounding(state.fpscr()),
+                _ => control.rounding,
             };
             let result = ppc_convert_to_integer(width, rounding, rb);
-            state.set_fpr(frt as usize, result.bits);
-            fpscr::write_convert_status(state, &result.status);
+            if result.status.refusal(control.enables).is_none() {
+                state.set_fpr(frt as usize, result.bits);
+            }
+            fpscr::write_status_keeping_fprf(state, &result.status);
             return ExecuteVerdict::Continue;
         }
         // The engine reads the bits of FRB as a 64-bit signed integer.
         // [PPC-Book1 p:118 s:4.6.6] fcfid: convert 64-bit signed integer to FP.
         Fp63Op::Fcfid => {
-            let rounding = fpscr::rounding(state.fpscr());
-            let result = ppc_from_integer(rounding, rb);
-            return write_engine_result(state, frt, result, PpcPrecision::Double);
+            let result = ppc_from_integer(control.rounding, rb);
+            return write_engine_result(state, frt, result, double, control.enables);
         }
         // [PPC-Book1 p:125 s:5.2.1.1] fsqrt: FRT <- square root of FRB.
         Fp63Op::Fsqrt => {
-            let rounding = fpscr::rounding(state.fpscr());
-            let result = ppc_sqrt(PpcPrecision::Double, rounding, rb);
-            return write_engine_result(state, frt, result, PpcPrecision::Double);
+            let result = ppc_sqrt(double, control, rb);
+            return write_engine_result(state, frt, result, double, control.enables);
         }
         // [PPC-Book1 p:126 s:5.2.1.1] frsqrte: an estimate within one part in 32 of 1/sqrt(FRB); the special-operand table fixes -inf and < 0 to QNaN, -0 to -inf, +0 to +inf, +inf to +0.
         // The PPE's own table, read back by the ppu_fp_estimate_readout capture.
         Fp63Op::Frsqrte => {
-            let bits = cellgov_float::frsqrte_estimate(rb);
-            state.set_fpr(frt as usize, bits);
-            let fprf = Fprf::of(bits, PpcPrecision::Double);
-            write_status(state, &frsqrte_status(rb), fprf);
-            return ExecuteVerdict::Continue;
+            let result = PpcResult {
+                bits: cellgov_float::frsqrte_estimate(rb),
+                status: frsqrte_status(rb),
+            };
+            return write_engine_result(state, frt, result, double, control.enables);
         }
         Fp63Op::Mffs => {
             fpscr::mffs(state, frt);
@@ -228,42 +246,46 @@ pub fn execute_fp59(
         state.fpr[frb as usize],
         state.fpr[frc as usize],
     );
-    let rounding = fpscr::rounding(state.fpscr());
+    let control = fpscr::control(state.fpscr());
     let single = PpcPrecision::Single;
     let (result, precision) = match op {
-        Fp59Op::Fmadds => (ppc_madd(single, rounding, ra, rb, rc), single),
-        Fp59Op::Fmsubs => (ppc_msub(single, rounding, ra, rb, rc), single),
-        Fp59Op::Fnmadds => (ppc_nmadd(single, rounding, ra, rb, rc), single),
-        Fp59Op::Fnmsubs => (ppc_nmsub(single, rounding, ra, rb, rc), single),
-        Fp59Op::Fmuls => (ppc_mul(single, rounding, ra, rc), single),
-        Fp59Op::Fadds => (ppc_add(single, rounding, ra, rb), single),
-        Fp59Op::Fsubs => (ppc_sub(single, rounding, ra, rb), single),
+        Fp59Op::Fmadds => (ppc_madd(single, control, ra, rb, rc), single),
+        Fp59Op::Fmsubs => (ppc_msub(single, control, ra, rb, rc), single),
+        Fp59Op::Fnmadds => (ppc_nmadd(single, control, ra, rb, rc), single),
+        Fp59Op::Fnmsubs => (ppc_nmsub(single, control, ra, rb, rc), single),
+        Fp59Op::Fmuls => (ppc_mul(single, control, ra, rc), single),
+        Fp59Op::Fadds => (ppc_add(single, control, ra, rb), single),
+        Fp59Op::Fsubs => (ppc_sub(single, control, ra, rb), single),
         // An operand outside the single exponent range makes the engine
         // round to double precision. The status and FPRF then use double
         // precision.
         Fp59Op::Fdivs => {
             let precision = ppc_div_sqrt_precision(single, &[ra, rb]);
-            (ppc_div(precision, rounding, ra, rb), precision)
+            (ppc_div(precision, control, ra, rb), precision)
         }
         // [PPC-Book1 p:125 s:5.2.1.1] fsqrts: FRT <- square root of FRB, single precision.
         Fp59Op::Fsqrts => {
             let precision = ppc_div_sqrt_precision(single, &[rb]);
-            (ppc_sqrt(precision, rounding, rb), precision)
+            (ppc_sqrt(precision, control, rb), precision)
         }
         // [PPC-Book1 p:125 s:5.2.1.1] fres: an estimate within one part in 256 of 1/FRB; the special-operand table fixes -inf to -0, -0 to -inf, +0 to +inf, +inf to +0.
         // The PPE's own table, read back by the ppu_fp_estimate_readout capture.
+        // An enabled overflow or underflow scales the estimate as it scales a single result.
         Fp59Op::Fres => {
-            let bits = cellgov_float::fres_estimate(rb);
-            state.set_fpr(frt as usize, bits);
-            let fprf = Fprf::of(bits, single);
-            write_status(state, &fres_status(rb, bits), fprf);
-            return ExecuteVerdict::Continue;
+            let estimate = cellgov_float::fres_estimate(rb);
+            let status = fres_status(rb, estimate, control.enables.underflow);
+            let bits = if status.scaled(control.enables) {
+                cellgov_float::fres_scaled_estimate(rb, &status)
+            } else {
+                estimate
+            };
+            (PpcResult { bits, status }, single)
         }
     };
-    write_engine_result(state, frt, result, precision)
+    write_engine_result(state, frt, result, precision, control.enables)
 }
 
-use cellgov_ps3_abi::hw::ppc_isa::{PPC_F64_SIGN_BIT, PPC_FPSCR_VE};
+use cellgov_ps3_abi::hw::ppc_isa::PPC_F64_SIGN_BIT;
 
 #[cfg(test)]
 #[path = "tests/fp_tests.rs"]

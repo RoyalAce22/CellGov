@@ -1,0 +1,20 @@
+[test]
+name = "ppu_fp_enabled_divsqrt_range"
+
+# A hardware probe of what fdivs and fsqrts write under OE and UE when an
+# operand lies outside the single range, so the operation rounds at
+# double precision, beside the same enables with every operand in range
+# and with the enables clear. The console capture is the answer; no
+# emulator runs it.
+
+[observe]
+# Big-endian u32 words, as ppu/main.c lists: 3 header words (failed
+# step, its code, case count), then 11 words per case (operation, FPSCR
+# before, FRA, FRB, FRC and FRT as high/low pairs, FPSCR after): 16
+# cases, 179 words, 716 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 716 },
+]
+
+[expect]
+outcome = "completed"

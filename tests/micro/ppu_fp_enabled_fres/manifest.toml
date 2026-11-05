@@ -1,0 +1,19 @@
+[test]
+name = "ppu_fp_enabled_fres"
+
+# A hardware probe of what fres writes under OE when the reciprocal of a
+# tiny operand overflows, and under UE when the reciprocal of a large
+# operand is tiny, beside the same operands with the enables clear. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u32 words, as ppu/main.c lists: 3 header words (failed
+# step, its code, case count), then 11 words per case (operation, FPSCR
+# before, FRA, FRB, FRC and FRT as high/low pairs, FPSCR after): 13
+# cases, 146 words, 584 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 584 },
+]
+
+[expect]
+outcome = "completed"

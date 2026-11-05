@@ -1,0 +1,20 @@
+[test]
+name = "ppu_fp_enabled_results"
+
+# A hardware probe of what an FP instruction writes when an FPSCR
+# exception enable bit is set: VE and ZE with their exceptions, OE and UE
+# with the scaled results in each rounding mode and both widths, XE, and
+# each enable with its exception not raised. The console capture is the
+# answer; no emulator runs it.
+
+[observe]
+# Big-endian u32 words, as ppu/main.c lists: 3 header words (failed
+# step, its code, case count), then 11 words per case (operation, FPSCR
+# before, FRA, FRB, FRC and FRT as high/low pairs, FPSCR after): 56
+# cases, 619 words, 2476 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 2476 },
+]
+
+[expect]
+outcome = "completed"

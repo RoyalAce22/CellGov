@@ -4,13 +4,14 @@
 //! Each move instruction takes its fields from the primary-63 decode:
 //! `frt` is instruction bits 6:10, `fra` bits 11:15 and `frb` bits 16:20.
 
-use cellgov_float::{PpcInvalid, PpcPrecision, PpcStatus, Rounding};
+use cellgov_float::{PpcControl, PpcEnables, PpcInvalid, PpcPrecision, PpcStatus, Rounding};
 use cellgov_ps3_abi::hw::ppc_isa::{
     PPC_FPSCR_ENABLE_BITS, PPC_FPSCR_EXCEPTION_BITS, PPC_FPSCR_FEX, PPC_FPSCR_FI, PPC_FPSCR_FPCC,
-    PPC_FPSCR_FPRF, PPC_FPSCR_FR, PPC_FPSCR_FX, PPC_FPSCR_OX, PPC_FPSCR_RN, PPC_FPSCR_UX,
-    PPC_FPSCR_VX, PPC_FPSCR_VXCVI, PPC_FPSCR_VXIDI, PPC_FPSCR_VXIMZ, PPC_FPSCR_VXISI,
-    PPC_FPSCR_VXSNAN, PPC_FPSCR_VXSQRT, PPC_FPSCR_VXVC, PPC_FPSCR_VXZDZ, PPC_FPSCR_VX_BITS,
-    PPC_FPSCR_XX, PPC_FPSCR_ZX, PPE_FPSCR_UNIMPLEMENTED_BITS, PPE_MFFS_HIGH_WORD,
+    PPC_FPSCR_FPRF, PPC_FPSCR_FR, PPC_FPSCR_FX, PPC_FPSCR_OE, PPC_FPSCR_OX, PPC_FPSCR_RN,
+    PPC_FPSCR_UE, PPC_FPSCR_UX, PPC_FPSCR_VE, PPC_FPSCR_VX, PPC_FPSCR_VXCVI, PPC_FPSCR_VXIDI,
+    PPC_FPSCR_VXIMZ, PPC_FPSCR_VXISI, PPC_FPSCR_VXSNAN, PPC_FPSCR_VXSQRT, PPC_FPSCR_VXVC,
+    PPC_FPSCR_VXZDZ, PPC_FPSCR_VX_BITS, PPC_FPSCR_XE, PPC_FPSCR_XX, PPC_FPSCR_ZE, PPC_FPSCR_ZX,
+    PPE_FPSCR_UNIMPLEMENTED_BITS, PPE_MFFS_HIGH_WORD,
 };
 
 use crate::state::PpuState;
@@ -79,12 +80,18 @@ pub(crate) fn write_status(state: &mut PpuState, status: &PpcStatus, fprf: Fprf)
     write_status_fields(state, status, Some(fprf));
 }
 
-/// Writes the status of a conversion to integer into the FPSCR: what
-/// [`write_status`] writes, with FPRF unchanged.
+/// Writes what [`write_status`] writes, with FPRF unchanged.
+///
+/// The callers write the status of:
+///
+/// - a conversion to integer;
+/// - an operation whose enabled exception leaves FRT unchanged.
 ///
 /// [PPC-Book1 p:117 s:4.6.6] a convert to integer leaves FPRF undefined.
 /// The ppu_fp_convert_modes console capture reads the FPRF bits the instruction started with.
-pub(crate) fn write_convert_status(state: &mut PpuState, status: &PpcStatus) {
+/// [PPC-Book1 p:97 s:4.4.1] with VE = 1 an invalid operation leaves FPRF unchanged.
+/// [PPC-Book1 p:98 s:4.4.2] with ZE = 1 a zero divide leaves FPRF unchanged.
+pub(crate) fn write_status_keeping_fprf(state: &mut PpuState, status: &PpcStatus) {
     write_status_fields(state, status, None);
 }
 
@@ -185,6 +192,20 @@ pub(crate) fn rounding(fpscr: u32) -> Rounding {
         1 => Rounding::TowardZero,
         2 => Rounding::TowardPositive,
         _ => Rounding::TowardNegative,
+    }
+}
+
+/// The rounding mode and the exception enables `fpscr` holds.
+pub(crate) fn control(fpscr: u32) -> PpcControl {
+    PpcControl {
+        rounding: rounding(fpscr),
+        enables: PpcEnables {
+            invalid: fpscr & PPC_FPSCR_VE != 0,
+            overflow: fpscr & PPC_FPSCR_OE != 0,
+            underflow: fpscr & PPC_FPSCR_UE != 0,
+            zero_divide: fpscr & PPC_FPSCR_ZE != 0,
+            inexact: fpscr & PPC_FPSCR_XE != 0,
+        },
     }
 }
 
