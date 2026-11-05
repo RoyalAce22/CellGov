@@ -901,6 +901,8 @@ Usage: cellgov boot run [OPTIONS] <--title <NAME>|--content-id <ID>|--title-mani
 | `--save-spu-local-store` | `PATH` | Write one SPU unit's local store and PC here when the run stops. |
 | `--spu-unit` | `ID` | The SPU unit --save-spu-local-store captures, when the run holds several. |
 | `--guest-arg` | `VALUE` | One guest argv entry; repeat for more. Values may spell a flag. |
+| `--ppu-shadow` | `PASSES` | The predecode passes of the primary PPU thread's instruction shadow. Every choice must run the guest the same way. One of `off`, `quickened`, `fused`. Default `fused`. |
+| `--no-trivial-commit` | -- | Commit every step through the full commit path. The guest must run the same way. |
 | `--skip-module-start` | -- | Run no firmware module's module_start in the boot process. |
 | `--force-system-authid` | -- | Serve the system-class bdj.self program authority id instead of the one the title's SELF names. |
 | `--prx-base` | `HEX` | Load the firmware module set at this 64K-aligned base inside the main region, instead of the first 64K page past the title image. A spawned child's firmware set loads at the same base. |
