@@ -373,9 +373,69 @@ data() {
     timed data-suites data_suites
 }
 
-# The pre-push gate, local only: every workflow group plus `local` on the
-# pushed commit, `check` on the MSRV, and the Linux allocation gate in
-# Docker.
+# The image the pre-push gate runs the microtests group in: the pinned
+# toolchain, with the cargo-nextest version of the workflow's microtests
+# job. It prints the image's tag and the two versions.
+microtests_image() {
+    local toolchain nextest
+    toolchain=$(sed -n 's/^channel = "\([^"]*\)"/\1/p' rust-toolchain.toml)
+    # Each workflow job that installs cargo-nextest pins the same version.
+    nextest=$(sed -n 's/^ *tool: cargo-nextest@//p' .github/workflows/ci.yml | sort -u)
+    # A command substitution does not inherit `set -e`, so the check returns.
+    if [ -z "$toolchain" ] || [ -z "$nextest" ] || [ "$(printf '%s\n' "$nextest" | wc -l)" -ne 1 ]; then
+        echo "ci.sh: no pinned toolchain, or not one cargo-nextest version, in the workflow" >&2
+        return 1
+    fi
+    echo "cellgov-microtests:$toolchain-nextest-$nextest $toolchain $nextest"
+}
+
+# The workflow's microtests job, for the pre-push gate, on the commit's
+# files in the current directory.
+#
+# - `git clean -fdx` deletes the built ELFs. A tar of them in
+#   $CARGO_TARGET_DIR/micro-build, named by the `tests/micro` tree,
+#   restores them, as the workflow's cache keyed by `tests/micro/**`
+#   does. A miss runs `micro-build` and saves the tar.
+# - The suites run on Linux, as in the workflow. A Windows boot runs about
+#   2.5 times slower than one on the runner, and the boot-suite walks
+#   then pass their budget.
+# - The container gets the runner's 4 CPUs. At most 4 boots run at once,
+#   as the runner's 4 CPUs allow. Docker's VM can hold less memory than
+#   the runner, and a Linux boot touches little of what it commits.
+push_microtests() {
+    local cache spec image toolchain nextest
+    cache=$CARGO_TARGET_DIR/micro-build/$(git rev-parse HEAD:tests/micro).tar
+    if [ -f "$cache" ]; then
+        timed restore-elfs tar --force-local -xf "$cache"
+    else
+        # A tag of its own leaves the operator's `ps3dev` image alone.
+        MICRO_IMAGE=cellgov-push-micro-toolchain bash .github/ci.sh micro-build
+        mkdir -p "$CARGO_TARGET_DIR/micro-build"
+        rm -f "$CARGO_TARGET_DIR"/micro-build/*.tar
+        timed save-elfs tar --force-local -cf "$cache" tests/micro/*/build
+    fi
+    spec=$(microtests_image)
+    read -r image toolchain nextest <<<"$spec"
+    printf 'FROM rust:%s\nRUN curl -LsSf https://get.nexte.st/%s/linux | tar zxf - -C /usr/local/cargo/bin\n' \
+        "$toolchain" "$nextest" >"$CARGO_TARGET_DIR/microtests.Dockerfile"
+    # A Dockerfile on stdin builds with no context.
+    timed image docker build -q -t "$image" - <"$CARGO_TARGET_DIR/microtests.Dockerfile"
+    timed microtests env MSYS_NO_PATHCONV=1 docker run --rm --cpus 4 \
+        --mount "type=bind,source=$(pwd -W 2>/dev/null || pwd),target=/workspace" \
+        --mount "type=volume,source=cellgov-cargo-registry,target=/usr/local/cargo/registry" \
+        --mount "type=volume,source=cellgov-push-microtests-target,target=/target" \
+        --workdir /workspace \
+        --env CARGO_TARGET_DIR=/target \
+        --env "RUSTUP_TOOLCHAIN=$toolchain" \
+        --env CARGO_PROFILE_DEV_DEBUG=0 \
+        --env CELLGOV_MICROTESTS_MAX_CONCURRENT=4 \
+        "$image" bash .github/ci.sh microtests
+}
+
+# The pre-push gate, local only, on the pushed commit: every workflow
+# group plus `local`, `check` on the MSRV, and the Linux allocation gate
+# in Docker. The microtests job's groups run on Linux (see
+# push_microtests).
 #
 # - It runs in one persistent detached worktree beside the repository.
 #   A forced checkout gives new mtimes to changed files only, so the
@@ -388,7 +448,8 @@ data() {
 push_gate_key() {
     printf '%s\n' "$1" "$(rustc --version)" "$(rustup run "$2" rustc --version)" \
         "$(cargo nextest --version | head -n 1)" \
-        "$(docker image inspect "rust:$2" --format '{{.Id}}' 2>/dev/null || true)" |
+        "$(docker image inspect "rust:$2" --format '{{.Id}}' 2>/dev/null || true)" \
+        "$(docker image inspect "$(microtests_image | cut -d' ' -f1)" --format '{{.Id}}' 2>/dev/null || true)" |
         sha256sum | cut -c1-16
 }
 
@@ -429,6 +490,7 @@ push_gate() {
         return
     fi
     bash .github/ci.sh full
+    run_group microtests-linux push_microtests
     # The workflow's msrv job runs this group on the same toolchain, so a
     # missing toolchain fails here first.
     RUSTUP_TOOLCHAIN=$msrv bash .github/ci.sh check
@@ -442,8 +504,8 @@ push_gate() {
         --env "RUSTUP_TOOLCHAIN=$docker_toolchain" \
         "rust:$msrv" \
         cargo test -p cellgov_core --release --locked --test allocation_counts
-    # The key includes the image id, and the run pulls a missing image, so
-    # the key comes after the run.
+    # The key includes the image ids, and the runs build or pull a missing
+    # image, so the key comes after the runs.
     record=$td/passed/$tree-$(push_gate_key "$tree" "$msrv")
     mkdir -p "$td/passed"
     echo "at $(date -u +%Y-%m-%dT%H:%M:%SZ) as $commit" >"$record"
@@ -465,9 +527,10 @@ case "${1:-full}" in
         gate_mode=${1#gate-}
         run_group "$1" gate
         ;;
-    # Every workflow group plus `local`. The test group runs through
-    # nextest, as the workflow's blocking legs do, so a test over the
-    # per-test budget fails here too.
+    # The workflow's groups but the microtests job's, plus `local`. The
+    # pre-push gate adds those two on Linux (push_microtests). The test
+    # group runs through nextest, as the workflow's blocking legs do, so
+    # a test over the per-test budget fails here too.
     full)
         run_group lint lint
         run_group deny deny
