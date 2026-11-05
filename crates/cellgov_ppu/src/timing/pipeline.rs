@@ -58,7 +58,7 @@ struct Scheduled {
 }
 
 /// The older instruction of an open dispatch group.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Older {
     pc: u64,
     issue: u64,
@@ -66,7 +66,7 @@ struct Older {
 }
 
 /// The scalar part of the model, which a faulted batch rolls back.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Core {
     /// The earliest cycle the next dispatch group can issue at.
     floor: u64,
@@ -133,7 +133,7 @@ const PRESSURE_WINDOW_CYCLES: u64 = 64;
 const PRESSURE_WINDOW_INSTRUCTIONS: u32 = 8;
 
 /// A store still in the store queue.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct Queued {
     ea: u64,
     len: u8,
@@ -143,7 +143,7 @@ struct Queued {
 
 /// The tables a faulted batch keeps: the caches, the predictor and the
 /// store queue. They advance on instructions the batch retires again.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Tables {
     caches: Caches,
     predictor: Predictor,
@@ -152,7 +152,7 @@ struct Tables {
 }
 
 /// The issue model of one PPU thread.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PpeTiming {
     core: Core,
     tables: Box<Tables>,

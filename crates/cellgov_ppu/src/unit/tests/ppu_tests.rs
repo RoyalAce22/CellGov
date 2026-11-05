@@ -651,7 +651,7 @@ fn snapshot_captures_state() {
     unit.state_mut().set_gpr(3, 0xCAFE);
     unit.state_mut().pc = 0x1000;
     unit.state_mut().set_lr(0x2000);
-    let snap = unit.snapshot();
+    let snap = unit.snapshot().state;
     assert_eq!(snap.pc, 0x1000);
     assert_eq!(snap.gpr[3], 0xCAFE);
     assert_eq!(snap.lr, 0x2000);
@@ -665,7 +665,7 @@ fn snapshot_captures_fpr_vr_xer_tb() {
         .set_vr(3, 0x0102_0304_0506_0708_090A_0B0C_0D0E_0F10);
     unit.state_mut().set_xer(0xDEAD_BEEF_CAFE_BABE);
     unit.state_mut().tb = 0x1122_3344_5566_7788;
-    let snap = unit.snapshot();
+    let snap = unit.snapshot().state;
     assert_eq!(snap.fpr[7], 0x4034_0000_0000_0000);
     assert_eq!(snap.vr[3], 0x0102_0304_0506_0708_090A_0B0C_0D0E_0F10);
     assert_eq!(snap.xer, 0xDEAD_BEEF_CAFE_BABE);

@@ -62,6 +62,58 @@ impl PpuArchitecturalState {
             reservation: fields.reservation,
         }
     }
+
+    /// Write every field into `state`.
+    ///
+    /// Each hashed field goes through its setter, so the state hash is
+    /// current afterwards.
+    pub fn apply(&self, state: &mut PpuState) {
+        let Self {
+            gpr,
+            fpr,
+            vr,
+            pc,
+            cr,
+            lr,
+            ctr,
+            xer,
+            fpscr,
+            vrsave,
+            vscr,
+            tb,
+            reservation,
+        } = self;
+        state.set_gpr_all(*gpr);
+        state.set_fpr_all(*fpr);
+        state.set_vr_all(*vr);
+        state.pc = *pc;
+        state.set_cr(*cr);
+        state.set_lr(*lr);
+        state.set_ctr(*ctr);
+        state.set_xer(*xer);
+        state.set_fpscr(*fpscr);
+        state.set_vrsave(*vrsave);
+        state.set_vscr(*vscr);
+        state.tb = *tb;
+        state.set_reservation(*reservation);
+    }
+
+    /// The fields the state hash covers.
+    pub fn fingerprint(&self) -> cellgov_exec::PpuFingerprint {
+        cellgov_exec::PpuFingerprint {
+            gpr: self.gpr,
+            lr: self.lr,
+            ctr: self.ctr,
+            xer: self.xer,
+            cr: self.cr,
+            reservation_line: self.reservation.map(|l| l.addr()),
+            fpscr: self.fpscr,
+            vrsave: self.vrsave,
+            fpr: self.fpr,
+            vr: self.vr,
+            vscr: self.vscr,
+        }
+    }
 }
 
 /// Terminal result attached to a PPU observation.

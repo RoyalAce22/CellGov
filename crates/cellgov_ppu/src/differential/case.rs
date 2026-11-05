@@ -3,11 +3,12 @@
 use cellgov_ps3_abi::hw::ppu::{FPR_COUNT, GPR_COUNT, VR_COUNT};
 use cellgov_sync::ReservedLine;
 
+use crate::observation::PpuArchitecturalState;
 use crate::state::PpuState;
 
 /// Architectural register snapshot used by [`InstructionCase`].
 ///
-/// Strict subset of [`PpuState`]: excludes PC and the time base
+/// The [`PpuArchitecturalState`] without the PC and the time base
 /// (the harness runs one instruction). Reservation state is
 /// included so `lwarx` / `ldarx` / `stwcx` / `stdcx` replay
 /// faithfully.
@@ -62,20 +63,7 @@ impl PpuStateSnapshot {
 
     /// Snapshot a [`PpuState`].
     pub fn capture(state: &PpuState) -> Self {
-        let fields = state.snapshot_fields();
-        Self {
-            gpr: fields.gpr,
-            fpr: fields.fpr,
-            vr: fields.vr,
-            cr: fields.cr,
-            lr: fields.lr,
-            ctr: fields.ctr,
-            xer: fields.xer,
-            fpscr: fields.fpscr,
-            vrsave: fields.vrsave,
-            vscr: fields.vscr,
-            reservation: fields.reservation,
-        }
+        Self::from(&PpuArchitecturalState::capture(state))
     }
 
     /// Copy this snapshot into `state`, leaving PC and TB untouched.
@@ -97,6 +85,40 @@ impl PpuStateSnapshot {
         state.set_vrsave(self.vrsave);
         state.set_vscr(self.vscr);
         state.set_reservation(self.reservation);
+    }
+}
+
+impl From<&PpuArchitecturalState> for PpuStateSnapshot {
+    /// Every field but the PC and the time base.
+    fn from(state: &PpuArchitecturalState) -> Self {
+        let PpuArchitecturalState {
+            gpr,
+            fpr,
+            vr,
+            pc: _,
+            cr,
+            lr,
+            ctr,
+            xer,
+            fpscr,
+            vrsave,
+            vscr,
+            tb: _,
+            reservation,
+        } = *state;
+        Self {
+            gpr,
+            fpr,
+            vr,
+            cr,
+            lr,
+            ctr,
+            xer,
+            fpscr,
+            vrsave,
+            vscr,
+            reservation,
+        }
     }
 }
 

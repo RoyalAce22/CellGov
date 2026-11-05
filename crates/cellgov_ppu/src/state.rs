@@ -194,20 +194,6 @@ pub struct PpuState {
     acc: u128,
 }
 
-pub(crate) struct PpuSnapshotFields {
-    pub gpr: [u64; GPR_COUNT],
-    pub fpr: [u64; FPR_COUNT],
-    pub vr: [u128; VR_COUNT],
-    pub cr: u32,
-    pub lr: u64,
-    pub ctr: u64,
-    pub xer: u64,
-    pub fpscr: u32,
-    pub vrsave: u32,
-    pub vscr: u32,
-    pub reservation: Option<ReservedLine>,
-}
-
 pub(crate) struct PpuObservationFields {
     pub gpr: [u64; GPR_COUNT],
     pub fpr: [u64; FPR_COUNT],
@@ -225,51 +211,13 @@ pub(crate) struct PpuObservationFields {
 }
 
 impl PpuState {
-    /// The exhaustive pattern requires each new state field to join the snapshot or have an instrumentation-only exclusion.
-    pub(crate) fn snapshot_fields(&self) -> PpuSnapshotFields {
-        let Self {
-            gpr,
-            fpr,
-            vr,
-            pc: _,
-            cr,
-            lr,
-            ctr,
-            xer,
-            fpscr,
-            vrsave,
-            vscr,
-            vrsave_written: _,
-            clock_read: _,
-            mfvrsave_executed: _,
-            ldarx_executed: _,
-            stdcx_executed: _,
-            lwarx_executed: _,
-            stwcx_executed: _,
-            mem_fault_arm_entries: _,
-            mem_fault_unmapped_routed: _,
-            dcbz_executed: _,
-            ctrl: _,
-            tb: _,
-            reservation,
-            acc: _,
-        } = self;
-        PpuSnapshotFields {
-            gpr: *gpr.as_array(),
-            fpr: *fpr.as_array(),
-            vr: *vr.as_array(),
-            cr: *cr,
-            lr: *lr,
-            ctr: *ctr,
-            xer: *xer,
-            fpscr: *fpscr,
-            vrsave: *vrsave,
-            vscr: *vscr,
-            reservation: *reservation,
-        }
-    }
-
+    /// Every architected field.
+    ///
+    /// The PPU snapshot and each of its projections read the state
+    /// through this function only.
     pub(crate) fn observation_fields(&self) -> PpuObservationFields {
+        // Every field is named, so a new one fails to compile here until
+        // the snapshot takes it or says why not.
         let Self {
             gpr,
             fpr,
@@ -282,8 +230,10 @@ impl PpuState {
             fpscr,
             vrsave,
             vscr,
-            vrsave_written: _,
+            // One step sets it and clears it.
             clock_read: _,
+            // Instruments the bench witnesses read; no instruction reads them.
+            vrsave_written: _,
             mfvrsave_executed: _,
             ldarx_executed: _,
             stdcx_executed: _,
@@ -296,6 +246,7 @@ impl PpuState {
             ctrl: _,
             tb,
             reservation,
+            // Derived from the fields above.
             acc: _,
         } = self;
         PpuObservationFields {
@@ -648,19 +599,7 @@ impl PpuState {
     /// trace carries them, so a per-step hash divergence always names
     /// a field in the zoom diff.
     pub fn fingerprint(&self) -> cellgov_exec::PpuFingerprint {
-        cellgov_exec::PpuFingerprint {
-            gpr: self.gpr.regs,
-            lr: self.lr,
-            ctr: self.ctr,
-            xer: self.xer,
-            cr: self.cr,
-            reservation_line: self.reservation.map(|l| l.addr()),
-            fpscr: self.fpscr,
-            vrsave: self.vrsave,
-            fpr: self.fpr.regs,
-            vr: self.vr.regs,
-            vscr: self.vscr,
-        }
+        crate::observation::PpuArchitecturalState::capture(self).fingerprint()
     }
 
     /// The Multilinear-128 hash of the [`Self::fingerprint`] field set.

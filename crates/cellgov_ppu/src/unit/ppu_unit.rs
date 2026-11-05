@@ -1,45 +1,36 @@
 //! The PPU unit's state, its constructor, and its accessors.
 
 use super::fetch::NO_FETCH_RUN;
+use crate::observation::PpuArchitecturalState;
 use crate::store_buffer::StoreBuffer;
 use crate::tap::PpuTap;
 use crate::{shadow, state};
 use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
 
-/// PPU architectural state snapshot for replay.
+/// One PPU thread's architected state and the unit's run state.
 ///
-/// [PPC-Book1 p:18 s:2.3 Branch Processor Registers] CR is 32 bits in eight 4-bit fields; LR and CTR are 64-bit branch registers.
-#[derive(Debug, Clone)]
+/// The differential snapshot, the observation and the fingerprint are
+/// projections of [`Self::state`]. [`PpuExecutionUnit::restore`] is the
+/// exact inverse of the unit's snapshot.
+///
+/// [CBE-Handbook p:297 s:10.2] for each thread, the PPE has duplicate copies of all architected state.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PpuSnapshot {
-    /// General-purpose registers.
-    pub gpr: [u64; 32],
-    /// Raw f64 bit patterns, matching `PpuState`.
-    pub fpr: [u64; 32],
-    /// Big-endian (byte 0 in MSB).
-    pub vr: [u128; 32],
-    /// Program counter.
-    pub pc: u64,
-    /// 8 nibble fields.
-    pub cr: u32,
-    /// Link register.
-    pub lr: u64,
-    /// Count register.
-    pub ctr: u64,
-    /// Fixed-point exception register.
-    pub xer: u64,
-    /// Floating-point status and control register.
-    pub fpscr: u32,
-    /// AltiVec VR-usage mask.
-    pub vrsave: u32,
-    /// Vector status and control register.
-    pub vscr: u32,
-    /// Time base register.
+    /// Registers, PC, time base and the reservation.
     ///
-    /// [PPC-Book2 p:29 s:Chapter 4. Time Base] TB is a 64-bit unsigned counter incremented monotonically.
-    pub tb: u64,
-    /// Canonical reservation-line address, or `None` when no reservation is held.
-    pub reservation_line: Option<u64>,
+    /// [PPC-Book1 p:18 s:2.3.1] CR is 32 bits in eight 4-bit fields.
+    /// [PPC-Book1 p:19 s:2.3] LR and CTR are 64-bit branch registers.
+    /// [PPC-Book2 p:29 s:Chapter 4. Time Base] TB is a 64-bit unsigned counter that the hardware increments periodically.
+    pub state: PpuArchitecturalState,
+    /// The status the unit resumes with.
+    pub status: UnitStatus,
+    /// The PC a debug break waits for.
+    pub break_pc: Option<u64>,
+    /// The hits at `break_pc` still to pass before the break fires.
+    pub break_skip: u32,
+    /// The issue model, which times the next instruction.
+    pub(super) timing: Box<crate::timing::PpeTiming>,
 }
 
 /// PPU `ExecutionUnit`: owns architectural state, fetches and executes
@@ -195,5 +186,60 @@ impl PpuExecutionUnit {
     /// batch retires none.
     pub fn retired_instructions(&self) -> u64 {
         self.retirement_counter
+    }
+
+    /// Put the unit back in the context `snapshot` holds. The registers
+    /// go through their setters, so the state hash is current after the
+    /// restore. The unit keeps its id, its instruments and its trace
+    /// settings, and drops the trace output it has not drained.
+    pub fn restore(&mut self, snapshot: PpuSnapshot) {
+        let PpuSnapshot {
+            state,
+            status,
+            break_pc,
+            break_skip,
+            timing,
+        } = snapshot;
+        // Every field is named, so a new one fails to compile here until
+        // the restore sets it, clears it or says why the unit keeps it.
+        let PpuExecutionUnit {
+            // The unit's identity.
+            id: _,
+            state: unit_state,
+            status: unit_status,
+            break_pc: unit_break_pc,
+            break_skip: unit_break_skip,
+            // Trace output the runtime has not drained.
+            per_step_hashes,
+            per_step_full_states,
+            barriers,
+            // Trace instruments and settings.
+            retirement_counter: _,
+            full_state_window: _,
+            // A cache of guest memory that `invalidate_code` keeps current.
+            instruction_shadow: _,
+            shadow_hits: _,
+            shadow_misses: _,
+            // Batch-local: each batch entry clears them.
+            fetch_start: _,
+            fetch_end: _,
+            fetch_runs: _,
+            store_buf: _,
+            timing: unit_timing,
+            // Profile instruments and the observer.
+            profile_mode: _,
+            profile_insns: _,
+            profile_pairs: _,
+            profile_prev: _,
+            tap: _,
+        } = self;
+        state.apply(unit_state);
+        *unit_status = status;
+        *unit_break_pc = break_pc;
+        *unit_break_skip = break_skip;
+        *unit_timing = timing;
+        per_step_hashes.clear();
+        per_step_full_states.clear();
+        barriers.clear();
     }
 }

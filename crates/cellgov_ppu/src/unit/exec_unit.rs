@@ -2,6 +2,7 @@
 
 use super::batch::NoTap;
 use super::ppu_unit::{PpuExecutionUnit, PpuSnapshot};
+use crate::observation::PpuArchitecturalState;
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionStepResult, ExecutionUnit, UnitStatus};
@@ -35,20 +36,46 @@ impl ExecutionUnit for PpuExecutionUnit {
     }
 
     fn snapshot(&self) -> PpuSnapshot {
+        // Every field is named, so a new one fails to compile here until
+        // the snapshot takes it or says why not.
+        let PpuExecutionUnit {
+            // The unit's identity, which a restore keeps.
+            id: _,
+            state,
+            status,
+            break_pc,
+            break_skip,
+            // Trace output the runtime drains.
+            per_step_hashes: _,
+            per_step_full_states: _,
+            barriers: _,
+            // Trace instruments: the step the records carry and the
+            // window of full records.
+            retirement_counter: _,
+            full_state_window: _,
+            // A cache of guest memory that `invalidate_code` keeps current.
+            instruction_shadow: _,
+            shadow_hits: _,
+            shadow_misses: _,
+            // Batch-local: each batch entry clears them.
+            fetch_start: _,
+            fetch_end: _,
+            fetch_runs: _,
+            store_buf: _,
+            timing,
+            // Profile instruments and the observer.
+            profile_mode: _,
+            profile_insns: _,
+            profile_pairs: _,
+            profile_prev: _,
+            tap: _,
+        } = self;
         PpuSnapshot {
-            gpr: *self.state.gpr.as_array(),
-            fpr: *self.state.fpr.as_array(),
-            vr: *self.state.vr.as_array(),
-            pc: self.state.pc,
-            cr: self.state.cr(),
-            lr: self.state.lr(),
-            ctr: self.state.ctr(),
-            xer: self.state.xer(),
-            fpscr: self.state.fpscr(),
-            vrsave: self.state.vrsave(),
-            vscr: self.state.vscr(),
-            tb: self.state.tb,
-            reservation_line: self.state.reservation().map(|l| l.addr()),
+            state: PpuArchitecturalState::capture(state),
+            status: *status,
+            break_pc: *break_pc,
+            break_skip: *break_skip,
+            timing: timing.clone(),
         }
     }
 

@@ -18,7 +18,7 @@ pub(crate) enum Level {
 }
 
 /// A set-associative tag array with tree pseudo-LRU replacement.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Tags<const SETS: usize, const WAYS: usize> {
     /// Each way's line number plus one; zero is an empty way.
     lines: [[u32; WAYS]; SETS],
@@ -108,7 +108,7 @@ impl<const SETS: usize, const WAYS: usize> Tags<SETS, WAYS> {
 }
 
 /// The L1 data cache and the L2, by 128-byte line.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Caches {
     l1: Tags<{ k::PPU_L1D_SETS }, { k::PPU_L1D_WAYS }>,
     l2: Tags<{ k::PPU_L2_SETS }, { k::PPU_L2_WAYS }>,

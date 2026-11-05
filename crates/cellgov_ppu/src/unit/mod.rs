@@ -96,3 +96,7 @@ mod synced_code_store_tests;
 #[cfg(test)]
 #[path = "tests/committed_code_write_tests.rs"]
 mod committed_code_write_tests;
+
+#[cfg(test)]
+#[path = "tests/snapshot_restore_tests.rs"]
+mod snapshot_restore_tests;

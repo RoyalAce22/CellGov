@@ -9,7 +9,7 @@
 use cellgov_ps3_abi::hw::ppu_issue as k;
 
 /// Branch-history and link-stack state.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Predictor {
     /// Two-bit counters: 2 and 3 predict taken.
     table: [u8; k::PPU_BHT_ENTRIES],
