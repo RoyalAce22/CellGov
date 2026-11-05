@@ -151,6 +151,11 @@ pub fn kind_unit(kind: PpuFuzzKind) -> PpuReferenceUnit {
 /// generation recipe.
 pub fn word_unit(raw: u32) -> Option<PpuReferenceUnit> {
     let kind = generation_descriptor(raw)?.kind;
+    Some(decoded_word_unit(raw, kind))
+}
+
+/// The unit of `raw`, a word that decodes to `kind`.
+pub fn decoded_word_unit(raw: u32, kind: PpuFuzzKind) -> PpuReferenceUnit {
     // [AltiVec-PEM p:A-1 s:A.1] dssall, dstt and dststt are mnemonics of
     // their own; word bit 6, the A or T field, selects each.
     let bit_6 = (raw >> 25) & 1 == 1;
@@ -158,11 +163,11 @@ pub fn word_unit(raw: u32) -> Option<PpuReferenceUnit> {
         PpuFuzzKind::Ordinary(K::Dss) if bit_6 => "dssall",
         PpuFuzzKind::Ordinary(K::Dst) if bit_6 => "dstt",
         PpuFuzzKind::Ordinary(K::Dstst) if bit_6 => "dststt",
-        _ => return Some(kind_unit(kind)),
+        _ => return kind_unit(kind),
     };
-    Some(PpuReferenceUnit::Instruction {
+    PpuReferenceUnit::Instruction {
         mnemonic: mnemonic.into(),
-    })
+    }
 }
 
 /// The unit of a kind whose name is not its mnemonic.

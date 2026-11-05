@@ -33,9 +33,11 @@ mod lv2_extract;
 mod lv2_tables;
 mod oracle_gap;
 mod paths;
+mod ppu_census;
 mod progress;
 mod spu_census;
 mod spu_disasm;
+mod title_images;
 
 use std::path::Path;
 
@@ -185,6 +187,8 @@ fn dispatch_dev(
         DevCommand::Disasm(args) => disasm::run(args, vfs_flag),
         DevCommand::SpuDisasm(args) => spu_disasm::run(args, vfs_flag),
         DevCommand::SpuCensus(args) => spu_census::run(args, vfs_flag, globals.format),
+        DevCommand::PpuCensus(args) => ppu_census::run(args, vfs_flag, globals.format),
+        DevCommand::PpuCoverageGen(args) => cli::ppu_coverage_gen::run(args),
         DevCommand::PrxImports(args) => {
             dump_prx_imports::run(args, vfs_flag)?;
             Ok(CommandExitCode::SUCCESS)

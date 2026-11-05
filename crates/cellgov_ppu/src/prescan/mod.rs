@@ -17,7 +17,7 @@ mod sections;
 
 pub use error::PrescanError;
 pub use scan::{
-    scan_be_bytes, scan_elf_text, scan_words, CoverageMode, ElfTextCoverage, PrescanGap,
-    PrescanReport,
+    elf_text_ranges, scan_be_bytes, scan_elf_text, scan_words, CoverageMode, ElfTextCoverage,
+    PrescanGap, PrescanReport,
 };
 pub use sections::executable_progbits_ranges;

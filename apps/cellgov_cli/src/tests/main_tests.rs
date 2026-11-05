@@ -76,6 +76,8 @@ const DISPATCHED: &[&str] = &[
     "dev disasm",
     "dev spu-disasm",
     "dev spu-census",
+    "dev ppu-census",
+    "dev ppu-coverage-gen",
     "dev prx-imports",
     "dev funcs",
     "dev lv2-discover",

@@ -28,6 +28,8 @@ crates/cellgov_ps3_abi/src/lv2/census_table.rs linguist-generated=true
 crates/cellgov_ps3_abi/src/nid/table.rs linguist-generated=true
 docs/cli.md linguist-generated=true
 docs/titles.md linguist-generated=true
+docs/ppu_census.json linguist-generated=true
+docs/ppu_coverage.md linguist-generated=true
 docs/lv2/README.md linguist-generated=true
 tests/micro/*/ppu/cases.h linguist-generated=true
 

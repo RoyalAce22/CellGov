@@ -2,19 +2,16 @@
 //! counted by opcode-map row and decoder class.
 
 use std::collections::BTreeSet;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use cellgov_boot::manifest::{TitleManifest, TitleRegistry};
-use cellgov_install::self_image::is_sce_wrapped;
+use cellgov_boot::manifest::TitleManifest;
 use cellgov_install::store::StoreInventory;
-use cellgov_ps3_abi::format::elf::ELF_MAGIC;
 use cellgov_spu::census::SpuCensus;
 use cellgov_spu::disasm::SpuWordClass;
 
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::{OutputFormat, SpuCensusArgs};
-use crate::cli::self_load::decrypt_ppu_self;
+use crate::title_images::{census_inputs, read_image, title_files};
 
 /// The classes a census reports, in report order.
 const CLASSES: [SpuWordClass; 4] = [
@@ -44,27 +41,17 @@ pub(crate) fn run(
     vfs_flag: Option<&Path>,
     format: OutputFormat,
 ) -> Result<CommandExitCode, CommandError> {
-    let vfs_root = crate::cli::title::resolve_ps3_vfs_root(vfs_flag)?;
-    let registry = TitleRegistry::scan_dir(&crate::cli::store::registry_dir())
-        .map_err(|error| CommandError::failed(format!("spu-census: title registry: {error}")))?;
-    let titles: Vec<&TitleManifest> = match &args.scope.title {
-        Some(name) => vec![registry.by_short_name(name).ok_or_else(|| {
-            CommandError::failed(format!(
-                "spu-census: unknown title '{name}'. Known titles: {}",
-                registry.known_names_csv()
-            ))
-        })?],
-        None => registry.iter().collect(),
-    };
-    let inventory = StoreInventory::read(&crate::cli::keys::install_root_of(&vfs_root))
-        .map_err(|error| CommandError::failed(format!("spu-census: store: {error}")))?;
-
+    let inputs = census_inputs(&args.scope, vfs_flag, "spu-census")?;
     let mut seen = BTreeSet::new();
     let mut total = SpuCensus::new();
     let mut reports = Vec::new();
-    for title in titles {
+    for title in &inputs.titles {
         reports.push(census_title(
-            title, &inventory, &vfs_root, &mut seen, &mut total,
+            title,
+            &inputs.inventory,
+            &inputs.vfs_root,
+            &mut seen,
+            &mut total,
         ));
     }
     match format {
@@ -90,35 +77,20 @@ fn census_title(
         words: 0,
         unreadable: Vec::new(),
     };
-    if title.ships_in_firmware() {
-        report.skipped = Some("ships inside the firmware".to_string());
-        return report;
-    }
-    let dirs: Vec<PathBuf> = match inventory.title(&title.content_id) {
-        Some(entry) => entry
-            .base
-            .iter()
-            .map(|base| base.dir.clone())
-            .chain(entry.updates.values().map(|update| update.dir.clone()))
-            .collect(),
-        None => title.eboot_dirs(vfs_root).unwrap_or_default(),
+    let found = match title_files(title, inventory, vfs_root) {
+        Ok(found) => found,
+        Err(reason) => {
+            report.skipped = Some(reason.to_string());
+            return report;
+        }
     };
-    let dirs: Vec<PathBuf> = dirs.into_iter().filter(|d| d.is_dir()).collect();
-    if dirs.is_empty() {
-        report.skipped = Some("not installed".to_string());
-        return report;
-    }
-    let mut files = Vec::new();
-    for dir in &dirs {
-        walk(dir, &mut files, &mut report.unreadable);
-    }
-    files.sort();
-    for path in files {
+    report.unreadable = found.unreadable;
+    for path in found.files {
         let bytes = match read_image(&path, vfs_root) {
             Ok(Some(bytes)) => bytes,
             Ok(None) => continue,
             Err(reason) => {
-                report.unreadable.push((path, reason));
+                report.unreadable.push((path, reason.to_string()));
                 continue;
             }
         };
@@ -128,49 +100,6 @@ fn census_title(
         report.words += words;
     }
     report
-}
-
-/// Every regular file under `dir`, recursively.
-fn walk(dir: &Path, files: &mut Vec<PathBuf>, unreadable: &mut Vec<(PathBuf, String)>) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(error) => {
-            unreadable.push((dir.to_path_buf(), error.to_string()));
-            return;
-        }
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        match entry.file_type() {
-            Ok(kind) if kind.is_dir() => walk(&path, files, unreadable),
-            Ok(kind) if kind.is_file() => files.push(path),
-            _ => {}
-        }
-    }
-}
-
-/// The plaintext ELF bytes of `path`, or `None` for a file that is
-/// neither an ELF nor an SCE container.
-///
-/// # Errors
-///
-/// Why the file could not be read or decrypted.
-fn read_image(path: &Path, vfs_root: &Path) -> Result<Option<Vec<u8>>, String> {
-    let mut head = [0u8; 4];
-    let read = std::fs::File::open(path)
-        .and_then(|mut file| file.read(&mut head))
-        .map_err(|error| error.to_string())?;
-    let head = &head[..read];
-    if head != ELF_MAGIC && !is_sce_wrapped(head) {
-        return Ok(None);
-    }
-    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
-    if head == ELF_MAGIC {
-        return Ok(Some(bytes));
-    }
-    decrypt_ppu_self(&bytes, &path.display().to_string(), vfs_root)
-        .map(Some)
-        .map_err(|error| error.to_string())
 }
 
 fn percent(part: u64, whole: u64) -> f64 {

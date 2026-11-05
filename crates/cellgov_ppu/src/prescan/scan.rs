@@ -183,79 +183,11 @@ pub struct ElfTextCoverage {
 /// Trailing bytes that don't form a full 32-bit word are ignored per
 /// [`scan_be_bytes`].
 pub fn scan_elf_text(elf_data: &[u8]) -> Result<(PrescanReport, ElfTextCoverage), PrescanError> {
-    let segments = crate::loader::pt_load_segments(elf_data)?;
-    let sections = executable_progbits_ranges(elf_data)?;
-
-    let mode = if sections.is_empty() {
-        CoverageMode::SegmentFallback
-    } else if executable_sections_anonymous(elf_data)? {
-        CoverageMode::SectionFilteredAnonymous
-    } else {
-        CoverageMode::SectionFiltered
-    };
-    let mut coverage = ElfTextCoverage {
-        sections_scanned: u32::try_from(sections.len()).unwrap_or(u32::MAX),
-        ..ElfTextCoverage::default()
-    };
-
-    // Collect the (section ∩ segment) intersections (or whole-segment
-    // ranges in fallback mode) before scanning. A single merge pass
-    // dedupes overlapping PT_LOAD entries so bytes_scanned and gap
-    // occurrences aren't double-counted.
-    let mut intersections: Vec<(usize, usize)> = Vec::new();
-    let mut had_exec_seg = false;
-    for seg in segments {
-        if !seg.executable {
-            continue;
-        }
-        had_exec_seg = true;
-        coverage.executable_segments = coverage.executable_segments.saturating_add(1);
-
-        // The two `try_from` casts guard 32-bit hosts where a u64
-        // segment value can exceed `usize::MAX`. A truncating
-        // `as usize` would silently shrink the scanned range and
-        // break determinism. Unreachable on 64-bit hosts.
-        let Ok(seg_lo) = usize::try_from(seg.file_offset) else {
-            continue;
-        };
-        let Ok(seg_sz) = usize::try_from(seg.filesz) else {
-            continue;
-        };
-        let seg_hi = match seg_lo.checked_add(seg_sz) {
-            Some(hi) => hi.min(elf_data.len()),
-            None => continue,
-        };
-        if seg_lo >= seg_hi {
-            continue;
-        }
-
-        if sections.is_empty() {
-            intersections.push((seg_lo, seg_hi));
-        } else {
-            for &(sec_lo, sec_hi) in &sections {
-                let lo = sec_lo.max(seg_lo);
-                let hi = sec_hi.min(seg_hi);
-                if lo < hi {
-                    intersections.push((lo, hi));
-                }
-            }
-        }
-    }
-
-    // If we never saw an executable segment, leave coverage_mode at
-    // NotRun (the Default) rather than claiming a fallback walk ran.
-    if had_exec_seg {
-        coverage.mode = mode;
-    }
-
-    let merged = merge_ranges(intersections);
-
+    let (ranges, coverage) = elf_text_ranges(elf_data)?;
     let mut accum: BTreeMap<GapKey, PrescanGap> = BTreeMap::new();
     let mut report = PrescanReport::default();
-    for (lo, hi) in merged {
-        let bytes = &elf_data[lo..hi];
-        coverage.bytes_scanned = coverage.bytes_scanned.saturating_add(bytes.len() as u64);
-        let chunk = scan_be_bytes(bytes);
+    for (lo, hi) in ranges {
+        let chunk = scan_be_bytes(&elf_data[lo..hi]);
         report.words_scanned += chunk.words_scanned;
         report.words_accepted += chunk.words_accepted;
         report.words_stubbed += chunk.words_stubbed;
@@ -272,6 +204,99 @@ pub fn scan_elf_text(elf_data: &[u8]) -> Result<(PrescanReport, ElfTextCoverage)
     Ok((report, coverage))
 }
 
+/// The byte ranges of `elf_data` that [`scan_elf_text`] walks, in
+/// ascending order with overlaps merged, and their [`ElfTextCoverage`].
+///
+/// # Errors
+///
+/// As [`scan_elf_text`].
+pub fn elf_text_ranges(
+    elf_data: &[u8],
+) -> Result<(Vec<(usize, usize)>, ElfTextCoverage), PrescanError> {
+    let segments = crate::loader::pt_load_segments(elf_data)?;
+    let sections = executable_progbits_ranges(elf_data)?;
+
+    let mode = if sections.is_empty() {
+        CoverageMode::SegmentFallback
+    } else if executable_sections_anonymous(elf_data)? {
+        CoverageMode::SectionFilteredAnonymous
+    } else {
+        CoverageMode::SectionFiltered
+    };
+    let mut coverage = ElfTextCoverage {
+        sections_scanned: u32::try_from(sections.len()).unwrap_or(u32::MAX),
+        ..ElfTextCoverage::default()
+    };
+
+    // Collect the section-segment intersections, or whole-segment
+    // ranges in fallback mode. One merge pass dedupes overlapping
+    // PT_LOAD entries, so neither bytes_scanned nor the gap occurrences
+    // of a scan count a byte twice.
+    let mut intersections: Vec<(usize, usize)> = Vec::new();
+    let mut had_exec_seg = false;
+    for seg in segments {
+        if !seg.executable {
+            continue;
+        }
+        had_exec_seg = true;
+        coverage.executable_segments = coverage.executable_segments.saturating_add(1);
+        let Some(segment) = segment_file_range(seg.file_offset, seg.filesz, elf_data.len()) else {
+            continue;
+        };
+        push_section_intersections(&mut intersections, segment, &sections);
+    }
+
+    // If we never saw an executable segment, leave coverage_mode at
+    // NotRun (the Default) rather than claiming a fallback walk ran.
+    if had_exec_seg {
+        coverage.mode = mode;
+    }
+
+    let merged = merge_ranges(intersections);
+    for &(lo, hi) in &merged {
+        coverage.bytes_scanned = coverage.bytes_scanned.saturating_add((hi - lo) as u64);
+    }
+    Ok((merged, coverage))
+}
+
+/// The file bytes `[lo, hi)` a segment at `file_offset` holding `filesz`
+/// bytes covers in an image of `len` bytes, or `None` when it covers
+/// none.
+fn segment_file_range(file_offset: u64, filesz: u64, len: usize) -> Option<(usize, usize)> {
+    // The two `try_from` casts guard 32-bit hosts where a u64
+    // segment value can exceed `usize::MAX`. A truncating
+    // `as usize` would silently shrink the scanned range and
+    // break determinism. Unreachable on 64-bit hosts.
+    let lo = usize::try_from(file_offset).ok()?;
+    let size = usize::try_from(filesz).ok()?;
+    let hi = lo.checked_add(size)?.min(len);
+    (lo < hi).then_some((lo, hi))
+}
+
+/// Push the part of `segment` each of `sections` overlaps, or the whole
+/// segment when there are no sections.
+fn push_section_intersections(
+    intersections: &mut Vec<(usize, usize)>,
+    (seg_lo, seg_hi): (usize, usize),
+    sections: &[(usize, usize)],
+) {
+    if sections.is_empty() {
+        intersections.push((seg_lo, seg_hi));
+        return;
+    }
+    for &(sec_lo, sec_hi) in sections {
+        let lo = sec_lo.max(seg_lo);
+        let hi = sec_hi.min(seg_hi);
+        if lo < hi {
+            intersections.push((lo, hi));
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "tests/scan_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/segment_range_tests.rs"]
+mod segment_range_tests;

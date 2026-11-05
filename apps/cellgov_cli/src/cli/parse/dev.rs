@@ -28,6 +28,11 @@ pub(crate) enum DevCommand {
     /// Count the SPU instruction words of installed titles by mnemonic
     /// and decoder class.
     SpuCensus(SpuCensusArgs),
+    /// Count the PPU instruction words of installed titles by
+    /// architectural unit and by what CellGov does with each.
+    PpuCensus(PpuCensusArgs),
+    /// Regenerate `docs/ppu_coverage.md` from the tracked PPU evidence.
+    PpuCoverageGen(PpuCoverageGenArgs),
     /// Print a PRX or executable's import table.
     PrxImports(PrxImportsArgs),
     /// Print the OPD-derived function map for an ELF or PRX.
@@ -187,10 +192,11 @@ pub(crate) struct SpuDisasmArgs {
     pub count: usize,
 }
 
-/// Which titles `cellgov dev spu-census` reads.
+/// Which titles `cellgov dev spu-census` and `cellgov dev ppu-census`
+/// read.
 #[derive(Debug, clap::Args)]
 #[group(required = true, multiple = false)]
-pub(crate) struct SpuCensusScope {
+pub(crate) struct TitleCensusScope {
     /// Every title in the registry.
     #[arg(long)]
     pub all: bool,
@@ -214,7 +220,44 @@ const SPU_CENSUS_NOTE: &str = "Scope:
 {SCE_INPUT_USAGE_NOTE}"))]
 pub(crate) struct SpuCensusArgs {
     #[command(flatten)]
-    pub scope: SpuCensusScope,
+    pub scope: TitleCensusScope,
+}
+
+/// What `dev ppu-census` reads and counts.
+const PPU_CENSUS_NOTE: &str = "Scope:
+  Every installed version of each title: the base tree and each update
+  tree. Each ELF, SELF or SPRX file in them is read; a SELF this build
+  cannot decrypt is listed as unread. Each PPU ELF found is counted once,
+  however many files hold it: the words of its executable sections, or of
+  its executable PT_LOAD segments when it has no section table. A title
+  that ships inside the firmware is skipped.
+
+Counts:
+  Each word is counted under its architectural unit, as the PPU reference
+  set names units: implemented (it decodes and CellGov runs it), refused
+  (it decodes and every execution faults, by fault class), or not
+  recognized (the decoder rejects it). --format json prints the census
+  record that dev ppu-coverage-gen reads from docs/ppu_census.json.";
+
+/// `cellgov dev ppu-census`
+#[derive(Debug, clap::Args)]
+#[command(after_help = format!("{PPU_CENSUS_NOTE}
+
+{SCE_INPUT_USAGE_NOTE}"))]
+pub(crate) struct PpuCensusArgs {
+    #[command(flatten)]
+    pub scope: TitleCensusScope,
+}
+
+/// `cellgov dev ppu-coverage-gen`
+#[derive(Debug, clap::Args)]
+pub(crate) struct PpuCoverageGenArgs {
+    /// The census record to read.
+    #[arg(long, value_name = "PATH", default_value = "docs/ppu_census.json")]
+    pub census: PathBuf,
+    /// The coverage table to write.
+    #[arg(long, value_name = "PATH", default_value = "docs/ppu_coverage.md")]
+    pub output: PathBuf,
 }
 
 /// A `--count` inside the disassembler's window.

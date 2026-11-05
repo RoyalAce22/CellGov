@@ -269,6 +269,17 @@ pub(crate) const EXAMPLES: &[Examples] = &[
         ],
     },
     Examples {
+        path: "dev ppu-census",
+        lines: &[
+            "cellgov dev ppu-census --all",
+            "cellgov dev ppu-census --title flow --format json",
+        ],
+    },
+    Examples {
+        path: "dev ppu-coverage-gen",
+        lines: &["cellgov dev ppu-coverage-gen"],
+    },
+    Examples {
         path: "dev prx-imports",
         lines: &[
             "cellgov dev prx-imports vfs/dev_flash/sys/external/libsysmodule.sprx",

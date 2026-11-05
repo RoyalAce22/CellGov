@@ -9,6 +9,8 @@ pub mod evaluation;
 pub mod loader_images;
 pub mod loaders;
 pub mod ppu;
+pub mod ppu_census;
+pub mod ppu_coverage;
 pub mod ppu_documented;
 pub mod ppu_paths;
 pub mod ppu_reference;
