@@ -13,6 +13,12 @@ use crate::lv2_stub::{Lv2OrdinalClass, Lv2StubClassification};
 
 const MAX_ENTRY_THUNKS: usize = 4;
 const PERMISSION_RECORD_BYTES: usize = 32;
+/// The most instructions a check's branch may follow its compare by,
+/// whatever lies between them.
+const COMPARE_TO_BRANCH_ANY: usize = 4;
+/// The most instructions a check's branch may follow its compare by when
+/// only argument setup lies between them.
+const COMPARE_TO_BRANCH: usize = 8;
 
 /// Describes the capability value read by a recognized check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,11 +149,13 @@ fn find_candidates(
         let Some((result_register, compare_index, compare_field)) = boolean_result(window) else {
             continue;
         };
+        let compare_at = call_index + 1 + compare_index;
         let Some((branch_after_compare, branch)) =
-            branch_on_compare(&window[compare_index + 1..], compare_field)
+            branch_on_compare(&decoded[compare_at + 1..], compare_field)
         else {
             continue;
         };
+        let branch_index = compare_at + 1 + branch_after_compare;
         let Some(record_pointer_address) = add_signed(toc, i64::from(record_offset)) else {
             continue;
         };
@@ -162,12 +170,13 @@ fn find_candidates(
             continue;
         }
         let search_start = call_index.saturating_sub(3);
-        let search_end = (call_index + compare_index + 8).min(decoded.len());
+        let search_end = (call_index + compare_index + 8)
+            .max(branch_index)
+            .min(decoded.len());
         let Some((fail_errno, error_register)) = known_errno(&decoded[search_start..search_end])
         else {
             continue;
         };
-        let branch_index = call_index + 1 + compare_index + 1 + branch_after_compare;
         if !error_path_returns(decoded, base, branch_index, branch, error_register) {
             continue;
         }
@@ -224,22 +233,50 @@ fn boolean_result(window: &[Option<PpuInstruction>]) -> Option<(u8, usize, u8)> 
     None
 }
 
+/// Finds the conditional branch on CR field `field` among the instructions
+/// after the compare.
+///
+/// The branch may be among the first [`COMPARE_TO_BRANCH_ANY`] whatever
+/// comes before it. Up to [`COMPARE_TO_BRANCH`] it counts only when every
+/// instruction before it is argument setup the compiler scheduled there.
 fn branch_on_compare(
-    window: &[Option<PpuInstruction>],
+    after_compare: &[Option<PpuInstruction>],
     field: u8,
 ) -> Option<(usize, PpuInstruction)> {
-    window
-        .iter()
-        .take(4)
-        .enumerate()
-        .find_map(|(index, instruction)| match instruction {
-            Some(
-                branch @ PpuInstruction::Bc {
-                    bi, link: false, ..
-                },
-            ) if *bi / 4 == field => Some((index, *branch)),
-            _ => None,
-        })
+    let mut setup_only = true;
+    for (index, instruction) in after_compare.iter().take(COMPARE_TO_BRANCH).enumerate() {
+        if index >= COMPARE_TO_BRANCH_ANY && !setup_only {
+            return None;
+        }
+        if let Some(
+            branch @ PpuInstruction::Bc {
+                bi, link: false, ..
+            },
+        ) = instruction
+        {
+            if *bi / 4 == field {
+                return Some((index, *branch));
+            }
+        }
+        setup_only &= instruction.as_ref().is_some_and(is_argument_setup);
+    }
+    None
+}
+
+/// Whether `instruction` only builds a register value: it reads no memory,
+/// writes no CR field, and does not branch.
+fn is_argument_setup(instruction: &PpuInstruction) -> bool {
+    matches!(
+        instruction,
+        PpuInstruction::Addi { .. }
+            | PpuInstruction::Addis { .. }
+            | PpuInstruction::Ori { .. }
+            | PpuInstruction::Oris { .. }
+            | PpuInstruction::Or { rc: false, .. }
+            | PpuInstruction::Li { .. }
+            | PpuInstruction::Lis { .. }
+            | PpuInstruction::Mr { .. }
+    )
 }
 
 fn known_errno(decoded: &[Option<PpuInstruction>]) -> Option<(u32, u8)> {
@@ -357,3 +394,7 @@ fn read_u64_at(elf: &[u8], segments: &[LoadSegment], address: u64) -> Option<u64
 #[cfg(test)]
 #[path = "tests/lv2_gate_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/lv2_gate_scheduled_branch_tests.rs"]
+mod scheduled_branch_tests;
