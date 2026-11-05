@@ -1,0 +1,116 @@
+{
+  "schema_version": 3,
+  "unit": {"kind": "instruction", "mnemonic": "isync"},
+  "vectors": [
+    {
+      "name": "isync",
+      "provenance": {
+        "kind": "documented_vector",
+        "citation": "PPC-Book2 p:22 s:3.3.1",
+        "vector_id": "isync"
+      },
+      "words": [1275068716],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {
+          "0": 7812619454541004800,
+          "1": 7812619454541005057,
+          "2": 7812619454541005314,
+          "3": 7812619454541005571,
+          "4": 7812619454541005828,
+          "5": 7812619454541006085,
+          "6": 7812619454541006342,
+          "7": 7812619454541006599,
+          "8": 7812619454541006856,
+          "9": 7812619454541007113,
+          "10": 7812619454541007370,
+          "11": 7812619454541007627,
+          "12": 7812619454541007884,
+          "13": 7812619454541008141,
+          "14": 7812619454541008398,
+          "15": 7812619454541008655,
+          "16": 7812619454541008912,
+          "17": 7812619454541009169,
+          "18": 7812619454541009426,
+          "19": 7812619454541009683,
+          "20": 7812619454541009940,
+          "21": 7812619454541010197,
+          "22": 7812619454541010454,
+          "23": 7812619454541010711,
+          "24": 7812619454541010968,
+          "25": 7812619454541011225,
+          "26": 7812619454541011482,
+          "27": 7812619454541011739,
+          "28": 7812619454541011996,
+          "29": 7812619454541012253,
+          "30": 7812619454541012510,
+          "31": 7812619454541012767
+        },
+        "fpr": {},
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 1164413355,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 2684354560,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [145, 204, 7, 66, 125, 184, 243, 46, 105, 164, 223, 26, 85, 144, 203, 6],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [7812619454541004800, 7812619454541005057, 7812619454541005314, 7812619454541005571, 7812619454541005828, 7812619454541006085, 7812619454541006342, 7812619454541006599, 7812619454541006856, 7812619454541007113, 7812619454541007370, 7812619454541007627, 7812619454541007884, 7812619454541008141, 7812619454541008398, 7812619454541008655, 7812619454541008912, 7812619454541009169, 7812619454541009426, 7812619454541009683, 7812619454541009940, 7812619454541010197, 7812619454541010454, 7812619454541010711, 7812619454541010968, 7812619454541011225, 7812619454541011482, 7812619454541011739, 7812619454541011996, 7812619454541012253, 7812619454541012510, 7812619454541012767]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {
+            "status": "value",
+            "value": ["00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000", "00000000000000000000000000000000"]
+          },
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 1164413355},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 2684354560},
+          "fpscr": {"status": "value", "value": 0},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the vector runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [145, 204, 7, 66, 125, 184, 243, 46, 105, 164, 223, 26, 85, 144, 203, 6]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the vector does not represent the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the vector does not represent the runtime's effect pipeline"},
+        "reservations": {
+          "status": "value",
+          "value": []
+        },
+        "store_buffer": {"status": "unsupported", "reason": "the vector does not represent the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the vector does not represent the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the vector does not represent the runtime's effect pipeline"}
+      }
+    }
+  ]
+}
