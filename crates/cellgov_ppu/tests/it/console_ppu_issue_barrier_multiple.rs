@@ -130,8 +130,11 @@ const BAND: f64 = 0.06;
 ///   `addi` in full.
 /// - Loop 10 runs an `std` after the `stmw`. The console takes about 11
 ///   cycles more than the `stmw` loop alone, and the model about 1.
-/// - Loop 2 runs a 2-word `stmw`, which the console times slower than
-///   the 4- and 8-word ones.
+/// - Loop 2 runs a 2-word `stmw`. Of its five runs here, the fastest is
+///   slower than the 4- and 8-word loops' fastest. The
+///   `ppu_issue_stmw_barrier_words` capture takes 11 runs a loop. In it,
+///   the 2-word loop lies between the 1- and 4-word loops and within the
+///   band of the model.
 const RESIDUALS: [(usize, f64); 5] = [(2, -0.09), (4, 0.16), (5, 0.14), (10, -0.10), (11, 0.12)];
 
 #[test]

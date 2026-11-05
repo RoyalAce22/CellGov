@@ -50,6 +50,7 @@ mod console_ppu_issue_shared;
 mod console_ppu_issue_sibling_rate;
 mod console_ppu_issue_smt;
 mod console_ppu_issue_stall_release;
+mod console_ppu_issue_stmw_barrier_words;
 mod console_ppu_issue_stmw_words;
 mod console_ppu_issue_store_data_wait;
 mod console_ppu_issue_store_gather_hit;
