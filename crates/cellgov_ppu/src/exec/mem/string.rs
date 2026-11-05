@@ -11,6 +11,21 @@ pub(crate) fn string_loads_into(rt: u8, n: usize, r: u8) -> bool {
     (usize::from(r) + 32 - usize::from(rt)) % 32 < n.div_ceil(4)
 }
 
+/// The bytes an invalid-form `n`-byte load string from `rt` loads before
+/// it reaches the first register of `collide` that it fills: four for
+/// each register ahead of it.
+///
+/// [CBE-Handbook p:254 s:9.5.9] For an invalid form whose RA is in the range, the PPE completes the loads up to the collision and takes the interrupt there.
+pub(crate) fn bytes_before_collision(rt: u8, n: usize, collide: &[u8]) -> u64 {
+    let ahead = collide
+        .iter()
+        .filter(|&&r| string_loads_into(rt, n, r))
+        .map(|&r| 4 * ((usize::from(r) + 32 - usize::from(rt)) % 32))
+        .min()
+        .unwrap_or(0);
+    ahead.min(n) as u64
+}
+
 /// `lswi` / `lswx` core: read `n` bytes from `base` and pack
 /// MSB-first four-per-register into successive GPRs starting at
 /// `rt_start`, wrapping at r31 -> r0. Zero-length is a no-op. The core

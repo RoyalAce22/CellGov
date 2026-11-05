@@ -24,6 +24,10 @@ const CONTINUE: &[PpuOutcomeClass] = &[PpuOutcomeClass::Continue];
 const FAULT: &[PpuOutcomeClass] = &[PpuOutcomeClass::Fault];
 const CONTINUE_OR_FAULT: &[PpuOutcomeClass] = &[PpuOutcomeClass::Continue, PpuOutcomeClass::Fault];
 const LOAD: &[PpuOutcomeClass] = &[PpuOutcomeClass::Continue, PpuOutcomeClass::MemoryFault];
+/// An invalid-form load multiple or load string: the loads ahead of the
+/// collision can take the data storage interrupt before the program
+/// interrupt.
+const COLLISION_FAULT: &[PpuOutcomeClass] = &[PpuOutcomeClass::Fault, PpuOutcomeClass::MemoryFault];
 const LOAD_OR_FAULT: &[PpuOutcomeClass] = &[
     PpuOutcomeClass::Continue,
     PpuOutcomeClass::Fault,
@@ -73,7 +77,10 @@ pub(super) fn sequence_class(kind: PpuFuzzKind) -> PpuSequenceClass {
 pub(super) fn sequence_flow(outcomes: &[PpuOutcomeClass]) -> PpuSequenceFlow {
     if outcomes.contains(&PpuOutcomeClass::Branch) {
         PpuSequenceFlow::ControlTransfer
-    } else if outcomes.contains(&PpuOutcomeClass::Syscall) || outcomes == FAULT {
+    } else if outcomes.contains(&PpuOutcomeClass::Syscall)
+        || !outcomes.contains(&PpuOutcomeClass::Continue)
+    {
+        // A word with no Continue outcome ends the sequence on every outcome.
         PpuSequenceFlow::Terminal
     } else if outcomes != CONTINUE {
         PpuSequenceFlow::StateDependent
@@ -172,6 +179,11 @@ pub(super) fn effect_and_outcome(
         ((NO_EFFECTS, FAULT), (NO_EFFECTS, FAULT))
     };
     match kind {
+        // [CBE-Handbook p:254 s:9.5.9] For an RA in the range, the PPE completes the loads up to the collision first.
+        // An invalid lswx encoding names RT as RA or RB, so the collision
+        // comes before the first load.
+        K::Lmw | K::Lswi if !valid_form => (NO_EFFECTS, COLLISION_FAULT),
+        K::Lswx if !valid_form => (NO_EFFECTS, FAULT),
         K::Lmw
         | K::Lfsu
         | K::Lfdu
@@ -190,8 +202,7 @@ pub(super) fn effect_and_outcome(
         K::Lbzu | K::Lbzux => checked_load,
         // The XER byte count decides whether RA or RB falls in the range,
         // so a word that passes the RT check may still fault.
-        K::Lswx if valid_form => (READ_EFFECTS, LOAD_OR_FAULT),
-        K::Lswx => (NO_EFFECTS, FAULT),
+        K::Lswx => (READ_EFFECTS, LOAD_OR_FAULT),
         K::Stfsu
         | K::Stfdu
         | K::Stfsux
@@ -329,7 +340,8 @@ pub(super) fn fused_effect_and_outcome(
 /// `outcomes` of the instruction.
 ///
 /// A `MemoryFault` outcome is a data storage interrupt. An invalid form
-/// that faults is an illegal instruction.
+/// that faults is an illegal instruction, unless a load ahead of the
+/// collision faults first.
 pub(super) fn fault_classes(
     kind: PpuInstructionKind,
     valid_form: bool,
@@ -348,6 +360,12 @@ pub(super) fn fault_classes(
         // A fused pair faults only on a memory half's alignment interrupt.
         K::Fused => &[Class::Alignment, Class::DataStorage],
         K::Lswx if valid_form => &[Class::ProgramIllegal, Class::Alignment, Class::DataStorage],
+        // An invalid lmw or lswi loads the operand bytes ahead of the
+        // collision first, and those loads can take the alignment
+        // interrupt.
+        K::Lmw | K::Lswi if !valid_form => {
+            &[Class::ProgramIllegal, Class::Alignment, Class::DataStorage]
+        }
         K::Lmw
         | K::Stmw
         | K::Lfs

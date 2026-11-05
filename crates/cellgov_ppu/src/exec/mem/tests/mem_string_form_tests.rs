@@ -99,8 +99,20 @@ fn only_an_invalid_load_string_encoding_admits_the_illegal_instruction_fault() {
     let outcomes = |xo, rt, ra, rb| descriptor(xo, rt, ra, rb).outcomes;
     // lswi: NB from the word decides the range. A valid lswi can still
     // take the alignment interrupt in caching-inhibited storage, or a
-    // data storage fault.
-    assert_eq!(outcomes(597, 4, 5, 8), &[PpuOutcomeClass::Fault]);
+    // data storage fault. An invalid lswi loads the bytes ahead of the
+    // collision first, so it can take a data storage fault too.
+    assert_eq!(
+        outcomes(597, 4, 5, 8),
+        &[PpuOutcomeClass::Fault, PpuOutcomeClass::MemoryFault]
+    );
+    assert_eq!(
+        descriptor(597, 4, 5, 8).faults,
+        &[
+            PpuFaultClass::ProgramIllegal,
+            PpuFaultClass::Alignment,
+            PpuFaultClass::DataStorage
+        ]
+    );
     for valid in [descriptor(597, 4, 6, 8), descriptor(597, 4, 0, 8)] {
         assert_eq!(
             valid.faults,

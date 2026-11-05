@@ -1,0 +1,20 @@
+[test]
+name = "ppu_exception_seen_lswi_ra_null"
+
+# A hardware probe: an invalid lswi r28,r30,16 with r30 = 0 in a child thread.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 16 big-endian u32 words, as ppu/main.c lists: 64 bytes. Word 0 is the
+# done or progress marker, word 1 the step a progress record names
+# (1 the create, 2 the start, 3 the wait for the child to reach the
+# instruction, 4 the wait for it to pass it), words 2..3 the create and
+# start return codes, words 4..5 the reached and passed flags, words 6..7
+# the destination register, word 8 the get-priority answer for the child,
+# words 9..10 the join return code and exit value, word 11 the access address.
+memory_regions = [
+  { name = "result", addr = 0, size = 64 },
+]
+
+[expect]
+outcome = "completed"

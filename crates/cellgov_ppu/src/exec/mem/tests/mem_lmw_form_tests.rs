@@ -55,10 +55,22 @@ fn an_invalid_lmw_encoding_faults_only_as_illegal_and_a_valid_one_only_on_alignm
         let invalid = descriptor(rt, ra);
         assert_eq!(
             invalid.outcomes,
-            &[PpuOutcomeClass::Fault],
+            &[PpuOutcomeClass::Fault, PpuOutcomeClass::MemoryFault],
             "rt={rt} ra={ra}"
         );
-        assert_eq!(invalid.faults, &[C::ProgramIllegal], "rt={rt} ra={ra}");
+        assert_eq!(
+            invalid.faults,
+            &[C::ProgramIllegal, C::Alignment, C::DataStorage],
+            "rt={rt} ra={ra}"
+        );
+        let raw = (46 << 26) | (rt << 21) | (ra << 16);
+        assert_eq!(
+            crate::instruction::fuzz::generation_descriptor(raw)
+                .unwrap()
+                .sequence_flow,
+            crate::instruction::fuzz::PpuSequenceFlow::Terminal,
+            "rt={rt} ra={ra}"
+        );
     }
     let valid = descriptor(20, 19);
     assert!(valid.outcomes.contains(&PpuOutcomeClass::Continue));

@@ -315,6 +315,20 @@ pub(crate) fn check_block_translates(
     }
 }
 
+/// The fault a load of `[ea, ea + len)` takes on its first byte that no
+/// view holds, or `None` when every byte is held.
+///
+/// The check reads no byte and records no read.
+#[inline]
+pub(crate) fn load_refusal(
+    views: &[RegionView<'_>],
+    ea: u64,
+    len: u64,
+) -> Option<cellgov_mem::MemError> {
+    let unheld = first_unheld(views, ea);
+    (len != 0 && unheld < ea.saturating_add(len)).then(|| unmapped(unheld))
+}
+
 /// Whether a byte of `[ea, ea + len)` lies in a caching-inhibited view.
 /// A byte that no view holds is not caching-inhibited, and an empty
 /// range holds no byte.

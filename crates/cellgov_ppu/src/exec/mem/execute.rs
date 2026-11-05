@@ -2,7 +2,7 @@
 
 use crate::exec::memory_helpers::{
     buffer_conditional_store, buffer_store, caching_inhibited, check_block_translates, check_store,
-    inhibited_load, inhibited_store, load_ze, LoadPort, Width,
+    inhibited_load, inhibited_store, load_refusal, load_ze, LoadPort, Width,
 };
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::PpuInstruction;
@@ -22,7 +22,7 @@ const _: () = assert!(
 
 use super::helpers::{holds_reservation_for, read_aligned_16};
 use super::scalar::{load, scalar, store, Scalar};
-use super::string::{string_load, string_loads_into, string_store};
+use super::string::{bytes_before_collision, string_load, string_loads_into, string_store};
 
 pub(crate) fn execute(
     insn: &PpuInstruction,
@@ -47,11 +47,26 @@ pub(crate) fn execute(
         // zero-extend(MEM(EA,4)); EA += 4. Invalid form if RA is in
         // (RT..=31) or RA==0.
         PpuInstruction::Lmw { rt, ra, imm } => {
-            // [CBE-Handbook p:254 s:9.5.9] The PPE loads up to the colliding register, then takes the illegal-instruction interrupt; the fault discards the partial loads, so no load runs first.
+            let ea = state.ea_d_form(ra, imm);
+            // [CBE-Handbook p:254 s:9.5.9] For an RA in the range, the PPE completes the loads up to the colliding register, then takes the illegal-instruction interrupt.
+            // A word ahead of RA that no view holds takes the data storage
+            // interrupt first. The interrupt discards the loaded registers.
             if ra == 0 || ra >= rt {
+                let ahead = if ra >= rt { 4 * u64::from(ra - rt) } else { 0 };
+                // [CBE-Handbook p:290 s:9.10] An lmw alignment interrupt outranks a page-fault data storage interrupt, which outranks a caching-inhibited alignment interrupt.
+                // The loads ahead of RA take both alignment interrupts as a
+                // valid lmw does.
+                if ahead != 0 && ea & 3 != 0 {
+                    return ExecuteVerdict::Fault(PpuFault::alignment(ea, false));
+                }
+                if caching_inhibited(region_views, ea, ahead) {
+                    return inhibited_load(region_views, ea, ea, ahead);
+                }
+                if let Some(e) = load_refusal(region_views, ea, ahead) {
+                    return ExecuteVerdict::MemFault(e);
+                }
                 return ExecuteVerdict::Fault(PpuFault::illegal("lmw"));
             }
-            let ea = state.ea_d_form(ra, imm);
             // [CBE-Handbook p:253 s:9.5.8] An lmw or stmw operand that is not word-aligned takes the alignment interrupt.
             if ea & 3 != 0 {
                 return ExecuteVerdict::Fault(PpuFault::alignment(ea, false));
@@ -109,11 +124,11 @@ pub(crate) fn execute(
         // range and on lswx with RA or RB in the range.
         PpuInstruction::Lswi { rt, ra, nb } => {
             let n = if nb == 0 { 32usize } else { nb as usize };
-            if string_loads_into(rt, n, ra) {
-                return ExecuteVerdict::Fault(PpuFault::illegal("lswi"));
-            }
             // [PPC-Book1 p:15 s:1.12.2] In 32-bit mode only the low 32 bits of an address sum address storage.
             let base = effective_address(state.ra_or_zero(ra));
+            if string_loads_into(rt, n, ra) {
+                return invalid_string_load(region_views, base, rt, n, &[ra], "lswi");
+            }
             if caching_inhibited(region_views, base, n as u64) {
                 return inhibited_load(region_views, base, base, n as u64);
             }
@@ -122,11 +137,11 @@ pub(crate) fn execute(
         }
         PpuInstruction::Lswx { rt, ra, rb } => {
             let n = state.xer_tbc() as usize;
+            let base = state.ea_x_form(ra, rb);
             if rt == ra || rt == rb || string_loads_into(rt, n, ra) || string_loads_into(rt, n, rb)
             {
-                return ExecuteVerdict::Fault(PpuFault::illegal("lswx"));
+                return invalid_string_load(region_views, base, rt, n, &[ra, rb], "lswx");
             }
-            let base = state.ea_x_form(ra, rb);
             // [PPC-Book1 p:48 s:3.3.6] With a zero count the contents of RT are undefined.
             // The reference console loads one byte, as a count of 1 does, and an
             // unmapped EA ends the process (probes ppu_reference_vectors and
@@ -401,6 +416,30 @@ pub(crate) fn execute(
         }
 
         _ => unreachable!("mem::execute called with non-memory variant"),
+    }
+}
+
+/// The verdict of an invalid-form load string `name` of `n` bytes from
+/// `base` into `rt`, whose registers include one of `collide` or start at
+/// it.
+///
+/// The interrupt discards the loaded registers.
+fn invalid_string_load(
+    region_views: &[cellgov_mem::RegionView<'_>],
+    base: u64,
+    rt: u8,
+    n: usize,
+    collide: &[u8],
+    name: &'static str,
+) -> ExecuteVerdict {
+    let ahead = bytes_before_collision(rt, n, collide);
+    // [CBE-Handbook p:253 s:9.5.8] An lswi or lswx operand in caching-inhibited storage takes the alignment interrupt.
+    if caching_inhibited(region_views, base, ahead) {
+        return inhibited_load(region_views, base, base, ahead);
+    }
+    match load_refusal(region_views, base, ahead) {
+        Some(e) => ExecuteVerdict::MemFault(e),
+        None => ExecuteVerdict::Fault(PpuFault::illegal(name)),
     }
 }
 

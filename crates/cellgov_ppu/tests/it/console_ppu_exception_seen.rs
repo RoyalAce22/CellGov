@@ -32,7 +32,7 @@ const CHILD_EXIT: u32 = 0xE5;
 /// The value the child presets in its destination register.
 const PRESET: u64 = 0xDEAD_BEEF_DEAD_BEEF;
 
-fn payload(probe: &str) -> [u32; 16] {
+pub(crate) fn payload(probe: &str) -> [u32; 16] {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/micro")
         .join(probe)
@@ -46,7 +46,7 @@ fn payload(probe: &str) -> [u32; 16] {
 
 /// What the console showed for a probe's child thread.
 #[derive(Debug, PartialEq, Eq)]
-enum Seen {
+pub(crate) enum Seen {
     /// The child passed the instruction; its destination register then
     /// held the value.
     Completed(u64),
@@ -56,7 +56,7 @@ enum Seen {
 }
 
 /// Classifies a probe's payload and asserts the words that each outcome fixes.
-fn seen(probe: &str) -> Seen {
+pub(crate) fn seen(probe: &str) -> Seen {
     let w = payload(probe);
     assert_eq!(w[0], DONE, "{probe}: the main thread finished");
     assert_eq!(w[2..4], [0, 0], "{probe}: the create and the start");

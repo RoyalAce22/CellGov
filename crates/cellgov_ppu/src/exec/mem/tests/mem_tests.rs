@@ -32,6 +32,8 @@ mod dcbz_rsx;
 mod floats;
 #[path = "mem_inhibited_hole_tests.rs"]
 mod inhibited_hole;
+#[path = "mem_invalid_form_loads_tests.rs"]
+mod invalid_form_loads;
 #[path = "mem_lmw_form_tests.rs"]
 mod lmw_form;
 #[path = "mem_load_wrap_tests.rs"]

@@ -10,6 +10,7 @@ mod console_ppu_ctrl_threads;
 mod console_ppu_divw_quotient;
 mod console_ppu_entry_state;
 mod console_ppu_exception_seen;
+mod console_ppu_exception_seen_collision;
 mod console_ppu_fixed_point;
 mod console_ppu_float_edges;
 mod console_ppu_fp_ops;
