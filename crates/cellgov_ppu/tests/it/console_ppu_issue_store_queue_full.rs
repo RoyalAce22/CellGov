@@ -154,21 +154,13 @@ fn cellgov_cycles() -> Vec<f64> {
 /// The loops the model times outside the console's spread, each with the
 /// cycles an iteration it may stay apart by.
 ///
+/// - Loop 9 runs six 32-word `stmw r0`. The console takes about 73 cycles
+///   a store multiple. The model takes 76 with the hold that fits the
+///   short `stmw` loops of the `ppu_issue_stmw_words` capture.
 /// - Loops 13, 14 and 16 run 24 and 32 `std`. Past 16 entries each store
 ///   costs the console about 13 cycles; the model drains a full queue at
 ///   the rate of one that is not full, about 3 cycles a store.
-/// - Loops 17 to 20 run `stmw r28` and `stmw r24`, which take longer on
-///   the console than the model's handbook microword counts give, as in
-///   the `ppu_issue_multiple` capture.
-const RESIDUALS: [(usize, f64); 7] = [
-    (13, 76.0),
-    (14, 160.0),
-    (16, 160.0),
-    (17, 53.0),
-    (18, 54.0),
-    (19, 24.0),
-    (20, 24.0),
-];
+const RESIDUALS: [(usize, f64); 4] = [(9, 18.0), (13, 76.0), (14, 160.0), (16, 160.0)];
 
 #[test]
 fn the_issue_model_times_each_store_queue_full_loop_within_the_console_s_spread() {

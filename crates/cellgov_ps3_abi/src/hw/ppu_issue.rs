@@ -788,6 +788,15 @@ pub const PPU_LHA_MICROWORDS: u8 = 10;
 /// does.
 pub const PPU_STORE_SOURCE_LEAD_MICROWORDS: u8 = 2;
 
+/// The cycles a store multiple holds issue beyond its microwords.
+///
+/// [CBE-Handbook p:729 s:A.1.3.1] gives `stmw` 2 + 1 x words microwords.
+/// In the `ppu_issue_stmw_words` capture, a loop of one `stmw` of 1, 2, 4
+/// or 8 words takes 18.0, 19.1, 21.7 and 26.1 cycles an iteration. The
+/// replay of each loop through the issue model lies within the console's
+/// spread at this hold.
+pub const PPU_STORE_MULTIPLE_EXTRA_CYCLES: u8 = 3;
+
 /// The bytes of one L1 data-cache sector.
 ///
 /// [CBE-Handbook p:730 s:A.1.3.2] the L1 data cache is physically

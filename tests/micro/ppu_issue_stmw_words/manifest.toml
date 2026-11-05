@@ -1,0 +1,19 @@
+[test]
+name = "ppu_issue_stmw_words"
+
+# A hardware probe of what a store multiple costs by its word count, alone
+# and with eight independent addi after it: twelve loops of a fixed body,
+# timed with mftb. ppu/main.c's header lists the loops and the payload
+# layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 216 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 216 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

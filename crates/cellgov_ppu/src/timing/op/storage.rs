@@ -75,7 +75,12 @@ pub(super) fn multiple(ea: u64, first: u8, bytes: u64, store_side: bool, string:
     let regs = bytes.div_ceil(4).min(32) as u8;
     let len = bytes.min(u8::MAX as u64) as u8;
     if store_side {
-        let mut op = store(INT_STORE, ea, len).microcode(micro, micro);
+        let span = if string {
+            micro
+        } else {
+            micro.saturating_add(k::PPU_STORE_MULTIPLE_EXTRA_CYCLES)
+        };
+        let mut op = store(INT_STORE, ea, len).microcode(micro, span);
         op.src_range = Some((gpr(first), regs, k::PPU_STORE_SOURCE_LEAD_MICROWORDS));
         op
     } else {

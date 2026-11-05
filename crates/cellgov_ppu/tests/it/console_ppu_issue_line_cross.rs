@@ -271,18 +271,16 @@ fn rows() -> Vec<(f64, Console)> {
 ///   split into microcode.
 /// - Loops 6 and 11: the model's trip to memory comes from a shuffled
 ///   chase, and this probe chases its nodes in address order.
-/// - Loops 8, 10, 12 and 13: `lmw` and `stmw` take a few cycles more on
-///   the console than the handbook's microword counts give, as in the
-///   `ppu_issue_multiple` capture.
-const RESIDUALS: [(usize, f64); 8] = [
+/// - Loops 8 and 10: `lmw` takes a few cycles more on the console than the
+///   handbook's microword counts give, as in the `ppu_issue_multiple`
+///   capture.
+const RESIDUALS: [(usize, f64); 6] = [
     (5, 31.0),
     (6, 43.0),
     (7, 14.0),
     (8, 3.0),
     (10, 4.0),
     (11, 30.0),
-    (12, 4.0),
-    (13, 4.0),
 ];
 
 #[test]
