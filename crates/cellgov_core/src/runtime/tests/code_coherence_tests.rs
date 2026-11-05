@@ -17,26 +17,26 @@ use super::{code_lines, is_patch_word, touches_code};
 use crate::runtime::{AddressSpaceId, Runtime, UnsyncedCodeFetch};
 
 /// The code word the programs rewrite.
-const X: u64 = 0x144;
+pub(super) const X: u64 = 0x144;
 /// A word on another code line.
 const Y: u64 = 0x1C0;
 const B_8: u32 = 0x4800_0008;
-const NOP: u32 = 0x6000_0000;
+pub(super) const NOP: u32 = 0x6000_0000;
 
 /// One scripted step: its events, and whether its batch faults.
 #[derive(Clone, Default)]
-struct Step {
-    events: Vec<CodeEvent>,
-    fault: bool,
+pub(super) struct Step {
+    pub(super) events: Vec<CodeEvent>,
+    pub(super) fault: bool,
 }
 
 /// Runs one scripted step per batch. It emits each event's store as an
 /// effect and hands the runtime the step's events.
 #[derive(Clone)]
-struct Scripted {
-    id: UnitId,
-    steps: VecDeque<Step>,
-    drained: Vec<CodeEvent>,
+pub(super) struct Scripted {
+    pub(super) id: UnitId,
+    pub(super) steps: VecDeque<Step>,
+    pub(super) drained: Vec<CodeEvent>,
 }
 
 impl ExecutionUnit for Scripted {
@@ -97,7 +97,7 @@ impl ExecutionUnit for Scripted {
     fn snapshot(&self) {}
 }
 
-fn store(addr: u64, word: u32) -> CodeEvent {
+pub(super) fn store(addr: u64, word: u32) -> CodeEvent {
     CodeEvent::Store {
         addr,
         len: 4,
@@ -105,11 +105,11 @@ fn store(addr: u64, word: u32) -> CodeEvent {
     }
 }
 
-fn fetch(pc: u64) -> CodeEvent {
+pub(super) fn fetch(pc: u64) -> CodeEvent {
     CodeEvent::Fetch { pc }
 }
 
-fn step(events: &[CodeEvent]) -> Step {
+pub(super) fn step(events: &[CodeEvent]) -> Step {
     Step {
         events: events.to_vec(),
         fault: false,
@@ -128,7 +128,7 @@ fn sequence(addr: u64) -> [CodeEvent; 4] {
 
 /// Guest memory of 0x400 bytes with `[0x100, 0x200)` declared as code
 /// and `X` holding `b +8`.
-fn memory() -> GuestMemory {
+pub(super) fn memory() -> GuestMemory {
     let mut mem = GuestMemory::new(0x400);
     let range = ByteRange::new(GuestAddr::new(X), 4).unwrap();
     mem.apply_commit(range, &B_8.to_be_bytes()).unwrap();

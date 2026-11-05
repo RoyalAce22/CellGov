@@ -107,6 +107,17 @@ fn distinct_block(authid_source: AuthorityIdSource) -> BenchWitnesses {
             });
             w
         },
+        unsynced_code_fetches: vec![cellgov_core::UnsyncedCodeFetch {
+            unit: cellgov_event::UnitId::new(2),
+            pc: 0x10248,
+            space: cellgov_core::AddressSpaceId::BOOT,
+            line: 0x10200,
+            writer: cellgov_event::UnitId::new(1),
+            store_step: 143,
+            sequence: 0b011,
+            patch_class: true,
+        }],
+        unsynced_code_fetch_total: 1,
     }
 }
 
@@ -343,6 +354,8 @@ fn the_block_renders_every_line_in_its_contract_form() {
         "BENCH_PRX_LOAD_MISSES: \"/dev_flash/sys/external/lib a.sprx\"=9",
         "BENCH_CODE_WRITE_LINES: 0:0x00010200=1",
         "BENCH_CODE_WRITE_DETAIL: unit=1 space=0 step=143 word=0x00010244 before=0x48000011 after=0x60000000",
+        "BENCH_UNSYNCED_CODE_FETCHES: total=1",
+        "BENCH_UNSYNCED_CODE_FETCH: unit=2 pc=0x00010248 space=0 line=0x00010200 writer=1 store_step=143 sequence=0b011 patch_class=true",
         "BENCH_FINAL_UNIT_WITNESS: unit=1 pc=0x00010230 lr=0x00010240 status=blocked ldarx=10 lwarx=11",
     ];
     assert_eq!(distinct_block(some_authid_source()).lines(), expected);
@@ -362,6 +375,8 @@ fn a_quiet_boot_suppresses_the_inventories_and_keeps_every_count_line() {
     block.prx_load_misses.clear();
     block.final_units.clear();
     block.code_writes = cellgov_core::CodeWriteWitness::default();
+    block.unsynced_code_fetches.clear();
+    block.unsynced_code_fetch_total = 0;
     let lines = block.lines();
     let prefixes: BTreeSet<&str> = lines
         .iter()

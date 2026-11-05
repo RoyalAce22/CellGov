@@ -245,6 +245,14 @@ const DIAGNOSTIC_LINES: &[(&str, &str)] = &[
         "one line per guest store into code, up to a fixed limit: the writer, step and word before and after",
     ),
     (
+        "BENCH_UNSYNCED_CODE_FETCHES:",
+        "the count of fetches from guest-stored code before its instruction-modification sequence, including those past the listed limit; only a traced boot records them, so it is suppressed at zero",
+    ),
+    (
+        "BENCH_UNSYNCED_CODE_FETCH:",
+        "one line per fetch from guest-stored code before its instruction-modification sequence, up to a fixed limit; only a traced boot records them",
+    ),
+    (
         "BENCH_MODULE_START_FAULTS:",
         "emitted only when a module_start faulted, so a baseline could not hold it Absent; the module list is the finding",
     ),

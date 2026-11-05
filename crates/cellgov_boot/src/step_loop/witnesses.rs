@@ -122,7 +122,17 @@ pub struct BenchWitnesses {
     pub final_units: Vec<FinalUnit>,
     /// Committed guest stores into declared code.
     pub code_writes: cellgov_core::CodeWriteWitness,
+    /// Fetches from guest-stored code before the instruction-modification
+    /// sequence completed, up to `UNSYNCED_CODE_FETCH_LIMIT`. Only a
+    /// traced boot records them.
+    pub unsynced_code_fetches: Vec<cellgov_core::UnsyncedCodeFetch>,
+    /// The count of unsynchronized code fetches the runtime recorded,
+    /// including those past the list limit.
+    pub unsynced_code_fetch_total: u64,
 }
+
+/// How many unsynchronized code fetches the block lists.
+pub const UNSYNCED_CODE_FETCH_LIMIT: usize = 64;
 
 /// One live PPU unit's terminal state: the parking map a `MaxSteps`
 /// boot reads its idle loops from.
@@ -212,6 +222,13 @@ impl BenchWitnesses {
             prx_load_misses: obs.prx_load_misses.clone(),
             final_units,
             code_writes: rt.code_writes().clone(),
+            unsynced_code_fetches: rt
+                .unsynced_code_fetches()
+                .iter()
+                .take(UNSYNCED_CODE_FETCH_LIMIT)
+                .copied()
+                .collect(),
+            unsynced_code_fetch_total: rt.unsynced_code_fetches().len() as u64,
         }
     }
 
@@ -395,6 +412,26 @@ impl BenchWitnesses {
                 w.after,
             ));
         }
+        // The list stops at its limit; the total counts every record.
+        if self.unsynced_code_fetch_total > 0 {
+            out.push(format!(
+                "BENCH_UNSYNCED_CODE_FETCHES: total={}",
+                self.unsynced_code_fetch_total
+            ));
+        }
+        for f in &self.unsynced_code_fetches {
+            out.push(format!(
+                "BENCH_UNSYNCED_CODE_FETCH: unit={} pc=0x{:08x} space={} line=0x{:08x} writer={} store_step={} sequence=0b{:03b} patch_class={}",
+                f.unit.raw(),
+                f.pc,
+                f.space.raw(),
+                f.line,
+                f.writer.raw(),
+                f.store_step,
+                f.sequence,
+                f.patch_class,
+            ));
+        }
         for u in &self.final_units {
             out.push(format!(
                 "BENCH_FINAL_UNIT_WITNESS: unit={} pc=0x{:08x} lr=0x{:08x} status={} ldarx={} lwarx={}",
@@ -500,3 +537,7 @@ fn unit_status_label(status: Option<cellgov_exec::UnitStatus>) -> &'static str {
 #[cfg(test)]
 #[path = "tests/witnesses_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/witnesses_unsynced_tests.rs"]
+mod unsynced_tests;

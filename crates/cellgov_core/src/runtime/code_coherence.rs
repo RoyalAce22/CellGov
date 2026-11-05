@@ -356,3 +356,7 @@ impl CodeCoherence {
 #[cfg(test)]
 #[path = "tests/code_coherence_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/code_coherence_host_write_tests.rs"]
+mod host_write_tests;
