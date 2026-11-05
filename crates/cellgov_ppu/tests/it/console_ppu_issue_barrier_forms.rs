@@ -111,7 +111,14 @@ fn cellgov_cycles(k: usize) -> f64 {
 const BAND: f64 = 0.06;
 
 /// The loops of an `stmw` before a barrier that the model times outside
-/// the band.
+/// the band of this capture.
+///
+/// - Loops 8 and 9 store 8 words. This capture timed them slower than the
+///   `ppu_issue_barrier_multiple` capture timed its `stmw r24; lwsync`
+///   loop, which the model times within the band.
+/// - Loops 11 and 15 store 16 words. The model falls short of them by
+///   about what it falls short of a 16-word `stmw` alone in the
+///   `ppu_issue_stmw_words` capture.
 const STORE_MULTIPLE: [usize; 4] = [8, 9, 11, 15];
 
 /// The loops of `sync 3` and `ptesync`, alone and after an `std`, each
@@ -146,9 +153,6 @@ fn a_sync_3_and_a_ptesync_cost_the_model_a_sync() {
     }
 }
 
-/// A barrier after an `stmw` costs the console about 41 cycles more than
-/// after an `std`, whatever the register count. The model drains the
-/// `stmw`'s microwords before the barrier, so it falls short.
 #[test]
 fn an_stmw_before_a_barrier_is_a_known_difference() {
     let w = console_words();

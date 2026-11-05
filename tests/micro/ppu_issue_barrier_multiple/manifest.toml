@@ -1,0 +1,20 @@
+[test]
+name = "ppu_issue_barrier_multiple"
+
+# A hardware probe of what a barrier costs after a store multiple or a
+# store string: by the store's word count, by the work between the store
+# and the barrier, and against the same barrier after an std, timed with
+# mftb. The console capture is the answer; ppu/main.c's header lists the
+# loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 232 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 232 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
