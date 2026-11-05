@@ -655,7 +655,13 @@ pub(crate) fn replay_beside(r: &Replay, siblings: usize, sibling: &Sibling) -> O
     } else {
         BESIDE_ITERATIONS
     };
-    replay_counted(r, siblings, sibling, iterations).map(|m| m.cycles)
+    replay_counted(r, siblings, sibling, iterations, false).map(|m| m.cycles)
+}
+
+/// [`replay`] alone, from a predecoded shadow of the loop, so the unit
+/// runs the loop's quickened and fused forms.
+pub(crate) fn replay_shadowed(r: &Replay) -> Option<f64> {
+    replay_counted(r, 0, &PROBE_SIBLING, REPLAY_ITERATIONS, true).map(|m| m.cycles)
 }
 
 /// What [`replay_measured`] times over the loop's second half.
@@ -670,15 +676,17 @@ pub(crate) struct Measured {
 /// [`replay_beside`] at `REPLAY_ITERATIONS`, with the first sibling's
 /// rate over the same half.
 pub(crate) fn replay_measured(r: &Replay, siblings: usize, sibling: &Sibling) -> Option<Measured> {
-    replay_counted(r, siblings, sibling, REPLAY_ITERATIONS)
+    replay_counted(r, siblings, sibling, REPLAY_ITERATIONS, false)
 }
 
-/// [`replay_measured`], with the loop run twice `iterations` times.
+/// [`replay_measured`], with the loop run twice `iterations` times. With
+/// `shadowed`, the loop's unit runs from a predecoded shadow of the loop.
 fn replay_counted(
     r: &Replay,
     siblings: usize,
     sibling: &Sibling,
     iterations: u64,
+    shadowed: bool,
 ) -> Option<Measured> {
     let words = r.words;
     let ring_end = r
@@ -712,8 +720,12 @@ fn replay_counted(
     });
     let mut rt = Runtime::new(mem, Budget::new(1), usize::MAX);
     let seeds = r.seeds;
+    let code: Vec<u8> = words.iter().flat_map(|w| w.to_be_bytes()).collect();
     let unit = rt.register_unit_with(|id| {
         let mut ppu = PpuExecutionUnit::new(id);
+        if shadowed {
+            ppu.set_instruction_shadow(cellgov_ppu::shadow::PredecodedShadow::build(CODE, &code));
+        }
         let state = ppu.state_mut();
         state.pc = CODE;
         match counter {

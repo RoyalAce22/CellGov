@@ -1,11 +1,12 @@
 //! Generated-input properties of `quicken_insn`: every rewrite leaves
-//! the machine where the original instruction does.
+//! the machine where the original instruction does, and times like it.
 
 use proptest::prelude::*;
 
 use super::quicken_insn;
 use crate::instruction::PpuInstruction;
 use crate::shadow::semantics_support::{reg, run_sequence, state_seed, StateSeed};
+use crate::timing::classify;
 
 /// Instructions every quickening rule accepts, one arm per rule.
 fn quickenable() -> impl Strategy<Value = PpuInstruction> {
@@ -41,7 +42,11 @@ fn quickenable() -> impl Strategy<Value = PpuInstruction> {
             me: 31,
             rc: false,
         }),
-        reg().prop_map(|ra| PpuInstruction::Ori { ra, rs: ra, imm: 0 }),
+        Just(PpuInstruction::Ori {
+            ra: 0,
+            rs: 0,
+            imm: 0
+        }),
         (0u8..8, reg()).prop_map(|(bf, ra)| PpuInstruction::Cmpwi { bf, ra, imm: 0 }),
         (reg(), reg(), 0u8..64).prop_map(|(ra, rs, n)| PpuInstruction::Rldicl {
             ra,
@@ -65,6 +70,11 @@ fn quickenable() -> impl Strategy<Value = PpuInstruction> {
             rc: false,
         }),
     ]
+}
+
+/// `ori rA,rA,0` for every rA: the `ori 0,0,0` rule quickens only rA 0.
+fn near_miss() -> impl Strategy<Value = PpuInstruction> {
+    reg().prop_map(|ra| PpuInstruction::Ori { ra, rs: ra, imm: 0 })
 }
 
 /// Verdict, registers, PC and emitted effects after `insn` runs from
@@ -91,6 +101,18 @@ proptest! {
         prop_assert_ne!(quick, insn);
         let mem = seed.memory();
         prop_assert_eq!(outcome(insn, &seed, &mem), outcome(quick, &seed, &mem));
+    }
+
+    #[test]
+    fn a_quickened_instruction_times_like_the_original(
+        insn in prop_oneof![quickenable(), near_miss()],
+        seed in state_seed(),
+    ) {
+        let Some(quick) = quicken_insn(insn) else {
+            return Ok(());
+        };
+        let state = seed.state();
+        prop_assert_eq!(classify(&quick, &state), classify(&insn, &state));
     }
 }
 

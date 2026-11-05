@@ -1,5 +1,5 @@
 //! Generated-input properties of `make_super_pair`: a fused pair runs
-//! the way its two halves run in sequence.
+//! and times the way its two halves run in sequence.
 
 use proptest::prelude::*;
 
@@ -11,6 +11,7 @@ use crate::shadow::semantics_support::{
     state_seed, MEM_BASE,
 };
 use crate::state::PpuState;
+use crate::timing::classify;
 
 fn bc(bo: u8, bi: u8, offset: i16) -> PpuInstruction {
     PpuInstruction::Bc {
@@ -20,6 +21,15 @@ fn bc(bo: u8, bi: u8, offset: i16) -> PpuInstruction {
         aa: false,
         link: false,
     }
+}
+
+/// A branch displacement, sometimes 4: a taken branch to the next
+/// instruction lands where the untaken one does.
+fn branch_offset() -> impl Strategy<Value = i16> {
+    prop_oneof![
+        3 => any::<i16>(),
+        1 => Just(4i16),
+    ]
 }
 
 /// Instruction pairs every fusion rule accepts, one arm per rule.
@@ -89,17 +99,17 @@ fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
             compare_immediate(),
             reg(),
             reg(),
-            any::<i16>()
+            branch_offset()
         )
             .prop_map(|(bf, ra, imm, bo, bi, off)| (
                 PpuInstruction::Cmpwi { bf, ra, imm },
                 bc(bo, bi, off)
             )),
-        (cr_field(), reg(), reg(), reg(), any::<i16>()).prop_map(|(bf, ra, bo, bi, off)| (
+        (cr_field(), reg(), reg(), reg(), branch_offset()).prop_map(|(bf, ra, bo, bi, off)| (
             PpuInstruction::CmpwZero { bf, ra },
             bc(bo, bi, off),
         )),
-        (cr_field(), reg(), reg(), reg(), reg(), any::<i16>()).prop_map(
+        (cr_field(), reg(), reg(), reg(), reg(), branch_offset()).prop_map(
             |(bf, ra, rb, bo, bi, off)| (PpuInstruction::Cmpw { bf, ra, rb }, bc(bo, bi, off))
         ),
     ]
@@ -199,5 +209,27 @@ proptest! {
         if matches!(verdict_pair, ExecuteVerdict::Continue | ExecuteVerdict::Branch) {
             prop_assert_eq!(pair.pc, halves.pc);
         }
+    }
+
+    #[test]
+    fn a_fused_pair_times_like_its_halves(
+        (a, b) in fusable_pair(),
+        seed in state_seed(),
+    ) {
+        let Some(fused) = make_super_pair(a, b) else {
+            return Err(TestCaseError::fail(format!("{a:?} + {b:?} did not fuse")));
+        };
+        let mem = seed.memory();
+        let mut state = seed.state();
+        let ([first, second], n) = classify(&fused, &state);
+        prop_assert_eq!(n, 2);
+        let ([raw_first, _], _) = classify(&a, &state);
+        prop_assert_eq!(first, raw_first);
+        let (verdict, _) = run_sequence(&[a], &mut state, &mem);
+        if verdict != ExecuteVerdict::Continue {
+            return Ok(());
+        }
+        let ([raw_second, _], _) = classify(&b, &state);
+        prop_assert_eq!(second, raw_second);
     }
 }

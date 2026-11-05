@@ -235,6 +235,26 @@ fn static_prediction(bo: u8) -> Option<bool> {
     hint.then_some(bo & 1 != 0)
 }
 
+/// Whether a taken branch at `pc` times as one that falls through.
+///
+/// It does when the branch:
+/// - is direct, to `pc + 4`, and does not link;
+/// - tests a CR bit and leaves CTR alone;
+/// - has no hint.
+///
+/// In the `ppu_issue_quickened_forms` capture, eight `cmpwi; beq` or
+/// `cmpw; beq` taken to the next instruction, and the loop's `bdnz`,
+/// take 38 to 52 cycles an iteration. Eight `cmpwi; bne` that fall
+/// through take 40 to 48. A model that times each `beq` as a
+/// predicted-taken fetch gives 72.
+fn lands_on_fall_through(pc: u64, bo: u8, link: bool, target: Target, next_pc: u64) -> bool {
+    matches!(target, Target::Direct)
+        && !link
+        && next_pc == pc.wrapping_add(4)
+        && bo & 0b10100 == 0b00100
+        && static_prediction(bo).is_none()
+}
+
 impl PpeTiming {
     /// A thread with no issued instruction and empty caches.
     pub(crate) fn new() -> Self {
@@ -479,8 +499,9 @@ impl PpeTiming {
 
     /// Issue `op` at `pc`, and return the cycle it issues at.
     ///
-    /// `next_pc` is the address the thread runs next. It gives the
-    /// direction of a branch whose `taken` is `None`.
+    /// `next_pc` is the address the thread runs next. A branch reads it:
+    /// - to check a branch to LR against the link stack's prediction;
+    /// - to find a direct branch to `pc + 4` ([`lands_on_fall_through`]).
     fn retire(&mut self, pc: u64, op: &Op, next_pc: u64) -> u64 {
         let Scheduled {
             issue: t,
@@ -535,7 +556,6 @@ impl PpeTiming {
                 target,
                 taken,
             } => {
-                let taken = taken.unwrap_or(next_pc != pc.wrapping_add(4));
                 self.branch(pc, t, bo, link, target, taken, next_pc);
                 return t;
             }
@@ -646,6 +666,7 @@ impl PpeTiming {
         taken: bool,
         next_pc: u64,
     ) {
+        let taken = taken && !lands_on_fall_through(pc, bo, link, target, next_pc);
         let predictor = &mut self.tables.predictor;
         let guessed = if bo & PPC_BO_ALWAYS == PPC_BO_ALWAYS {
             true

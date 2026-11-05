@@ -165,8 +165,11 @@ const SIBLING_MFTB: Sibling = Sibling {
     seeds: &[],
 };
 
-/// The largest share of a loop's console mean the model may differ by,
-/// when the model falls outside the console's spread.
+/// The largest share of a loop's fastest console run the model may differ
+/// by, when the model falls outside the console's spread.
+///
+/// A loop's fastest run repeats across captures of the probe to within a
+/// percent; its mean and slowest runs do not.
 const TOLERANCE: f64 = 0.20;
 
 #[test]
@@ -179,7 +182,8 @@ fn alone_the_instructions_after_an_mftb_wait_for_it_as_on_the_console() {
         let cellgov = replay(r, 0).expect("the loop replays");
         let (fastest, slowest, mean) = console_cycles(&w, 0, c);
         assert!(
-            (fastest..=slowest).contains(&cellgov) || (cellgov - mean).abs() / mean <= TOLERANCE,
+            (fastest..=slowest).contains(&cellgov)
+                || (cellgov - fastest).abs() / fastest <= TOLERANCE,
             "{name}: CellGov {cellgov:.2} cycles an iteration, the console {fastest:.2} to \
              {slowest:.2}, mean {mean:.2}",
         );
@@ -187,27 +191,37 @@ fn alone_the_instructions_after_an_mftb_wait_for_it_as_on_the_console() {
 }
 
 #[test]
-fn beside_an_mftb_sibling_every_loop_waits_short_of_the_console_as_beside_a_held_divide() {
-    // Beside the mftb sibling, the console's loops wait 20 to 30 cycles
-    // an instruction past their alone time. A held divide sibling gives
-    // the same level in `ppu_issue_loop_shape`. The model gives the mftb
-    // the divide's stall, `PPU_SMT_SHARED_STALL_CYCLES`, and lands short
-    // of the console by the same accepted gap.
+fn beside_an_mftb_sibling_every_loop_runs_slower_than_alone_as_on_the_console() {
+    // Beside the mftb sibling, every console loop's mean runs slower than
+    // alone. The amount changes from run to run: three captures of the
+    // probe put the wait between 1.5 and 32 cycles an instruction, and put
+    // one loop's mean 4.7 times apart. The model gives the mftb a held
+    // divide's stall, `PPU_SMT_SHARED_STALL_CYCLES`.
     let w = console_words();
+    let mut console_longest = 0.0_f64;
+    let mut cellgov_waits = Vec::new();
     for (c, (name, r)) in LOOPS.iter().enumerate() {
         let alone = replay(r, 0).expect("the loop replays");
         let cellgov = replay_beside(r, 1, &SIBLING_MFTB).expect("the loop replays");
         let console = console_cycles(&w, 1, c).2;
-        let instructions = (r.words.len() - 1) as f64;
-        let wait = (console - console_cycles(&w, 0, c).2) / instructions;
+        let console_alone = console_cycles(&w, 0, c).2;
         assert!(
-            wait > PPU_SMT_SHARED_STALL_CYCLES as f64,
-            "{name}: the console waits {wait:.1} cycles an instruction beside mftb"
+            console > console_alone,
+            "{name}: the console's mean beside mftb {console:.1}, alone {console_alone:.1}"
         );
+        let instructions = (r.words.len() - 1) as f64;
         assert!(
-            cellgov < console && cellgov > 0.45 * console,
-            "{name} beside mftb: CellGov {cellgov:.1} cycles an iteration (alone {alone:.1}), \
-             the console's mean {console:.1}",
+            cellgov - alone >= PPU_SMT_SHARED_STALL_CYCLES as f64 * instructions,
+            "{name} beside mftb: CellGov {cellgov:.1} cycles an iteration, alone {alone:.1}"
+        );
+        console_longest = console_longest.max((console - console_alone) / instructions);
+        cellgov_waits.push((name, (cellgov - alone) / instructions));
+    }
+    for (name, wait) in cellgov_waits {
+        assert!(
+            wait <= console_longest,
+            "{name} beside mftb: CellGov waits {wait:.1} cycles an instruction, the console's \
+             longest-waiting loop {console_longest:.1}"
         );
     }
 }

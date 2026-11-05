@@ -273,7 +273,7 @@ work:
 - `addi rT, 0, imm` -> `Li`
 - `or rA, rS, rS` -> `Mr`
 - `rlwinm` subsets -> `Slwi`/`Srwi`/`Clrlwi`
-- `ori rA, rA, 0` -> `Nop`
+- `ori 0, 0, 0` -> `Nop`
 - `cmpwi crF, rA, 0` -> `CmpwZero`
 - `rldicl`/`rldicr` subsets -> `Clrldi`/`Sldi`/`Srdi`
 

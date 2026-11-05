@@ -105,10 +105,23 @@ fn refresh_applies_quickening_or_to_mr() {
 }
 
 #[test]
-fn quicken_ori_same_reg_zero_becomes_nop() {
-    // ori r5, r5, 0 => Nop
-    let shadow = build_from_words(0, &[ori_raw(5, 5, 0)]);
+fn quicken_ori_zero_zero_zero_becomes_nop() {
+    let shadow = build_from_words(0, &[ori_raw(0, 0, 0)]);
     assert_eq!(shadow.get(0), Some(PpuInstruction::Nop));
+}
+
+#[test]
+fn quicken_ori_same_nonzero_reg_zero_stays_ori() {
+    // `ori r3, r3, 0` waits for r3; `Nop` waits for nothing.
+    let shadow = build_from_words(0, &[ori_raw(3, 3, 0)]);
+    assert_eq!(
+        shadow.get(0),
+        Some(PpuInstruction::Ori {
+            ra: 3,
+            rs: 3,
+            imm: 0
+        })
+    );
 }
 
 #[test]

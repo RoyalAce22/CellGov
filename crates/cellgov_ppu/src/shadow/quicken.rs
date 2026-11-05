@@ -68,9 +68,15 @@ pub(super) fn quicken_insn(insn: PpuInstruction) -> Option<PpuInstruction> {
             me,
             rc: false,
         } if sh == 0 && me == 31 => Some(PpuInstruction::Clrlwi { ra, rs, n: mb }),
-        // ori rA, rA, 0 => Nop
+        // ori 0, 0, 0 => Nop
         // [PPC-Book1 p:162 s:B.9 No-op] preferred no-op form is ori 0,0,0.
-        PpuInstruction::Ori { ra, rs, imm: 0 } if ra == rs => Some(PpuInstruction::Nop),
+        // [PPC-Book1 p:66 s:3.3.11] other forms that alter no state may
+        // affect performance. `ori rN,rN,0` waits for rN, so it stays raw.
+        PpuInstruction::Ori {
+            ra: 0,
+            rs: 0,
+            imm: 0,
+        } => Some(PpuInstruction::Nop),
         // cmpwi crF, rA, 0 => CmpwZero
         PpuInstruction::Cmpwi { bf, ra, imm: 0 } => Some(PpuInstruction::CmpwZero { bf, ra }),
         // rldicl rA, rS, 0, n => Clrldi

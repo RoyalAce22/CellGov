@@ -1,0 +1,22 @@
+[test]
+name = "ppu_issue_quickened_forms"
+
+# A hardware probe of the time of two forms whose result a no-op or a
+# branch to the next instruction leaves unchanged: `ori 9,9,0` after each
+# add of a dependent add chain, against `nop` in the same place, and word
+# compares paired with a conditional branch to the next instruction,
+# taken and not taken. Five loops, each timed with mftb. The console
+# capture is the answer; ppu/main.c's header lists the loops and the
+# payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 128 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 128 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

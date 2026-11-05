@@ -8,7 +8,7 @@
 
 use crate::instruction::ops::{Fp59Op, Fp63Op, VaOp, VxOp};
 use crate::instruction::PpuInstruction as I;
-use crate::state::PpuState;
+use crate::state::{cmp_cr_field, PpuState};
 use cellgov_ps3_abi::hw::ppc_isa::PPC_BO_ALWAYS;
 use cellgov_ps3_abi::hw::ppu_issue as k;
 
@@ -94,15 +94,13 @@ pub(crate) enum Kind {
     ZeroLine { ea: u64 },
     /// A branch with this `BO` field.
     ///
-    /// `taken` is its direction when the state it executes from decides
-    /// it. A fused pair's branch reads the CR that its compare writes.
-    /// Its `taken` is `None`, and its direction comes from where the
-    /// pair goes.
+    /// `taken` is its direction from the state it executes from. A fused
+    /// pair's branch reads the CR that its compare writes.
     Branch {
         bo: u8,
         link: bool,
         target: Target,
-        taken: Option<bool>,
+        taken: bool,
     },
     /// Issues once every older result is ready.
     Drain,
@@ -157,7 +155,12 @@ impl Op {
         }
     }
 
+    /// Reads `r` as data. A register read twice takes one slot, so
+    /// `or rA,rS,rS` and `mr rA,rS` read the same set.
     fn src(mut self, r: Reg) -> Self {
+        if self.srcs.contains(&r) {
+            return self;
+        }
         if let Some(slot) = self.srcs.iter_mut().find(|s| **s == NO_REG) {
             *slot = r;
         }
@@ -435,7 +438,7 @@ fn cmp(bf: u8, ra: u8, rb: Option<u8>) -> Op {
 ///
 /// [PPC-Book1 p:20 s:2.4.1] `BO` bit 0 (value 16) ignores the condition
 /// and bit 2 (value 4) leaves CTR alone.
-fn branch(bo: u8, bi: u8, link: bool, target: Target, taken: Option<bool>) -> Op {
+fn branch(bo: u8, bi: u8, link: bool, target: Target, taken: bool) -> Op {
     let mut op = Op::on(unit::BRU).kind(Kind::Branch {
         bo,
         link,
@@ -466,8 +469,26 @@ fn branch(bo: u8, bi: u8, link: bool, target: Target, taken: Option<bool>) -> Op
 /// (decrement, then test against zero) and the condition clause (CR bit
 /// `bi` against `BO` bit 1) both hold; `BO` bits 0 and 2 drop them.
 fn branches(state: &PpuState, bo: u8, bi: u8) -> bool {
+    branches_on(state.cr(), state, bo, bi)
+}
+
+/// Whether the branch of a fused `cmpw[i]; bc` branches: its condition
+/// reads CR with field `bf` set from the signed compare of `a` with `b`.
+///
+/// [PPC-Book1 p:60 s:3.3.9] the compare sets field BF to c || `XER[SO]`.
+fn fused_branches(state: &PpuState, bf: u8, (a, b): (i32, i32), bo: u8, bi: u8) -> bool {
+    let shift = u32::from(7 - bf) * 4;
+    let field = u32::from(cmp_cr_field(a < b, a > b, state.xer_so()));
+    let cr = (state.cr() & !(0xF << shift)) | (field << shift);
+    branches_on(cr, state, bo, bi)
+}
+
+/// Whether a conditional branch with `bo` and `bi` branches when CR
+/// holds `cr` and CTR is the one in `state`. [`branches`] cites the
+/// two clauses.
+fn branches_on(cr: u32, state: &PpuState, bo: u8, bi: u8) -> bool {
     let ctr_ok = bo & 0x04 != 0 || ((state.ctr().wrapping_sub(1) != 0) != (bo & 0x02 != 0));
-    let bit = (state.cr() >> (31 - u32::from(bi))) & 1 != 0;
+    let bit = (cr >> (31 - u32::from(bi))) & 1 != 0;
     let cond_ok = bo & 0x10 != 0 || bit == (bo & 0x08 != 0);
     ctr_ok && cond_ok
 }
@@ -859,28 +880,20 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
         | I::Cmplw { bf, ra, rb }
         | I::Cmpd { bf, ra, rb }
         | I::Cmpld { bf, ra, rb } => one(cmp(bf, ra, Some(rb))),
-        I::B { link, .. } => one(branch(PPC_BO_ALWAYS, 0, link, Target::Direct, Some(true))),
+        I::B { link, .. } => one(branch(PPC_BO_ALWAYS, 0, link, Target::Direct, true)),
         I::Bc { bo, bi, link, .. } => one(branch(
             bo,
             bi,
             link,
             Target::Direct,
-            Some(branches(state, bo, bi)),
+            branches(state, bo, bi),
         )),
-        I::Bclr { bo, bi, link } => one(branch(
-            bo,
-            bi,
-            link,
-            Target::Link,
-            Some(branches(state, bo, bi)),
-        )),
-        I::Bcctr { bo, bi, link } => one(branch(
-            bo,
-            bi,
-            link,
-            Target::Count,
-            Some(branches(state, bo, bi)),
-        )),
+        I::Bclr { bo, bi, link } => {
+            one(branch(bo, bi, link, Target::Link, branches(state, bo, bi)))
+        }
+        I::Bcctr { bo, bi, link } => {
+            one(branch(bo, bi, link, Target::Count, branches(state, bo, bi)))
+        }
         I::Mcrf { crfd, crfs } => one(Op::on(unit::BRU)
             .src(crf(crfs))
             .dst(crf(crfd), k::PPU_BRANCH_UNIT_LATENCY_CYCLES)),
@@ -1322,16 +1335,31 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
                     .base(ra),
             )
         }
-        I::CmpwiBc { bf, ra, bo, bi, .. } => two(
-            cmp(bf, ra, None),
-            branch(bo, bi, false, Target::Direct, None),
-        ),
+        I::CmpwiBc {
+            bf,
+            ra,
+            imm,
+            bo,
+            bi,
+            ..
+        } => {
+            let operands = (g(ra) as i32, i32::from(imm));
+            let taken = fused_branches(state, bf, operands, bo, bi);
+            two(
+                cmp(bf, ra, None),
+                branch(bo, bi, false, Target::Direct, taken),
+            )
+        }
         I::CmpwBc {
             bf, ra, rb, bo, bi, ..
-        } => two(
-            cmp(bf, ra, Some(rb)),
-            branch(bo, bi, false, Target::Direct, None),
-        ),
+        } => {
+            let operands = (g(ra) as i32, g(rb) as i32);
+            let taken = fused_branches(state, bf, operands, bo, bi);
+            two(
+                cmp(bf, ra, Some(rb)),
+                branch(bo, bi, false, Target::Direct, taken),
+            )
+        }
         I::Consumed => ([none, none], 0),
         I::Dcbz { ra, rb } => one(Op::on(unit::LSU)
             .kind(Kind::ZeroLine {

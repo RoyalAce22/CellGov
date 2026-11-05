@@ -248,6 +248,9 @@ fn triples_across_a_carry(tick: u64) -> (u64, u64, u64) {
 fn mftbu_mftb_mftbu_triples_across_a_low_word_carry_stay_consistent_as_the_console_s_do() {
     let w = console_words();
     assert_eq!(w[74], 1, "the console's low word carried");
+    // Whether the console's own carry falls inside a triple changes from
+    // run to run; at most one of its triples can straddle it.
+    assert!(w[72] <= 1, "the console straddled {} triples", w[72]);
     // The first triple reads a hundred time-base ticks before the carry,
     // at each phase within a tick.
     let start = (0x1_0000_0000 - 100) * TICKS_PER_TB_TICK;
@@ -258,7 +261,7 @@ fn mftbu_mftb_mftbu_triples_across_a_low_word_carry_stay_consistent_as_the_conso
         assert_eq!(carried, w[74], "phase {phase}: carries");
         // Whether a triple straddles the carry depends on where the carry
         // falls in the loop; at most one can.
-        assert!(plus_one <= w[72], "phase {phase}: {plus_one} straddled");
+        assert!(plus_one <= 1, "phase {phase}: {plus_one} straddled");
         straddled += plus_one;
     }
     assert!(straddled > 0, "some phase puts the carry inside a triple");

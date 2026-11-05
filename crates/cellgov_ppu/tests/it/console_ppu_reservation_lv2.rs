@@ -11,9 +11,11 @@
 //!   granule;
 //! - case 3 calls `sys_ppu_thread_yield`.
 //!
-//! The console's case 3 yields to a second runnable thread. The replay
-//! has no second thread, because CellGov drops the reservation at the call
-//! itself, whatever runs next.
+//! The console's case 3 yields while a second thread is runnable. The
+//! second thread runs in some trials and not in others, and the
+//! `stwcx.` fails in every trial either way. The replay has no second
+//! thread, because CellGov drops the reservation at the call itself,
+//! whatever runs next.
 
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_ppu::PpuExecutionUnit;
@@ -56,10 +58,10 @@ fn console() -> (u64, [u64; CASES]) {
     let trials = word(2);
     assert_eq!(word(4 + 3), trials, "every time call returned 0");
     assert_eq!(word(4 + 6), trials, "every time call returned 0");
-    assert_eq!(
-        word(5 + 9),
-        trials,
-        "the second thread ran in every yield trial"
+    let ran = word(5 + 9);
+    assert!(
+        (1..=trials).contains(&ran),
+        "the second thread ran in {ran} of {trials} yield trials"
     );
     (trials, std::array::from_fn(|c| word(3 + 3 * c)))
 }

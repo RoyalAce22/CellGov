@@ -23,6 +23,6 @@ fn a_bcctr_with_bo_2_clear_tests_the_decremented_ctr() {
         let Kind::Branch { taken: t, .. } = ops[0].kind else {
             panic!("bo {bo:#x}: {:?}", ops[0].kind);
         };
-        assert_eq!(t, Some(taken), "bo {bo:#x}");
+        assert_eq!(t, taken, "bo {bo:#x}");
     }
 }
