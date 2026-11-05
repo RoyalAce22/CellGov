@@ -527,7 +527,7 @@ impl PpeTiming {
         let outranked = u64::from(self.shared_stall.issue_interval);
         let c = &mut self.core;
         c.gate = c.gate.max(t.saturating_mul(256)).saturating_add(outranked);
-        stretch_pending(c, began, stalled);
+        stretch_pending(c, &mut self.tables.stores, began, stalled);
         let before = c.floor;
         if opens {
             c.block_open = true;
@@ -855,20 +855,41 @@ fn weigh(share: u32, w: u64, counts: bool) -> u32 {
     ((kept + added) / PRESSURE_WINDOW_CYCLES) as u32
 }
 
-/// Pushes back every result still pending when the sibling's stall
-/// began by the length of that stall.
+/// Delays each pending time by the length of the sibling's stall.
 ///
-/// In the `ppu_issue_units` capture a dependent `fadd` with an
-/// independent `addi` after each waits its latency and both stalls. In
-/// the `ppu_issue_miss` capture an L2 miss beside an `fdiv` sibling
-/// waits out the stall of every instruction after it, about 40 cycles
-/// each there, past the model's own stall.
+/// A time is pending when it is later than the start of the stall:
+/// - each result and each outstanding load miss;
+/// - each unit's release;
+/// - each queued store's write into the cache.
+///
+/// The console captures show the delay:
+/// - `ppu_issue_units`: a dependent `fadd` with an independent `addi`
+///   after each waits its latency and both stalls.
+/// - `ppu_issue_miss`: an L2 miss beside an `fdiv` sibling waits out
+///   the stall of every instruction after it, about 40 cycles each
+///   there, past the model's own stall.
+/// - `ppu_issue_stall_release`, beside an `fdiv` sibling: a load of
+///   bytes a store just queued costs more over a load of another line
+///   than it does alone. This is also true with four `addi` between the
+///   two, whose stalls outlast the store's write when that write does
+///   not move.
+/// - `ppu_issue_stall_release`, beside an `fdiv` sibling: a `divd` with
+///   four independent loads after it costs most of what it costs alone
+///   over an `addi` with the same loads. The loads' stalls outlast the
+///   divide when its release does not move.
 #[inline]
-fn stretch_pending(c: &mut Core, began: u64, stalled: u64) {
+fn stretch_pending(c: &mut Core, stores: &mut [Queued], began: u64, stalled: u64) {
     if stalled == 0 {
         return;
     }
-    for r in c.ready.iter_mut().chain(c.addr_ready.iter_mut()) {
+    let pending = c
+        .ready
+        .iter_mut()
+        .chain(c.addr_ready.iter_mut())
+        .chain(c.miss.iter_mut())
+        .chain(c.unit_free.iter_mut())
+        .chain(stores.iter_mut().map(|s| &mut s.done));
+    for r in pending {
         if *r > began {
             *r += stalled;
         }
