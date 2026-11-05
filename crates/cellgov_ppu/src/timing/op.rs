@@ -1555,6 +1555,15 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
                 int_load(ea_d(state, ra1, off1), 1, rt1).base(ra1),
                 int_load(ea_d(state, ra2, off2), 1, rt2).base(ra2),
             ),
+            FusedPair::MtlrAddi { rs, rt, ra, .. } => {
+                let add = fx(gpr(rt));
+                two(
+                    Op::on(unit::BRU)
+                        .src(gpr(rs))
+                        .dst(LR, k::PPU_BRANCH_UNIT_LATENCY_CYCLES),
+                    if ra == 0 { add } else { add.src(gpr(ra)) },
+                )
+            }
         },
         I::Consumed => ([none, none], 0),
         I::Dcbz { ra, rb } => one(Op::on(unit::LSU)

@@ -676,6 +676,14 @@ fn execute_pair(
                 Err(ea) => ExecuteVerdict::MemFault(ea),
             }
         }
+        // [PPC-Book1 p:81 s:3.3.13 Move To Special Purpose Register] mtspr (mtlr when SPR=8): LR <- (RS).
+        // [PPC-Book1 p:51 s:3.3.8 Add Immediate] addi: RT <- (RA|0) + EXTS(SI). The mtlr writes no GPR.
+        FusedPair::MtlrAddi { rs, rt, ra, imm } => {
+            state.set_lr(state.gpr[rs as usize]);
+            let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
+            state.set_gpr(rt as usize, base.wrapping_add(imm as i64 as u64));
+            ExecuteVerdict::Continue
+        }
     }
 }
 

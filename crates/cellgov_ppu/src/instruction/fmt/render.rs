@@ -1020,6 +1020,16 @@ pub(super) fn render(
                 f.write_str("; ")?;
                 mem_d(f, "lbz", 'r', rt2, off2, ra2)
             }
+            FusedPair::MtlrAddi { rs, rt, ra, imm } => {
+                op(f, "mtlr", format_args!("r{rs}"))?;
+                // [PPC-Book1 p:162 s:B.9] li rX,v is addi rX,0,v, as the
+                // quickened `li` renders.
+                if ra == 0 {
+                    write!(f, "; li r{rt}, {imm}")
+                } else {
+                    write!(f, "; addi r{rt}, r{ra}, {imm}")
+                }
+            }
         },
         I::Consumed => op0(f, ".consumed"),
 

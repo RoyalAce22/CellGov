@@ -1,0 +1,24 @@
+[test]
+name = "ppu_mtlr_addi_pair"
+
+# A hardware probe: the LR and the 64-bit register that an "mtlr"
+# followed by an "addi" leave, in the plain pair, with "li" as the
+# second instruction, with the addi overwriting the mtlr source, through
+# a branch over the mtlr into the addi, with r0 as the mtlr source
+# before li, and with the add wrapping past the signed maximum and past
+# all ones. The console capture is the answer; no emulator runs it.
+
+[observe]
+# 30 big-endian u32 words, as ppu/main.c lists: 120 bytes.
+#   0 failed step, 1 its return code; then each register as a high word
+#   and a low word: 2-3 LR and 4-5 r5 of the plain pair, 6-7 LR and 8-9
+#   r5 with li, 10-11 LR and 12-13 r3 when the addi overwrites the mtlr
+#   source, 14-15 LR and 16-17 r5 after the branch into the addi, 18-19
+#   LR and 20-21 r5 with r0 as the mtlr source, 22-23 LR and 24-25 r5
+#   past the signed maximum, 26-27 LR and 28-29 r4 past all ones.
+memory_regions = [
+  { name = "result", addr = 0, size = 120 },
+]
+
+[expect]
+outcome = "completed"

@@ -493,6 +493,17 @@ fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
                     },
                 )
             }),
+        // The addi takes the form the shadow gives it: li when RA is 0.
+        // RA is 0 in about half the cases, so every run covers the li form.
+        (reg(), reg(), prop_oneof![Just(0u8), reg()], any::<i16>()).prop_map(
+            |(rs, rt, ra, imm)| {
+                let addi = PpuInstruction::Addi { rt, ra, imm };
+                (
+                    PpuInstruction::Mtlr { rs },
+                    quicken_insn(addi).unwrap_or(addi),
+                )
+            }
+        ),
     ]
 }
 
@@ -576,7 +587,7 @@ fn aim_compare(
 }
 
 proptest! {
-    // Seven of the thirty arms are compares that need an aimed
+    // Seven of the thirty-one arms are compares that need an aimed
     // operand to show an off-by-one. Four times the default count
     // makes one such case near certain per run.
     #![proptest_config(ProptestConfig::with_cases(1024))]

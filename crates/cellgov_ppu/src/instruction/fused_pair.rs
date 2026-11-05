@@ -257,4 +257,12 @@ pub enum FusedPair {
         ra2: u8,
         off2: i16,
     },
+    /// `mtlr rS` followed by `addi rT, rA, imm` (or its quickened `li`
+    /// when `ra` is 0).
+    MtlrAddi {
+        rs: u8,
+        rt: u8,
+        ra: u8,
+        imm: i16,
+    },
 }

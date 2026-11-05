@@ -592,6 +592,14 @@ fn fuse(a: PpuInstruction, b: PpuInstruction) -> Option<FusedPair> {
             ra2,
             off2,
         }),
+        // mtlr rS + addi rT, rA, imm. The shadow quickens addi rT, 0, imm to
+        // Li, so that shape fuses as an addi with RA = 0.
+        (PpuInstruction::Mtlr { rs }, PpuInstruction::Addi { rt, ra, imm }) => {
+            Some(FusedPair::MtlrAddi { rs, rt, ra, imm })
+        }
+        (PpuInstruction::Mtlr { rs }, PpuInstruction::Li { rt, imm }) => {
+            Some(FusedPair::MtlrAddi { rs, rt, ra: 0, imm })
+        }
         _ => None,
     }
 }
@@ -701,3 +709,7 @@ mod or_b_tests;
 #[cfg(test)]
 #[path = "tests/superpair_lbz_pair_tests.rs"]
 mod lbz_pair_tests;
+
+#[cfg(test)]
+#[path = "tests/superpair_mtlr_addi_tests.rs"]
+mod mtlr_addi_tests;

@@ -150,8 +150,16 @@ mod fused_or_b_tests;
 mod fused_lbz_pair_tests;
 
 #[cfg(test)]
+#[path = "tests/fused_mtlr_addi_tests.rs"]
+mod fused_mtlr_addi_tests;
+
+#[cfg(test)]
 #[path = "tests/lbz_lbz_console_tests.rs"]
 mod lbz_lbz_console_tests;
+
+#[cfg(test)]
+#[path = "tests/mtlr_addi_console_tests.rs"]
+mod mtlr_addi_console_tests;
 
 #[cfg(test)]
 #[path = "tests/std_lwz_console_tests.rs"]
