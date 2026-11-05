@@ -68,3 +68,7 @@ mod store_fault_tests;
 #[cfg(test)]
 #[path = "tests/synced_code_store_tests.rs"]
 mod synced_code_store_tests;
+
+#[cfg(test)]
+#[path = "tests/committed_code_write_tests.rs"]
+mod committed_code_write_tests;

@@ -11,11 +11,12 @@
 //! - a Raw SPU's problem-state window;
 //! - a placement by the program driving the runtime.
 //!
-//! [`Runtime::host_write`] gives them the pipeline's three
+//! [`Runtime::host_write`] gives them the pipeline's four
 //! guest-visible steps:
 //!
 //! - the same write validation,
 //! - the same reservation clear sweep,
+//! - the same drop of predecoded code over the written bytes,
 //! - a trace record.
 //!
 //! It does not give them the pipeline's atomic-batch contract. Each
@@ -75,9 +76,12 @@ impl Runtime {
     /// # Errors
     ///
     /// Returns the [`MemError`] that `GuestMemory::apply_commit`
-    /// rejects the write with. A refused write changes nothing: it
-    /// lands no bytes, sweeps no reservation, and leaves no trace
-    /// record.
+    /// rejects the write with. A refused write changes nothing:
+    ///
+    /// - it lands no bytes;
+    /// - it sweeps no reservation;
+    /// - it drops no predecoded code;
+    /// - it leaves no trace record.
     pub(super) fn host_write(
         &mut self,
         writer: HostWriter,
@@ -95,6 +99,10 @@ impl Runtime {
         mem.apply_commit(range, bytes)?;
         let (addr, len) = (range.start().raw(), range.length());
         let cleared = reservations.clear_covering(addr, len, exempt);
+        // A write by another mechanism changes what the next fetch must
+        // see once the modification sequence runs, as a store does.
+        // [PPC-Book2 p:11 s:1.8]
+        self.drop_predecoded_code(addr, len);
         // The push precedes the mode gate below: a FaultDriven run
         // writes no trace record and still publishes this entry. A
         // placement is the driver's write between steps, so it belongs
@@ -128,6 +136,17 @@ impl Runtime {
             });
         }
         Ok(cleared)
+    }
+
+    /// Drops every unit's predecoded code over `[addr, addr + len)`.
+    ///
+    /// The drop ignores the address space: a unit in another space
+    /// re-decodes words that did not change, which costs one fetch and
+    /// changes no result.
+    pub(super) fn drop_predecoded_code(&mut self, addr: u64, len: u64) {
+        for unit in self.registry.code_caches_mut() {
+            unit.invalidate_code(addr, len);
+        }
     }
 
     /// Places `bytes` over `range` in `space`, and returns the count of
@@ -201,3 +220,7 @@ mod place_bytes_tests;
 #[cfg(test)]
 #[path = "tests/published_step_records_tests.rs"]
 mod published_step_records_tests;
+
+#[cfg(test)]
+#[path = "tests/write_invalidation_tests.rs"]
+mod write_invalidation_tests;

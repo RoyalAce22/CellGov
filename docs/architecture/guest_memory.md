@@ -166,8 +166,8 @@ Cross-process shared memory is an explicit registration. A shared
 mapping specifies a segment size and a set of `(space, base)` views,
 installed all-or-nothing.
 
-The fanout and the invalidation cover two writers: the committed
-store and the DMA landing.
+The fanout covers two writers: the committed store and the DMA
+landing.
 
 A committed write through one view:
 

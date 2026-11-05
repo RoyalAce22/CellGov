@@ -156,13 +156,13 @@ impl Runtime {
         if batch_applied {
             let writer = self.lv2_host.process_of_unit(source);
             self.lv2_host.note_committed_effects(writer, effects);
+            self.invalidate_committed_code(effects, rsx_label_base);
             // Same batch boundary: writes landing in a shared view
             // replicate to sibling views before any checkpoint hashes.
             let fanout_cleared = self.fanout_shared_writes(source_space, effects);
             if let Ok(ref mut o) = outcome {
                 o.reservations_cleared += fanout_cleared;
             }
-            self.invalidate_committed_code(source, effects);
         }
 
         // The RSX control registers live in space 0; a child-space
@@ -366,20 +366,45 @@ impl Runtime {
         (Some(combined), count)
     }
 
-    /// Drop every unit's predecoded code over the ranges `source`'s
-    /// batch wrote, and over the sibling-view ranges the fanout
-    /// replicated them to: predecoded code there is exactly as stale as
-    /// at the source range.
-    fn invalidate_committed_code(&mut self, source: UnitId, effects: &[Effect]) {
-        let mut invalidation_ranges = Vec::new();
-        for effect in effects {
-            if let Effect::SharedWriteIntent { range, .. } = effect {
-                let alias_ranges = self.shared_alias_ranges(source, *range);
-                invalidation_ranges.push(*range);
-                invalidation_ranges.extend(alias_ranges);
+    /// Drops every unit's predecoded code over the bytes a committed batch wrote.
+    ///
+    /// The fanout's sibling-view copies go through `host_write`, which
+    /// drops the code at each alias.
+    fn invalidate_committed_code(&mut self, effects: &[Effect], rsx_label_base: u32) {
+        let written = effects.iter().filter_map(|effect| match effect {
+            Effect::SharedWriteIntent { range, .. } | Effect::ConditionalStore { range, .. } => {
+                Some(*range)
             }
+            Effect::RsxLabelWrite { offset, .. } => ByteRange::new(
+                cellgov_mem::GuestAddr::new(u64::from(rsx_label_base) + u64::from(*offset)),
+                4,
+            ),
+            // These effects land no guest-memory bytes at commit. A DMA
+            // transfer lands at completion through `host_write`; a
+            // local-store write is outside guest memory.
+            Effect::DmaEnqueue { .. }
+            | Effect::SpuLocalStoreWrite { .. }
+            | Effect::MailboxSend { .. }
+            | Effect::MailboxReceiveAttempt { .. }
+            | Effect::MailboxPop { .. }
+            | Effect::WaitOnEvent { .. }
+            | Effect::WakeUnit { .. }
+            | Effect::SignalUpdate { .. }
+            | Effect::SpuSignalWrite { .. }
+            | Effect::FaultRaised { .. }
+            | Effect::TraceMarker { .. }
+            | Effect::ReservationAcquire { .. }
+            | Effect::RsxFlipRequest { .. }
+            | Effect::SharedReadIntent { .. }
+            | Effect::ClockRead { .. }
+            | Effect::SpuLocalStoreRead { .. }
+            | Effect::MfcInvalidCommand { .. } => None,
+        });
+        let merged = merge_ranges(written.collect());
+        if merged.is_empty() {
+            return;
         }
-        let merged = merge_ranges(invalidation_ranges);
+        // One walk of the registry per batch: most units cache no code.
         for unit in self.registry.code_caches_mut() {
             for range in &merged {
                 unit.invalidate_code(range.start().raw(), range.length());

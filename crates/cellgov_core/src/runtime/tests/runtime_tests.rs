@@ -32,6 +32,8 @@ mod invariant_channel;
 mod large_page_area;
 #[path = "runtime_lv2_apply_tests.rs"]
 mod lv2_apply;
+#[path = "mmapper_code_drop_tests.rs"]
+mod mmapper_code_drop;
 #[path = "runtime_mmapper_unmap_tests.rs"]
 mod mmapper_unmap;
 #[path = "no_such_syscall_trace_tests.rs"]

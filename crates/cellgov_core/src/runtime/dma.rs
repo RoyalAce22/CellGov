@@ -144,20 +144,12 @@ impl Runtime {
         // replaced. The issuer is not exempt there either: every view of
         // the segment shares one reservation granule, so the sweep the
         // write already applies in space 0 is the sweep the aliases carry.
-        self.fanout_committed_range(AddressSpaceId::BOOT, c.destination(), None);
+        //
         // A transfer can land over code a unit is executing: a title
-        // loading an overlay by MFC transfer is that shape. Predecoded
-        // code at the destination, and at every alias the fanout
-        // replicated into, is as stale as after a committed store, so
-        // the same invalidation runs over every unit.
-        let aliases = self.shared_alias_ranges_in(AddressSpaceId::BOOT, c.destination());
-        let (dst, len) = (c.destination().start().raw(), c.destination().length());
-        for unit in self.registry.code_caches_mut() {
-            unit.invalidate_code(dst, len);
-            for alias in &aliases {
-                unit.invalidate_code(alias.start().raw(), alias.length());
-            }
-        }
+        // that loads an overlay by MFC transfer is that shape. The
+        // destination write and each alias write go through
+        // `host_write`, which drops the predecoded code there.
+        self.fanout_committed_range(AddressSpaceId::BOOT, c.destination(), None);
     }
 
     /// The bytes a completed put writes, read now: its inline payload, the

@@ -162,6 +162,10 @@ fn build(shared: bool) -> (Runtime, Calls) {
     }
     rt.registry_mut()
         .register_with(|id| DmaEmitter { id, steps: 0 });
+    // The source bytes land before the recorder joins, so the
+    // placement's own invalidation reaches no recorder.
+    rt.place_bytes(AddressSpaceId::BOOT, range(SRC), &[0xA5; LEN as usize])
+        .expect("space 0 maps the source");
     let calls = Rc::new(RefCell::new(Vec::new()));
     let recorder_calls = Rc::clone(&calls);
     rt.registry_mut()
@@ -170,8 +174,6 @@ fn build(shared: bool) -> (Runtime, Calls) {
             calls: recorder_calls,
             done: false,
         });
-    rt.place_bytes(AddressSpaceId::BOOT, range(SRC), &[0xA5; LEN as usize])
-        .expect("space 0 maps the source");
     (rt, calls)
 }
 
@@ -213,9 +215,8 @@ fn a_landing_in_a_shared_view_invalidates_every_alias() {
     );
 }
 
-/// The premise: nothing else in this workload invalidates. A commit
-/// with no `SharedWriteIntent` reaches the recorder only through the
-/// landing.
+/// The premise of the landing tests: the enqueue commit writes no
+/// bytes, so only the landing reaches the recorder.
 #[test]
 fn nothing_invalidates_before_the_completion_lands() {
     let (mut rt, calls) = build(false);

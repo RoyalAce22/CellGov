@@ -465,6 +465,8 @@ impl Runtime {
                 continue;
             }
             restore_segment_contents(&mut self.lv2_host, mem, mem_id, addr, size);
+            // The window now holds the segment's bytes, or zeros.
+            self.drop_predecoded_code(addr, size as u64);
             // A keyed window is a view of a process-shared
             // segment; record it so views stay coherent across
             // address spaces once a second space attaches.
@@ -555,6 +557,9 @@ impl Runtime {
             if let (Some(bytes), Some(mem_id)) = (held, mem_id) {
                 self.lv2_host.park_segment_contents(mem_id, bytes);
             }
+            // A fetch from the unmapped window must fault, so no decode
+            // of its old bytes may survive.
+            self.drop_predecoded_code(addr, size as u64);
             if let Some(key) = ipc_key {
                 self.detach_keyed_shm_view(key, space, addr);
             }
