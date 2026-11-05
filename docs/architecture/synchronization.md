@@ -222,7 +222,8 @@ atomic load sets it. It is cleared by:
 - a conditional-store retirement;
 - an SPU's own unconditional lock-line put over the line;
 - another unit's write to the line, or the landing of the SPU's own
-  put over it.
+  put over it;
+- a system call the PPU thread makes.
 
 The holder's other stores leave it in place.
 
@@ -238,8 +239,8 @@ store's line.
 The committed half of the check is a step-start refresh. At the top
 of every `run_until_yield`, a local register that is `Some` while
 `ExecutionContext::reservation_held(unit_id)` is false is cleared.
-That state means a cross-unit write in an earlier commit cycle
-cleared the entry.
+That state means a cross-unit write or a system call in an earlier
+commit cycle cleared the entry.
 
 Intra-step verdicts trust the local register alone.
 

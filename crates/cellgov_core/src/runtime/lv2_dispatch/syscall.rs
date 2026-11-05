@@ -55,6 +55,29 @@ impl Runtime {
         }
     }
 
+    /// Drops the reservation `caller` holds, as LV2 does on every
+    /// system call.
+    ///
+    /// In the `ppu_reservation_lv2` console capture, a `stwcx.` fails
+    /// after each of these calls:
+    ///
+    /// - a call that writes outside the reserved granule;
+    /// - a call that writes into the reserved granule;
+    /// - a yield to another runnable thread.
+    ///
+    /// The unit clears its local register when it next runs and finds
+    /// no table entry.
+    fn drop_caller_reservation(&mut self, caller: UnitId) {
+        let space = self.spaces.space_of(caller);
+        let (_, reservations) = crate::runtime::spaces::resolve_commit_targets(
+            &mut self.memory,
+            &mut self.reservations,
+            &mut self.spaces,
+            space,
+        );
+        reservations.remove_if_present(caller);
+    }
+
     pub(in crate::runtime) fn dispatch_syscall(
         &mut self,
         result: &ExecutionStepResult,
@@ -105,6 +128,7 @@ impl Runtime {
                 disposition,
             });
         }
+        self.drop_caller_reservation(source);
 
         if let Some(request) = request {
             if matches!(request, cellgov_lv2::request::Lv2Request::PpuThreadYield) {

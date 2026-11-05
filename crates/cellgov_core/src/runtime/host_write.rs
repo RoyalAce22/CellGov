@@ -60,7 +60,9 @@ impl Runtime {
     /// host passes it for a write it makes on that unit's behalf -- an
     /// LV2 out-parameter, or a DMA payload the unit issued. A mechanism
     /// with no unit behind it, such as the RSX, passes `None` and
-    /// exempts nobody.
+    /// exempts nobody. A PPU thread drops its reservation when it makes
+    /// a system call, so the exemption keeps nothing for that call's
+    /// out-parameters.
     /// [PPC-Book2 p:10 s:1.7.3.1] a store by another processor
     /// or mechanism into the granule loses the reservation.
     ///

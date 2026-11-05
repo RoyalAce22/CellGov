@@ -1,0 +1,19 @@
+[test]
+name = "ppu_reservation_lv2"
+
+# A hardware probe: whether LV2 keeps a reservation across a system call
+# (one that writes elsewhere, one that writes into the reserved granule)
+# and across a yield to another runnable thread of equal priority. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# 15 big-endian u32 words (60 bytes): failed step, its return code,
+# TRIALS, then per case c in ppu/main.c's order the CR0[EQ] count, the
+# count of syscalls that returned 0, and the trials in which the second
+# thread ran.
+memory_regions = [
+  { name = "result", addr = 0, size = 60 },
+]
+
+[expect]
+outcome = "completed"
