@@ -600,11 +600,42 @@ fn fuse(a: PpuInstruction, b: PpuInstruction) -> Option<FusedPair> {
         (PpuInstruction::Mtlr { rs }, PpuInstruction::Li { rt, imm }) => {
             Some(FusedPair::MtlrAddi { rs, rt, ra: 0, imm })
         }
+        // rldicl + rldicl, either half in any form, recording or not.
+        (
+            first,
+            PpuInstruction::Rldicl {
+                ra: ra2,
+                rs: rs2,
+                sh: sh2,
+                mb: mb2,
+                rc: rc2,
+            },
+        ) => match decoded_form(first) {
+            PpuInstruction::Rldicl {
+                ra: ra1,
+                rs: rs1,
+                sh: sh1,
+                mb: mb1,
+                rc: rc1,
+            } => Some(FusedPair::RldiclRldicl {
+                ra1,
+                rs1,
+                sh1,
+                mb1,
+                ra2,
+                rs2,
+                sh2,
+                mb2,
+                rc: u8::from(rc1) | (u8::from(rc2) << 1),
+            }),
+            _ => None,
+        },
         _ => None,
     }
 }
 
-/// The original form of a quickened branch or rotate, or any other `insn` unchanged.
+/// The original form of a quickened branch, rotate or doubleword rotate, or
+/// any other `insn` unchanged.
 ///
 /// A quickened second half then pairs as its original instruction does.
 fn decoded_form(insn: PpuInstruction) -> PpuInstruction {
@@ -634,6 +665,22 @@ fn decoded_form(insn: PpuInstruction) -> PpuInstruction {
         PpuInstruction::RlwinmMask {
             ra, rs, sh, mb, me, ..
         } => rlwinm(ra, rs, sh, mb, me),
+        // [PPC-Book1 p:160 s:B.7.1 Table 9] clrldi n is rldicl 0,n; srdi n is
+        // rldicl 64-n,n.
+        PpuInstruction::Clrldi { ra, rs, n } => PpuInstruction::Rldicl {
+            ra,
+            rs,
+            sh: 0,
+            mb: n,
+            rc: false,
+        },
+        PpuInstruction::Srdi { ra, rs, n } => PpuInstruction::Rldicl {
+            ra,
+            rs,
+            sh: 64 - n,
+            mb: n,
+            rc: false,
+        },
         other => other,
     }
 }
@@ -713,3 +760,7 @@ mod lbz_pair_tests;
 #[cfg(test)]
 #[path = "tests/superpair_mtlr_addi_tests.rs"]
 mod mtlr_addi_tests;
+
+#[cfg(test)]
+#[path = "tests/superpair_rldicl_pair_tests.rs"]
+mod rldicl_pair_tests;

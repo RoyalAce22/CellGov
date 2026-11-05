@@ -265,4 +265,18 @@ pub enum FusedPair {
         ra: u8,
         imm: i16,
     },
+    /// `rldicl rA1, rS1, sh1, mb1` followed by `rldicl rA2, rS2, sh2, mb2`
+    /// (or a quickened `clrldi` or `srdi` in either slot). Bit 0 of `rc` is
+    /// the first half's Rc bit, and bit 1 is the second half's.
+    RldiclRldicl {
+        ra1: u8,
+        rs1: u8,
+        sh1: u8,
+        mb1: u8,
+        ra2: u8,
+        rs2: u8,
+        sh2: u8,
+        mb2: u8,
+        rc: u8,
+    },
 }

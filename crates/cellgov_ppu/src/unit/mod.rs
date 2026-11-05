@@ -154,12 +154,20 @@ mod fused_lbz_pair_tests;
 mod fused_mtlr_addi_tests;
 
 #[cfg(test)]
+#[path = "tests/fused_rldicl_pair_tests.rs"]
+mod fused_rldicl_pair_tests;
+
+#[cfg(test)]
 #[path = "tests/lbz_lbz_console_tests.rs"]
 mod lbz_lbz_console_tests;
 
 #[cfg(test)]
 #[path = "tests/mtlr_addi_console_tests.rs"]
 mod mtlr_addi_console_tests;
+
+#[cfg(test)]
+#[path = "tests/rldicl_rldicl_console_tests.rs"]
+mod rldicl_rldicl_console_tests;
 
 #[cfg(test)]
 #[path = "tests/std_lwz_console_tests.rs"]

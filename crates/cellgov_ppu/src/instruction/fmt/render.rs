@@ -1030,6 +1030,37 @@ pub(super) fn render(
                     write!(f, "; addi r{rt}, r{ra}, {imm}")
                 }
             }
+            FusedPair::RldiclRldicl {
+                ra1,
+                rs1,
+                sh1,
+                mb1,
+                ra2,
+                rs2,
+                sh2,
+                mb2,
+                rc,
+            } => {
+                // Each rldicl renders as it does unfused, as its extended
+                // mnemonic where one applies.
+                let first = I::Rldicl {
+                    ra: ra1,
+                    rs: rs1,
+                    sh: sh1,
+                    mb: mb1,
+                    rc: rc & 1 != 0,
+                };
+                render(&first, addr, symbols, f)?;
+                f.write_str("; ")?;
+                let second = I::Rldicl {
+                    ra: ra2,
+                    rs: rs2,
+                    sh: sh2,
+                    mb: mb2,
+                    rc: rc & 2 != 0,
+                };
+                render(&second, addr.wrapping_add(4), symbols, f)
+            }
         },
         I::Consumed => op0(f, ".consumed"),
 

@@ -504,6 +504,35 @@ fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
                 )
             }
         ),
+        // Each rldicl takes the form the shadow gives it. Half the cases read
+        // the first half's RA as the second half's RS.
+        (
+            (reg(), reg(), 0u8..64, 0u8..64, any::<bool>()),
+            (reg(), reg(), 0u8..64, 0u8..64, any::<bool>()),
+            any::<bool>()
+        )
+            .prop_map(
+                |((ra1, rs1, sh1, mb1, rc1), (ra2, rs2, sh2, mb2, rc2), chained)| {
+                    let first = PpuInstruction::Rldicl {
+                        ra: ra1,
+                        rs: rs1,
+                        sh: sh1,
+                        mb: mb1,
+                        rc: rc1,
+                    };
+                    let second = PpuInstruction::Rldicl {
+                        ra: ra2,
+                        rs: if chained { ra1 } else { rs2 },
+                        sh: sh2,
+                        mb: mb2,
+                        rc: rc2,
+                    };
+                    (
+                        quicken_insn(first).unwrap_or(first),
+                        quicken_insn(second).unwrap_or(second),
+                    )
+                }
+            ),
     ]
 }
 
@@ -587,7 +616,7 @@ fn aim_compare(
 }
 
 proptest! {
-    // Seven of the thirty-one arms are compares that need an aimed
+    // Seven of the thirty-two arms are compares that need an aimed
     // operand to show an off-by-one. Four times the default count
     // makes one such case near certain per run.
     #![proptest_config(ProptestConfig::with_cases(1024))]

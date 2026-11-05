@@ -66,7 +66,7 @@ The variant count also includes:
   `CmpwiBc`, `CmpwBc`, `CmpdiBc`, `CmpdBc`, `CmplwBc`, `LdMtlr`,
   `LdLd`, `StdStd`, `LbzuCmpwi`, `LduLdu`, `CmpdNor`, `ExtswBlr`,
   `OrAdd`, `LisOri`, `LdRlwinm`, `AddiBc`, `OrRlwinm`, `LwzLwz`,
-  `StdLwz`, `LdLdAny`, `OrB`, `LbzLbz`, `MtlrAddi`);
+  `StdLwz`, `LdLdAny`, `OrB`, `LbzLbz`, `MtlrAddi`, `RldiclRldicl`);
 - the `Consumed` placeholder.
 
 ### PPU loaders
@@ -325,6 +325,7 @@ Frequent 2-instruction sequences fuse into single dispatch entries:
 - `or + b` -> `OrB`
 - `lbz + lbz` -> `LbzLbz`
 - `mtlr + addi` -> `MtlrAddi`
+- `rldicl + rldicl` -> `RldiclRldicl`
 
 The second slot is marked `Consumed`. The fused entry retires both
 slots; a branch that reaches the second slot runs the word stored

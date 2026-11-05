@@ -1,0 +1,27 @@
+[test]
+name = "ppu_rldicl_rldicl_pair"
+
+# A hardware probe: the registers and CR0 that two adjacent "rldicl"
+# leave, raw or as "srdi" and "clrldi": chained with the second half
+# recording, one register overwritten twice, only the first half
+# recording, both halves recording, through a branch over the first half
+# into the second, with the second half writing the first half's source,
+# and with both halves recording under XER[SO]. The console capture is
+# the answer; no emulator runs it.
+
+[observe]
+# 33 big-endian u32 words, as ppu/main.c lists: 132 bytes.
+#   0 failed step, 1 its return code; each register is a high word and a
+#   low word, each CR0 one word holding LT GT EQ SO in bits 3..0:
+#   2-3 r3, 4-5 r5, 6 CR0 of the chained pair; 7-8 r3, 9 CR0 of srdi
+#   then clrldi into r3; 10-11 r3, 12-13 r5, 14 CR0 with the first half
+#   recording; 15-16 r3, 17-18 r5, 19 CR0 with both recording; 20-21 r5,
+#   22-23 r6 after the branch into the second half; 24-25 r3, 26-27 r4
+#   when the second half writes the first half's source; 28-29 r3, 30-31
+#   r5, 32 CR0 with both recording under XER[SO].
+memory_regions = [
+  { name = "result", addr = 0, size = 132 },
+]
+
+[expect]
+outcome = "completed"

@@ -684,6 +684,23 @@ fn execute_pair(
             state.set_gpr(rt as usize, base.wrapping_add(imm as i64 as u64));
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:72 s:3.3.12] rldicl (x2): ROTL64 of RS, ANDed with MASK(MB, 63); Rc = 1 sets CR0 from the result.
+        // [PPC-Book1 p:17 s:2.2] the second rldicl reads its RS after the first wrote RA1.
+        FusedPair::RldiclRldicl {
+            ra1,
+            rs1,
+            sh1,
+            mb1,
+            ra2,
+            rs2,
+            sh2,
+            mb2,
+            rc,
+        } => {
+            rldicl(state, ra1, rs1, sh1, mb1, rc & 1 != 0);
+            rldicl(state, ra2, rs2, sh2, mb2, rc & 2 != 0);
+            ExecuteVerdict::Continue
+        }
     }
 }
 
@@ -700,6 +717,16 @@ fn cmpw<T: Ord>(state: &mut PpuState, bf: u8, a: T, b: T) {
 fn rlwinm(state: &mut PpuState, ra: u8, rs: u8, sh: u8, mb: u8, me: u8, rc: bool) {
     let rotated = rotl32(state.gpr[rs as usize] as u32, u32::from(sh));
     let result = rotated & mask64(mb + 32, me + 32);
+    state.set_gpr(ra as usize, result);
+    if rc {
+        state.set_cr0_from_result(result);
+    }
+}
+
+/// `rldicl rA, rS, sh, mb` into RA, and into CR0 when `rc` is set.
+#[inline]
+fn rldicl(state: &mut PpuState, ra: u8, rs: u8, sh: u8, mb: u8, rc: bool) {
+    let result = state.gpr[rs as usize].rotate_left(u32::from(sh)) & mask64(mb, 63);
     state.set_gpr(ra as usize, result);
     if rc {
         state.set_cr0_from_result(result);

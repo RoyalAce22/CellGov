@@ -1564,6 +1564,17 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
                     if ra == 0 { add } else { add.src(gpr(ra)) },
                 )
             }
+            FusedPair::RldiclRldicl {
+                ra1,
+                rs1,
+                ra2,
+                rs2,
+                rc,
+                ..
+            } => two(
+                logical(Op::on(unit::FXU).src(gpr(rs1)), ra1, rc & 1 != 0),
+                logical(Op::on(unit::FXU).src(gpr(rs2)), ra2, rc & 2 != 0),
+            ),
         },
         I::Consumed => ([none, none], 0),
         I::Dcbz { ra, rb } => one(Op::on(unit::LSU)
