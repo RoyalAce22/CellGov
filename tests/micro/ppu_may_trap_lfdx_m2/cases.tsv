@@ -1,0 +1,2 @@
+id	asm	words	inputs	record	may_end_process
+lfdx_m2	lfdx f1, r10, r9	0x7c2a4cae	mem=0x00112233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f,r9=0x2	f1	1

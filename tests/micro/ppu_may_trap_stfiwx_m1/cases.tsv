@@ -1,0 +1,2 @@
+id	asm	words	inputs	record	may_end_process
+stfiwx_m1	stfiwx f1, r10, r9	0x7c2a4fae	mem=0x00112233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f,f1=0x0123456789abcdef,r9=0x1	m0,m8	1

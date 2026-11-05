@@ -45,36 +45,51 @@ fn an_update_form_in_an_invalid_form_is_no_finding() {
 }
 
 #[test]
-fn only_an_invalid_update_encoding_admits_a_fault() {
-    let outcomes = |raw: u32| {
+fn only_an_invalid_update_encoding_admits_the_illegal_instruction_fault() {
+    let descriptor = |raw: u32| {
         cellgov_ppu::decode::decode(raw)
             .unwrap()
             .fuzz_descriptor(raw)
-            .outcomes
     };
-    for (invalid, valid) in [
+    use cellgov_ppu::PpuFaultClass as C;
+    let outcomes = |raw: u32| descriptor(raw).outcomes;
+    // (invalid, valid, the valid form's fault classes)
+    for (invalid, valid, valid_faults) in [
         // stwu r3,16(r0) / stwu r3,16(r1)
         (
             (37 << 26) | (3 << 21) | 16,
             (37 << 26) | (3 << 21) | (1 << 16) | 16,
+            &[C::DataStorage][..],
         ),
         // lhzu r4,0(r4) / lhzu r4,0(r5)
         (
             (41 << 26) | (4 << 21) | (4 << 16),
             (41 << 26) | (4 << 21) | (5 << 16),
+            &[C::DataStorage][..],
         ),
-        // lfsu f1,0(r0) / lfsu f1,0(r1): RA=FRT is a valid form.
-        ((49 << 26) | (1 << 21), (49 << 26) | (1 << 21) | (1 << 16)),
+        // lfsu f1,0(r0) / lfsu f1,0(r1): RA=FRT is a valid form, and a
+        // misaligned EA takes the alignment interrupt.
+        (
+            (49 << 26) | (1 << 21),
+            (49 << 26) | (1 << 21) | (1 << 16),
+            &[C::Alignment, C::DataStorage][..],
+        ),
     ] {
         assert_eq!(
             outcomes(invalid),
             &[PpuOutcomeClass::Fault],
             "{invalid:#010x}"
         );
+        assert_eq!(
+            descriptor(invalid).faults,
+            &[C::ProgramIllegal],
+            "{invalid:#010x}"
+        );
         assert!(
-            !outcomes(valid).contains(&PpuOutcomeClass::Fault),
+            outcomes(valid).contains(&PpuOutcomeClass::Continue),
             "{valid:#010x}: {:?}",
             outcomes(valid)
         );
+        assert_eq!(descriptor(valid).faults, valid_faults, "{valid:#010x}");
     }
 }

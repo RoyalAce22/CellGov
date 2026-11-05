@@ -1,0 +1,18 @@
+[test]
+name = "ppu_may_trap_lmw_m3"
+
+# A hardware probe: lmw r28 from an address three bytes past a word boundary.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 16 big-endian u32 words, as ppu/main.c lists: 64 bytes. Word 0 is the
+# done or progress marker, word 1 the step a progress record names
+# (2 the access), word 2 the low 32 bits of the access address,
+# word 3 0, words 4..7 what the access loaded, words 8..15
+# the 32-byte window around the access after it ran.
+memory_regions = [
+  { name = "result", addr = 0, size = 64 },
+]
+
+[expect]
+outcome = "completed"

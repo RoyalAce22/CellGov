@@ -203,6 +203,16 @@ pub(super) fn scalar(insn: &PpuInstruction) -> Option<Scalar> {
     })
 }
 
+/// Whether `ea` is word-aligned, as a floating-point operand must be.
+///
+/// [CBE-Handbook p:290 s:9.10] A floating-point load or store that is not word-aligned takes the alignment interrupt, ahead of a page-fault data storage interrupt.
+/// A word-aligned doubleword across a 64 KiB page boundary completes on
+/// the console (`ppu_may_trap_lfd_page`, `ppu_may_trap_stfd_page`).
+#[inline]
+fn word_aligned(ea: u64) -> bool {
+    ea & 3 == 0
+}
+
 /// Runs one scalar load, then writes EA to RA for an update form.
 ///
 /// The writeback follows a successful load only, so a fault leaves RA
@@ -230,6 +240,9 @@ pub(super) fn load(
         }
     }
     let addr = ea.resolve(state);
+    if matches!(dest, Dest::Fpr(_)) && !word_aligned(addr) {
+        return ExecuteVerdict::Fault(PpuFault::alignment(addr, false));
+    }
     let loaded = match dest {
         Dest::Sign(_) => load_se(port, addr, width),
         Dest::Zero(_) | Dest::Reversed(_) | Dest::Fpr(_) => load_ze(port, addr, width),
@@ -276,6 +289,9 @@ pub(super) fn store(
         }
     }
     let addr = ea.resolve(state);
+    if matches!(src, Src::Fpr(_) | Src::FprBits(_)) && !word_aligned(addr) {
+        return ExecuteVerdict::Fault(PpuFault::alignment(addr, true));
+    }
     let value = match src {
         Src::Gpr(rs) => state.gpr[rs as usize],
         Src::Reversed(rs) => swap_low_bytes(state.gpr[rs as usize], width),

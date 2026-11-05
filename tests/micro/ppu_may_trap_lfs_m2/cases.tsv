@@ -1,0 +1,2 @@
+id	asm	words	inputs	record	may_end_process
+lfs_m2	lfs f1, 2(r10)	0xc02a0002	mem=0x00112233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f	f1	1

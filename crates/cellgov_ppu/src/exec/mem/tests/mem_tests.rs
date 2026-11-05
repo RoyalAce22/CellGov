@@ -14,6 +14,8 @@ use cellgov_event::UnitId;
 
 use cellgov_sync::ReservedLine;
 
+#[path = "mem_alignment_tests.rs"]
+mod alignment;
 #[path = "mem_altivec_tests.rs"]
 mod altivec;
 #[path = "mem_atomic_tests.rs"]

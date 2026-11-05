@@ -26,7 +26,7 @@ pub use table::{parse_table, probe_dir, table, Case};
 /// The table-driven probes, each with its own `cases.tsv`.
 /// `ppu_reference_vectors` takes its table from the `cellgov_fuzz`
 /// module `ppu_documented`, which replays its capture.
-pub const PROBES: [&str; 65] = [
+pub const PROBES: [&str; 92] = [
     "ppu_int_edges",
     "ppu_addc_xer",
     "ppu_trap_immediate",
@@ -92,4 +92,31 @@ pub const PROBES: [&str; 65] = [
     "ppu_may_trap_lwz_null",
     "ppu_may_trap_lwz_low",
     "ppu_may_trap_stw_null",
+    "ppu_may_trap_lfs_m1",
+    "ppu_may_trap_lfd_m1",
+    "ppu_may_trap_stfs_m1",
+    "ppu_may_trap_stfd_m1",
+    "ppu_may_trap_stfiwx_m1",
+    "ppu_may_trap_lfs_m2",
+    "ppu_may_trap_lfd_m2",
+    "ppu_may_trap_stfs_m2",
+    "ppu_may_trap_stfd_m2",
+    "ppu_may_trap_stfiwx_m2",
+    "ppu_may_trap_lfs_m3",
+    "ppu_may_trap_lfd_m3",
+    "ppu_may_trap_stfs_m3",
+    "ppu_may_trap_stfd_m3",
+    "ppu_may_trap_stfiwx_m3",
+    "ppu_may_trap_lfsx_m1",
+    "ppu_may_trap_lfdx_m2",
+    "ppu_may_trap_lfsux_m3",
+    "ppu_may_trap_lfdux_m1",
+    "ppu_may_trap_stfsx_m2",
+    "ppu_may_trap_stfdx_m3",
+    "ppu_may_trap_stfsux_m1",
+    "ppu_may_trap_stfdux_m2",
+    "ppu_may_trap_lfsu_m3",
+    "ppu_may_trap_lfdu_m1",
+    "ppu_may_trap_stfsu_m2",
+    "ppu_may_trap_stfdu_m3",
 ];

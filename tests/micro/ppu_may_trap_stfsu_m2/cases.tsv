@@ -1,0 +1,2 @@
+id	asm	words	inputs	record	may_end_process
+stfsu_m2	stfsu f1, 2(r10)	0xd42a0002	mem=0x00112233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f,f1=0x400921fb54442d18	m0,m8	1

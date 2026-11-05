@@ -1,0 +1,2 @@
+id	asm	words	inputs	record	may_end_process
+stfdux_m2	stfdux f1, r10, r9	0x7c2a4dee	mem=0x00112233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f,f1=0x400921fb54442d18,r9=0x2	m0,m8	1

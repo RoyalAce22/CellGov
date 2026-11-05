@@ -1,0 +1,18 @@
+[test]
+name = "ppu_may_trap_stfd_page"
+
+# A hardware probe: stfd to four bytes below a 64 KiB page boundary, so the doubleword spans two pages.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 16 big-endian u32 words, as ppu/main.c lists: 64 bytes. Word 0 is the
+# done or progress marker, word 1 the step a progress record names
+# (1 the allocate, 2 the access), word 2 the low 32 bits of the access address,
+# word 3 the allocate's return code, words 4..7 what the access loaded, words 8..15
+# the 32-byte window around the access after it ran.
+memory_regions = [
+  { name = "result", addr = 0, size = 64 },
+]
+
+[expect]
+outcome = "completed"

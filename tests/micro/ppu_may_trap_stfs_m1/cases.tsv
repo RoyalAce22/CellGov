@@ -1,0 +1,2 @@
+id	asm	words	inputs	record	may_end_process
+stfs_m1	stfs f1, 1(r10)	0xd02a0001	mem=0x00112233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f,f1=0x400921fb54442d18	m0,m8	1

@@ -45,9 +45,13 @@ pub(crate) fn execute(
             if ra == 0 || ra >= rt {
                 return ExecuteVerdict::Fault(PpuFault::illegal("lmw"));
             }
+            let ea = state.ea_d_form(ra, imm);
+            // [CBE-Handbook p:253 s:9.5.8] An lmw or stmw operand that is not word-aligned takes the alignment interrupt.
+            if ea & 3 != 0 {
+                return ExecuteVerdict::Fault(PpuFault::alignment(ea, false));
+            }
             // The loop loads every word before it writes a register, so
             // a fault part way writes none.
-            let ea = state.ea_d_form(ra, imm);
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
             let mut words = [0u64; 32];
             for (i, word) in words.iter_mut().enumerate().skip(rt as usize) {
@@ -63,12 +67,16 @@ pub(crate) fn execute(
             ExecuteVerdict::Continue
         }
         // [PPC-Book1 p:54 s:3.3] stmw D-form: for r=RS..31, MEM(EA,4) = low32(GPR[r]); EA += 4.
+        // A misaligned EA takes the alignment interrupt, as for lmw.
         // Capacity is pre-checked so a mid-instruction BufferFull
         // cannot leave a partially-committed multi-store; retry
         // would duplicate the earlier word writes.
         PpuInstruction::Stmw { rs, ra, imm } => {
             let first = rs as usize;
             let ea = state.ea_d_form(ra, imm);
+            if ea & 3 != 0 {
+                return ExecuteVerdict::Fault(PpuFault::alignment(ea, true));
+            }
             let gpr = *state.gpr.as_array();
             let words = (first..32).map(|r| (ea.wrapping_add(4 * (r - first) as u64), 4, gpr[r]));
             store_prechecked(store_buf, region_views, 32 - first, words, "stmw word")

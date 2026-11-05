@@ -1,0 +1,2 @@
+id	asm	words	inputs	record	may_end_process
+lfdu_m1	lfdu f1, 1(r10)	0xcc2a0001	mem=0x00112233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f	f1	1

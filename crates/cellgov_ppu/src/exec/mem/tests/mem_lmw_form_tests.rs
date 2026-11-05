@@ -2,12 +2,17 @@
 
 use super::*;
 
-/// Runs `lmw rt, 0(ra)` with rN = `0x100 + N` and every memory byte
+/// The word-aligned value rN holds before an `lmw`.
+fn before(r: usize) -> u64 {
+    0x100 + 4 * r as u64
+}
+
+/// Runs `lmw rt, 0(ra)` with rN = [`before`]`(N)` and every memory byte
 /// 0xAA; returns the verdict, the state, and the effects.
 fn lmw(rt: u8, ra: u8) -> (ExecuteVerdict, PpuState, Vec<Effect>) {
     let mut s = PpuState::new();
     for r in 1..32 {
-        s.set_gpr(r, 0x100 + r as u64);
+        s.set_gpr(r, before(r));
     }
     let mut effects = Vec::new();
     let v = exec_with_mem(
@@ -32,25 +37,32 @@ fn lmw_with_ra_in_the_load_range_or_zero_faults_without_loading() {
             "rt={rt} ra={ra}"
         );
         for r in 1..32 {
-            assert_eq!(s.gpr[r], 0x100 + r as u64, "rt={rt} ra={ra} r{r}");
+            assert_eq!(s.gpr[r], before(r), "rt={rt} ra={ra} r{r}");
         }
         assert!(effects.is_empty(), "rt={rt} ra={ra}: {effects:?}");
     }
 }
 
 #[test]
-fn only_an_invalid_lmw_encoding_admits_a_fault() {
+fn an_invalid_lmw_encoding_faults_only_as_illegal_and_a_valid_one_only_on_alignment() {
     use crate::instruction::fuzz::PpuOutcomeClass;
-    let outcomes = |rt: u32, ra: u32| {
+    use crate::PpuFaultClass as C;
+    let descriptor = |rt: u32, ra: u32| {
         let raw = (46 << 26) | (rt << 21) | (ra << 16);
-        crate::decode::decode(raw)
-            .unwrap()
-            .fuzz_descriptor(raw)
-            .outcomes
+        crate::decode::decode(raw).unwrap().fuzz_descriptor(raw)
     };
-    assert_eq!(outcomes(20, 26), &[PpuOutcomeClass::Fault]);
-    assert_eq!(outcomes(20, 0), &[PpuOutcomeClass::Fault]);
-    assert!(!outcomes(20, 19).contains(&PpuOutcomeClass::Fault));
+    for (rt, ra) in [(20, 26), (20, 0)] {
+        let invalid = descriptor(rt, ra);
+        assert_eq!(
+            invalid.outcomes,
+            &[PpuOutcomeClass::Fault],
+            "rt={rt} ra={ra}"
+        );
+        assert_eq!(invalid.faults, &[C::ProgramIllegal], "rt={rt} ra={ra}");
+    }
+    let valid = descriptor(20, 19);
+    assert!(valid.outcomes.contains(&PpuOutcomeClass::Continue));
+    assert_eq!(valid.faults, &[C::Alignment, C::DataStorage]);
 }
 
 #[test]
@@ -59,5 +71,5 @@ fn lmw_with_ra_just_below_the_load_range_loads() {
     assert_eq!(v, ExecuteVerdict::Continue);
     assert_eq!(s.gpr[20], 0xAAAA_AAAA);
     assert_eq!(s.gpr[31], 0xAAAA_AAAA);
-    assert_eq!(s.gpr[19], 0x100 + 19);
+    assert_eq!(s.gpr[19], before(19));
 }

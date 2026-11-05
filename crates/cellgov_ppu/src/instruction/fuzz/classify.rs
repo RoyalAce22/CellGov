@@ -151,15 +151,24 @@ pub(super) fn effect_and_outcome(
     valid_form: bool,
 ) -> (&'static [EffectKind], &'static [PpuOutcomeClass]) {
     use PpuInstructionKind as K;
-    // [CBE-Handbook p:254 s:9.5.9] The PPE takes an illegal-instruction program interrupt for a load or store with update, an lmw, or a load string in an invalid form, so only the encoding decides whether the form faults.
+    // [CBE-Handbook p:254 s:9.5.9] The PPE takes an illegal-instruction program interrupt for a load or store with update, an lmw, or a load string in an invalid form, so only the encoding decides whether the form takes that interrupt.
     let (checked_load, checked_store) = if valid_form {
         ((READ_EFFECTS, LOAD), (WRITE_EFFECTS, STORE))
     } else {
         ((NO_EFFECTS, FAULT), (NO_EFFECTS, FAULT))
     };
+    // A misaligned EA takes the alignment interrupt: see `word_aligned` in the scalar model, and the lmw arm.
+    let (aligned_load, aligned_store) = if valid_form {
+        (
+            (READ_EFFECTS, LOAD_OR_FAULT),
+            (WRITE_EFFECTS, STORE_OR_FAULT),
+        )
+    } else {
+        ((NO_EFFECTS, FAULT), (NO_EFFECTS, FAULT))
+    };
     match kind {
-        K::Lmw
-        | K::Lhau
+        K::Lmw | K::Lfsu | K::Lfdu | K::Lfsux | K::Lfdux => aligned_load,
+        K::Lhau
         | K::Lwzu
         | K::Lbzu
         | K::Lhzu
@@ -170,27 +179,15 @@ pub(super) fn effect_and_outcome(
         | K::Ldux
         | K::Lhaux
         | K::Lwaux
-        | K::Lfsu
-        | K::Lfdu
-        | K::Lfsux
-        | K::Lfdux
         | K::Lswi => checked_load,
         // The XER byte count decides whether RA or RB falls in the range,
         // so a word that passes the RT check may still fault.
         K::Lswx if valid_form => (READ_EFFECTS, LOAD_OR_FAULT),
         K::Lswx => (NO_EFFECTS, FAULT),
-        K::Stwu
-        | K::Stdu
-        | K::Stbu
-        | K::Sthu
-        | K::Stdux
-        | K::Sthux
-        | K::Stwux
-        | K::Stbux
-        | K::Stfsu
-        | K::Stfdu
-        | K::Stfsux
-        | K::Stfdux => checked_store,
+        K::Stfsu | K::Stfdu | K::Stfsux | K::Stfdux => aligned_store,
+        K::Stwu | K::Stdu | K::Stbu | K::Sthu | K::Stdux | K::Sthux | K::Stwux | K::Stbux => {
+            checked_store
+        }
         K::Lwz
         | K::Lbz
         | K::Lhz
@@ -217,16 +214,15 @@ pub(super) fn effect_and_outcome(
         | K::Lvewx
         | K::Lvx
         | K::Lvxl
-        | K::Lfs
-        | K::Lfd
-        | K::Lfsx
-        | K::Lfdx
         | K::LwzCmpwi
         | K::LwzMtlr
         | K::LdMtlr => (READ_EFFECTS, LOAD),
+        K::Lfs | K::Lfd | K::Lfsx | K::Lfdx => (READ_EFFECTS, LOAD_OR_FAULT),
+        K::Stmw | K::Stfs | K::Stfd | K::Stfiwx | K::Stfsx | K::Stfdx => {
+            (WRITE_EFFECTS, STORE_OR_FAULT)
+        }
         K::Stw
         | K::Stb
-        | K::Stmw
         | K::Sth
         | K::Std
         | K::Stwx
@@ -247,11 +243,6 @@ pub(super) fn effect_and_outcome(
         | K::Stvewx
         | K::Stvx
         | K::Stvxl
-        | K::Stfs
-        | K::Stfd
-        | K::Stfiwx
-        | K::Stfsx
-        | K::Stfdx
         | K::LiStw
         | K::MflrStw
         | K::MflrStd
@@ -289,6 +280,29 @@ pub(super) fn fault_classes(kind: PpuInstructionKind, valid_form: bool) -> &'sta
     }
     match kind {
         K::Ldarx | K::Lwarx | K::Stdcx | K::Stwcx | K::Dcbz => {
+            &[Class::Alignment, Class::DataStorage]
+        }
+        K::Lmw
+        | K::Stmw
+        | K::Lfs
+        | K::Lfsu
+        | K::Lfsx
+        | K::Lfsux
+        | K::Lfd
+        | K::Lfdu
+        | K::Lfdx
+        | K::Lfdux
+        | K::Stfs
+        | K::Stfsu
+        | K::Stfsx
+        | K::Stfsux
+        | K::Stfd
+        | K::Stfdu
+        | K::Stfdx
+        | K::Stfdux
+        | K::Stfiwx
+            if valid_form =>
+        {
             &[Class::Alignment, Class::DataStorage]
         }
         K::PpePrivileged => &[Class::ProgramPrivileged],
