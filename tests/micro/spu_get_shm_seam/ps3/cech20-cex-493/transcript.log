@@ -1,0 +1,144 @@
+#0001 > GET /cpursx.ps3
+#0002 < 200 (5728 bytes)
+#0003 = console: model CECH-2001A, kernel cex, firmware 4.93, cfw EvilNAT 4.93 PEX, cobra 8.5, webman 1.47.48t, debugger not attached
+#0004 = console satisfies profile cech20-cex-493
+#0005 = load: Cell 67 C, RSX 63 C, fan 40%, /dev_hdd0 99840 MiB free; cool
+#0006 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0007 > USER anonymous
+#0008 < 331 OK
+#0009 > PASS anonymous@
+#0010 < 230 OK
+#0011 > TYPE I
+#0012 < 200 TYPE OK
+#0013 > MKD /dev_hdd0/tmp/cellgov_lease
+#0014 < 257 "/dev_hdd0/tmp/cellgov_lease" OK
+#0015 > PASV
+#0016 < 227 Entering Passive Mode (10,77,0,2,222,68)
+#0017 > STOR /dev_hdd0/tmp/cellgov_lease/holder (73 bytes)
+#0018 < 150 OK
+#0019 < 226 OK
+#0020 > GET /dev_hdd0/tmp/cgov_spu_get_shm_seam.bin
+#0021 < 404 (510 bytes)
+#0022 > PASV
+#0023 < 227 Entering Passive Mode (10,77,0,2,224,6)
+#0024 > NLST /dev_hdd0/game
+#0025 < 150 OK
+#0026 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 63C]
+#0027 > MKD /dev_hdd0/game/CGOV00001
+#0028 < 257 "/dev_hdd0/game/CGOV00001" OK
+#0029 > MKD /dev_hdd0/game/CGOV00001/USRDIR
+#0030 < 257 "/dev_hdd0/game/CGOV00001/USRDIR" OK
+#0031 > PASV
+#0032 < 227 Entering Passive Mode (10,77,0,2,224,27)
+#0033 > STOR /dev_hdd0/game/CGOV00001/PARAM.SFO (1040 bytes)
+#0034 < 150 OK
+#0035 < 226 OK
+#0036 > PASV
+#0037 < 227 Entering Passive Mode (10,77,0,2,224,202)
+#0038 > STOR /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN (7904 bytes)
+#0039 < 150 OK
+#0040 < 226 OK
+#0041 > PASV
+#0042 < 227 Entering Passive Mode (10,77,0,2,226,140)
+#0043 > STOR /dev_hdd0/game/CGOV00001/USRDIR/spu_main.elf (5725 bytes)
+#0044 < 150 OK
+#0045 < 226 OK
+#0046 = deployed 3 file(s) under /dev_hdd0/game/CGOV00001
+#0047 > QUIT
+#0048 < 221 BYE
+#0049 > GET /play.ps3?CGOV00001
+#0050 < 200 (5728 bytes)
+#0051 = started
+#0052 > GET /cpursx.ps3
+#0053 < 200 (5728 bytes)
+#0054 > GET /dev_hdd0/tmp/cgov_spu_get_shm_seam.bin
+#0055 < 404 (510 bytes)
+#0056 > GET /cpursx.ps3
+#0057 < 200 (5728 bytes)
+#0058 > GET /dev_hdd0/tmp/cgov_spu_get_shm_seam.bin
+#0059 < 404 (510 bytes)
+#0060 > GET /cpursx.ps3
+#0061 < 200 (5728 bytes)
+#0062 > GET /dev_hdd0/tmp/cgov_spu_get_shm_seam.bin
+#0063 < 404 (510 bytes)
+#0064 > GET /cpursx.ps3
+#0065 < 200 (5728 bytes)
+#0066 > GET /dev_hdd0/tmp/cgov_spu_get_shm_seam.bin
+#0067 < 404 (510 bytes)
+#0068 > GET /cpursx.ps3
+#0069 < 200 (5728 bytes)
+#0070 > GET /dev_hdd0/tmp/cgov_spu_get_shm_seam.bin
+#0071 < 404 (510 bytes)
+#0072 > GET /cpursx.ps3
+#0073 < 200 (6435 bytes)
+#0074 = left the XMB after 6 poll(s)
+#0075 > GET /dev_hdd0/tmp/cgov_spu_get_shm_seam.bin
+#0076 < 404 (510 bytes)
+#0077 > GET /dev_hdd0/tmp/cgov_spu_get_shm_seam.bin
+#0078 < 404 (510 bytes)
+#0079 > GET /dev_hdd0/tmp/cgov_spu_get_shm_seam.bin
+#0080 < 404 (510 bytes)
+#0081 > GET /dev_hdd0/tmp/cgov_spu_get_shm_seam.bin
+#0082 < 404 (510 bytes)
+#0083 > GET /dev_hdd0/tmp/cgov_spu_get_shm_seam.bin
+#0084 < 404 (510 bytes)
+#0085 > GET /dev_hdd0/tmp/cgov_spu_get_shm_seam.bin
+#0086 < 404 (510 bytes)
+#0087 > GET /dev_hdd0/tmp/cgov_spu_get_shm_seam.bin
+#0088 < 404 (510 bytes)
+#0089 > GET /dev_hdd0/tmp/cgov_spu_get_shm_seam.bin
+#0090 < 200 (200 bytes)
+#0091 = result present after 8 poll(s)
+#0092 > GET /cpursx.ps3
+#0093 < 200 (6435 bytes)
+#0094 > GET /cpursx.ps3
+#0095 < 200 (6435 bytes)
+#0096 > GET /cpursx.ps3
+#0097 < 200 (5936 bytes)
+#0098 > GET /cpursx.ps3
+#0099 < 200 (5936 bytes)
+#0100 > GET /cpursx.ps3
+#0101 < 200 (5728 bytes)
+#0102 = back at the XMB after 5 poll(s)
+#0103 > GET /dev_hdd0/tmp/cgov_spu_get_shm_seam.bin
+#0104 < 200 (200 bytes)
+#0105 = captured micro:spu_get_shm_seam#dbdbcef44802
+#0106 > GET /mount.ps3/unmount
+#0107 < 200 (4441 bytes)
+#0108 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0109 > USER anonymous
+#0110 < 331 OK
+#0111 > PASS anonymous@
+#0112 < 230 OK
+#0113 > TYPE I
+#0114 < 200 TYPE OK
+#0115 > PASV
+#0116 < 227 Entering Passive Mode (10,77,0,2,142,62)
+#0117 > NLST /dev_hdd0/game
+#0118 < 150 OK
+#0119 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 60C]
+#0120 > PASV
+#0121 < 227 Entering Passive Mode (10,77,0,2,142,242)
+#0122 > NLST /dev_hdd0/game/CGOV00001
+#0123 < 150 OK
+#0124 < 226 [/dev_hdd0/game/CGOV00001/] [ 97.5 GB free CPU: 67C | RSX: 60C]
+#0125 > PASV
+#0126 < 227 Entering Passive Mode (10,77,0,2,144,38)
+#0127 > NLST /dev_hdd0/game/CGOV00001/USRDIR
+#0128 < 150 OK
+#0129 < 226 [/dev_hdd0/game/CGOV00001/USRDIR/] [ 0.0 MB free CPU: 67C | RSX: 60C]
+#0130 > DELE /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN
+#0131 < 250 OK
+#0132 > DELE /dev_hdd0/game/CGOV00001/USRDIR/spu_main.elf
+#0133 < 250 OK
+#0134 > RMD /dev_hdd0/game/CGOV00001/USRDIR
+#0135 < 250 OK
+#0136 > DELE /dev_hdd0/game/CGOV00001/PARAM.SFO
+#0137 < 250 OK
+#0138 > RMD /dev_hdd0/game/CGOV00001
+#0139 < 250 OK
+#0140 > GET /dev_hdd0/tmp/cgov_spu_get_shm_seam.bin
+#0141 < 200 (200 bytes)
+#0142 > DELE /dev_hdd0/tmp/cgov_spu_get_shm_seam.bin
+#0143 < 250 OK
+#0144 = console restored
