@@ -169,6 +169,29 @@ pub const PPU_STORE_ENTRY_BYTES: u64 = 16;
 /// pairs, and 30 stays within 22 cycles of each.
 pub const PPU_STORE_DRAIN_CYCLES: u64 = 30;
 
+/// The cycles between two entries of one store as they leave the store queue.
+///
+/// Each entry that leaves frees its slot for a younger store.
+/// In the `ppu_issue_store_queue_full` capture, 1 to 6 back-to-back
+/// 128-byte `stmw r0` (8 entries each) take 72 to 78 cycles a store.
+/// With this interval the issue model gives 74.5, which keeps each of
+/// those loops within the console's spread. With
+/// [`PPU_STORE_DRAIN_CYCLES`] the third store waits for the first and
+/// the model gives 151.
+pub const PPU_STORE_SLOT_DRAIN_CYCLES: u64 = 8;
+
+/// The 16-byte entries a store can hold past the store queue.
+///
+/// A store holds them until it writes its bytes into the cache. They are:
+/// - the 8 entries of the CIU store queue;
+/// - the 8 entries of 64 bytes of the L2 store queue, 4 16-byte entries
+///   each.
+///
+/// [CBE-Handbook p:134 s:6.1.2.2] the store subunit contains a store
+/// queue (STQ, 8 x 16-byte entries); the L2 has a store queue (STQ, 8 x
+/// 64-byte entries).
+pub const PPU_STORE_WRITE_BACK_ENTRIES: usize = 8 + 8 * 4;
+
 /// The cycles from a mispredicted branch's issue to the earliest issue
 /// of the instruction at its correct target.
 ///
@@ -730,7 +753,8 @@ pub const PPU_L2_SETS: usize = 512;
 /// [CBE-Handbook p:135 s:6.1] 128-byte cache-line size.
 pub const PPU_CACHE_LINE_BYTES: u64 = 128;
 
-/// The entries of the store queue, which the threads share.
+/// The entries of the store queue, which the threads share. Each entry
+/// holds the bytes of one block of [`PPU_STORE_ENTRY_BYTES`].
 ///
 /// [CBE-Handbook p:135 s:6.1] 16-entry store queue.
 pub const PPU_STORE_QUEUE_ENTRIES: usize = 16;

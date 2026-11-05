@@ -1,0 +1,23 @@
+[test]
+name = "ppu_issue_store_gather_hit"
+
+# A hardware probe of which bytes of a pending store's 16-byte block a
+# load waits for: twelve loops, each timed with mftb. One word store, then
+# a load of its bytes, of the rest of its doubleword or block, or of
+# another block; two word stores to one block, then a load of bytes in the
+# block that neither wrote; and a second store to the block of a store
+# that has already written, then a load of the first store's bytes. The
+# console capture is the answer; ppu/main.c's header lists the loops and
+# the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 216 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 216 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

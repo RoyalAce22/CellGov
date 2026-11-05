@@ -1,0 +1,21 @@
+[test]
+name = "ppu_issue_store_queue_drain"
+
+# A hardware probe of how fast the store queue drains and what a store
+# that finds it full costs: seventeen loops, each timed with mftb. 16 to
+# 64 doubleword stores to separate 16-byte blocks, 32 stores to the same
+# blocks twice, two to a block and one to a line, and 32 or 16 stores
+# spaced out by independent addi. The console capture is the answer;
+# ppu/main.c's header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 296 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 296 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

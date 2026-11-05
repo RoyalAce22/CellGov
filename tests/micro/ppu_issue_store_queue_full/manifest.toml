@@ -1,0 +1,22 @@
+[test]
+name = "ppu_issue_store_queue_full"
+
+# A hardware probe of stores that fill the store queue: twenty-one loops,
+# each timed with mftb. One to six back-to-back 128-byte store multiples
+# to separate lines, then a load of the first store's bytes or of a line
+# no store writes; 8 to 32 doubleword stores, then the same loads; and
+# 16-byte and 32-byte store multiples, which tell a queue that counts
+# stores from one that counts 16-byte entries. The console capture is the
+# answer; ppu/main.c's header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 360 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 360 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
