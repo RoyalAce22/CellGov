@@ -1,0 +1,20 @@
+[test]
+name = "ppu_fp_fma_modes"
+
+# A hardware probe of the fused multiply-add forms in each FPSCR rounding
+# mode: fmadds on operands that single format cannot hold, one rounding
+# of the exact result, the sign of a zero and of a NaN after the
+# negation, overflow, tiny results, and FR and FI before an exact result.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u32 words, as ppu/main.c lists: 3 header words (failed
+# step, its code, case count), then 11 words per case (operation, FPSCR
+# before, FRA, FRB, FRC and FRT as high/low pairs, FPSCR after): 61
+# cases, 674 words, 2696 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 2696 },
+]
+
+[expect]
+outcome = "completed"

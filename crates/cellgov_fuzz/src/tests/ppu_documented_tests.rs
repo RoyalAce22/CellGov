@@ -232,11 +232,6 @@ const KNOWN_CONTRADICTED: &[(&str, &str, &str)] = &[
         "the console sign-extends the converted word into FRT[0:31]",
     ),
     (
-        "fp59-wide-operand/fmadds/",
-        "fpscr.status",
-        "the console sets the status bits of the result it computes on the whole double operand",
-    ),
-    (
         "lve-other-lanes/",
         "v1.other",
         "the console loads the whole aligned quadword into vD",

@@ -1,0 +1,19 @@
+[test]
+name = "ppu_fp_fma_range_order"
+
+# A hardware probe of the single multiply-add forms on an operand that
+# single format cannot hold: from an FPSCR with FR and FI already set,
+# and beside an infinite FRB or FRC, an invalid operation and an SNaN.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u32 words, as ppu/main.c lists: 3 header words (failed
+# step, its code, case count), then 11 words per case (operation, FPSCR
+# before, FRA, FRB, FRC and FRT as high/low pairs, FPSCR after): 18
+# cases, 201 words, 804 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 804 },
+]
+
+[expect]
+outcome = "completed"

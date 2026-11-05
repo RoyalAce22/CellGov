@@ -62,30 +62,20 @@ impl Fprf {
     }
 }
 
-/// Whether a computational instruction's status sets FR and FI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FrFi {
-    /// FR and FI take the status's values, and FI ORs into XX.
-    Set,
-    /// FR, FI and XX keep their values: the arm computed its result on
-    /// the host, which reports no rounding.
-    Unchanged,
-}
-
 /// Writes one computational instruction's status into the FPSCR.
 ///
 /// It writes:
 ///
 /// - the sticky exception bits;
 /// - FX, when one of them turns from 0 to 1;
-/// - FR and FI, as `fr_fi` selects;
+/// - FR and FI, with FI ORed into XX;
 /// - FPRF;
 /// - the VX and FEX summaries.
 ///
 /// [PPC-Book1 p:87 s:4.2.2] the exception bits are sticky; FX is set when an instruction turns an exception bit from 0 to 1; XX ORs in each new FI.
 /// [PPC-Book1 p:88 s:4.2.2] FR and FI are not sticky; FPRF is set from the result and the target precision.
 /// [PPC-Book1 p:97 s:4.4.1] an invalid operation sets one bit per cause.
-pub(crate) fn write_status(state: &mut PpuState, status: &PpcStatus, fprf: Fprf, fr_fi: FrFi) {
+pub(crate) fn write_status(state: &mut PpuState, status: &PpcStatus, fprf: Fprf) {
     let old = state.fpscr();
     let invalid = &status.invalid;
     let mut raised = 0;
@@ -106,16 +96,13 @@ pub(crate) fn write_status(state: &mut PpuState, status: &PpcStatus, fprf: Fprf,
             raised |= bit;
         }
     }
-    let mut v = old & !PPC_FPSCR_FPRF;
-    if fr_fi == FrFi::Set {
-        v &= !(PPC_FPSCR_FR | PPC_FPSCR_FI);
-        if status.fr {
-            v |= PPC_FPSCR_FR;
-        }
-        if status.fi {
-            v |= PPC_FPSCR_FI;
-            raised |= PPC_FPSCR_XX;
-        }
+    let mut v = old & !(PPC_FPSCR_FPRF | PPC_FPSCR_FR | PPC_FPSCR_FI);
+    if status.fr {
+        v |= PPC_FPSCR_FR;
+    }
+    if status.fi {
+        v |= PPC_FPSCR_FI;
+        raised |= PPC_FPSCR_XX;
     }
     v |= raised | (fprf as u32) << 12;
     if raised & !old != 0 {

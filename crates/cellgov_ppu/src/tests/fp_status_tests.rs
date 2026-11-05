@@ -5,7 +5,10 @@
 
 use super::*;
 use crate::fp::{execute_fp59, execute_fp63};
+use crate::fpscr::{write_status, Fprf};
 use crate::instruction::ops::{Fp59Op, Fp63Op};
+use crate::state::PpuState;
+use cellgov_float::PpcPrecision;
 use cellgov_ps3_abi::hw::ppc_isa::{
     PPC_FPSCR_FEX, PPC_FPSCR_FI, PPC_FPSCR_FR, PPC_FPSCR_FX, PPC_FPSCR_OX, PPC_FPSCR_VX,
     PPC_FPSCR_VXIDI, PPC_FPSCR_VXIMZ, PPC_FPSCR_VXISI, PPC_FPSCR_VXSNAN, PPC_FPSCR_VXSQRT,
@@ -64,29 +67,24 @@ fn status(f: impl FnOnce(&mut PpcStatus)) -> PpcStatus {
 fn fx_is_set_only_by_a_new_exception_bit() {
     let mut s = PpuState::new();
     let zx = status(|s| s.zx = true);
-    write_status(&mut s, &zx, Fprf::PositiveInfinity, FrFi::Set);
+    write_status(&mut s, &zx, Fprf::PositiveInfinity);
     assert_eq!(
         s.fpscr(),
         PPC_FPSCR_FX | PPC_FPSCR_ZX | fprf(Fprf::PositiveInfinity)
     );
     // FX cleared, ZX still set: the same exception again leaves FX at 0.
     s.set_fpscr(PPC_FPSCR_ZX);
-    write_status(&mut s, &zx, Fprf::PositiveInfinity, FrFi::Set);
+    write_status(&mut s, &zx, Fprf::PositiveInfinity);
     assert_eq!(s.fpscr(), PPC_FPSCR_ZX | fprf(Fprf::PositiveInfinity));
     // A clean result keeps the sticky ZX and replaces FPRF.
-    write_status(
-        &mut s,
-        &PpcStatus::default(),
-        Fprf::PositiveNormal,
-        FrFi::Set,
-    );
+    write_status(&mut s, &PpcStatus::default(), Fprf::PositiveNormal);
     assert_eq!(s.fpscr(), PPC_FPSCR_ZX | fprf(Fprf::PositiveNormal));
     // FI sets XX, a new exception bit, so FX too.
     let inexact = status(|s| {
         s.fr = true;
         s.fi = true;
     });
-    write_status(&mut s, &inexact, Fprf::PositiveNormal, FrFi::Set);
+    write_status(&mut s, &inexact, Fprf::PositiveNormal);
     assert_eq!(
         s.fpscr(),
         PPC_FPSCR_FX
@@ -100,25 +98,10 @@ fn fx_is_set_only_by_a_new_exception_bit() {
 
 /// [PPC-Book1 p:88 s:4.2.2] FR and FI are not sticky.
 #[test]
-fn fr_and_fi_are_replaced_or_kept_as_asked() {
+fn fr_and_fi_are_replaced() {
     let mut s = PpuState::new();
     s.set_fpscr(PPC_FPSCR_FR | PPC_FPSCR_FI | PPC_FPSCR_XX);
-    write_status(
-        &mut s,
-        &PpcStatus::default(),
-        Fprf::PositiveNormal,
-        FrFi::Unchanged,
-    );
-    assert_eq!(
-        s.fpscr(),
-        PPC_FPSCR_FR | PPC_FPSCR_FI | PPC_FPSCR_XX | fprf(Fprf::PositiveNormal)
-    );
-    write_status(
-        &mut s,
-        &PpcStatus::default(),
-        Fprf::PositiveNormal,
-        FrFi::Set,
-    );
+    write_status(&mut s, &PpcStatus::default(), Fprf::PositiveNormal);
     assert_eq!(s.fpscr(), PPC_FPSCR_XX | fprf(Fprf::PositiveNormal));
 }
 
@@ -128,7 +111,7 @@ fn an_invalid_cause_sets_vx_and_an_enabled_one_fex() {
     let mut s = PpuState::new();
     s.set_fpscr(1 << 7); // VE
     let snan = status(|s| s.invalid.snan = true);
-    write_status(&mut s, &snan, Fprf::QuietNan, FrFi::Set);
+    write_status(&mut s, &snan, Fprf::QuietNan);
     assert_eq!(
         s.fpscr(),
         PPC_FPSCR_FX
@@ -164,7 +147,7 @@ const NAN_RESULT: u32 = PPC_FPSCR_FX | PPC_FPSCR_VX | (Fprf::QuietNan as u32) <<
 /// [PPC-Book1 p:97 s:4.4.1] each invalid operation sets its own VX bit and gives a QNaN.
 /// [PPC-Book1 p:97 s:4.4.2] a finite nonzero dividend over a zero divisor sets ZX and gives an infinity.
 #[test]
-fn each_host_arm_reports_its_invalid_cause_and_zero_divide() {
+fn each_arithmetic_arm_reports_its_invalid_cause_and_zero_divide() {
     use Fp63Op::*;
     assert_eq!(
         fp63_fpscr(Fadd, INF, 0, NEG | INF),
@@ -243,8 +226,9 @@ fn a_single_arm_classes_its_result_in_single_precision() {
 
 /// [PPC-Book1 p:97 s:4.4.1] a disabled invalid operation sets FR and FI to zero.
 /// The `ppu_fp_status_writeback` capture holds FR = FI = 0 after an infinity operand.
+/// [PPC-Book1 p:88 s:4.2.2] FR is set when rounding incremented the fraction, FI when the result is inexact.
 #[test]
-fn a_host_arm_clears_fr_and_fi_on_an_invalid_or_operand_exact_result() {
+fn a_multiply_add_writes_fr_and_fi_of_its_one_rounding() {
     let run = |op, a, b| {
         let mut s = PpuState::new();
         s.set_fpscr(PPC_FPSCR_FR | PPC_FPSCR_FI | PPC_FPSCR_XX);
@@ -257,11 +241,14 @@ fn a_host_arm_clears_fr_and_fi_on_an_invalid_or_operand_exact_result() {
     // FRA x FRC + FRB with FRC = 1.
     assert_eq!(run(Fp63Op::Fmadd, INF, NEG | INF), 0);
     assert_eq!(run(Fp63Op::Fmadd, INF, TWO), 0);
-    // 1 x 1 + 2^-60: a finite result the operands do not make exact.
+    // 1 x 1 + 2^-60 rounds down to 1; 1 x 1 + 3 x 2^-54 rounds up.
+    assert_eq!(run(Fp63Op::Fmadd, ONE, 0x3C30_0000_0000_0000), PPC_FPSCR_FI);
     assert_eq!(
-        run(Fp63Op::Fmadd, ONE, 0x3C30_0000_0000_0000),
+        run(Fp63Op::Fmadd, ONE, 0x3CA8_0000_0000_0000),
         PPC_FPSCR_FR | PPC_FPSCR_FI
     );
+    // 1 x 1 + 1 is exact.
+    assert_eq!(run(Fp63Op::Fmadd, ONE, ONE), 0);
 }
 
 /// The `ppu_fp_estimate_readout` capture shows the status of each estimate:

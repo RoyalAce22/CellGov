@@ -8,9 +8,9 @@
 //! its test asserts both the console's value and CellGov's different
 //! value.
 
-use super::*;
 use crate::fp::{execute_fp59, execute_fp63};
 use crate::instruction::ops::{Fp59Op, Fp63Op};
+use crate::state::PpuState;
 
 /// One case of a probe capture.
 ///
