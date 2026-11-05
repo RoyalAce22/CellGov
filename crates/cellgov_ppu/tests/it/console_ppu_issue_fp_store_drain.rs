@@ -233,8 +233,10 @@ fn the_bdnz_after_a_barrier_in_its_group_waits_out_the_barrier() {
 const STFS_SYNC: usize = 3;
 const STFD_SYNC: usize = 2;
 
-/// An `stfs` before a `sync` costs the console about 27 cycles more than
-/// an `stfd` before one. The model drains both stores alike.
+/// This capture times an `stfs` before a `sync` about 27 cycles slower
+/// than an `stfd` before one, and the model times them alike. Two runs
+/// of the `ppu_issue_fp_store_barrier` probe, each at 11 runs a loop,
+/// time the two stores within 2 cycles of each other.
 #[test]
 fn an_stfs_before_a_sync_is_a_known_difference() {
     let w = console_words();
