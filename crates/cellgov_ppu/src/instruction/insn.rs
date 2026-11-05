@@ -1837,6 +1837,15 @@ pub enum FusedPair {
         ra2: u8,
         off2: i16,
     },
+    /// `cmpd crF, rA, rB` followed by `nor rA2, rS, rB2` with Rc = 0.
+    CmpdNor {
+        bf: u8,
+        ra: u8,
+        rb: u8,
+        nor_ra: u8,
+        nor_rs: u8,
+        nor_rb: u8,
+    },
     /// `extsw rA, rS` with Rc = 0, followed by a branch-always `bclr`
     /// (the quickened `blr`).
     ExtswBlr {

@@ -1,0 +1,25 @@
+[test]
+name = "ppu_cmpd_nor_pair"
+
+# A hardware probe: the CR and the nor target an adjacent
+# "cmpd crF,rA,rB ; nor rA2,rS,rB2" leave, with a compare greater only in
+# 64 bits, a less-than on cr0 with a two-source nor, an equal compare
+# whose nor overwrites the compare's first source, XER[SO] set, and a
+# branch over the cmpd. The console capture is the answer; no emulator
+# runs it.
+
+[observe]
+# 17 big-endian u32 words, as ppu/main.c lists: 68 bytes.
+#   0 failed step, 1 its return code; each register as a high word and
+#   a low word:
+#   2 CR, 3-4 r5 with the 64-bit greater compare on cr7;
+#   5 CR, 6-7 r5 with the less-than on cr0 and "nor 5,6,8";
+#   8 CR, 9-10 r3 with the equal compare and "nor 3,6,6";
+#   11 CR, 12-13 r5 with XER[SO] set;
+#   14 CR, 15-16 r5 after a branch over the cmpd.
+memory_regions = [
+  { name = "result", addr = 0, size = 68 },
+]
+
+[expect]
+outcome = "completed"

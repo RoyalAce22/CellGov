@@ -341,6 +341,28 @@ fn execute_pair(
             state.set_gpr(ra2 as usize, ea2);
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:60 s:3.3.9 Compare] cmp with L = 1 (cmpd): signed 64-bit compare, CR field <- c || XER[SO].
+        // [PPC-Book1 p:68 s:3.3.11 NOR] nor: RA <- ~((RS) | (RB)), read after the compare.
+        FusedPair::CmpdNor {
+            bf,
+            ra,
+            rb,
+            nor_ra,
+            nor_rs,
+            nor_rb,
+        } => {
+            cmpw(
+                state,
+                bf,
+                state.gpr[ra as usize] as i64,
+                state.gpr[rb as usize] as i64,
+            );
+            state.set_gpr(
+                nor_ra as usize,
+                !(state.gpr[nor_rs as usize] | state.gpr[nor_rb as usize]),
+            );
+            ExecuteVerdict::Continue
+        }
         // [PPC-Book1 p:69 s:3.3.11 Extend Sign Word] extsw: RA <- EXTS((RS)32:63).
         // [PPC-Book1 p:25 s:2.4 Branch Conditional to Link Register] bclr with BO 1z1zz: NIA <- LR[0:61] || 0b00.
         FusedPair::ExtswBlr { ra, rs, .. } => {

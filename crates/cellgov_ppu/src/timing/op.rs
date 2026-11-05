@@ -1385,6 +1385,21 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
                     ),
                 )
             }
+            FusedPair::CmpdNor {
+                bf,
+                ra,
+                rb,
+                nor_ra,
+                nor_rs,
+                nor_rb,
+            } => two(
+                cmp(bf, ra, Some(rb)),
+                logical(
+                    Op::on(unit::FXU).src(gpr(nor_rs)).src(gpr(nor_rb)),
+                    nor_ra,
+                    false,
+                ),
+            ),
             FusedPair::ExtswBlr { ra, rs, bo, bi } => two(
                 logical(Op::on(unit::FXU).src(gpr(rs)), ra, false),
                 branch(bo, bi, false, Target::Link, branches(state, bo, bi)),

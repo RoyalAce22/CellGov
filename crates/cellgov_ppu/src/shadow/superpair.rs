@@ -158,6 +158,23 @@ fn fuse(a: PpuInstruction, b: PpuInstruction) -> Option<FusedPair> {
                 off2,
             })
         }
+        // cmpd crF, rA, rB + nor rA2, rS, rB2 without Rc.
+        (
+            PpuInstruction::Cmpd { bf, ra, rb },
+            PpuInstruction::Nor {
+                ra: nor_ra,
+                rs: nor_rs,
+                rb: nor_rb,
+                rc: false,
+            },
+        ) => Some(FusedPair::CmpdNor {
+            bf,
+            ra,
+            rb,
+            nor_ra,
+            nor_rs,
+            nor_rb,
+        }),
         // extsw rA, rS + blr. The shadow quickens only a branch-always bclr
         // to Blr.
         (PpuInstruction::Extsw { ra, rs, rc: false }, PpuInstruction::Blr { bo, bi }) => {
@@ -408,3 +425,7 @@ mod extsw_tests;
 #[cfg(test)]
 #[path = "tests/superpair_ldu_tests.rs"]
 mod ldu_tests;
+
+#[cfg(test)]
+#[path = "tests/superpair_cmpd_nor_tests.rs"]
+mod cmpd_nor_tests;

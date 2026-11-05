@@ -251,6 +251,17 @@ fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
                     },
                 )
             }),
+        (cr_field(), reg(), reg(), reg(), reg(), reg()).prop_map(
+            |(bf, ra, rb, nor_ra, nor_rs, nor_rb)| (
+                PpuInstruction::Cmpd { bf, ra, rb },
+                PpuInstruction::Nor {
+                    ra: nor_ra,
+                    rs: nor_rs,
+                    rb: nor_rb,
+                    rc: false,
+                },
+            )
+        ),
         // The shadow quickens a bclr to Blr only when BO is 1z1zz.
         (
             reg(),
@@ -275,9 +286,9 @@ fn word_at(mem: &[u8], ea: u64) -> Option<i32> {
 /// Aim a compare at the value it will see, plus `nudge`, so an
 /// off-by-one in the fused compare changes the condition register. A
 /// random immediate meets a random operand too rarely for that. The
-/// compare is the second half of `lwz; cmpwi` and the first half of
-/// each compare-and-`bc` pair, so either slot may hold the changed
-/// instruction.
+/// compare is the second half of `lwz; cmpwi`. It is the first half of
+/// `cmpd; nor` and of each compare-and-`bc` pair. Thus either slot may
+/// hold the changed instruction.
 fn aim_compare(
     a: PpuInstruction,
     b: PpuInstruction,
@@ -321,7 +332,10 @@ fn aim_compare(
                 None => (a, b),
             }
         }
-        (PpuInstruction::Cmpd { ra, rb, .. }, PpuInstruction::Bc { .. }) => {
+        (
+            PpuInstruction::Cmpd { ra, rb, .. },
+            PpuInstruction::Bc { .. } | PpuInstruction::Nor { .. },
+        ) => {
             let seen = state.gpr[ra as usize] as i64;
             state.set_gpr(rb as usize, seen.wrapping_add(i64::from(nudge)) as u64);
             (a, b)
@@ -342,7 +356,7 @@ fn aim_compare(
 }
 
 proptest! {
-    // Six of the twenty-one arms are compares that need an aimed
+    // Seven of the twenty-two arms are compares that need an aimed
     // operand to show an off-by-one. Four times the default count
     // makes one such case near certain per run.
     #![proptest_config(ProptestConfig::with_cases(1024))]

@@ -774,6 +774,21 @@ pub(super) fn render(
                 op(f, "ldu", format_args!("r{rt1}, {off1}(r{ra1})"))?;
                 write!(f, "; ldu r{rt2}, {off2}(r{ra2})")
             }
+            FusedPair::CmpdNor {
+                bf,
+                ra,
+                rb,
+                nor_ra,
+                nor_rs,
+                nor_rb,
+            } => {
+                cmp!(f, "cmpd", bf, "r{}, r{}", ra, rb)?;
+                // [PPC-Book1 p:163 s:B.9] not rX,rY is nor rX,rY,rY, as the standalone `nor` renders.
+                if nor_rs == nor_rb {
+                    return write!(f, "; not r{nor_ra}, r{nor_rs}");
+                }
+                write!(f, "; nor r{nor_ra}, r{nor_rs}, r{nor_rb}")
+            }
             FusedPair::ExtswBlr { ra, rs, bo, bi } => {
                 op(f, "extsw", format_args!("r{ra}, r{rs}"))?;
                 write!(f, "; bclr {bo}, {bi}")
