@@ -1,0 +1,241 @@
+#0001 > GET /cpursx.ps3
+#0002 < 200 (5725 bytes)
+#0003 = console: model CECH-2001A, kernel cex, firmware 4.93, cfw EvilNAT 4.93 PEX, cobra 8.5, webman 1.47.48t, debugger not attached
+#0004 = console satisfies profile cech20-cex-493
+#0005 = load: Cell 67 C, RSX 65 C, fan 37%, /dev_hdd0 99840 MiB free; cool
+#0006 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0007 > USER anonymous
+#0008 < 331 OK
+#0009 > PASS anonymous@
+#0010 < 230 OK
+#0011 > TYPE I
+#0012 < 200 TYPE OK
+#0013 > MKD /dev_hdd0/tmp/cellgov_lease
+#0014 < 257 "/dev_hdd0/tmp/cellgov_lease" OK
+#0015 > PASV
+#0016 < 227 Entering Passive Mode (10,77,0,2,212,180)
+#0017 > STOR /dev_hdd0/tmp/cellgov_lease/holder (75 bytes)
+#0018 < 150 OK
+#0019 < 226 OK
+#0020 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0021 < 404 (512 bytes)
+#0022 > PASV
+#0023 < 227 Entering Passive Mode (10,77,0,2,212,117)
+#0024 > NLST /dev_hdd0/game
+#0025 < 150 OK
+#0026 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 65C]
+#0027 > MKD /dev_hdd0/game/CGOV00001
+#0028 < 257 "/dev_hdd0/game/CGOV00001" OK
+#0029 > MKD /dev_hdd0/game/CGOV00001/USRDIR
+#0030 < 257 "/dev_hdd0/game/CGOV00001/USRDIR" OK
+#0031 > PASV
+#0032 < 227 Entering Passive Mode (10,77,0,2,214,159)
+#0033 > STOR /dev_hdd0/game/CGOV00001/PARAM.SFO (1040 bytes)
+#0034 < 150 OK
+#0035 < 226 OK
+#0036 > PASV
+#0037 < 227 Entering Passive Mode (10,77,0,2,214,79)
+#0038 > STOR /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN (5872 bytes)
+#0039 < 150 OK
+#0040 < 226 OK
+#0041 = deployed 2 file(s) under /dev_hdd0/game/CGOV00001
+#0042 > QUIT
+#0043 < 221 BYE
+#0044 > GET /play.ps3?CGOV00001
+#0045 < 200 (5725 bytes)
+#0046 = started
+#0047 > GET /cpursx.ps3
+#0048 < 200 (5725 bytes)
+#0049 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0050 < 404 (512 bytes)
+#0051 > GET /cpursx.ps3
+#0052 < 200 (5725 bytes)
+#0053 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0054 < 404 (512 bytes)
+#0055 > GET /cpursx.ps3
+#0056 < 200 (5725 bytes)
+#0057 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0058 < 404 (512 bytes)
+#0059 > GET /cpursx.ps3
+#0060 < 200 (5725 bytes)
+#0061 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0062 < 404 (512 bytes)
+#0063 > GET /cpursx.ps3
+#0064 < 200 (5725 bytes)
+#0065 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0066 < 404 (512 bytes)
+#0067 > GET /cpursx.ps3
+#0068 < 200 (5933 bytes)
+#0069 = left the XMB after 6 poll(s)
+#0070 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0071 < 404 (512 bytes)
+#0072 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0073 < 404 (512 bytes)
+#0074 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0075 < 404 (512 bytes)
+#0076 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0077 < 404 (512 bytes)
+#0078 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0079 < 404 (512 bytes)
+#0080 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0081 < 404 (512 bytes)
+#0082 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0083 < 404 (512 bytes)
+#0084 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0085 < 404 (512 bytes)
+#0086 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0087 < 404 (512 bytes)
+#0088 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0089 < 404 (512 bytes)
+#0090 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0091 < 404 (512 bytes)
+#0092 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0093 < 404 (512 bytes)
+#0094 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0095 < 404 (512 bytes)
+#0096 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0097 < 404 (512 bytes)
+#0098 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0099 < 404 (512 bytes)
+#0100 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0101 < 404 (512 bytes)
+#0102 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0103 < 404 (512 bytes)
+#0104 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0105 < 404 (512 bytes)
+#0106 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0107 < 404 (512 bytes)
+#0108 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0109 < 404 (512 bytes)
+#0110 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0111 < 404 (512 bytes)
+#0112 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0113 < 404 (512 bytes)
+#0114 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0115 < 404 (512 bytes)
+#0116 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0117 < 404 (512 bytes)
+#0118 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0119 < 404 (512 bytes)
+#0120 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0121 < 404 (512 bytes)
+#0122 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0123 < 404 (512 bytes)
+#0124 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0125 < 404 (512 bytes)
+#0126 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0127 < 404 (512 bytes)
+#0128 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0129 < 404 (512 bytes)
+#0130 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0131 < 404 (512 bytes)
+#0132 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0133 < 404 (512 bytes)
+#0134 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0135 < 404 (512 bytes)
+#0136 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0137 < 404 (512 bytes)
+#0138 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0139 < 404 (512 bytes)
+#0140 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0141 < 404 (512 bytes)
+#0142 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0143 < 404 (512 bytes)
+#0144 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0145 < 404 (512 bytes)
+#0146 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0147 < 404 (512 bytes)
+#0148 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0149 < 404 (512 bytes)
+#0150 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0151 < 404 (512 bytes)
+#0152 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0153 < 404 (512 bytes)
+#0154 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0155 < 404 (512 bytes)
+#0156 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0157 < 404 (512 bytes)
+#0158 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0159 < 404 (512 bytes)
+#0160 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0161 < 404 (512 bytes)
+#0162 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0163 < 404 (512 bytes)
+#0164 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0165 < 404 (512 bytes)
+#0166 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0167 < 404 (512 bytes)
+#0168 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0169 < 404 (512 bytes)
+#0170 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0171 < 404 (512 bytes)
+#0172 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0173 < 404 (512 bytes)
+#0174 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0175 < 404 (512 bytes)
+#0176 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0177 < 404 (512 bytes)
+#0178 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0179 < 404 (512 bytes)
+#0180 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0181 < 404 (512 bytes)
+#0182 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0183 < 404 (512 bytes)
+#0184 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0185 < 404 (512 bytes)
+#0186 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0187 < 404 (512 bytes)
+#0188 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0189 < 200 (728 bytes)
+#0190 = result present after 60 poll(s)
+#0191 > GET /cpursx.ps3
+#0192 < 200 (6436 bytes)
+#0193 > GET /cpursx.ps3
+#0194 < 200 (6436 bytes)
+#0195 > GET /cpursx.ps3
+#0196 < 200 (5933 bytes)
+#0197 > GET /cpursx.ps3
+#0198 < 200 (5933 bytes)
+#0199 > GET /cpursx.ps3
+#0200 < 200 (5725 bytes)
+#0201 = back at the XMB after 5 poll(s)
+#0202 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0203 < 200 (728 bytes)
+#0204 = captured micro:ppu_timebase_reads#9055404aea4e
+#0205 > GET /mount.ps3/unmount
+#0206 < 200 (4441 bytes)
+#0207 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0208 > USER anonymous
+#0209 < 331 OK
+#0210 > PASS anonymous@
+#0211 < 230 OK
+#0212 > TYPE I
+#0213 < 200 TYPE OK
+#0214 > PASV
+#0215 < 227 Entering Passive Mode (10,77,0,2,244,130)
+#0216 > NLST /dev_hdd0/game
+#0217 < 150 OK
+#0218 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 60C]
+#0219 > PASV
+#0220 < 227 Entering Passive Mode (10,77,0,2,246,75)
+#0221 > NLST /dev_hdd0/game/CGOV00001
+#0222 < 150 OK
+#0223 < 226 [/dev_hdd0/game/CGOV00001/] [ 97.5 GB free CPU: 67C | RSX: 60C]
+#0224 > PASV
+#0225 < 227 Entering Passive Mode (10,77,0,2,246,195)
+#0226 > NLST /dev_hdd0/game/CGOV00001/USRDIR
+#0227 < 150 OK
+#0228 < 226 [/dev_hdd0/game/CGOV00001/USRDIR/] [ 0.0 MB free CPU: 67C | RSX: 60C]
+#0229 > DELE /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN
+#0230 < 250 OK
+#0231 > RMD /dev_hdd0/game/CGOV00001/USRDIR
+#0232 < 250 OK
+#0233 > DELE /dev_hdd0/game/CGOV00001/PARAM.SFO
+#0234 < 250 OK
+#0235 > RMD /dev_hdd0/game/CGOV00001
+#0236 < 250 OK
+#0237 > GET /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0238 < 200 (728 bytes)
+#0239 > DELE /dev_hdd0/tmp/cgov_ppu_timebase_reads.bin
+#0240 < 250 OK
+#0241 = console restored
