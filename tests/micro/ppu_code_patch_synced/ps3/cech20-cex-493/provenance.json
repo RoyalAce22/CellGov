@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "capture_id": "micro:ppu_code_patch_synced#9e7aa02b67d9",
+  "captured_at": "2026-10-31T16:09:47Z",
+  "console": {
+    "profile": "cech20-cex-493",
+    "model": "CECH-2001A",
+    "kernel": "cex",
+    "firmware": "4.93",
+    "cfw": "EvilNAT 4.93 PEX",
+    "cobra": "8.5",
+    "webman": "1.47.48t",
+    "debugger_attached": false,
+    "load_at_start": {
+      "cpu_c": 67,
+      "rsx_c": 62,
+      "fan_percent": 44
+    }
+  },
+  "transport": {
+    "kind": "webman-filedrop"
+  },
+  "harness": {
+    "runner": "runner_ps3",
+    "revision": "7ce1b66cfbc23be628884b94a29128d58dba8930",
+    "link": "https://github.com/RoyalAce22/CellGov/commit/7ce1b66cfbc23be628884b94a29128d58dba8930"
+  },
+  "microtest": {
+    "name": "ppu_code_patch_synced",
+    "manifest_sha256": "069c08abbeb5444138923e0dc396014a2a71e6b61dc109468529531e3a26e7b6",
+    "sources": {
+      "../common/cgov_cases.h": "2cc9df4e06e27071ec36fd32a33acdec781c8ed863f2871ccc1b31e8b30b3f78",
+      "../common/cgov_lv2.h": "18efe6e4e763676e4b215a12af9d37a68f82a01f93e6ee816a882abee5132c0e",
+      "../common/cgov_out.h": "dcd53f330ba62b8aba0acd9cff2a580b5bfdcdc4f18c9e4d5ac64caee4efab9a",
+      "../common/cgov_spu_load.h": "999392b83cb8965f4cd5612632a73b8021861a6a588d9e3ebb2c405cfdf726c3",
+      "../common/crt0.S": "a0e5c9e27431ef06df31507e0320d001b10098b154b59c3a6639b7916d76b8d9",
+      "../common/package_ps3.sh": "78e6be20e91352ffd7afa3e89e06d7ce57bc9842181c3c59e0b86670ecbd8abf",
+      "../common/param_sfo.xml": "0fe1608eeeb92cc1e033cd012a07991997cc91c7c8eac3bc8c31b212ef892c97",
+      "../common/patch_ctrl_flags.py": "86a0ec46658144b0a50e9179ac3e2323b96532a89227612e6a640a469ea4bf4d",
+      "../common/patch_toc.py": "6218bae28d718aeb19ab94b5fc464e526dbb46270e2614ed10922a8773edd229",
+      "../common/test_patch_toc.py": "9bb95d499c2e7c9da88bcaf56ee34fb724edfb17a8fc566189b79fad48d4f5b6",
+      "build.sh": "c489934eb0fe6bd68e4c9a7eb510854782bc6022b75bb5e1091acf8adf5c434e",
+      "ppu/main.c": "a2e73fa904680bd1829993a6c1cccb8e2b4ca0421bff53f74806086ca4604013"
+    }
+  },
+  "artifacts": {
+    "eboot_sha256": "35008e29075b4cb14f4e6db268708c72878c6e6d32b30491094fbe4e56c06ac3",
+    "ps3_elf_sha256": "d6c386580c61b6c39c96adac247e4dbc109b81e9d59c1ae916e0fcb60583ccc7",
+    "reference_elf_sha256": "06af3c44c4353f84ff17c15004d083a472c7ab701ec67271229d942067404438",
+    "siblings": {},
+    "param_sfo_sha256": "32251c0955a3282745bc5212ed10d7187683575f5b16ccab9f89aade970ab251"
+  },
+  "frame": {
+    "file": "cgov_frame.bin",
+    "sha256": "9e7aa02b67d93e3767e237e58038cf88ba7a9d06714ec5d2155ea70328be38de",
+    "bytes": 72,
+    "result_path": "/dev_hdd0/tmp/cgov_ppu_code_patch_synced.bin"
+  },
+  "digest": "9e7aa02b67d93e3767e237e58038cf88ba7a9d06714ec5d2155ea70328be38de  micro:ppu_code_patch_synced  72",
+  "recapture_reason": "the case driver's frame-header comment now says word 3 holds the memory buffer address, which changes the cgov_cases.h source hash"
+}
