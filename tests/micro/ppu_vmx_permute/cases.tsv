@@ -1,0 +1,149 @@
+id	asm	words	inputs	record	may_end_process
+vperm/a-only	vperm v3, v1, v2, v4	0x1061112b	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f,v4=0x00010203_04050607_08090a0b_0c0d0e0f	v3	0
+vperm/b-only	vperm v3, v1, v2, v4	0x1061112b	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f,v4=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vperm/reverse	vperm v3, v1, v2, v4	0x1061112b	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f,v4=0x1f1e1d1c_1b1a1918_17161514_13121110	v3	0
+vperm/interleave	vperm v3, v1, v2, v4	0x1061112b	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f,v4=0x00100111_02120313_04140515_06160717	v3	0
+vperm/high-bits	vperm v3, v1, v2, v4	0x1061112b	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f,v4=0xe0e1e2e3_e4e5e6e7_e8e9eaeb_ecedeeef	v3	0
+vperm/scatter	vperm v3, v1, v2, v4	0x1061112b	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f,v4=0x0719001f_0c12031d_0f100916_011e0614	v3	0
+vsel/zeros	vsel v3, v1, v2, v4	0x1061112a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee,v4=0x00000000_00000000_00000000_00000000	v3	0
+vsel/ones	vsel v3, v1, v2, v4	0x1061112a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee,v4=0xffffffff_ffffffff_ffffffff_ffffffff	v3	0
+vsel/bytes	vsel v3, v1, v2, v4	0x1061112a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee,v4=0xff00ff00_ff00ff00_ff00ff00_ff00ff00	v3	0
+vsel/bits	vsel v3, v1, v2, v4	0x1061112a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee,v4=0xa5a5a5a5_a5a5a5a5_a5a5a5a5_a5a5a5a5	v3	0
+vsldoi/sh0	vsldoi v3, v1, v2, 0	0x1061102c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vsldoi/sh1	vsldoi v3, v1, v2, 1	0x1061106c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vsldoi/sh2	vsldoi v3, v1, v2, 2	0x106110ac	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vsldoi/sh3	vsldoi v3, v1, v2, 3	0x106110ec	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vsldoi/sh4	vsldoi v3, v1, v2, 4	0x1061112c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vsldoi/sh5	vsldoi v3, v1, v2, 5	0x1061116c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vsldoi/sh6	vsldoi v3, v1, v2, 6	0x106111ac	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vsldoi/sh7	vsldoi v3, v1, v2, 7	0x106111ec	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vsldoi/sh8	vsldoi v3, v1, v2, 8	0x1061122c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vsldoi/sh9	vsldoi v3, v1, v2, 9	0x1061126c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vsldoi/sh10	vsldoi v3, v1, v2, 10	0x106112ac	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vsldoi/sh11	vsldoi v3, v1, v2, 11	0x106112ec	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vsldoi/sh12	vsldoi v3, v1, v2, 12	0x1061132c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vsldoi/sh13	vsldoi v3, v1, v2, 13	0x1061136c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vsldoi/sh14	vsldoi v3, v1, v2, 14	0x106113ac	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vsldoi/sh15	vsldoi v3, v1, v2, 15	0x106113ec	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vmrghb/seq	vmrghb v3, v1, v2	0x1061100c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vmrghb/mix	vmrghb v3, v1, v2	0x1061100c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vmrghh/seq	vmrghh v3, v1, v2	0x1061104c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vmrghh/mix	vmrghh v3, v1, v2	0x1061104c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vmrghw/seq	vmrghw v3, v1, v2	0x1061108c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vmrghw/mix	vmrghw v3, v1, v2	0x1061108c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vmrglb/seq	vmrglb v3, v1, v2	0x1061110c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vmrglb/mix	vmrglb v3, v1, v2	0x1061110c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vmrglh/seq	vmrglh v3, v1, v2	0x1061114c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vmrglh/mix	vmrglh v3, v1, v2	0x1061114c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vmrglw/seq	vmrglw v3, v1, v2	0x1061118c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x00010203_04050607_08090a0b_0c0d0e0f,v2=0x10111213_14151617_18191a1b_1c1d1e1f	v3	0
+vmrglw/mix	vmrglw v3, v1, v2	0x1061118c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltb/u0	vspltb v3, v2, 0	0x1060120c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltb/u1	vspltb v3, v2, 1	0x1061120c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltb/u2	vspltb v3, v2, 2	0x1062120c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltb/u3	vspltb v3, v2, 3	0x1063120c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltb/u4	vspltb v3, v2, 4	0x1064120c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltb/u5	vspltb v3, v2, 5	0x1065120c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltb/u6	vspltb v3, v2, 6	0x1066120c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltb/u7	vspltb v3, v2, 7	0x1067120c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltb/u8	vspltb v3, v2, 8	0x1068120c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltb/u9	vspltb v3, v2, 9	0x1069120c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltb/u10	vspltb v3, v2, 10	0x106a120c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltb/u11	vspltb v3, v2, 11	0x106b120c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltb/u12	vspltb v3, v2, 12	0x106c120c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltb/u13	vspltb v3, v2, 13	0x106d120c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltb/u14	vspltb v3, v2, 14	0x106e120c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltb/u15	vspltb v3, v2, 15	0x106f120c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vsplth/u0	vsplth v3, v2, 0	0x1060124c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vsplth/u1	vsplth v3, v2, 1	0x1061124c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vsplth/u2	vsplth v3, v2, 2	0x1062124c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vsplth/u3	vsplth v3, v2, 3	0x1063124c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vsplth/u4	vsplth v3, v2, 4	0x1064124c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vsplth/u5	vsplth v3, v2, 5	0x1065124c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vsplth/u6	vsplth v3, v2, 6	0x1066124c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vsplth/u7	vsplth v3, v2, 7	0x1067124c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltw/u0	vspltw v3, v2, 0	0x1060128c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltw/u1	vspltw v3, v2, 1	0x1061128c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltw/u2	vspltw v3, v2, 2	0x1062128c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltw/u3	vspltw v3, v2, 3	0x1063128c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vspltisb/s-16	vspltisb v3, -16	0x1070030c	cr=0x9abcdef0,xer=0x0,fpscr=0x0	v3	0
+vspltisb/s-1	vspltisb v3, -1	0x107f030c	cr=0x9abcdef0,xer=0x0,fpscr=0x0	v3	0
+vspltisb/s0	vspltisb v3, 0	0x1060030c	cr=0x9abcdef0,xer=0x0,fpscr=0x0	v3	0
+vspltisb/s1	vspltisb v3, 1	0x1061030c	cr=0x9abcdef0,xer=0x0,fpscr=0x0	v3	0
+vspltisb/s7	vspltisb v3, 7	0x1067030c	cr=0x9abcdef0,xer=0x0,fpscr=0x0	v3	0
+vspltisb/s15	vspltisb v3, 15	0x106f030c	cr=0x9abcdef0,xer=0x0,fpscr=0x0	v3	0
+vspltish/s-16	vspltish v3, -16	0x1070034c	cr=0x9abcdef0,xer=0x0,fpscr=0x0	v3	0
+vspltish/s-1	vspltish v3, -1	0x107f034c	cr=0x9abcdef0,xer=0x0,fpscr=0x0	v3	0
+vspltish/s0	vspltish v3, 0	0x1060034c	cr=0x9abcdef0,xer=0x0,fpscr=0x0	v3	0
+vspltish/s1	vspltish v3, 1	0x1061034c	cr=0x9abcdef0,xer=0x0,fpscr=0x0	v3	0
+vspltish/s7	vspltish v3, 7	0x1067034c	cr=0x9abcdef0,xer=0x0,fpscr=0x0	v3	0
+vspltish/s15	vspltish v3, 15	0x106f034c	cr=0x9abcdef0,xer=0x0,fpscr=0x0	v3	0
+vspltisw/s-16	vspltisw v3, -16	0x1070038c	cr=0x9abcdef0,xer=0x0,fpscr=0x0	v3	0
+vspltisw/s-1	vspltisw v3, -1	0x107f038c	cr=0x9abcdef0,xer=0x0,fpscr=0x0	v3	0
+vspltisw/s0	vspltisw v3, 0	0x1060038c	cr=0x9abcdef0,xer=0x0,fpscr=0x0	v3	0
+vspltisw/s1	vspltisw v3, 1	0x1061038c	cr=0x9abcdef0,xer=0x0,fpscr=0x0	v3	0
+vspltisw/s7	vspltisw v3, 7	0x1067038c	cr=0x9abcdef0,xer=0x0,fpscr=0x0	v3	0
+vspltisw/s15	vspltisw v3, 15	0x106f038c	cr=0x9abcdef0,xer=0x0,fpscr=0x0	v3	0
+vsl/s0	vsl v3, v1, v2	0x106111c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000000	v3	0
+vsl/s1	vsl v3, v1, v2	0x106111c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x01010101_01010101_01010101_01010101	v3	0
+vsl/s2	vsl v3, v1, v2	0x106111c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x02020202_02020202_02020202_02020202	v3	0
+vsl/s3	vsl v3, v1, v2	0x106111c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x03030303_03030303_03030303_03030303	v3	0
+vsl/s4	vsl v3, v1, v2	0x106111c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x04040404_04040404_04040404_04040404	v3	0
+vsl/s5	vsl v3, v1, v2	0x106111c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x05050505_05050505_05050505_05050505	v3	0
+vsl/s6	vsl v3, v1, v2	0x106111c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x06060606_06060606_06060606_06060606	v3	0
+vsl/s7	vsl v3, v1, v2	0x106111c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x07070707_07070707_07070707_07070707	v3	0
+vsl/s5-high-bits	vsl v3, v1, v2	0x106111c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0xf5f5f5f5_f5f5f5f5_f5f5f5f5_f5f5f5f5	v3	0
+vsl/uneven	vsl v3, v1, v2	0x106111c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x03030303_03030303_03030303_03030305	v3	0
+vsr/s0	vsr v3, v1, v2	0x106112c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000000	v3	0
+vsr/s1	vsr v3, v1, v2	0x106112c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x01010101_01010101_01010101_01010101	v3	0
+vsr/s2	vsr v3, v1, v2	0x106112c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x02020202_02020202_02020202_02020202	v3	0
+vsr/s3	vsr v3, v1, v2	0x106112c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x03030303_03030303_03030303_03030303	v3	0
+vsr/s4	vsr v3, v1, v2	0x106112c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x04040404_04040404_04040404_04040404	v3	0
+vsr/s5	vsr v3, v1, v2	0x106112c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x05050505_05050505_05050505_05050505	v3	0
+vsr/s6	vsr v3, v1, v2	0x106112c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x06060606_06060606_06060606_06060606	v3	0
+vsr/s7	vsr v3, v1, v2	0x106112c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x07070707_07070707_07070707_07070707	v3	0
+vsr/s5-high-bits	vsr v3, v1, v2	0x106112c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0xf5f5f5f5_f5f5f5f5_f5f5f5f5_f5f5f5f5	v3	0
+vsr/uneven	vsr v3, v1, v2	0x106112c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x03030303_03030303_03030303_03030305	v3	0
+vslo/o0	vslo v3, v1, v2	0x1061140c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000000	v3	0
+vslo/o1	vslo v3, v1, v2	0x1061140c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000008	v3	0
+vslo/o2	vslo v3, v1, v2	0x1061140c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000010	v3	0
+vslo/o3	vslo v3, v1, v2	0x1061140c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000018	v3	0
+vslo/o4	vslo v3, v1, v2	0x1061140c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000020	v3	0
+vslo/o5	vslo v3, v1, v2	0x1061140c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000028	v3	0
+vslo/o6	vslo v3, v1, v2	0x1061140c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000030	v3	0
+vslo/o7	vslo v3, v1, v2	0x1061140c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000038	v3	0
+vslo/o8	vslo v3, v1, v2	0x1061140c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000040	v3	0
+vslo/o9	vslo v3, v1, v2	0x1061140c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000048	v3	0
+vslo/o10	vslo v3, v1, v2	0x1061140c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000050	v3	0
+vslo/o11	vslo v3, v1, v2	0x1061140c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000058	v3	0
+vslo/o12	vslo v3, v1, v2	0x1061140c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000060	v3	0
+vslo/o13	vslo v3, v1, v2	0x1061140c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000068	v3	0
+vslo/o14	vslo v3, v1, v2	0x1061140c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000070	v3	0
+vslo/o15	vslo v3, v1, v2	0x1061140c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000078	v3	0
+vslo/o5-other-bits	vslo v3, v1, v2	0x1061140c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0xffffffff_ffffffff_ffffffff_ffffffaf	v3	0
+vsro/o0	vsro v3, v1, v2	0x1061144c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000000	v3	0
+vsro/o1	vsro v3, v1, v2	0x1061144c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000008	v3	0
+vsro/o2	vsro v3, v1, v2	0x1061144c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000010	v3	0
+vsro/o3	vsro v3, v1, v2	0x1061144c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000018	v3	0
+vsro/o4	vsro v3, v1, v2	0x1061144c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000020	v3	0
+vsro/o5	vsro v3, v1, v2	0x1061144c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000028	v3	0
+vsro/o6	vsro v3, v1, v2	0x1061144c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000030	v3	0
+vsro/o7	vsro v3, v1, v2	0x1061144c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000038	v3	0
+vsro/o8	vsro v3, v1, v2	0x1061144c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000040	v3	0
+vsro/o9	vsro v3, v1, v2	0x1061144c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000048	v3	0
+vsro/o10	vsro v3, v1, v2	0x1061144c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000050	v3	0
+vsro/o11	vsro v3, v1, v2	0x1061144c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000058	v3	0
+vsro/o12	vsro v3, v1, v2	0x1061144c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000060	v3	0
+vsro/o13	vsro v3, v1, v2	0x1061144c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000068	v3	0
+vsro/o14	vsro v3, v1, v2	0x1061144c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000070	v3	0
+vsro/o15	vsro v3, v1, v2	0x1061144c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0x00000000_00000000_00000000_00000078	v3	0
+vsro/o5-other-bits	vsro v3, v1, v2	0x1061144c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0xffffffff_ffffffff_ffffffff_ffffffaf	v3	0
+vand/mix	vand v3, v1, v2	0x10611404	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vand/ones-zeros	vand v3, v1, v2	0x10611404	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0xffffffff_ffffffff_ffffffff_ffffffff,v2=0xffffffff_ffffffff_00000000_00000000	v3	0
+vandc/mix	vandc v3, v1, v2	0x10611444	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vandc/ones-zeros	vandc v3, v1, v2	0x10611444	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0xffffffff_ffffffff_ffffffff_ffffffff,v2=0xffffffff_ffffffff_00000000_00000000	v3	0
+vor/mix	vor v3, v1, v2	0x10611484	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vor/ones-zeros	vor v3, v1, v2	0x10611484	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0xffffffff_ffffffff_ffffffff_ffffffff,v2=0xffffffff_ffffffff_00000000_00000000	v3	0
+vnor/mix	vnor v3, v1, v2	0x10611504	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vnor/ones-zeros	vnor v3, v1, v2	0x10611504	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0xffffffff_ffffffff_ffffffff_ffffffff,v2=0xffffffff_ffffffff_00000000_00000000	v3	0
+vxor/mix	vxor v3, v1, v2	0x106114c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0x817f00ff_12ed40c0_01fe55aa_33cc0ff0,v2=0xa55a9669_3cc318e7_24db42bd_996611ee	v3	0
+vxor/ones-zeros	vxor v3, v1, v2	0x106114c4	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v1=0xffffffff_ffffffff_ffffffff_ffffffff,v2=0xffffffff_ffffffff_00000000_00000000	v3	0

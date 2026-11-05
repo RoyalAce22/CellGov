@@ -51,11 +51,7 @@ fn altivec_memory_family_no_longer_in_directory() {
 
 #[test]
 fn cbe_unaligned_family_no_longer_in_directory() {
-    // The decoder graduated lvlxl / lvrxl / stvlx / stvrx /
-    // stvlxl / stvrxl into the decoder. The two LRU-hint loads
-    // share semantics with Lvlx / Lvrx; the four stores are
-    // harness-gated fault stubs pending differential verification.
-    for xo in [647u16, 711, 775, 839, 903, 967] {
+    for xo in [551u16, 647, 679, 775, 807, 903, 935] {
         assert!(
             opcode_gap(31, xo).is_none(),
             "CBE-unaligned XO {xo} still present in OPCODE_GAPS"

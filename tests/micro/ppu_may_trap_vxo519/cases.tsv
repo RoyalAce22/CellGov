@@ -1,0 +1,2 @@
+id	asm	words	inputs	record	may_end_process
+vxo519	?	0x7c6a240e	cr=0x0,xer=0x0,fpscr=0x0,mem=0x123456789abcdef123456789abcdef02,v3=0xa0a1a2a3_a4a5a6a7_a8a9aaab_acadaeaf,r4=0x5	v3,m0,m8	1

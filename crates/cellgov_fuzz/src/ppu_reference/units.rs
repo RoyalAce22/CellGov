@@ -61,11 +61,15 @@ pub enum PpuReferenceFacility {
     /// The FPSCR's own rules: sticky exception bits, the FX, FEX and VX
     /// summaries, and the record forms' copy into CR1.
     Fpscr,
+    /// The VSCR's own rules: SAT's stickiness, and NJ.
+    Vscr,
+    /// The VRSAVE a thread starts with, and its width.
+    Vrsave,
 }
 
 impl PpuReferenceFacility {
     /// Every facility, in declaration order.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 9] = [
         Self::ThreadEntry,
         Self::Reservation,
         Self::DcbzWidth,
@@ -73,6 +77,8 @@ impl PpuReferenceFacility {
         Self::StoreForwarding,
         Self::StringAcrossPage,
         Self::Fpscr,
+        Self::Vscr,
+        Self::Vrsave,
     ];
 
     /// The name a reference file writes.
@@ -85,6 +91,8 @@ impl PpuReferenceFacility {
             Self::StoreForwarding => "store_forwarding",
             Self::StringAcrossPage => "string_across_page",
             Self::Fpscr => "fpscr",
+            Self::Vscr => "vscr",
+            Self::Vrsave => "vrsave",
         }
     }
 }

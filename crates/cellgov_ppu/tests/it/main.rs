@@ -60,6 +60,7 @@ mod console_ppu_vfp_rfi_more;
 mod console_ppu_vminmax_avg;
 mod console_ppu_vmul_add_sum;
 mod console_ppu_vmul_even_odd;
+mod console_ppu_vmx;
 mod console_ppu_vmx_float_policy;
 mod console_ppu_vmx_gap_edges;
 mod console_ppu_vmx_int_edges;

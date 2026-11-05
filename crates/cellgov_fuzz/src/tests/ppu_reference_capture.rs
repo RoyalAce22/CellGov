@@ -10,6 +10,11 @@
 //! reads it back into a recorded GPR, and that read is its end value. A
 //! case of a floating-point unit also expects the FPR bank: each recorded
 //! FPR has the console's value, and every other FPR keeps its start value.
+//! A case of a vector unit expects the VR bank the same way. A vector
+//! starts from the VSCR a new thread starts with. The probe routine loads
+//! no VSCR, so the converter skips a case whose recorded end moves under
+//! another start VSCR. A case that writes the VSCR ends at the value that
+//! its last word, an `mfvscr`, reads back.
 //!
 //! A vector's data is the first [`DATA_BYTES`] bytes of the case's memory
 //! buffer, at [`MEMORY_BASE`]. Its expected data takes each recorded
@@ -18,7 +23,7 @@
 //! CellGov runs each case for three checks:
 //!
 //! - its recorded result reads no register the routine keeps;
-//! - its words write no GPR, FPR or data byte the case leaves unrecorded;
+//! - its words write no GPR, FPR, VR or data byte the case leaves unrecorded;
 //! - its words change no LR, CTR or VRSAVE they do not read back.
 //!
 //! The converter also skips each case of these kinds:
@@ -46,6 +51,7 @@ use cellgov_testkit::console_cases::{capture, parse_table, Capture, Case, Reg, R
 use super::floor::{features, floor};
 use super::fp::FP_UNITS;
 use super::multiple::ended_case_vector;
+use super::vmx::{VMX_MEMORY_UNITS, VMX_UNITS};
 use crate::ppu_reference::{
     word_unit, PpuReferenceInputState, PpuReferenceObservation, PpuReferenceProvenance,
     PpuReferenceSet, PpuReferenceState, PpuReferenceStateBase, PpuReferenceStop, PpuReferenceUnit,
@@ -97,7 +103,7 @@ pub(super) fn is_float_access(unit: &str) -> bool {
 }
 
 /// The probes whose cases fill a facility, never an instruction unit.
-pub(super) const FACILITY_PROBES: [&str; 1] = ["ppu_fpscr_rules"];
+pub(super) const FACILITY_PROBES: [&str; 2] = ["ppu_fpscr_rules", "ppu_vscr_rules"];
 
 /// The documented units whose sets also take the converted cases: the
 /// console settles the form the document leaves undefined.
@@ -131,9 +137,12 @@ pub(super) enum Skip {
     Refused,
     /// The result depends on a register the routine keeps for itself.
     ReadsRoutineRegister,
-    /// The words can write a GPR, FPR or data doubleword the case does not
-    /// record.
+    /// The words can write a GPR, FPR, VR, data doubleword or VSCR the case
+    /// does not record.
     WritesUnrecorded,
+    /// The result or the end VSCR depends on the VSCR an earlier case left:
+    /// the probe routine loads none.
+    UnloadedVscr,
     /// The console run ended the process, so the capture did not complete.
     Ended,
     /// A word of the case moves the PC somewhere other than the next word.
@@ -234,14 +243,17 @@ fn case_units(case: &Case) -> Vec<String> {
         .iter()
         .filter_map(|&w| word_mnemonic(w))
         .collect();
-    let memory = |m: &str| MEMORY_UNITS.contains(&m) || FED_UNITS.contains(&m);
+    let memory = |m: &str| {
+        MEMORY_UNITS.contains(&m) || FED_UNITS.contains(&m) || VMX_MEMORY_UNITS.contains(&m)
+    };
     let any_memory = mnemonics.iter().any(|m| memory(m));
     let mut units: Vec<String> = Vec::new();
     for mnemonic in mnemonics {
+        let m = mnemonic.as_str();
         let listed = if any_memory {
-            memory(&mnemonic)
+            memory(m)
         } else {
-            UNITS.contains(&mnemonic.as_str()) || FP_UNITS.contains(&mnemonic.as_str())
+            UNITS.contains(&m) || FP_UNITS.contains(&m) || VMX_UNITS.contains(&m)
         };
         if listed && !units.contains(&mnemonic) {
             units.push(mnemonic);
@@ -348,19 +360,21 @@ fn doubleword(bytes: &[u8], off: usize) -> u64 {
     u64::from_be_bytes(bytes[off..off + 8].try_into().expect("8 bytes"))
 }
 
-/// The recorded components of an end: each recorded GPR, FPR and data
-/// doubleword, then CR, XER and the FPSCR.
+/// The recorded components of an end: each recorded GPR, FPR, VR and data
+/// doubleword, a VR as its two doublewords, then CR, XER and the FPSCR.
 fn recorded(case: &Case, (s, bytes): &(PpuStateSnapshot, Vec<u8>)) -> Vec<u64> {
-    let mut out: Vec<u64> = case
-        .record
-        .iter()
-        .filter_map(|r| match *r {
-            Reg::Gpr(n) => Some(s.gpr[usize::from(n)]),
-            Reg::Fpr(n) => Some(s.fpr[usize::from(n)]),
-            Reg::Mem(off) => Some(doubleword(bytes, usize::from(off))),
-            Reg::Vr(_) => None,
-        })
-        .collect();
+    let mut out: Vec<u64> = Vec::new();
+    for &r in &case.record {
+        match r {
+            Reg::Gpr(n) => out.push(s.gpr[usize::from(n)]),
+            Reg::Fpr(n) => out.push(s.fpr[usize::from(n)]),
+            Reg::Vr(n) => {
+                let v = s.vr[usize::from(n)];
+                out.extend([(v >> 64) as u64, v as u64]);
+            }
+            Reg::Mem(off) => out.push(doubleword(bytes, usize::from(off))),
+        }
+    }
     out.extend([u64::from(s.cr), s.xer, u64::from(s.fpscr)]);
     out
 }
@@ -371,6 +385,89 @@ fn floating(case: &Case) -> bool {
     case_units(case)
         .iter()
         .any(|u| FP_UNITS.contains(&u.as_str()) || is_float_access(u))
+}
+
+/// Whether the case covers a vector unit, so its vector expects the whole
+/// VR bank.
+fn vector_case(case: &Case) -> bool {
+    case_units(case)
+        .iter()
+        .any(|u| VMX_UNITS.contains(&u.as_str()) || VMX_MEMORY_UNITS.contains(&u.as_str()))
+}
+
+/// [AltiVec-PEM p:2-5 s:2.3.2] VSCR bit 31 is SAT, the saturation bit.
+pub(super) const SAT: u32 = 0x0000_0001;
+/// [AltiVec-PEM p:2-5 s:2.3.2] VSCR bit 15 is NJ, the non-Java mode bit.
+pub(super) const NJ: u32 = 0x0001_0000;
+
+/// The VSCRs besides [`ENTRY_VSCR`] that an earlier case can leave: each
+/// combination of NJ and SAT.
+const OTHER_VSCRS: [u32; 3] = [0, SAT, NJ | SAT];
+
+/// The VSCR a case ends with on the console, or why the vector cannot
+/// give it.
+///
+/// The probe routine loads no VSCR, so a case starts from the VSCR the
+/// case before it left. A vector starts from [`ENTRY_VSCR`], so the
+/// function refuses a case whose recorded end moves under another start
+/// VSCR. A case whose words leave the VSCR alone ends at its start.
+///
+/// A case whose words write the VSCR ends at the value that its last word
+/// reads back. That word is an `mfvscr` into a recorded VR. The function
+/// also refuses a case with a word that writes the VSCR before any
+/// `mtvscr`.
+fn vscr_end(
+    case: &Case,
+    start: &PpuStateSnapshot,
+    end: &(PpuStateSnapshot, Vec<u8>),
+    run: &Run,
+) -> Result<u32, Skip> {
+    for vscr in OTHER_VSCRS {
+        let moved = cellgov_end(
+            case,
+            &PpuStateSnapshot {
+                vscr,
+                ..start.clone()
+            },
+        )
+        .ok_or(Skip::UnloadedVscr)?;
+        if recorded(case, &moved) != recorded(case, end) {
+            return Err(Skip::UnloadedVscr);
+        }
+    }
+    if !writes_vscr(case, start)? {
+        return Ok(start.vscr);
+    }
+    let last = cellgov_ppu::decode::decode(*case.words.last().ok_or(Skip::WritesUnrecorded)?);
+    let Ok(I::Mfvscr { vt }) = last else {
+        return Err(Skip::WritesUnrecorded);
+    };
+    let slot = case
+        .slots()
+        .into_iter()
+        .find_map(|(r, slot)| (r == Reg::Vr(vt)).then_some(slot))
+        .ok_or(Skip::WritesUnrecorded)?;
+    // [AltiVec-PEM p:6-23 s:6.2] mfvscr places the VSCR in the low word of
+    // vD and clears the rest.
+    Ok(run.slots[slot + 1] as u32)
+}
+
+/// Whether the case's words write the VSCR, or
+/// [`Skip::UnloadedVscr`] when one writes it before any `mtvscr`.
+fn writes_vscr(case: &Case, start: &PpuStateSnapshot) -> Result<bool, Skip> {
+    let mut s = start.clone();
+    let mut bytes = data(case);
+    let mut loaded = false;
+    for &w in &case.words {
+        let before = s.vscr;
+        (s, bytes) = execute_state_in(w, &s, MEMORY_BASE, bytes).map_err(|_| Skip::Refused)?;
+        if matches!(cellgov_ppu::decode::decode(w), Ok(I::Mtvscr { .. })) {
+            loaded = true;
+        } else if s.vscr != before && !loaded {
+            return Err(Skip::UnloadedVscr);
+        }
+    }
+    Ok(loaded || s.vscr != start.vscr)
 }
 
 /// `start` with every routine register set to a value no case loads.
@@ -425,8 +522,21 @@ fn expected_data(case: &Case, run: &Run) -> Vec<u8> {
     bytes
 }
 
-/// Whether CellGov's end leaves every unrecorded GPR, FPR and data byte at
-/// its start value.
+/// The expected VR bank: the start values, with each recorded VR set to
+/// the console's value.
+fn expected_vrs(case: &Case, start: &PpuStateSnapshot, run: &Run) -> Vec<String> {
+    let mut vr = start.vr;
+    for (r, slot) in case.slots() {
+        if let Reg::Vr(n) = r {
+            vr[usize::from(n)] =
+                u128::from(run.slots[slot]) << 64 | u128::from(run.slots[slot + 1]);
+        }
+    }
+    vr.iter().map(|v| format!("{v:032x}")).collect()
+}
+
+/// Whether CellGov's end leaves every unrecorded GPR, FPR, VR and data
+/// byte at its start value.
 fn writes_only_recorded(
     case: &Case,
     start: &PpuStateSnapshot,
@@ -438,6 +548,8 @@ fn writes_only_recorded(
         .all(|n| start.gpr[n] == end.gpr[n] || case.record.contains(&Reg::Gpr(n as u8)))
         && (0..start.fpr.len())
             .all(|n| start.fpr[n] == end.fpr[n] || case.record.contains(&Reg::Fpr(n as u8)))
+        && (0..start.vr.len())
+            .all(|n| start.vr[n] == end.vr[n] || case.record.contains(&Reg::Vr(n as u8)))
         && data(case)
             .iter()
             .zip(bytes)
@@ -466,26 +578,26 @@ pub(super) fn skip_reason(
     convertible(case, start, runs).map(|_| ())
 }
 
-/// The special-purpose register values a converted case ends with, or
-/// why the case is left out.
-fn convertible(
-    case: &Case,
-    start: &PpuStateSnapshot,
-    runs: &[Run; 2],
-) -> Result<Vec<(Spr, u64)>, Skip> {
+/// The register values a converted case ends with that no recorded slot
+/// holds.
+struct Ends {
+    /// Each special-purpose register the words change, with its end value.
+    sprs: Vec<(Spr, u64)>,
+    vscr: u32,
+}
+
+/// The register values a converted case ends with, or why the case is
+/// left out.
+fn convertible(case: &Case, start: &PpuStateSnapshot, runs: &[Run; 2]) -> Result<Ends, Skip> {
     if case_units(case).is_empty() {
         return Err(Skip::OtherUnit);
     }
     representable(case, start, runs)
 }
 
-/// The special-purpose register values a case ends with, or why a vector
-/// cannot represent it, whatever units its words belong to.
-fn representable(
-    case: &Case,
-    start: &PpuStateSnapshot,
-    runs: &[Run; 2],
-) -> Result<Vec<(Spr, u64)>, Skip> {
+/// The register values a case ends with, or why a vector cannot
+/// represent it, whatever units its words belong to.
+fn representable(case: &Case, start: &PpuStateSnapshot, runs: &[Run; 2]) -> Result<Ends, Skip> {
     if has_flow(case) {
         return Err(Skip::Flow);
     }
@@ -507,7 +619,9 @@ fn representable(
     if !writes_only_recorded(case, start, &end) {
         return Err(Skip::WritesUnrecorded);
     }
-    spr_readbacks(case, start, &end.0, &runs[0]).ok_or(Skip::WritesUnrecorded)
+    let vscr = vscr_end(case, start, &end, &runs[0])?;
+    let sprs = spr_readbacks(case, start, &end.0, &runs[0]).ok_or(Skip::WritesUnrecorded)?;
+    Ok(Ends { sprs, vscr })
 }
 
 pub(super) fn value<T>(value: T) -> ReferenceField<T> {
@@ -547,7 +661,7 @@ fn input_state(case: &Case, start: &PpuStateSnapshot) -> PpuReferenceInputState 
         xer: case.xer,
         fpscr: Some(start.fpscr),
         vrsave: 0,
-        vscr: Some(ENTRY_VSCR),
+        vscr: Some(start.vscr),
         tb: 0,
         reservation: None,
     }
@@ -573,12 +687,13 @@ fn expected(
     case: &Case,
     start: &PpuStateSnapshot,
     run: &Run,
-    sprs: &[(Spr, u64)],
+    ends: &Ends,
 ) -> PpuReferenceObservation {
     const RUNTIME: &str = "the console capture does not observe the runtime's effect pipeline";
     let words = case.words.len() as u64;
     let spr = |which: Spr| {
-        sprs.iter()
+        ends.sprs
+            .iter()
             .find_map(|&(s, v)| (s == which).then_some(v))
             .unwrap_or_else(|| which.of(start))
     };
@@ -590,11 +705,15 @@ fn expected(
             } else {
                 unsupported("the fixed-point case records no floating-point register")
             },
-            vr_hex: unsupported(if floating(case) {
-                "the floating-point case records no vector register"
+            vr_hex: if vector_case(case) {
+                value(expected_vrs(case, start, run))
             } else {
-                "the fixed-point case records no vector register"
-            }),
+                unsupported(if floating(case) {
+                    "the floating-point case records no vector register"
+                } else {
+                    "the fixed-point case records no vector register"
+                })
+            },
             pc: value(4 * words),
             cr: value(run.cr),
             lr: value(spr(Spr::Lr)),
@@ -602,7 +721,7 @@ fn expected(
             xer: value(run.xer),
             fpscr: value(run.fpscr),
             vrsave: value(spr(Spr::Vrsave) as u32),
-            vscr: value(ENTRY_VSCR),
+            vscr: value(ends.vscr),
             tb: ReferenceField::Undefined {
                 reason: "the time base advances while the case runs".to_owned(),
             },
@@ -626,7 +745,7 @@ fn vector(
     case: &Case,
     start: &PpuStateSnapshot,
     run: &Run,
-    sprs: &[(Spr, u64)],
+    ends: &Ends,
 ) -> PpuReferenceVector {
     PpuReferenceVector {
         name: format!("{probe}-{}", case.id),
@@ -640,7 +759,7 @@ fn vector(
         initial_state: input_state(case, start),
         memory_base: MEMORY_BASE,
         initial_memory: data(case),
-        expected: expected(case, start, run, sprs),
+        expected: expected(case, start, run, ends),
     }
 }
 
@@ -667,14 +786,14 @@ fn convert_probe(probe: &str, out: &mut Conversion) {
     let source = capture_source(probe);
     for (index, (case, runs)) in cases.iter().zip(&runs).enumerate() {
         let start = case_start(case, index);
-        let sprs = match convertible(case, &start, runs) {
-            Ok(sprs) => sprs,
+        let ends = match convertible(case, &start, runs) {
+            Ok(ends) => ends,
             Err(skip) => {
                 *out.skipped.entry(skip).or_default() += 1;
                 continue;
             }
         };
-        let converted = vector(probe, &source, case, &start, &runs[0], &sprs);
+        let converted = vector(probe, &source, case, &start, &runs[0], &ends);
         for unit in case_units(case) {
             out.candidates
                 .entry(unit)
@@ -684,11 +803,12 @@ fn convert_probe(probe: &str, out: &mut Conversion) {
     }
 }
 
-/// The state case `index` starts from on the console: the table's, with
-/// the FPSCR as the probe routine's load leaves it.
+/// The state case `index` starts from: the table's, with the FPSCR as the
+/// probe routine's load leaves it and the VSCR a new thread starts with.
 fn case_start(case: &Case, index: usize) -> PpuStateSnapshot {
     let mut s = case.initial(index, MEMORY_BASE);
     s.fpscr = loaded_fpscr(s.fpscr);
+    s.vscr = ENTRY_VSCR;
     s
 }
 
@@ -753,9 +873,9 @@ pub(super) fn facility_vectors(probe: &str) -> Vec<PpuReferenceVector> {
         .enumerate()
         .map(|(index, (case, runs))| {
             let start = case_start(case, index);
-            let sprs = representable(case, &start, runs)
+            let ends = representable(case, &start, runs)
                 .unwrap_or_else(|skip| panic!("{probe} {}: {skip:?}", case.id));
-            vector(probe, &source, case, &start, &runs[0], &sprs)
+            vector(probe, &source, case, &start, &runs[0], &ends)
         })
         .collect()
 }

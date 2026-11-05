@@ -1,0 +1,19 @@
+[test]
+name = "ppu_vmx_stores"
+
+# A hardware probe of the vector stores at each address in a quadword.
+# cases.tsv lists the 144 cases. The console capture is the answer;
+# no emulator runs it.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case.
+memory_regions = [
+  { name = "result", addr = 0, size = 18448 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

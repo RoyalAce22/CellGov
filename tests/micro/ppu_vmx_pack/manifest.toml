@@ -1,0 +1,19 @@
+[test]
+name = "ppu_vmx_pack"
+
+# A hardware probe of the vector pack and unpack instructions.
+# cases.tsv lists the 62 cases. The console capture is the answer;
+# no emulator runs it.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case.
+memory_regions = [
+  { name = "result", addr = 0, size = 7952 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

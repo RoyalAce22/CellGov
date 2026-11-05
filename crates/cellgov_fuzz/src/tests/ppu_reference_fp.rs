@@ -19,7 +19,7 @@
 
 use std::collections::BTreeSet;
 
-use super::capture::{facility_vectors, select_by, Conversion, FACILITY_PROBES};
+use super::capture::{facility_vectors, select_by, Conversion};
 use crate::ppu_reference::{
     word_unit, PpuReferenceFacility, PpuReferenceSet, PpuReferenceUnit, PpuReferenceVector,
     ReferenceField, PPU_REFERENCE_SET_SCHEMA_VERSION,
@@ -515,18 +515,15 @@ pub(super) fn fp_required(floor: &FpFloor) -> BTreeSet<String> {
     out
 }
 
-/// The `fpscr` facility's set: every case of the [`FACILITY_PROBES`]
-/// captures, each over two or three words.
+/// The `fpscr` facility's set: every case of the `ppu_fpscr_rules`
+/// capture, each over two or three words.
 pub(super) fn fpscr_facility_set() -> PpuReferenceSet {
     PpuReferenceSet {
         schema_version: PPU_REFERENCE_SET_SCHEMA_VERSION,
         unit: PpuReferenceUnit::Facility {
             name: PpuReferenceFacility::Fpscr,
         },
-        vectors: FACILITY_PROBES
-            .iter()
-            .flat_map(|probe| facility_vectors(probe))
-            .collect(),
+        vectors: facility_vectors("ppu_fpscr_rules"),
     }
 }
 

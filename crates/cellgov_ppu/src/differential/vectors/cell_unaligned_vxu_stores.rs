@@ -17,12 +17,12 @@ use super::super::{InstructionCase, MemorySnapshot};
 use super::case_keep_memory;
 use crate::differential::PpuStateSnapshot;
 
-// Extended opcodes (primary-31 X-form). Stride of 64 encodes the
-// left/right + LRU-hint bits.
-const XO_STVLX: u32 = 775;
-const XO_STVRX: u32 = 839;
+// Extended opcodes (primary-31 X-form), as the ppu_may_trap_vxo<XO>
+// console captures give them.
+const XO_STVLX: u32 = 647;
+const XO_STVRX: u32 = 679;
 const XO_STVLXL: u32 = 903;
-const XO_STVRXL: u32 = 967;
+const XO_STVRXL: u32 = 935;
 
 // Register assignments used throughout the vectors.
 const RA_IDX: u8 = 4;

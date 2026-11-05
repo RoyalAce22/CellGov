@@ -416,16 +416,16 @@ fn cbe_unaligned_vxu_family_decodes_canonical_encodings() {
     let mk = |xo: u32| (31u32 << 26) | regs | (xo << 1);
     let cases: &[(u32, PpuInstruction)] = &[
         (
-            mk(647),
-            PpuInstruction::Lvlxl {
+            mk(519),
+            PpuInstruction::Lvlx {
                 vt: 2,
                 ra: 3,
                 rb: 4,
             },
         ),
         (
-            mk(711),
-            PpuInstruction::Lvrxl {
+            mk(551),
+            PpuInstruction::Lvrx {
                 vt: 2,
                 ra: 3,
                 rb: 4,
@@ -433,6 +433,22 @@ fn cbe_unaligned_vxu_family_decodes_canonical_encodings() {
         ),
         (
             mk(775),
+            PpuInstruction::Lvlxl {
+                vt: 2,
+                ra: 3,
+                rb: 4,
+            },
+        ),
+        (
+            mk(807),
+            PpuInstruction::Lvrxl {
+                vt: 2,
+                ra: 3,
+                rb: 4,
+            },
+        ),
+        (
+            mk(647),
             PpuInstruction::Stvlx {
                 vs: 2,
                 ra: 3,
@@ -440,7 +456,7 @@ fn cbe_unaligned_vxu_family_decodes_canonical_encodings() {
             },
         ),
         (
-            mk(839),
+            mk(679),
             PpuInstruction::Stvrx {
                 vs: 2,
                 ra: 3,
@@ -456,7 +472,7 @@ fn cbe_unaligned_vxu_family_decodes_canonical_encodings() {
             },
         ),
         (
-            mk(967),
+            mk(935),
             PpuInstruction::Stvrxl {
                 vs: 2,
                 ra: 3,

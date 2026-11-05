@@ -32,7 +32,7 @@ The units come from the documents:
   Book III instructions, and one for the words no instruction selects;
 - the facilities no single instruction exercises: `thread_entry`,
   `reservation`, `dcbz_width`, `time_base`, `store_forwarding`,
-  `string_across_page` and `fpscr`.
+  `string_across_page`, `fpscr`, `vscr` and `vrsave`.
 
 Each decoded instruction kind belongs to one of these units, and a test
 fails when a kind has none. A file for a unit deletes that unit's line
@@ -118,6 +118,35 @@ The probes also raise each exception with its enable bit set. A PS3
 process runs with MSR[FE0:FE1] = 0, so the console sets FEX and takes
 no interrupt. No expected value comes from host floating-point
 arithmetic: the converter and the floor read only bit patterns.
+
+The vector load, store, permute, pack, data-stream and VSCR move files
+come from the `ppu_reference::vmx_tests` drift test, from the
+`ppu_vmx_*` and `ppu_vscr_moves` probes and the earlier vector probes.
+A vector of a vector unit expects the whole VR bank. Each set shows:
+
+- for a load, a store, `lvsl` and `lvsr`, each byte offset of the
+  address within a quadword; for the left and right forms, offset 0 is
+  the quadword edge, where a right form moves no byte;
+- for a permute, a select, a shift or a splat, each control, mask, count
+  or index;
+- for a saturating pack, source lanes inside the target range, at its
+  edges and past them, with SAT clear and set before the word and read
+  back after it;
+- for an unpack, negative and positive lanes or both pixel top bits;
+- for a data-stream instruction, each stream, and no change to any
+  register;
+- for `mtvscr` and `mfvscr`, NJ and SAT each clear and set, and the
+  bits `mtvscr` ignores.
+
+The probe routine loads no VSCR, so a case starts from the VSCR the case
+before it left. A vector starts from the VSCR a new thread starts with,
+NJ set. The converter skips a case whose recorded end moves under another
+start VSCR, and a case that writes the VSCR ends at the value its last
+word, an `mfvscr`, reads back. `facility_vscr` holds the
+`ppu_vscr_rules` sequences: SAT kept across words until an `mtvscr`
+clears it, and NJ under a denormal operand. `facility_vrsave` holds the
+VRSAVE the `ppu_vrsave_entry` capture shows a main and a child thread
+starting with, and a write of a value with its high word set, read back.
 
 ## Documented sets
 

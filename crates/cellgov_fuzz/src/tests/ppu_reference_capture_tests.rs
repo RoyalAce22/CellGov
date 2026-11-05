@@ -52,6 +52,9 @@ fn the_converter_skips_only_other_units_and_the_cases_it_cannot_represent() {
     // - WritesUnrecorded: the lswx case that copies the buffer's address
     //   into a register it does not record, and the 14 stfs cases of the
     //   older float probes that record one data doubleword of the region.
+    //   The other 219 are cases of the older vector probes: a vspltisw
+    //   that fills a VR the case does not record, or an mtvscr with no
+    //   mfvscr read-back after the words.
     // - Ended: the tdi and twi cases that trapped; the lq and lswi cases,
     //   whose address move is an `or`; the four invalid or unmapped lswx
     //   forms; and the lwz and stw cases at a null or low address. Each
@@ -60,8 +63,8 @@ fn the_converter_skips_only_other_units_and_the_cases_it_cannot_represent() {
     assert_eq!(
         skipped,
         [
-            (Skip::OtherUnit, 548),
-            (Skip::WritesUnrecorded, 15),
+            (Skip::OtherUnit, 137),
+            (Skip::WritesUnrecorded, 234),
             (Skip::Ended, 11),
             (Skip::Flow, 2)
         ]

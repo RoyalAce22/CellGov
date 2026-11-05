@@ -384,7 +384,7 @@ fn fmt_fp_loads_use_f_registers() {
 fn fmt_vector_memory_uses_v_registers() {
     assert_eq!(fmt(enc_x(31, 2, 0, 9, 103, false)), "lvx        v2, r0, r9");
     assert_eq!(fmt(enc_x(31, 2, 0, 9, 231, false)), "stvx       v2, r0, r9");
-    assert_eq!(fmt(enc_x(31, 2, 3, 9, 775, false)), "stvlx      v2, r3, r9");
+    assert_eq!(fmt(enc_x(31, 2, 3, 9, 647, false)), "stvlx      v2, r3, r9");
     assert_eq!(fmt(enc_x(31, 2, 3, 9, 6, false)), "lvsl       v2, r3, r9");
 }
 

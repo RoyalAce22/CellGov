@@ -67,3 +67,11 @@ mod fp;
 #[cfg(test)]
 #[path = "../tests/ppu_reference_fp_tests.rs"]
 mod fp_tests;
+
+#[cfg(test)]
+#[path = "../tests/ppu_reference_vmx.rs"]
+mod vmx;
+
+#[cfg(test)]
+#[path = "../tests/ppu_reference_vmx_tests.rs"]
+mod vmx_tests;

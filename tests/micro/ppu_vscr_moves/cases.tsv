@@ -1,0 +1,10 @@
+id	asm	words	inputs	record	may_end_process
+vscr/zero	mtvscr v5; mfvscr v4	0x10002e44,0x10800604	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v5=0x00000000_00000000_00000000_00000000	v4	0
+vscr/sat	mtvscr v5; mfvscr v4	0x10002e44,0x10800604	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v5=0x00000000_00000000_00000000_00000001	v4	0
+vscr/nj	mtvscr v5; mfvscr v4	0x10002e44,0x10800604	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v5=0x00000000_00000000_00000000_00010000	v4	0
+vscr/nj-sat	mtvscr v5; mfvscr v4	0x10002e44,0x10800604	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v5=0x00000000_00000000_00000000_00010001	v4	0
+vscr/ones	mtvscr v5; mfvscr v4	0x10002e44,0x10800604	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v5=0x00000000_00000000_00000000_ffffffff	v4	0
+vscr/reserved	mtvscr v5; mfvscr v4	0x10002e44,0x10800604	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v5=0x00000000_00000000_00000000_fffefffe	v4	0
+vscr/high-words	mtvscr v5; mfvscr v4	0x10002e44,0x10800604	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v5=0xffffffff_ffffffff_ffffffff_00000000	v4	0
+vscr/high-words-nj	mtvscr v5; mfvscr v4	0x10002e44,0x10800604	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v5=0xffffffff_ffffffff_ffffffff_00010000	v4	0
+vscr/twice	mtvscr v5; mtvscr v6; mfvscr v4	0x10002e44,0x10003644,0x10800604	cr=0x9abcdef0,xer=0x0,fpscr=0x0,v5=0x00000000_00000000_00000000_00010001,v6=0x00000000_00000000_00000000_00000000	v4	0

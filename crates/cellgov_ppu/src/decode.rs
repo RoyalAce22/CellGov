@@ -800,14 +800,16 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
 
         // Cell BE PPU unaligned-vector loads and stores.
         // [CBE-Handbook p:744 s:A.3.3] PPE-only VMX misaligned helpers.
+        // The ppu_may_trap_vxo<XO> console captures give each extended
+        // opcode; XO 583, 711, 839 and 967 end the process.
         519 => return Ok(PpuInstruction::Lvlx { vt: rt, ra, rb }),
-        583 => return Ok(PpuInstruction::Lvrx { vt: rt, ra, rb }),
-        647 => return Ok(PpuInstruction::Lvlxl { vt: rt, ra, rb }),
-        711 => return Ok(PpuInstruction::Lvrxl { vt: rt, ra, rb }),
-        775 => return Ok(PpuInstruction::Stvlx { vs: rt, ra, rb }),
-        839 => return Ok(PpuInstruction::Stvrx { vs: rt, ra, rb }),
+        551 => return Ok(PpuInstruction::Lvrx { vt: rt, ra, rb }),
+        775 => return Ok(PpuInstruction::Lvlxl { vt: rt, ra, rb }),
+        807 => return Ok(PpuInstruction::Lvrxl { vt: rt, ra, rb }),
+        647 => return Ok(PpuInstruction::Stvlx { vs: rt, ra, rb }),
+        679 => return Ok(PpuInstruction::Stvrx { vs: rt, ra, rb }),
         903 => return Ok(PpuInstruction::Stvlxl { vs: rt, ra, rb }),
-        967 => return Ok(PpuInstruction::Stvrxl { vs: rt, ra, rb }),
+        935 => return Ok(PpuInstruction::Stvrxl { vs: rt, ra, rb }),
 
         // AltiVec-memory family (X-form, primary 31).
         // [AltiVec-PEM p:6-21 s:6.2] lvsl XO=6, [p:6-15] lvebx XO=7,
