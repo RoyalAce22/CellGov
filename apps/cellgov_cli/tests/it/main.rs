@@ -12,6 +12,7 @@ mod compare_observations_tripwire;
 mod compare_region_refusal;
 mod compare_unsupported_baseline;
 mod cross_triple_warnings;
+mod diverge_cr_xer_fixtures;
 mod diverge_fixtures;
 mod dma_overlay;
 mod exit_code_contract;

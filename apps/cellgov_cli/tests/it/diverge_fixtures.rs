@@ -36,7 +36,7 @@ fn linear_addi_program(n: usize) -> GuestMemory {
 /// Run a PPU unit for `n` instructions and serialize the retired
 /// `(pc, hash)` pairs as `PpuStateHash` records -- same byte layout
 /// the runtime emits.
-fn ppu_trace_bytes(mem: &GuestMemory, n: usize) -> Vec<u8> {
+pub(crate) fn ppu_trace_bytes(mem: &GuestMemory, n: usize) -> Vec<u8> {
     let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
     let ctx = ExecutionContext::new(mem).with_trace_per_step(true);
     let _ = ppu.run_until_yield(Budget::new(n as u64), &ctx, &mut Vec::new());
@@ -179,7 +179,7 @@ fn cli_diverge_subcommand_reports_diverge_on_mismatch() {
 
 /// Produce a zoom-trace byte buffer from a PPU run with a configured
 /// full-state window, serialized as `PpuStateFull` records.
-fn ppu_zoom_bytes(mem: &GuestMemory, n: usize, window: (u64, u64)) -> Vec<u8> {
+pub(crate) fn ppu_zoom_bytes(mem: &GuestMemory, n: usize, window: (u64, u64)) -> Vec<u8> {
     let mut ppu = PpuExecutionUnit::new(UnitId::new(0));
     ppu.set_full_state_window(Some(window));
     let ctx = ExecutionContext::new(mem);
