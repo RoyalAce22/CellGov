@@ -130,20 +130,22 @@ fn the_store_reaches_every_view_of_the_segment() {
     assert_eq!(
         rt.memory()
             .read(range(VIEW0_BASE + OFFSET))
-            .map(<[u8]>::to_vec),
+            .map(std::borrow::Cow::into_owned),
         want,
         "the view the store landed in",
     );
     assert_eq!(
         rt.memory()
             .read(range(ALIAS_BASE + OFFSET))
-            .map(<[u8]>::to_vec),
+            .map(std::borrow::Cow::into_owned),
         want,
         "the repeat map in the same space",
     );
     let child = rt.space_memory(S1).expect("the child space exists");
     assert_eq!(
-        child.read(range(VIEW1_BASE + OFFSET)).map(<[u8]>::to_vec),
+        child
+            .read(range(VIEW1_BASE + OFFSET))
+            .map(std::borrow::Cow::into_owned),
         want,
         "and the view in the child space",
     );

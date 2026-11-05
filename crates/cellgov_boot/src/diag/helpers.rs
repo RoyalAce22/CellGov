@@ -27,10 +27,20 @@ pub(crate) fn fetch_raw_at(mem: &GuestMemory, pc: u64) -> Option<u32> {
 
 /// `len` must match the caller's read width; querying with `len=1` mislabels
 /// a PC 1-3 bytes before a boundary as mapped when a 4-byte fetch would fail.
-pub(crate) fn region_label_at(mem: &GuestMemory, addr: u64, len: u64) -> &'static str {
-    mem.containing_region(addr, len)
+///
+/// A range across regions that sit end to end, as a read can run, names
+/// every region it reaches, joined with `+`.
+pub(crate) fn region_label_at(mem: &GuestMemory, addr: u64, len: u64) -> String {
+    if !mem.holds(addr, len) {
+        return String::from("<unmapped>");
+    }
+    let end = addr.saturating_add(len);
+    let labels: Vec<&str> = mem
+        .regions()
+        .filter(|r| r.base() < end && addr < r.base().saturating_add(r.size()))
         .map(|r| r.label())
-        .unwrap_or("<unmapped>")
+        .collect();
+    labels.join("+")
 }
 
 /// Longest readable prefix of `[buf, buf+len)` via O(log len) probes.
@@ -70,3 +80,7 @@ pub(crate) fn format_hle_idx(idx: u32) -> String {
 #[cfg(test)]
 #[path = "tests/helpers_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/region_label_seam_tests.rs"]
+mod region_label_seam_tests;

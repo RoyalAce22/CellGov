@@ -251,7 +251,7 @@ fn rsx_mirror_writes_on_routes_put_to_cursor() {
         .memory()
         .read(ByteRange::new(GuestAddr::new(test_slot(control_register::PUT_OFFSET)), 4).unwrap())
         .unwrap();
-    assert_eq!(mem_bytes, &0x0000_1000u32.to_be_bytes());
+    assert_eq!(*mem_bytes, 0x0000_1000u32.to_be_bytes());
 }
 
 #[test]
@@ -332,7 +332,7 @@ fn rsx_label_write_round_trip_drives_label_memory_end_to_end() {
         .memory()
         .read(ByteRange::new(GuestAddr::new((LABEL_BASE + SEM_OFFSET) as u64), 4).unwrap())
         .unwrap();
-    assert_eq!(pre_bytes, &[0, 0, 0, 0], "label still zero after batch 1");
+    assert_eq!(*pre_bytes, [0, 0, 0, 0], "label still zero after batch 1");
     let mut s2 = rt.step().unwrap();
     rt.commit_step(&mut s2).unwrap();
     let post_bytes = rt
@@ -340,8 +340,8 @@ fn rsx_label_write_round_trip_drives_label_memory_end_to_end() {
         .read(ByteRange::new(GuestAddr::new((LABEL_BASE + SEM_OFFSET) as u64), 4).unwrap())
         .unwrap();
     assert_eq!(
-        post_bytes,
-        &RELEASE_VALUE.to_be_bytes(),
+        *post_bytes,
+        RELEASE_VALUE.to_be_bytes(),
         "label holds the big-endian release value after batch 2"
     );
 }
@@ -559,7 +559,7 @@ fn a_faulted_batch_leaves_the_queued_rsx_work_for_the_next_one() {
     assert_eq!(s1.unit, UnitId::new(0));
     rt.commit_step(&mut s1).unwrap();
     assert_eq!(
-        rt.memory().read(label).unwrap(),
+        rt.memory().read(label).as_deref().unwrap(),
         &[0, 0, 0, 0],
         "the advance pass queued the write for a later batch",
     );
@@ -573,7 +573,7 @@ fn a_faulted_batch_leaves_the_queued_rsx_work_for_the_next_one() {
         "the faulting unit emitted nothing, so nothing of its own was discarded",
     );
     assert_eq!(
-        rt.memory().read(label).unwrap(),
+        rt.memory().read(label).as_deref().unwrap(),
         &[0, 0, 0, 0],
         "and the queued write did not land in the batch that faulted",
     );
@@ -581,7 +581,7 @@ fn a_faulted_batch_leaves_the_queued_rsx_work_for_the_next_one() {
     let mut s3 = rt.step().unwrap();
     rt.commit_step(&mut s3).unwrap();
     assert_eq!(
-        rt.memory().read(label).unwrap(),
+        rt.memory().read(label).as_deref().unwrap(),
         &RELEASE_VALUE.to_be_bytes(),
         "the next batch that did not fault carries it",
     );
@@ -699,8 +699,8 @@ fn a_label_write_resolves_against_the_base_sys_rsx_context_allocate_published() 
         .read(ByteRange::new(GuestAddr::new((reports_addr + OFFSET) as u64), 4).unwrap())
         .expect("reports region is backed");
     assert_eq!(
-        landed,
-        &VALUE.to_be_bytes(),
+        *landed,
+        VALUE.to_be_bytes(),
         "the label write must land at reports_addr + offset, not at the \
          pre-GCM seed or at the bare offset",
     );
@@ -709,7 +709,7 @@ fn a_label_write_resolves_against_the_base_sys_rsx_context_allocate_published() 
         .read(ByteRange::new(GuestAddr::new(0x4000 + OFFSET as u64), 4).unwrap())
         .expect("flat region is backed");
     assert_eq!(
-        seed_slot, &[0u8; 4],
+        *seed_slot, [0u8; 4],
         "the stale pre-GCM seed must not still be the commit target",
     );
 }
@@ -739,5 +739,5 @@ fn a_label_write_falls_back_to_the_seed_while_no_sys_rsx_context_exists() {
         .memory()
         .read(ByteRange::new(GuestAddr::new((LABEL_BASE + OFFSET) as u64), 4).unwrap())
         .expect("flat region is backed");
-    assert_eq!(landed, &VALUE.to_be_bytes());
+    assert_eq!(*landed, VALUE.to_be_bytes());
 }

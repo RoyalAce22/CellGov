@@ -2,6 +2,8 @@
 //! `sys_spu_image_close`, the user-image parse at thread initialize, and
 //! the image group start loads.
 
+use std::borrow::Cow;
+
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
@@ -30,7 +32,7 @@ const EXTRA_IMAGE_ID_BASE: u32 = 0x8000_0000;
 
 /// The path `sys_spu_image_open` names at `path_ptr`, without its NUL,
 /// or the code the kernel answers instead.
-fn image_path(rt: &dyn Lv2Runtime, path_ptr: u32) -> Result<&[u8], errno::Lv2ErrCode> {
+fn image_path(rt: &dyn Lv2Runtime, path_ptr: u32) -> Result<Cow<'_, [u8]>, errno::Lv2ErrCode> {
     let addr = u64::from(path_ptr);
     let Some(path) = rt.read_committed_until(addr, spu::IMAGE_PATH_MAX, 0) else {
         // No NUL sits within the window. If the whole window reads, the
@@ -270,7 +272,7 @@ impl Lv2Host {
             .state
             .content
             .lookup_by_path(path.as_bytes())
-            .is_some_and(|r| r.elf_bytes != img_bytes)
+            .is_some_and(|r| r.elf_bytes != *img_bytes)
         {
             suffix += 1;
             path = format!("{base}:{suffix}");
@@ -392,7 +394,7 @@ impl Lv2Host {
             Err(code) => return Lv2Dispatch::immediate(code.into()),
         };
 
-        let record = match self.state.content.lookup_by_path(path) {
+        let record = match self.state.content.lookup_by_path(&path) {
             Some(r) => r,
             None => {
                 return Lv2Dispatch::immediate(errno::CELL_ENOENT.into());

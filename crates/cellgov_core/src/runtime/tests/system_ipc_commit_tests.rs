@@ -33,7 +33,7 @@ fn call(rt: &mut Runtime, unit: UnitId, number: u64, args: [u64; 4]) -> u32 {
         .unwrap()
         .read(ByteRange::new(GuestAddr::new(OUT), 4).unwrap())
         .expect("the call wrote its word");
-    u32::from_be_bytes(bytes.try_into().unwrap())
+    u32::from_be_bytes(bytes[..].try_into().unwrap())
 }
 
 /// Commit one 4-byte store at `addr` as `unit`'s batch.

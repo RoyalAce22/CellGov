@@ -159,7 +159,7 @@ fn run_with_put(
         .memory()
         .read(cellgov_mem::ByteRange::new(GuestAddr::new(u64::from(OUT)), 4).expect("in range"))
         .expect("the out buffer");
-    let out = u32::from_be_bytes(out.try_into().expect("4 bytes"));
+    let out = u32::from_be_bytes(out[..].try_into().expect("4 bytes"));
     (moved, out, held)
 }
 

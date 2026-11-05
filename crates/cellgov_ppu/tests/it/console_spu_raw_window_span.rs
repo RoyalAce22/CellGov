@@ -108,7 +108,7 @@ fn cellgov(w: &[u32], access: &[u32]) -> (Option<PpuFaultClass>, [u32; 4]) {
     let id_at = |slot: u64| {
         let range = ByteRange::new(GuestAddr::new(OUT + slot), 4).expect("range");
         let bytes = ran.rt.memory().read(range).expect("the id slot");
-        u32::from_be_bytes(bytes.try_into().expect("4"))
+        u32::from_be_bytes(bytes[..].try_into().expect("4"))
     };
     assert_eq!([id_at(0), id_at(8)], [w[4], w[6]], "the Raw SPU ids");
     let raw = ran.rt.lv2_host().raw_spu_unit(1).expect("Raw SPU 1");

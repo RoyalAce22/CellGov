@@ -108,7 +108,7 @@ impl ExecutionUnit for Reader {
     ) -> ExecutionStepResult {
         self.done = true;
         let bytes = ctx.memory().read(word()).unwrap();
-        self.local.copy_from_slice(bytes);
+        self.local.copy_from_slice(&bytes);
         effects.push(Effect::SharedReadIntent {
             range: word(),
             source: self.id,

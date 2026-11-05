@@ -565,7 +565,7 @@ impl Runtime {
         let Some(bytes) = self
             .memory
             .read(range)
-            .and_then(|b| <[u8; 4]>::try_from(b).ok())
+            .and_then(|b| <[u8; 4]>::try_from(&*b).ok())
         else {
             self.lv2_host.log_invariant_break(
                 "dispatch.rsx_flip_done_driver_info_unmapped",

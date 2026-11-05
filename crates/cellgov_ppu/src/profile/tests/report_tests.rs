@@ -102,7 +102,7 @@ fn shipped_coverage_counts_fused_heads_and_quickened_slots_and_skips_consumed_sl
         profile.record(pc);
     }
 
-    let c = super::shipped_coverage(&profile, &shadow, &text);
+    let c = super::shipped_coverage(&profile, &shadow, text.as_slice());
 
     assert_eq!(c.retired, 5);
     assert_eq!(c.dispatches_removed, 1, "one per retirement of the head");
@@ -121,7 +121,7 @@ fn the_report_ranks_by_retirements_and_carries_the_static_count() {
         profile.record(pc);
     }
 
-    let report = ProfileReport::new(&profile, &text, &text, None);
+    let report = ProfileReport::new(&profile, text.as_slice(), &text, None);
 
     let nonzero = InsnClass::of(addi(3)).unwrap();
     let zero = InsnClass::of(addi_zero(4)).unwrap();
@@ -131,7 +131,7 @@ fn the_report_ranks_by_retirements_and_carries_the_static_count() {
     assert_eq!(report.pairs.iter().map(|(_, n)| n).sum::<u64>(), 2);
     assert_eq!(
         report.to_json(),
-        "{\n  \"retired\": 5,\n  \"insns\": [\
+        "{\n  \"retired\": 5,\n  \"unresolved\": 0,\n  \"insns\": [\
          \n    {\"class\": \"Addi imm=nz same\", \"dynamic\": 3, \"static\": 1},\
          \n    {\"class\": \"Addi imm=0 same\", \"dynamic\": 2, \"static\": 2}\
          \n  ],\n  \"pairs\": [\

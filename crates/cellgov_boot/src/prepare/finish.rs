@@ -70,13 +70,9 @@ pub(super) fn dump_boot_memory(rt: &Runtime, addrs: &[u64], sink: &dyn crate::Bo
             None => sink.note(&format!("mem[0x{addr:x}]: invalid address range")),
             Some(r) => match rt.memory().read(r) {
                 Some(slice) => {
-                    let label = rt
-                        .memory()
-                        .containing_region(addr, 32)
-                        .map(|r| r.label())
-                        .unwrap_or("<unmapped>");
+                    let label = crate::diag::region_label_at(rt.memory(), addr, 32);
                     let mut line = format!("mem[0x{addr:x}] ({label}):");
-                    for b in slice {
+                    for b in slice.iter() {
                         line.push_str(&format!(" {b:02x}"));
                     }
                     sink.note(&line);
@@ -158,3 +154,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/rsx_settings_tests.rs"]
 mod rsx_settings_tests;
+
+#[cfg(test)]
+#[path = "tests/dump_mem_seam_tests.rs"]
+mod dump_mem_seam_tests;

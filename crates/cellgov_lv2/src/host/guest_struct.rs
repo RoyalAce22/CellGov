@@ -1,5 +1,7 @@
 //! Big-endian field reads over guest structs, shared by the LV2 handlers.
 
+use std::borrow::Cow;
+
 use crate::host::Lv2Runtime;
 
 /// A guest struct's bytes, read at big-endian field offsets.
@@ -8,14 +10,16 @@ use crate::host::Lv2Runtime;
 ///
 /// Every accessor panics when the field runs past the end of the
 /// wrapped slice.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct GuestStruct<'a> {
-    bytes: &'a [u8],
+    bytes: Cow<'a, [u8]>,
 }
 
 impl<'a> GuestStruct<'a> {
-    pub(crate) fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes }
+    pub(crate) fn new(bytes: impl Into<Cow<'a, [u8]>>) -> Self {
+        Self {
+            bytes: bytes.into(),
+        }
     }
 
     /// The `len` bytes at `addr`, or `None` when the range is unmapped.

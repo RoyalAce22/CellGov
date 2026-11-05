@@ -1,7 +1,7 @@
 //! The extractor refuses a region whose bytes are provisional zeros.
 
 use super::*;
-use cellgov_mem::{PageSize, Region, RegionAccess};
+use cellgov_mem::{FaultContext, PageSize, Region, RegionAccess};
 
 fn desc(name: &str, addr: u64, size: u64) -> RegionDescriptor {
     RegionDescriptor {
@@ -106,17 +106,51 @@ fn a_range_at_the_user_base_right_after_the_reserved_region_is_read() {
 }
 
 #[test]
-fn a_range_crossing_out_of_the_reserved_region_is_unreadable_not_provisional() {
+fn a_range_crossing_out_of_the_reserved_region_is_provisional() {
+    // The read runs across the two regions, so its reserved half would
+    // be provisional zeros.
     let spaces = reserved_zero_abutting_user();
     let err = extract_regions(&spaces, &[desc("straddle", 0x10F8, 16)]).unwrap_err();
     assert!(
         matches!(
             &err,
+            RegionExtractError::Provisional { name, region: "rsx", .. } if name == "straddle"
+        ),
+        "{err:?}"
+    );
+    assert_eq!(spaces[&AddressSpaceId::BOOT].provisional_read_count(), 0);
+}
+
+#[test]
+fn a_range_from_user_memory_into_a_reserved_neighbour_is_provisional() {
+    let spaces = boot_with_reserved_zero();
+    let mut mem = spaces[&AddressSpaceId::BOOT].clone();
+    mem.install_region(0x100, 0xF00, "gap_fill", PageSize::Page4K)
+        .unwrap();
+    let spaces = SpaceSnapshots::from([(AddressSpaceId::BOOT, mem)]);
+    let err = extract_regions(&spaces, &[desc("into_rsx", 0xFF8, 16)]).unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            RegionExtractError::Provisional { name, region: "rsx", .. } if name == "into_rsx"
+        ),
+        "{err:?}"
+    );
+    assert_eq!(spaces[&AddressSpaceId::BOOT].provisional_read_count(), 0);
+}
+
+#[test]
+fn a_range_from_the_reserved_region_into_a_gap_is_unmapped() {
+    let spaces = boot_with_reserved_zero();
+    let err = extract_regions(&spaces, &[desc("past_rsx", 0x10F8, 16)]).unwrap_err();
+    assert!(
+        matches!(
+            &err,
             RegionExtractError::Unreadable {
                 name,
-                source: MemError::Unmapped(_),
+                source: MemError::Unmapped(FaultContext { addr: 0x10F8, .. }),
                 ..
-            } if name == "straddle"
+            } if name == "past_rsx"
         ),
         "{err:?}"
     );

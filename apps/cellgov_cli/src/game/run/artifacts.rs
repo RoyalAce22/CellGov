@@ -254,7 +254,7 @@ fn operand_profile_report(rt: &Runtime) -> ProfileReport {
     let mut report = ProfileReport::default();
     for (space, units) in by_space {
         match rt.space_memory(space) {
-            Ok(mem) => report.merge(report_units(units, mem.as_bytes())),
+            Ok(mem) => report.merge(report_units(units, mem)),
             Err(e) => {
                 let retired: u64 = units.iter().map(|u| u.operand_profile().retired()).sum();
                 eprintln!("save-operand-profile: {retired} retirements left out: {e}");

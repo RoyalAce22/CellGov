@@ -145,7 +145,7 @@ fn an_auxiliary_region_above_the_flat_range_is_readable() {
 }
 
 #[test]
-fn a_region_straddling_two_mapped_regions_is_refused() {
+fn a_region_across_two_adjacent_mapped_regions_reads_both() {
     let mut mem = GuestMemory::new(0x10);
     mem.install_region(0x10, 0x10, "aux", PageSize::Page4K)
         .unwrap();
@@ -154,17 +154,12 @@ fn a_region_straddling_two_mapped_regions_is_refused() {
     let high = ByteRange::new(GuestAddr::new(0x10), 0x10).unwrap();
     mem.apply_commit(high, &[0xBB; 0x10]).unwrap();
     let spaces = SpaceSnapshots::from([(AddressSpaceId::BOOT, mem)]);
-    let err = extract_regions(&spaces, &[desc("boundary", AddressSpaceId::BOOT, 0xC, 8)])
-        .expect_err("no single region holds 0xC..0x14");
-    assert!(
-        matches!(
-            &err,
-            RegionExtractError::Unreadable {
-                source: MemError::Unmapped(_),
-                ..
-            }
-        ),
-        "{err:?}"
+    let extracted = extract_regions(&spaces, &[desc("boundary", AddressSpaceId::BOOT, 0xC, 8)])
+        .expect("the two regions sit end to end");
+    assert_eq!(
+        extracted[0].data,
+        [[0xAA; 4], [0xBB; 4]].concat(),
+        "both regions' bytes, in address order"
     );
 }
 

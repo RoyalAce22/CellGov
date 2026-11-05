@@ -259,7 +259,10 @@ fn a_host_write_lands_in_the_named_space_not_the_boot_space() {
         "equal addresses in different spaces never alias, so space 0's table is untouched",
     );
     assert_eq!(
-        rt.memory().read(range(MAIN, 4)).expect("mapped in space 0"),
+        rt.memory()
+            .read(range(MAIN, 4))
+            .as_deref()
+            .expect("mapped in space 0"),
         &[0u8; 4],
         "space 0's bytes are untouched",
     );
@@ -267,6 +270,7 @@ fn a_host_write_lands_in_the_named_space_not_the_boot_space() {
         rt.space_memory(child)
             .expect("the space exists")
             .read(range(MAIN, 4))
+            .as_deref()
             .expect("mapped in the child space"),
         &[0xAB; 4],
     );
@@ -340,6 +344,7 @@ fn the_fault_driven_mode_suppresses_host_write_records() {
     assert_eq!(
         rt.memory()
             .read(range(MAIN, 4))
+            .as_deref()
             .expect("the region is readable"),
         &[0xAB; 4],
         "suppressing the record must not suppress the write",
@@ -370,12 +375,16 @@ fn a_continuation_payload_lands_in_the_units_own_space() {
         rt.space_memory(child)
             .expect("the space exists")
             .read(range(MAIN, 4))
+            .as_deref()
             .expect("mapped in the child space"),
         &0xAABB_CCDDu32.to_be_bytes(),
         "the pointer came from the waiter's own syscall, so it resolves in its space",
     );
     assert_eq!(
-        rt.memory().read(range(MAIN, 4)).expect("mapped in space 0"),
+        rt.memory()
+            .read(range(MAIN, 4))
+            .as_deref()
+            .expect("mapped in space 0"),
         &[0u8; 4],
         "boot bytes landing here means the payload resolved the wrong space",
     );

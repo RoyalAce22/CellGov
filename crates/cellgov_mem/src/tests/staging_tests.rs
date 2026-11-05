@@ -58,7 +58,7 @@ fn drain_into_writes_in_stage_order() {
     assert_eq!(n, 2);
     assert!(s.is_empty());
     assert_eq!(
-        mem.read(range(0, 16)).unwrap(),
+        mem.read(range(0, 16)).as_deref().unwrap(),
         &[1, 1, 1, 1, 0, 0, 0, 0, 2, 2, 2, 2, 0, 0, 0, 0]
     );
 }
@@ -70,7 +70,10 @@ fn drain_into_overlapping_last_writer_wins_in_stage_order() {
     s.stage(staged(0, &[1, 1, 1, 1]));
     s.stage(staged(2, &[2, 2, 2, 2]));
     s.drain_into(&mut mem).unwrap();
-    assert_eq!(mem.read(range(0, 8)).unwrap(), &[1, 1, 2, 2, 2, 2, 0, 0]);
+    assert_eq!(
+        mem.read(range(0, 8)).as_deref().unwrap(),
+        &[1, 1, 2, 2, 2, 2, 0, 0]
+    );
 }
 
 #[test]
@@ -80,7 +83,7 @@ fn drain_into_empty_is_ok_and_noop() {
     let mut s = StagingMemory::new();
     let n = s.drain_into(&mut mem).unwrap();
     assert_eq!(n, 0);
-    assert_eq!(mem.read(range(0, 4)).unwrap(), &[7, 7, 7, 7]);
+    assert_eq!(mem.read(range(0, 4)).as_deref().unwrap(), &[7, 7, 7, 7]);
 }
 
 #[test]
@@ -93,7 +96,7 @@ fn drain_into_length_mismatch_rejects_whole_batch_with_neighbors_intact() {
     s.stage(staged(8, &[2, 2, 2, 2]));
     let err = s.drain_into(&mut mem).unwrap_err();
     assert_eq!(err, MemError::LengthMismatch);
-    assert_eq!(mem.read(range(0, 12)).unwrap(), &[0; 12]);
+    assert_eq!(mem.read(range(0, 12)).as_deref().unwrap(), &[0; 12]);
     assert_eq!(s.len(), 3);
     s.clear();
 }
@@ -106,7 +109,7 @@ fn drain_into_out_of_range_rejects_whole_batch() {
     s.stage(staged(6, &[2, 2, 2, 2]));
     let err = s.drain_into(&mut mem).unwrap_err();
     assert!(matches!(err, MemError::Unmapped(_)));
-    assert_eq!(mem.read(range(0, 8)).unwrap(), &[0; 8]);
+    assert_eq!(mem.read(range(0, 8)).as_deref().unwrap(), &[0; 8]);
     assert_eq!(s.len(), 2);
     s.clear();
 }
@@ -198,8 +201,8 @@ fn drain_into_a_span_across_adjacent_regions_writes_both() {
     // [0xFC, 0x104): straddles the main/tail boundary at 0x100.
     s.stage(staged(0xFC, &[1, 2, 3, 4, 5, 6, 7, 8]));
     assert_eq!(s.drain_into(&mut mem).unwrap(), 1);
-    assert_eq!(mem.read(range(0xFC, 4)).unwrap(), &[1, 2, 3, 4]);
-    assert_eq!(mem.read(range(0x100, 4)).unwrap(), &[5, 6, 7, 8]);
+    assert_eq!(mem.read(range(0xFC, 4)).as_deref().unwrap(), &[1, 2, 3, 4]);
+    assert_eq!(mem.read(range(0x100, 4)).as_deref().unwrap(), &[5, 6, 7, 8]);
 }
 
 #[test]
@@ -225,7 +228,10 @@ fn drain_into_zero_length_write_to_rw_region_is_noop() {
     let n = s.drain_into(&mut mem).unwrap();
     assert_eq!(n, 1);
     assert!(s.is_empty());
-    assert_eq!(mem.read(range(0, 8)).unwrap(), &[1, 2, 3, 4, 5, 6, 7, 8]);
+    assert_eq!(
+        mem.read(range(0, 8)).as_deref().unwrap(),
+        &[1, 2, 3, 4, 5, 6, 7, 8]
+    );
 }
 
 #[test]

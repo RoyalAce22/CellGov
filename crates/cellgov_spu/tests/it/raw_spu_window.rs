@@ -82,7 +82,7 @@ impl ExecutionUnit for Ppu {
         let polling = match op {
             Op::Poll(addr, mask, want) => {
                 let held = ctx.memory().read(word(addr)).unwrap();
-                u32::from_be_bytes(held.try_into().unwrap()) & mask != want
+                u32::from_be_bytes(held[..].try_into().unwrap()) & mask != want
             }
             _ => false,
         };
@@ -205,7 +205,7 @@ fn run_out(rt: &mut Runtime) {
 
 pub(crate) fn read(rt: &Runtime, addr: u64) -> u32 {
     let bytes = rt.memory().read(word(addr)).unwrap();
-    u32::from_be_bytes(bytes.try_into().unwrap())
+    u32::from_be_bytes(bytes[..].try_into().unwrap())
 }
 
 pub(crate) fn create_ops() -> Vec<Op> {

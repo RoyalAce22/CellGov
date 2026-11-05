@@ -28,7 +28,7 @@ fn every_access_below_the_floor_is_refused_and_the_floor_itself_is_not() {
         mem.apply_commit(range(0, 4), &[1; 4]),
         Err(MemError::Unmapped(_))
     ));
-    assert_eq!(mem.read(range(0x1000, 4)), Some(&[0u8; 4][..]));
+    assert_eq!(mem.read(range(0x1000, 4)).as_deref(), Some(&[0u8; 4][..]));
     assert_eq!(mem.apply_commit(range(0x1000, 4), &[1; 4]), Ok(()));
 }
 

@@ -276,7 +276,7 @@ impl Lv2Host {
         use cellgov_ps3_abi::format::elf::PRX_NAME_MAX_LEN;
         let name_ptr = entry.name_ptr;
         if let Some(bytes) = rt.read_committed_until(u64::from(name_ptr), PRX_NAME_MAX_LEN, 0) {
-            return Some(String::from_utf8_lossy(bytes).into_owned());
+            return Some(String::from_utf8_lossy(&bytes).into_owned());
         }
         // An unreadable name resolves under no library: the entry's
         // NIDs still walk (so the witness counts them) but every

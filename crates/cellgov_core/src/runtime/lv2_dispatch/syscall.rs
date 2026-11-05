@@ -540,8 +540,9 @@ impl Runtime {
             // The segment keeps the window's bytes for its next map.
             let held = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), size as u64)
                 .and_then(|range| mem.read(range))
-                .map(<[u8]>::to_vec);
-            if let Err(err) = mem.remove_region(addr, size) {
+                .map(std::borrow::Cow::into_owned);
+            let removed = mem.remove_region(addr, size);
+            if let Err(err) = &removed {
                 // The window's install was refused, the one path
                 // that leaves a host window with no region; the
                 // install arm logged that break already.
@@ -554,7 +555,9 @@ impl Runtime {
                     ),
                 );
             }
-            if let (Some(bytes), Some(mem_id)) = (held, mem_id) {
+            // With no window removed, `held` came from the regions that
+            // tile the range, and those bytes are no part of the segment.
+            if let (Ok(_), Some(bytes), Some(mem_id)) = (removed, held, mem_id) {
                 self.lv2_host.park_segment_contents(mem_id, bytes);
             }
             // A fetch from the unmapped window must fault, so no decode

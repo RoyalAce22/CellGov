@@ -200,6 +200,7 @@ fn run(commands: &[Command], elements: &[(u32, u8)], stale: [u8; 2]) -> Outcome 
         u32::from_be_bytes(
             rt.memory()
                 .read(range)
+                .as_deref()
                 .expect("main memory")
                 .try_into()
                 .expect("4"),

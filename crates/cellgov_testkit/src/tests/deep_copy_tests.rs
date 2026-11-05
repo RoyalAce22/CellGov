@@ -39,7 +39,7 @@ fn two_space_fixture() -> ScenarioFixture {
 
 fn head(mem: &GuestMemory, addr: u64) -> Option<Vec<u8>> {
     mem.read(ByteRange::new(GuestAddr::new(addr), 4).unwrap())
-        .map(<[u8]>::to_vec)
+        .map(std::borrow::Cow::into_owned)
 }
 
 #[test]

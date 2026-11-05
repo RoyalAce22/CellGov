@@ -28,8 +28,11 @@ fn a_write_across_two_adjacent_read_write_regions_lands_in_both() {
     let edge = BASE + SIZE as u64;
     mem.apply_commit(range(edge - 4, 8), &[1, 2, 3, 4, 5, 6, 7, 8])
         .expect("every byte lies in a read-write region");
-    assert_eq!(mem.read(range(edge - 4, 4)).unwrap(), &[1, 2, 3, 4]);
-    assert_eq!(mem.read(range(edge, 4)).unwrap(), &[5, 6, 7, 8]);
+    assert_eq!(
+        mem.read(range(edge - 4, 4)).as_deref().unwrap(),
+        &[1, 2, 3, 4]
+    );
+    assert_eq!(mem.read(range(edge, 4)).as_deref().unwrap(), &[5, 6, 7, 8]);
 
     // The same bytes written one region at a time give the same hash, so
     // the spanning write marked both regions' pages.
@@ -67,7 +70,7 @@ fn a_write_from_a_read_write_region_into_a_reserved_one_names_the_reserved_regio
             region: "reserved"
         }
     );
-    assert_eq!(mem.read(range(edge - 4, 4)).unwrap(), &[0; 4]);
+    assert_eq!(mem.read(range(edge - 4, 4)).as_deref().unwrap(), &[0; 4]);
     assert_eq!(mem.content_hash(), before);
 }
 

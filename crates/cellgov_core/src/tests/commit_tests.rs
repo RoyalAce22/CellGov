@@ -201,7 +201,7 @@ fn single_shared_write_becomes_visible() {
     let outcome = bed.process(&r, &e).unwrap();
     assert_eq!(outcome.writes_committed, 1);
     assert_eq!(outcome.effects_deferred, 0);
-    assert_eq!(bed.mem.read(range(0, 4)).unwrap(), &[1, 2, 3, 4]);
+    assert_eq!(bed.mem.read(range(0, 4)).as_deref().unwrap(), &[1, 2, 3, 4]);
 }
 
 #[test]
@@ -217,7 +217,7 @@ fn multiple_shared_writes_apply_in_emission_order() {
     let outcome = bed.process(&r, &e).unwrap();
     assert_eq!(outcome.writes_committed, 2);
     assert_eq!(
-        bed.mem.read(range(0, 8)).unwrap(),
+        bed.mem.read(range(0, 8)).as_deref().unwrap(),
         &[1, 1, 2, 2, 2, 2, 0, 0]
     );
 }
@@ -232,7 +232,7 @@ fn non_write_effects_are_deferred() {
     let outcome = bed.process(&r, &e).unwrap();
     assert_eq!(outcome.writes_committed, 1);
     assert_eq!(outcome.effects_deferred, 2);
-    assert_eq!(bed.mem.read(range(0, 2)).unwrap(), &[9, 9]);
+    assert_eq!(bed.mem.read(range(0, 2)).as_deref().unwrap(), &[9, 9]);
 }
 
 /// `ClockRead` and `SharedReadIntent` exist for the dependency
@@ -269,7 +269,7 @@ fn fault_step_discards_everything() {
     let outcome = bed.process(&r, &e).unwrap();
     assert!(outcome.fault_discarded);
     assert_eq!(outcome.writes_committed, 0);
-    assert_eq!(bed.mem.read(range(0, 8)).unwrap(), &[0; 8]);
+    assert_eq!(bed.mem.read(range(0, 8)).as_deref().unwrap(), &[0; 8]);
 }
 
 #[test]
@@ -287,7 +287,7 @@ fn payload_length_mismatch_aborts_batch_atomically() {
     );
     let err = bed.process(&r, &e).unwrap_err();
     assert_eq!(err, CommitError::PayloadLengthMismatch { effect_index: 1 });
-    assert_eq!(bed.mem.read(range(0, 8)).unwrap(), &[0; 8]);
+    assert_eq!(bed.mem.read(range(0, 8)).as_deref().unwrap(), &[0; 8]);
 }
 
 #[test]
@@ -302,7 +302,7 @@ fn out_of_range_aborts_batch_atomically() {
     );
     let err = bed.process(&r, &e).unwrap_err();
     assert_eq!(err, CommitError::OutOfRange { effect_index: 1 });
-    assert_eq!(bed.mem.read(range(0, 8)).unwrap(), &[0; 8]);
+    assert_eq!(bed.mem.read(range(0, 8)).as_deref().unwrap(), &[0; 8]);
 }
 
 #[test]
@@ -394,7 +394,7 @@ fn writes_and_mailbox_sends_compose_in_one_step() {
     assert_eq!(outcome.mailbox_sends_committed, 1);
     assert_eq!(outcome.effects_deferred, 1);
     assert_eq!(
-        bed.mem.read(range(0, 4)).unwrap(),
+        bed.mem.read(range(0, 4)).as_deref().unwrap(),
         &[0xaa, 0xbb, 0xcc, 0xdd]
     );
     assert_eq!(bed.mailboxes.get(mb).unwrap().peek(), Some(0xcafe));
@@ -486,7 +486,7 @@ fn all_four_handled_effects_compose_in_one_step() {
     assert_eq!(outcome.signal_updates_committed, 1);
     assert_eq!(outcome.dma_enqueued, 1);
     assert_eq!(outcome.effects_deferred, 1); // the marker
-    assert_eq!(bed.mem.read(range(0, 4)).unwrap(), &[1, 2, 3, 4]);
+    assert_eq!(bed.mem.read(range(0, 4)).as_deref().unwrap(), &[1, 2, 3, 4]);
     assert_eq!(bed.mailboxes.get(mb).unwrap().peek(), Some(0xfeed));
     assert_eq!(bed.signals.get(sig).unwrap().value(), 0xa5);
     assert_eq!(
@@ -887,7 +887,7 @@ fn writes_mailbox_sends_and_signal_updates_compose_in_one_step() {
     assert_eq!(outcome.mailbox_sends_committed, 1);
     assert_eq!(outcome.signal_updates_committed, 1);
     assert_eq!(outcome.effects_deferred, 1); // the marker
-    assert_eq!(bed.mem.read(range(0, 4)).unwrap(), &[1, 2, 3, 4]);
+    assert_eq!(bed.mem.read(range(0, 4)).as_deref().unwrap(), &[1, 2, 3, 4]);
     assert_eq!(bed.mailboxes.get(mb).unwrap().peek(), Some(0xfeed));
     assert_eq!(bed.signals.get(sig).unwrap().value(), 0xa5);
 }
@@ -1047,7 +1047,7 @@ fn conditional_store_applies_bytes_and_retires_own_reservation() {
     assert!(!bed.reservations.is_held_by(u));
     // Bytes landed.
     let read = bed.mem.read(range(0x100, 4)).unwrap();
-    assert_eq!(read, &[1, 2, 3, 4]);
+    assert_eq!(*read, [1, 2, 3, 4]);
 }
 
 #[test]
@@ -1253,7 +1253,7 @@ fn conditional_store_without_prior_reservation_bumps_counter() {
     assert_eq!(outcome.reservations_cleared, 0);
     // Store still committed.
     let read = bed.mem.read(range(0x100, 4)).unwrap();
-    assert_eq!(read, &[1, 2, 3, 4]);
+    assert_eq!(*read, [1, 2, 3, 4]);
 }
 
 #[test]
@@ -1303,7 +1303,7 @@ fn rsx_label_write_past_the_label_area_commits_when_no_label_base_exists() {
     let outcome = bed.process(&r, &e).expect("absolute offset commits");
     assert_eq!(outcome.writes_committed, 1);
     assert_eq!(
-        bed.mem.read(range(0x1_0000, 4)).unwrap(),
+        bed.mem.read(range(0x1_0000, 4)).as_deref().unwrap(),
         &0xCAFE_BABEu32.to_be_bytes()
     );
 }
@@ -1334,7 +1334,7 @@ fn rsx_label_write_inside_the_semaphore_region_commits_relative_to_the_label_bas
     let outcome = bed.process(&r, &e).expect("relative offset commits");
     assert_eq!(outcome.writes_committed, 1);
     assert_eq!(
-        bed.mem.read(range(0x2040, 4)).unwrap(),
+        bed.mem.read(range(0x2040, 4)).as_deref().unwrap(),
         &0x1234_5678u32.to_be_bytes()
     );
 }
@@ -1355,7 +1355,10 @@ fn rsx_label_write_into_the_report_region_commits_without_tripping_the_guard() {
     let outcome = bed.process(&r, &e).expect("report offset commits");
     assert_eq!(outcome.writes_committed, 1);
     assert_eq!(
-        bed.mem.read(range(0x2000 + offset as u64, 4)).unwrap(),
+        bed.mem
+            .read(range(0x2000 + offset as u64, 4))
+            .as_deref()
+            .unwrap(),
         &0x0BAD_F00Du32.to_be_bytes()
     );
 }

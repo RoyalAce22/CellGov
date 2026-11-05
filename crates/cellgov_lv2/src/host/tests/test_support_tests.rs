@@ -17,7 +17,7 @@ fn read_committed_until_terminator_at_first_byte_returns_empty_prefix() {
     mem.apply_commit(ByteRange::new(GuestAddr::new(0), 1).unwrap(), &[0u8])
         .unwrap();
     let rt = FakeRuntime::with_memory(mem);
-    assert_eq!(rt.read_committed_until(0, 8, 0), Some(&[][..]));
+    assert_eq!(rt.read_committed_until(0, 8, 0).as_deref(), Some(&[][..]));
 }
 
 #[test]

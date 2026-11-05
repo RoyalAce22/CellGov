@@ -49,7 +49,10 @@ fn a_window_splits_the_reserved_region_around_it() {
     );
     mem.apply_commit(range(WINDOW + 4, 4), &[1, 2, 3, 4])
         .unwrap();
-    assert_eq!(mem.read(range(WINDOW + 4, 4)), Some(&[1, 2, 3, 4][..]));
+    assert_eq!(
+        mem.read(range(WINDOW + 4, 4)).as_deref(),
+        Some(&[1, 2, 3, 4][..])
+    );
     assert!(matches!(
         mem.apply_commit(range(WINDOW - 4, 4), &[0; 4]),
         Err(MemError::ReservedWrite { .. })
@@ -79,7 +82,7 @@ fn unmapping_a_window_restores_the_region_and_its_hash() {
     assert_ne!(mem.content_hash(), before.1);
     mem.unmap_window(WINDOW).unwrap();
     assert_eq!((layout(&mem), mem.content_hash()), before);
-    assert_eq!(mem.read(range(WINDOW, 4)), Some(&[0; 4][..]));
+    assert_eq!(mem.read(range(WINDOW, 4)).as_deref(), Some(&[0; 4][..]));
     assert_eq!(mem.content_hash(), mem.content_hash_from_scratch());
 }
 

@@ -1,0 +1,27 @@
+[test]
+name = "spu_get_shm_seam"
+
+# A hardware probe: an SPU thread runs a 32-byte get from inside one
+# 64 KiB shared-memory segment (the control) and across the seam between
+# two segments mapped end to end, and puts what it got to a landing
+# buffer. Each case runs in a fresh group whose exception event goes to
+# a PPU event queue.
+
+[observe]
+# 48 big-endian u32 words, as ppu/main.c lists: 192 bytes. Words 0..3
+# are the failed step, its return code, the case count and the queue
+# destroy's answer; words 4..9 the area, segment and map return codes
+# (word 5 the area's low word); words 10..14 the unmap and free return
+# codes. Two 16-word case records follow at words 16 and 32: receive's
+# answer, the event cause, terminate's answer, join's answer, cause and
+# status, disconnect's and destroy's answers, then the eight landing
+# words.
+memory_regions = [
+  { name = "result", addr = 0, size = 192 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+files = ["spu_main.elf"]

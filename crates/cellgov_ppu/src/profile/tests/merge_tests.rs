@@ -18,7 +18,7 @@ fn report(words: &[u32], pcs: &[u64]) -> ProfileReport {
     for &pc in pcs {
         profile.record(pc);
     }
-    ProfileReport::new(&profile, &text, &text, None)
+    ProfileReport::new(&profile, text.as_slice(), &text, None)
 }
 
 #[test]

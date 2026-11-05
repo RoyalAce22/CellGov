@@ -118,7 +118,7 @@ fn a_raw_spu_is_a_stopped_spu_unit_until_its_destroy_retires_it() {
         .memory()
         .read(ByteRange::new(GuestAddr::new(ID_PTR), 4).unwrap())
         .unwrap();
-    assert_eq!(id, [0, 0, 0, 0], "the create writes id 0");
+    assert_eq!(*id, [0, 0, 0, 0], "the create writes id 0");
     assert_eq!(
         rt.registry().effective_status(raw),
         Some(UnitStatus::Finished),

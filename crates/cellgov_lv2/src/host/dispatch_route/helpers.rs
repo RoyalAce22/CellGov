@@ -95,7 +95,7 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         if len > 0 {
             if let Some(bytes) = rt.read_committed(buf_ptr as u64, len as usize) {
-                self.obs.tty_log.extend_from_slice(bytes);
+                self.obs.tty_log.extend_from_slice(&bytes);
             } else {
                 self.log_invariant_break(
                     "dispatch.tty_write_buffer_unmapped",
@@ -165,7 +165,7 @@ impl Lv2Host {
             bytes.len() < PATH_CAP,
             "resolve_prx_load: read_committed_until returned a {PATH_CAP}-byte slice"
         );
-        let Ok(path) = std::str::from_utf8(bytes) else {
+        let Ok(path) = std::str::from_utf8(&bytes) else {
             self.obs.prx_load_not_found_count += 1;
             return Lv2Dispatch::immediate(errno::CELL_ENOENT.into());
         };

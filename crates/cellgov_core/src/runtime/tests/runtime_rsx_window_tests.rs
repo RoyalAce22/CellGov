@@ -51,6 +51,7 @@ fn a_context_allocate_maps_its_window_past_the_held_granule() {
     let control = u64::from_be_bytes(
         rt.memory()
             .read(ByteRange::new(GuestAddr::new(0x208), 8).unwrap())
+            .as_deref()
             .expect("the dma control out word")
             .try_into()
             .expect("8 bytes"),

@@ -22,7 +22,7 @@ fn read_word(rt: &Runtime, space: AddressSpaceId) -> u32 {
         .unwrap()
         .read(ByteRange::new(GuestAddr::new(OUT), 4).unwrap())
         .expect("the call wrote its word");
-    u32::from_be_bytes(bytes.try_into().unwrap())
+    u32::from_be_bytes(bytes[..].try_into().unwrap())
 }
 
 fn call(rt: &mut Runtime, unit: UnitId, number: u64, args: [u64; 4]) -> Option<u64> {
@@ -40,7 +40,7 @@ fn create(rt: &mut Runtime, unit: UnitId, space: AddressSpaceId, number: u64) ->
         .unwrap()
         .read(ByteRange::new(GuestAddr::new(OUT), 4).unwrap())
         .expect("the create wrote its id");
-    u32::from_be_bytes(bytes.try_into().unwrap())
+    u32::from_be_bytes(bytes[..].try_into().unwrap())
 }
 
 #[test]

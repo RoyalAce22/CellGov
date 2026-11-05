@@ -207,6 +207,7 @@ fn step_then_commit_writes_become_visible() {
     assert_eq!(
         rt.memory()
             .read(cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0), 4).unwrap())
+            .as_deref()
             .unwrap(),
         &[1, 1, 1, 1]
     );
@@ -217,6 +218,7 @@ fn step_then_commit_writes_become_visible() {
     assert_eq!(
         rt.memory()
             .read(cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0), 4).unwrap())
+            .as_deref()
             .unwrap(),
         &[2, 2, 2, 2]
     );

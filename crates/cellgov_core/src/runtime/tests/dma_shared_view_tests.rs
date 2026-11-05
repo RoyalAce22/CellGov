@@ -166,13 +166,15 @@ fn both_views_start_zeroed() {
     assert_eq!(
         rt.memory()
             .read(range(VIEW0_BASE + OFFSET))
-            .map(<[u8]>::to_vec),
+            .map(std::borrow::Cow::into_owned),
         Some(vec![0u8; LEN as usize]),
         "the space-0 view is mapped and zeroed",
     );
     let child = rt.space_memory(S1).expect("the child space exists");
     assert_eq!(
-        child.read(range(VIEW1_BASE + OFFSET)).map(<[u8]>::to_vec),
+        child
+            .read(range(VIEW1_BASE + OFFSET))
+            .map(std::borrow::Cow::into_owned),
         Some(vec![0u8; LEN as usize]),
         "and so is the sibling view",
     );
@@ -187,13 +189,15 @@ fn a_dma_landing_in_a_view_replicates_to_its_sibling() {
     assert_eq!(
         rt.memory()
             .read(range(VIEW0_BASE + OFFSET))
-            .map(<[u8]>::to_vec),
+            .map(std::borrow::Cow::into_owned),
         Some(PAYLOAD.to_vec()),
         "the transfer lands in the view it was aimed at",
     );
     let child = rt.space_memory(S1).expect("the child space exists");
     assert_eq!(
-        child.read(range(VIEW1_BASE + OFFSET)).map(<[u8]>::to_vec),
+        child
+            .read(range(VIEW1_BASE + OFFSET))
+            .map(std::borrow::Cow::into_owned),
         Some(PAYLOAD.to_vec()),
         "and the sibling view names the same bytes, at its own base",
     );
@@ -245,7 +249,7 @@ fn a_landing_over_a_same_space_alias_sweeps_every_holder_the_issuer_included() {
     assert_eq!(
         rt.memory()
             .read(range(ALIAS_BASE + OFFSET))
-            .map(<[u8]>::to_vec),
+            .map(std::borrow::Cow::into_owned),
         Some(PAYLOAD.to_vec()),
         "a repeat map is an alias of the same bytes, so the landing reaches it",
     );

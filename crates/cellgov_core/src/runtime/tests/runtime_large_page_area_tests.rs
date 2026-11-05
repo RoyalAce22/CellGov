@@ -30,6 +30,7 @@ fn a_1m_page_block_is_backed_where_the_kernel_put_it() {
     let base = u32::from_be_bytes(
         rt.memory()
             .read(ByteRange::new(GuestAddr::new(0x100), 4).unwrap())
+            .as_deref()
             .expect("the out word")
             .try_into()
             .expect("4 bytes"),

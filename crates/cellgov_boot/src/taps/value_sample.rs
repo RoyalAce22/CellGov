@@ -91,7 +91,7 @@ impl<W: Write> ValueSample<W> {
         }
         let bytes = ByteRange::new(GuestAddr::new(self.addr), u64::from(self.width))
             .and_then(|range| memory.read(range));
-        self.record(step, bytes);
+        self.record(step, bytes.as_deref());
     }
 
     /// Record one sample of `bytes`, the read result; `None` means the range is unmapped.

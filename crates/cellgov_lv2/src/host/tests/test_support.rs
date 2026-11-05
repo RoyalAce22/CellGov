@@ -1,5 +1,7 @@
 //! Shared test helpers for `Lv2Host` dispatch tests.
 
+use std::borrow::Cow;
+
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
@@ -84,12 +86,12 @@ impl FakeRuntime {
 }
 
 impl Lv2Runtime for FakeRuntime {
-    fn read_committed(&self, addr: u64, len: usize) -> Option<&[u8]> {
+    fn read_committed(&self, addr: u64, len: usize) -> Option<Cow<'_, [u8]>> {
         let start = addr as usize;
         let end = start.checked_add(len)?;
         let bytes = self.memory.as_bytes();
         if end <= bytes.len() {
-            Some(&bytes[start..end])
+            Some(Cow::Borrowed(&bytes[start..end]))
         } else {
             None
         }
@@ -107,7 +109,12 @@ impl Lv2Runtime for FakeRuntime {
             .map(<[u8]>::to_vec)
     }
 
-    fn read_committed_until(&self, addr: u64, max_len: usize, terminator: u8) -> Option<&[u8]> {
+    fn read_committed_until(
+        &self,
+        addr: u64,
+        max_len: usize,
+        terminator: u8,
+    ) -> Option<Cow<'_, [u8]>> {
         let bytes = self.memory.as_bytes();
         let start = addr as usize;
         let end = start.checked_add(max_len)?.min(bytes.len());
@@ -116,7 +123,7 @@ impl Lv2Runtime for FakeRuntime {
         }
         let window = &bytes[start..end];
         let nul_pos = window.iter().position(|&b| b == terminator)?;
-        Some(&window[..nul_pos])
+        Some(Cow::Borrowed(&window[..nul_pos]))
     }
 
     fn committed_overlap_end(&self, addr: u64, size: u64) -> Option<u64> {
@@ -275,7 +282,7 @@ fn seed_private_cond_attr(memory: &mut GuestMemory) {
     let Some(word) = ByteRange::new(GuestAddr::new(at), 4) else {
         return;
     };
-    if memory.read(word) == Some(&[0u8; 4][..]) {
+    if memory.read(word).as_deref() == Some(&[0u8; 4][..]) {
         memory
             .apply_commit(word, &SYS_SYNC_NOT_PROCESS_SHARED.to_be_bytes())
             .expect("the word reads, so it is mapped");

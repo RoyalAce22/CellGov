@@ -115,7 +115,7 @@ fn run(src: u32, bad_size: u32, bad_offset: u32) -> (Vec<YieldReason>, Option<u6
         let range =
             ByteRange::new(GuestAddr::new(u64::from(BUFFER + offset)), 4).expect("in range");
         let bytes = rt.memory().read(range).expect("the buffer");
-        u32::from_be_bytes(bytes.try_into().expect("4 bytes"))
+        u32::from_be_bytes(bytes[..].try_into().expect("4 bytes"))
     });
     (reasons, class, landed)
 }

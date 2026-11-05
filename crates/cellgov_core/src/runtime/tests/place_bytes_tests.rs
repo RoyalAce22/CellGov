@@ -249,7 +249,7 @@ fn a_placement_into_a_shared_view_is_a_named_invariant_break_in_release() {
         breaks_before + 1
     );
     assert_eq!(
-        rt.space_memory(space)
+        &*rt.space_memory(space)
             .expect("the child space is live")
             .read(range(0x3_0000, 4))
             .expect("the sibling view is readable"),

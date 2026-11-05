@@ -153,7 +153,9 @@ fn an_address_mapped_before_the_queue_reaches_the_put_translates() {
     run_out(&mut rt);
     assert_eq!(rt.take_mfc_exception(), None);
     assert_eq!(
-        rt.memory().read(range(LATE)).map(<[u8]>::to_vec),
+        rt.memory()
+            .read(range(LATE))
+            .map(std::borrow::Cow::into_owned),
         Some(vec![0xA5; LEN as usize])
     );
 }
@@ -165,7 +167,9 @@ fn a_raised_put_moves_nothing_and_holds_the_issuers_later_puts() {
     run_out(&mut rt);
     assert!(rt.take_mfc_exception().is_some());
     assert_eq!(
-        rt.memory().read(range(0x40)).map(<[u8]>::to_vec),
+        rt.memory()
+            .read(range(0x40))
+            .map(std::borrow::Cow::into_owned),
         Some(vec![0; LEN as usize]),
         "the later put waits behind the suspended queue"
     );

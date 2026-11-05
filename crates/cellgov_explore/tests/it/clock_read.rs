@@ -94,7 +94,11 @@ fn stored_ticks(rt: &Runtime) -> u64 {
         .memory()
         .read(destination())
         .expect("the destination is mapped for every schedule");
-    u64::from_le_bytes(bytes.try_into().expect("the destination is eight bytes"))
+    u64::from_le_bytes(
+        bytes[..]
+            .try_into()
+            .expect("the destination is eight bytes"),
+    )
 }
 
 /// Units runnable once `prefix` runs.

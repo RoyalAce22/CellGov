@@ -253,7 +253,7 @@ impl Lv2Host {
             return Ok(Vec::new());
         }
         rt.read_committed(u64::from(product_ptr), len)
-            .map(<[u8]>::to_vec)
+            .map(std::borrow::Cow::into_owned)
             .ok_or(errno::CELL_EFAULT)
     }
 

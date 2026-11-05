@@ -105,10 +105,10 @@ pub enum RegionExtractError {
         #[source]
         source: MemError,
     },
-    /// The range lies in a `ReservedZeroReadable` region, so its bytes
-    /// are provisional zeros the run never wrote.
+    /// A byte of the range lies in a `ReservedZeroReadable` region, so
+    /// that byte is a provisional zero the run never wrote.
     #[error(
-        "region {name} at 0x{addr:016x} of {size} bytes in space {space} lies in \
+        "region {name} at 0x{addr:016x} of {size} bytes in space {space} reaches \
          reserved region {region}, whose reads are provisional zeros the run never \
          wrote; an observation carries no provisional bytes, so it cannot carry this \
          region"
@@ -122,7 +122,7 @@ pub enum RegionExtractError {
         addr: u64,
         /// Declared size in bytes.
         size: u64,
-        /// Label of the reserved region the range lies in.
+        /// Label of the first reserved region the range reaches.
         region: &'static str,
     },
 }
@@ -130,8 +130,8 @@ pub enum RegionExtractError {
 /// Read each region through its own space.
 ///
 /// The extractor refuses a repeated name, then a descriptor of zero
-/// bytes, before it resolves the space. It refuses a range in a
-/// `ReservedZeroReadable` region before any read, so the snapshot's
+/// bytes, before it resolves the space. It refuses a range with a byte
+/// in a `ReservedZeroReadable` region before any read, so the snapshot's
 /// provisional-read counter does not change.
 ///
 /// # Errors
@@ -172,16 +172,14 @@ pub(super) fn extract_regions(
                     size: desc.size,
                 }
             })?;
-            if let Some(region) = memory.containing_region(desc.addr, desc.size) {
-                if region.access() == RegionAccess::ReservedZeroReadable {
-                    return Err(RegionExtractError::Provisional {
-                        name: desc.name.clone(),
-                        space: desc.space.raw(),
-                        addr: desc.addr,
-                        size: desc.size,
-                        region: region.label(),
-                    });
-                }
+            if let Some(region) = provisional_region(memory, desc.addr, desc.size) {
+                return Err(RegionExtractError::Provisional {
+                    name: desc.name.clone(),
+                    space: desc.space.raw(),
+                    addr: desc.addr,
+                    size: desc.size,
+                    region,
+                });
             }
             let data = memory
                 .read_checked(range)
@@ -200,6 +198,24 @@ pub(super) fn extract_regions(
             })
         })
         .collect()
+}
+
+/// The label of the first `ReservedZeroReadable` region that holds a
+/// byte of `[addr, addr + size)`, when every byte of the range is held.
+///
+/// A range may run across regions that sit end to end, so a range that
+/// starts in user memory can still reach provisional bytes. A range with
+/// a byte in no region is left to the read, which refuses it as unmapped.
+fn provisional_region(memory: &GuestMemory, addr: u64, size: u64) -> Option<&'static str> {
+    if !memory.holds(addr, size) {
+        return None;
+    }
+    let end = addr.saturating_add(size);
+    memory
+        .regions()
+        .filter(|r| r.base() < end && addr < r.base().saturating_add(r.size()))
+        .find(|r| r.access() == RegionAccess::ReservedZeroReadable)
+        .map(|r| r.label())
 }
 
 #[cfg(test)]

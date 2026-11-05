@@ -47,7 +47,7 @@ pub(super) fn read_path_bytes(
         }
         return Err(errno::CELL_EFAULT);
     };
-    let below_device = path.len() - device_len(path);
+    let below_device = path.len() - device_len(&path);
     let long_name = path
         .split(|&b| b == b'/')
         .any(|name| name.len() > usize::from(CELL_FS_MAX_FS_FILE_NAME_LENGTH));

@@ -30,7 +30,7 @@ fn word(rt: &Runtime, space: AddressSpaceId, addr: u64) -> Option<u32> {
         .space_memory(space)
         .unwrap()
         .read(ByteRange::new(GuestAddr::new(addr), 4).unwrap())?;
-    Some(u32::from_be_bytes(bytes.try_into().unwrap()))
+    Some(u32::from_be_bytes(bytes[..].try_into().unwrap()))
 }
 
 #[test]

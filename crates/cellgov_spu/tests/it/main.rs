@@ -15,6 +15,7 @@ mod console_double_compares;
 mod console_ea_bound;
 mod console_event_edges;
 mod console_events;
+mod console_get_shm_seam;
 mod console_ie_branch_forms;
 mod console_invalid_channel;
 mod console_invalid_npc;

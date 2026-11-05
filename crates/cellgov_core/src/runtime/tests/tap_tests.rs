@@ -190,7 +190,7 @@ struct ReservedReader;
 impl RuntimeTap for ReservedReader {
     fn step(&mut self, _step: u64, memory: &GuestMemory) {
         let range = ByteRange::new(GuestAddr::new(RESERVED), 4).unwrap();
-        assert_eq!(memory.read(range), Some(&[0u8; 4][..]));
+        assert_eq!(memory.read(range).as_deref(), Some(&[0u8; 4][..]));
     }
 }
 

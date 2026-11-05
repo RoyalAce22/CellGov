@@ -4,6 +4,7 @@
 //! commit pipeline in `cellgov_core` after it validates a batch of
 //! `SharedWriteIntent` effects. Execution units must not call it directly.
 
+use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -481,8 +482,8 @@ pub enum MemError {
     },
     /// The mapped regions do not hold the range as its access needs.
     ///
-    /// - A write needs each byte in some region.
-    /// - A read or a window needs the whole range in one region.
+    /// - A read or a write needs each byte in some region.
+    /// - A window needs the whole range in one region.
     #[error("{0}")]
     Unmapped(FaultContext),
     /// Write targeted a non-`ReadWrite` region.
@@ -810,46 +811,64 @@ impl GuestMemory {
     /// [`GuestMemory::read_checked`]: applies access-mode dispatch
     /// (`ReservedZeroReadable` bumps the provisional counter,
     /// `ReservedStrict` faults).
-    fn resolve_read(&self, range: ByteRange) -> Result<&[u8], MemError> {
+    ///
+    /// The range may run across regions that sit end to end, as a load
+    /// runs across adjacent pages that are each translated on their own
+    /// [PPC-Book2 p:3 s:1.3]. A range in one region borrows its bytes; a
+    /// range across regions returns an owned copy, and each
+    /// `ReservedZeroReadable` piece notes its own read.
+    fn resolve_read(&self, range: ByteRange) -> Result<Cow<'_, [u8]>, MemError> {
         let start = range.start().raw();
         let length = range.length();
-        let region = self
-            .containing_region(start, length)
-            .ok_or_else(|| MemError::Unmapped(self.fault_context(start)))?;
-        match region.access {
-            RegionAccess::ReadWrite => {}
-            RegionAccess::ReservedZeroReadable => {
-                self.note_provisional_read(start, length);
-            }
-            RegionAccess::ReservedStrict => {
-                return Err(MemError::ReservedStrictRead {
-                    addr: start,
-                    region: region.label(),
-                });
-            }
+        let span = self
+            .region_span(start, length)
+            .map_err(|_| MemError::Unmapped(self.fault_context(start)))?;
+        let regions = &self.regions[span];
+        if let Some(region) = regions
+            .iter()
+            .find(|r| r.access == RegionAccess::ReservedStrict)
+        {
+            return Err(MemError::ReservedStrictRead {
+                addr: start.max(region.base()),
+                region: region.label(),
+            });
         }
-        let offset = (start - region.base()) as usize;
-        let end = offset + length as usize;
-        Ok(&region.bytes[offset..end])
+        let end = start + length;
+        let mut pieces = regions.iter().map(|r| {
+            let (at, piece_end) = (start.max(r.base()), end.min(r.end()));
+            if r.access == RegionAccess::ReservedZeroReadable {
+                self.note_provisional_read(at, piece_end - at);
+            }
+            let offset = (at - r.base()) as usize;
+            &r.bytes[offset..offset + (piece_end - at) as usize]
+        });
+        if let [_] = regions {
+            return Ok(Cow::Borrowed(pieces.next().unwrap_or_default()));
+        }
+        Ok(Cow::Owned(pieces.flatten().copied().collect()))
     }
 
-    /// Returns `None` if [`GuestMemory::containing_region`] finds no region
-    /// for the range or the target region is `ReservedStrict`. Outside
+    /// Returns `None` if a byte of the range lies in no region, or a
+    /// region the range reaches is `ReservedStrict`. Outside
     /// [`GuestMemory::with_reads_unlogged`], a read from a
     /// `ReservedZeroReadable` region bumps
     /// [`GuestMemory::provisional_read_count`]. Use
     /// [`GuestMemory::read_checked`] for typed errors.
-    pub fn read(&self, range: ByteRange) -> Option<&[u8]> {
+    pub fn read(&self, range: ByteRange) -> Option<Cow<'_, [u8]>> {
         self.resolve_read(range).ok()
     }
 
+    /// The range may run across regions that sit end to end; such a read
+    /// returns an owned copy.
+    ///
     /// # Errors
     ///
-    /// - [`MemError::Unmapped`] with a [`FaultContext`] when
-    ///   [`GuestMemory::containing_region`] finds no region for the range.
-    /// - [`MemError::ReservedStrictRead`] when the target region is
-    ///   `ReservedStrict`.
-    pub fn read_checked(&self, range: ByteRange) -> Result<&[u8], MemError> {
+    /// - [`MemError::Unmapped`] with a [`FaultContext`] when a byte of the
+    ///   range lies in no region.
+    /// - [`MemError::ReservedStrictRead`] when a region the range reaches
+    ///   is `ReservedStrict`. The error's `addr` is the first byte of the
+    ///   range in that region.
+    pub fn read_checked(&self, range: ByteRange) -> Result<Cow<'_, [u8]>, MemError> {
         self.resolve_read(range)
     }
 
@@ -1122,3 +1141,7 @@ mod region_span_tests;
 #[cfg(test)]
 #[path = "tests/provisional_rewind_tests.rs"]
 mod provisional_rewind_tests;
+
+#[cfg(test)]
+#[path = "tests/spanning_read_tests.rs"]
+mod spanning_read_tests;

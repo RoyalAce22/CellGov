@@ -1,6 +1,8 @@
 //! Bridges runtime effect/yield enums onto their `cellgov_trace` twins
 //! and exposes a read-only `MemoryView` to `Lv2Host::dispatch`.
 
+use std::borrow::Cow;
+
 use cellgov_exec::{BarrierKind, YieldReason};
 use cellgov_lv2::{InvariantBreakReason, Lv2Runtime};
 use cellgov_mem::GuestMemory;
@@ -94,7 +96,7 @@ pub(super) struct MemoryView<'a> {
 }
 
 impl Lv2Runtime for MemoryView<'_> {
-    fn read_committed(&self, addr: u64, len: usize) -> Option<&[u8]> {
+    fn read_committed(&self, addr: u64, len: usize) -> Option<Cow<'_, [u8]>> {
         // Linear `.as_bytes()` only covers the main region; route
         // through `GuestMemory::read` to reach stacks, RSX, and
         // SPU-reserved regions.
@@ -111,32 +113,55 @@ impl Lv2Runtime for MemoryView<'_> {
         self.registry.get(unit)?.read_local_store(lsa, len).ok()
     }
 
-    fn read_committed_until(&self, addr: u64, max_len: usize, terminator: u8) -> Option<&[u8]> {
-        // `GuestMemory::read` returns None when a range straddles a
-        // region boundary, so bisect to find the largest readable
+    fn read_committed_until(
+        &self,
+        addr: u64,
+        max_len: usize,
+        terminator: u8,
+    ) -> Option<Cow<'_, [u8]>> {
+        // `GuestMemory::read` returns None when a range runs past the
+        // last mapped byte, so bisect to find the largest readable
         // window <= max_len before scanning for the terminator.
+        //
+        // The probes and the scan run unlogged: a window can run
+        // into a `ReservedZeroReadable` neighbour past the terminator,
+        // and those bytes are no read of the guest's. The one logged
+        // read below covers the string and its terminator, or the
+        // whole window when no terminator is found.
         use cellgov_mem::ByteRange;
-        let region_remaining = {
+        let (window_len, nul_pos) = self.memory.with_reads_unlogged(|mem| {
             let probe = ByteRange::new(cellgov_mem::GuestAddr::new(addr), 1)?;
-            self.memory.read(probe)?;
+            mem.read(probe)?;
             let mut hi = max_len;
             let mut lo = 1;
             while hi > lo {
                 let mid = (lo + hi).div_ceil(2);
                 let r = ByteRange::new(cellgov_mem::GuestAddr::new(addr), mid as u64);
-                if r.and_then(|r| self.memory.read(r)).is_some() {
+                if r.and_then(|r| mem.read(r)).is_some() {
                     lo = mid;
                 } else {
                     hi = mid - 1;
                 }
             }
-            lo
-        };
-        let window_range =
-            ByteRange::new(cellgov_mem::GuestAddr::new(addr), region_remaining as u64)?;
-        let window = self.memory.read(window_range)?;
-        let nul_pos = window.iter().position(|&b| b == terminator)?;
-        Some(&window[..nul_pos])
+            let window = mem.read(ByteRange::new(
+                cellgov_mem::GuestAddr::new(addr),
+                lo as u64,
+            )?)?;
+            Some((lo, window.iter().position(|&b| b == terminator)))
+        })?;
+        let read_len = nul_pos.map_or(window_len, |p| p + 1);
+        let window = self.memory.read(ByteRange::new(
+            cellgov_mem::GuestAddr::new(addr),
+            read_len as u64,
+        )?)?;
+        let nul_pos = nul_pos?;
+        Some(match window {
+            Cow::Borrowed(bytes) => Cow::Borrowed(&bytes[..nul_pos]),
+            Cow::Owned(mut bytes) => {
+                bytes.truncate(nul_pos);
+                Cow::Owned(bytes)
+            }
+        })
     }
 
     fn committed_overlap_end(&self, addr: u64, size: u64) -> Option<u64> {
@@ -159,16 +184,9 @@ impl Lv2Runtime for MemoryView<'_> {
     }
 
     fn writable(&self, addr: u64, len: usize) -> bool {
-        use cellgov_mem::RegionAccess;
-        let Some(end) = (addr).checked_add(len as u64) else {
-            return false;
-        };
-        let Some(region) = self.memory.containing_region(addr, end - addr) else {
-            return false;
-        };
-        match region.access() {
-            RegionAccess::ReadWrite => true,
-            RegionAccess::ReservedZeroReadable | RegionAccess::ReservedStrict => false,
-        }
+        // The commit accepts the same writes, across regions that sit
+        // end to end.
+        cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), len as u64)
+            .is_some_and(|range| self.memory.validate_write(range, len).is_ok())
     }
 }

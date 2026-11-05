@@ -98,5 +98,8 @@ fn the_exit_drain_lands_a_released_list_element_that_holds_no_slot() {
         "no element of the released list stays queued past the exit"
     );
     let range = ByteRange::new(GuestAddr::new(HELD_DESTINATION), 4).expect("fits");
-    assert_eq!(rt.memory.read(range).expect("in memory"), &[0x5A; 4]);
+    assert_eq!(
+        rt.memory.read(range).as_deref().expect("in memory"),
+        &[0x5A; 4]
+    );
 }

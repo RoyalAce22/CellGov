@@ -178,7 +178,7 @@ fn run() -> Answers {
         let range =
             ByteRange::new(GuestAddr::new(u64::from(BUFFER_EA) + offset), 4).expect("in range");
         let bytes = rt.memory().read(range).expect("readable");
-        u32::from_be_bytes(bytes.try_into().expect("4"))
+        u32::from_be_bytes(bytes[..].try_into().expect("4"))
     };
     (stop.status, stop.npc, slots, [buffer(0), buffer(0x10)])
 }

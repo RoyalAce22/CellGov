@@ -97,7 +97,7 @@ fn program(exit_code: u32) -> Vec<u32> {
 fn word_at(rt: &Runtime, addr: u32) -> u32 {
     let range = ByteRange::new(GuestAddr::new(u64::from(addr)), 4).expect("in range");
     let bytes = rt.memory().read(range).expect("readable");
-    u32::from_be_bytes(bytes.try_into().expect("4"))
+    u32::from_be_bytes(bytes[..].try_into().expect("4"))
 }
 
 fn run(exit_code: u32) -> Answers {

@@ -136,7 +136,10 @@ fn run_until_landed(rt: &mut Runtime, ppu: UnitId, overlayer: UnitId) {
             break;
         }
         step_once(rt);
-        let text = rt.memory().read(range(TEXT)).map(<[u8]>::to_vec);
+        let text = rt
+            .memory()
+            .read(range(TEXT))
+            .map(std::borrow::Cow::into_owned);
         if text == Some(LI_R3_1.to_be_bytes().to_vec()) && rt.time().raw() > 4 {
             assert_eq!(
                 r3(rt, ppu),
@@ -147,7 +150,9 @@ fn run_until_landed(rt: &mut Runtime, ppu: UnitId, overlayer: UnitId) {
     }
     assert!(landed(rt, overlayer), "the transfer never landed");
     assert_eq!(
-        rt.memory().read(range(TEXT)).map(<[u8]>::to_vec),
+        rt.memory()
+            .read(range(TEXT))
+            .map(std::borrow::Cow::into_owned),
         Some(LI_R3_2.to_be_bytes().to_vec()),
         "the transfer replaced the loop's first word",
     );

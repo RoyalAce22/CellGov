@@ -4,8 +4,8 @@ use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr};
 
-/// The source of a main-memory-to-local-store copy resolves to no
-/// region.
+/// The source of a main-memory-to-local-store copy does not read: a byte
+/// of it lies in no region, or it reaches a `ReservedStrict` region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Unresolved;
 
@@ -15,8 +15,10 @@ pub(super) struct Unresolved;
 ///
 /// # Errors
 ///
-/// Returns [`Unresolved`] when no region backs the source. A refusal
-/// leaves local store untouched.
+/// Returns [`Unresolved`] when a byte of the source lies in no region,
+/// or the source reaches a `ReservedStrict` region. A source may run
+/// across regions that sit end to end. A refusal leaves local store
+/// untouched.
 pub(super) fn copy_into_local_store(
     state: &mut crate::state::SpuState,
     memory: &cellgov_mem::GuestMemory,
@@ -27,7 +29,7 @@ pub(super) fn copy_into_local_store(
     let bytes = ByteRange::new(GuestAddr::new(ea), u64::from(size))
         .and_then(|src| memory.read(src))
         .ok_or(Unresolved)?;
-    state.write_ls_wrapped(lsa, bytes);
+    state.write_ls_wrapped(lsa, &bytes);
     Ok(())
 }
 

@@ -1468,8 +1468,8 @@ fn prx_start_module_wrapping_p_opt_returns_efault_and_emits_no_writes() {
             None
         }
 
-        fn read_committed(&self, _addr: u64, len: usize) -> Option<&[u8]> {
-            (len == 8).then_some(&self.size_be[..])
+        fn read_committed(&self, _addr: u64, len: usize) -> Option<std::borrow::Cow<'_, [u8]>> {
+            (len == 8).then_some(self.size_be[..].into())
         }
         fn current_tick(&self) -> GuestTicks {
             GuestTicks::ZERO
@@ -1479,7 +1479,7 @@ fn prx_start_module_wrapping_p_opt_returns_efault_and_emits_no_writes() {
             _addr: u64,
             _max_len: usize,
             _terminator: u8,
-        ) -> Option<&[u8]> {
+        ) -> Option<std::borrow::Cow<'_, [u8]>> {
             None
         }
         fn writable(&self, _addr: u64, _len: usize) -> bool {
@@ -1532,8 +1532,8 @@ fn prx_get_module_list_wrapping_p_info_returns_efault_and_emits_no_writes() {
             None
         }
 
-        fn read_committed(&self, _addr: u64, len: usize) -> Option<&[u8]> {
-            (len == 4).then_some(&self.zeros[..])
+        fn read_committed(&self, _addr: u64, len: usize) -> Option<std::borrow::Cow<'_, [u8]>> {
+            (len == 4).then_some(self.zeros[..].into())
         }
         fn current_tick(&self) -> GuestTicks {
             GuestTicks::ZERO
@@ -1543,7 +1543,7 @@ fn prx_get_module_list_wrapping_p_info_returns_efault_and_emits_no_writes() {
             _addr: u64,
             _max_len: usize,
             _terminator: u8,
-        ) -> Option<&[u8]> {
+        ) -> Option<std::borrow::Cow<'_, [u8]>> {
             None
         }
         fn writable(&self, _addr: u64, _len: usize) -> bool {

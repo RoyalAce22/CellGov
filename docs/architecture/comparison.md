@@ -42,10 +42,10 @@ region.** The refusal names the region. A region is unreadable if it:
 - has a name an earlier region already declared
 - declares zero bytes
 - is in a space the run never created
-- is a range no single mapped region contains
+- is a range with a byte no mapped region holds
 - is a reserved range that refuses reads
-- is a `ReservedZeroReadable` range, whose reads are provisional zeros
-  the run never wrote
+- reaches a `ReservedZeroReadable` range, whose reads are provisional
+  zeros the run never wrote
 
 *Why:* an observation never contains bytes nobody read, and a
 same-runner round trip cannot match on them.

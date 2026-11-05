@@ -98,7 +98,7 @@ impl Lv2Host {
             Some(path_ptr) => {
                 let path = rt
                     .read_committed_until(path_ptr, SPAWN_STRING_MAX_LEN, 0)
-                    .map(|b| String::from_utf8_lossy(b).into_owned())
+                    .map(|b| String::from_utf8_lossy(&b).into_owned())
                     .unwrap_or_else(|| String::from("<unreadable>"));
                 // An `arg_size` past `exit2_param::DATA_BLOB_THRESHOLD`
                 // additionally carries the caller's data blob at the

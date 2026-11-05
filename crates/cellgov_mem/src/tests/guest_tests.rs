@@ -12,7 +12,7 @@ fn new_is_zero_initialized() {
     let mem = GuestMemory::new(16);
     assert_eq!(mem.size(), 16);
     let bytes = mem.read(range(0, 16)).unwrap();
-    assert_eq!(bytes, &[0u8; 16]);
+    assert_eq!(*bytes, [0u8; 16]);
 }
 
 const COW_OFFSET: u64 = 0;
@@ -41,11 +41,14 @@ fn write_to_original_does_not_leak_into_clone() {
         .unwrap();
 
     assert_eq!(
-        original.read(range(COW_OFFSET, COW_LEN)).unwrap(),
+        original
+            .read(range(COW_OFFSET, COW_LEN))
+            .as_deref()
+            .unwrap(),
         &FORKED_BYTES
     );
     assert_eq!(
-        clone.read(range(COW_OFFSET, COW_LEN)).unwrap(),
+        clone.read(range(COW_OFFSET, COW_LEN)).as_deref().unwrap(),
         &ORIGINAL_BYTES,
         "COW fork failed: write to original leaked into clone",
     );
@@ -59,12 +62,15 @@ fn write_to_clone_does_not_leak_into_original() {
         .unwrap();
 
     assert_eq!(
-        original.read(range(COW_OFFSET, COW_LEN)).unwrap(),
+        original
+            .read(range(COW_OFFSET, COW_LEN))
+            .as_deref()
+            .unwrap(),
         &ORIGINAL_BYTES,
         "COW fork failed: write to clone leaked into original",
     );
     assert_eq!(
-        clone.read(range(COW_OFFSET, COW_LEN)).unwrap(),
+        clone.read(range(COW_OFFSET, COW_LEN)).as_deref().unwrap(),
         &FORKED_BYTES
     );
 }
@@ -113,7 +119,7 @@ fn original_hash_remains_valid_after_clone_writes() {
 fn read_in_range() {
     let mut mem = GuestMemory::new(16);
     mem.apply_commit(range(4, 4), &[1, 2, 3, 4]).unwrap();
-    assert_eq!(mem.read(range(4, 4)).unwrap(), &[1, 2, 3, 4]);
+    assert_eq!(mem.read(range(4, 4)).as_deref().unwrap(), &[1, 2, 3, 4]);
 }
 
 #[test]
@@ -147,8 +153,11 @@ fn commit_writes_visible_on_read() {
     let mut mem = GuestMemory::new(8);
     mem.apply_commit(range(0, 4), &[0xde, 0xad, 0xbe, 0xef])
         .unwrap();
-    assert_eq!(mem.read(range(0, 4)).unwrap(), &[0xde, 0xad, 0xbe, 0xef]);
-    assert_eq!(mem.read(range(4, 4)).unwrap(), &[0, 0, 0, 0]);
+    assert_eq!(
+        mem.read(range(0, 4)).as_deref().unwrap(),
+        &[0xde, 0xad, 0xbe, 0xef]
+    );
+    assert_eq!(mem.read(range(4, 4)).as_deref().unwrap(), &[0, 0, 0, 0]);
 }
 
 #[test]
@@ -156,7 +165,7 @@ fn commit_length_mismatch_rejected() {
     let mut mem = GuestMemory::new(16);
     let err = mem.apply_commit(range(0, 4), &[1, 2, 3]).unwrap_err();
     assert_eq!(err, MemError::LengthMismatch);
-    assert_eq!(mem.read(range(0, 4)).unwrap(), &[0, 0, 0, 0]);
+    assert_eq!(mem.read(range(0, 4)).as_deref().unwrap(), &[0, 0, 0, 0]);
 }
 
 #[test]
@@ -164,7 +173,7 @@ fn commit_out_of_range_rejected() {
     let mut mem = GuestMemory::new(8);
     let err = mem.apply_commit(range(6, 4), &[1, 2, 3, 4]).unwrap_err();
     assert!(matches!(err, MemError::Unmapped(_)));
-    assert_eq!(mem.read(range(0, 8)).unwrap(), &[0; 8]);
+    assert_eq!(mem.read(range(0, 8)).as_deref().unwrap(), &[0; 8]);
 }
 
 #[test]
@@ -255,7 +264,7 @@ fn containing_region_finds_matching_region() {
 fn commit_zero_length_is_noop() {
     let mut mem = GuestMemory::new(8);
     mem.apply_commit(range(4, 0), &[]).unwrap();
-    assert_eq!(mem.read(range(0, 8)).unwrap(), &[0; 8]);
+    assert_eq!(mem.read(range(0, 8)).as_deref().unwrap(), &[0; 8]);
 }
 
 #[test]
@@ -263,7 +272,10 @@ fn overlapping_commits_apply_in_call_order() {
     let mut mem = GuestMemory::new(8);
     mem.apply_commit(range(0, 4), &[1, 1, 1, 1]).unwrap();
     mem.apply_commit(range(2, 4), &[2, 2, 2, 2]).unwrap();
-    assert_eq!(mem.read(range(0, 8)).unwrap(), &[1, 1, 2, 2, 2, 2, 0, 0]);
+    assert_eq!(
+        mem.read(range(0, 8)).as_deref().unwrap(),
+        &[1, 1, 2, 2, 2, 2, 0, 0]
+    );
 }
 
 #[test]
@@ -314,8 +326,8 @@ fn clone_is_independent() {
     a.apply_commit(range(0, 4), &[9, 9, 9, 9]).unwrap();
     let b = a.clone();
     a.apply_commit(range(0, 4), &[0, 0, 0, 0]).unwrap();
-    assert_eq!(a.read(range(0, 4)).unwrap(), &[0, 0, 0, 0]);
-    assert_eq!(b.read(range(0, 4)).unwrap(), &[9, 9, 9, 9]);
+    assert_eq!(a.read(range(0, 4)).as_deref().unwrap(), &[0, 0, 0, 0]);
+    assert_eq!(b.read(range(0, 4)).as_deref().unwrap(), &[9, 9, 9, 9]);
 }
 
 #[test]
@@ -395,7 +407,7 @@ fn reserved_zero_readable_region_reads_zero_and_bumps_counter() {
     .unwrap();
     assert_eq!(mem.provisional_read_count(), 0);
     let bytes = mem.read(range(0xC000_0000, 8)).unwrap();
-    assert_eq!(bytes, &[0u8; 8]);
+    assert_eq!(*bytes, [0u8; 8]);
     assert_eq!(mem.provisional_read_count(), 1);
     let _ = mem.read(range(0xC000_0040, 4)).unwrap();
     assert_eq!(mem.provisional_read_count(), 2);
@@ -457,8 +469,11 @@ fn multi_region_read_and_commit_route_by_address() {
     .unwrap();
     mem.apply_commit(range(0x10, 4), &[1, 2, 3, 4]).unwrap();
     mem.apply_commit(range(0x1010, 4), &[9, 9, 9, 9]).unwrap();
-    assert_eq!(mem.read(range(0x10, 4)).unwrap(), &[1, 2, 3, 4]);
-    assert_eq!(mem.read(range(0x1010, 4)).unwrap(), &[9, 9, 9, 9]);
+    assert_eq!(mem.read(range(0x10, 4)).as_deref().unwrap(), &[1, 2, 3, 4]);
+    assert_eq!(
+        mem.read(range(0x1010, 4)).as_deref().unwrap(),
+        &[9, 9, 9, 9]
+    );
     assert_eq!(mem.read(range(0x500, 4)), None);
 }
 
@@ -494,7 +509,7 @@ fn read_checked_bumps_provisional_counter_for_reserved_zero_readable() {
     .unwrap();
     assert_eq!(mem.provisional_read_count(), 0);
     let bytes = mem.read_checked(range(0xC000_0000, 8)).unwrap();
-    assert_eq!(bytes, &[0u8; 8]);
+    assert_eq!(*bytes, [0u8; 8]);
     assert_eq!(mem.provisional_read_count(), 1);
 }
 
@@ -527,8 +542,8 @@ fn reset_for_reuse_zeroes_touched_bytes_and_matches_fresh_hash() {
     assert_ne!(mem.content_hash(), fresh);
     mem.reset_for_reuse();
     assert_eq!(mem.content_hash(), fresh);
-    assert_eq!(mem.read(range(0x10, 4)).unwrap(), &[0; 4]);
-    assert_eq!(mem.read(range(0x2000, 4)).unwrap(), &[0; 4]);
+    assert_eq!(mem.read(range(0x10, 4)).as_deref().unwrap(), &[0; 4]);
+    assert_eq!(mem.read(range(0x2000, 4)).as_deref().unwrap(), &[0; 4]);
 }
 
 #[test]
@@ -546,9 +561,12 @@ fn reset_for_reuse_clears_dirty_set_between_resets() {
     mem.apply_commit(range(0x0, 4), &[1, 2, 3, 4]).unwrap();
     mem.reset_for_reuse();
     mem.apply_commit(range(0x2000, 4), &[9, 9, 9, 9]).unwrap();
-    assert_eq!(mem.read(range(0x2000, 4)).unwrap(), &[9, 9, 9, 9]);
+    assert_eq!(
+        mem.read(range(0x2000, 4)).as_deref().unwrap(),
+        &[9, 9, 9, 9]
+    );
     mem.reset_for_reuse();
-    assert_eq!(mem.read(range(0x2000, 4)).unwrap(), &[0; 4]);
+    assert_eq!(mem.read(range(0x2000, 4)).as_deref().unwrap(), &[0; 4]);
 }
 
 #[test]

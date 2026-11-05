@@ -76,7 +76,7 @@ fn a_placement_lands_and_traces_but_publishes_no_host_write() {
         rt.observations().host_writes,
     );
     assert_eq!(
-        rt.memory().read(range(MAIN, 4)).expect("mapped"),
+        rt.memory().read(range(MAIN, 4)).as_deref().expect("mapped"),
         &[0xAB; 4]
     );
     assert!(matches!(
@@ -193,7 +193,7 @@ fn a_rolled_back_lv2_memory_subset_publishes_neither_record() {
     assert!(rt.observations().lv2_effects.is_empty());
     assert!(rt.observations().host_writes.is_empty());
     assert_eq!(
-        rt.memory().read(range(MAIN, 4)).expect("mapped"),
+        rt.memory().read(range(MAIN, 4)).as_deref().expect("mapped"),
         &[0u8; 4],
         "the rolled-back subset landed no bytes either",
     );
@@ -481,7 +481,7 @@ fn a_write_into_a_child_space_publishes_that_space() {
          the space is what tells them apart",
     );
     assert_eq!(
-        rt.memory().read(range(MAIN, 4)).expect("mapped"),
+        rt.memory().read(range(MAIN, 4)).as_deref().expect("mapped"),
         &[0u8; 4],
         "and the boot space is untouched",
     );

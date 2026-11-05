@@ -16,7 +16,8 @@ pub use class::{BaseClass, InsnClass, PairClass};
 pub use counts::OperandProfile;
 pub use load::{LoadOutcome, LoadProfile, LoadSummary};
 pub use report::{
-    coverage, report_units, shipped_coverage, shipped_forms, static_counts, Coverage, ProfileReport,
+    coverage, report_units, shipped_coverage, shipped_forms, static_counts, Coverage,
+    ProfileReport, WordSource,
 };
 
 #[cfg(test)]
@@ -38,3 +39,7 @@ mod merge_tests;
 #[cfg(test)]
 #[path = "tests/load_tests.rs"]
 mod load_tests;
+
+#[cfg(test)]
+#[path = "tests/region_words_tests.rs"]
+mod region_words_tests;

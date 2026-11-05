@@ -98,15 +98,20 @@ struct ShortReader {
 
 #[cfg(debug_assertions)]
 impl Lv2Runtime for ShortReader {
-    fn read_committed(&self, _addr: u64, _len: usize) -> Option<&[u8]> {
-        Some(&self.bytes[..])
+    fn read_committed(&self, _addr: u64, _len: usize) -> Option<std::borrow::Cow<'_, [u8]>> {
+        Some(self.bytes[..].into())
     }
 
     fn current_tick(&self) -> GuestTicks {
         GuestTicks::ZERO
     }
 
-    fn read_committed_until(&self, _addr: u64, _max_len: usize, _terminator: u8) -> Option<&[u8]> {
+    fn read_committed_until(
+        &self,
+        _addr: u64,
+        _max_len: usize,
+        _terminator: u8,
+    ) -> Option<std::borrow::Cow<'_, [u8]>> {
         None
     }
 

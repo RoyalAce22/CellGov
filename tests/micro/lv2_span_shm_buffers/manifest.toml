@@ -1,0 +1,25 @@
+[test]
+name = "lv2_span_shm_buffers"
+
+# A hardware probe: a mutex attribute, an SPU image path and a Raw SPU
+# interrupt-mask out word that each run across the seam between two
+# 64 KiB shared-memory segments mapped end to end.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# 32 big-endian u32 words, as ppu/main.c lists: 128 bytes. Word 0 is
+# the done or progress marker, word 1 the step a progress record names,
+# words 2..7 the area, segment and map return codes (word 3 the area's
+# low word), words 8..11 the two mutex creates across the seam and their
+# destroys, words 12..13 the image opens of an absent path in the
+# probe's data and across the seam, words 14..15 the SPU initialize and
+# Raw SPU create, words 16..24 the three interrupt-mask reads (aligned,
+# at seam - 20, at seam - 4) each as a return code and the two words at
+# the out pointer, word 25 the Raw SPU destroy, words 26..30 the unmap
+# and free return codes.
+memory_regions = [
+  { name = "result", addr = 0, size = 128 },
+]
+
+[expect]
+outcome = "completed"

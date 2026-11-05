@@ -56,7 +56,7 @@ fn import_module(name: &str, funcs: &[(u32, u32)]) -> cellgov_ppu::prx::Imported
 
 fn slot_word(mem: &GuestMemory, addr: u64) -> u32 {
     let range = ByteRange::new(GuestAddr::new(addr), 4).unwrap();
-    read_u32(mem.read(range).expect("mapped"), 0)
+    read_u32(&mem.read(range).expect("mapped"), 0)
 }
 
 #[test]

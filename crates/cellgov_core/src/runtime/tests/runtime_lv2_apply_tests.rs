@@ -184,7 +184,7 @@ fn apply_lv2_effects_loud_rejects_every_unsupported_effect_variant() {
             "{effect:?} must log once under its own site",
         );
     }
-    assert_eq!(rt.memory().read(slot).unwrap(), &[0; 4]);
+    assert_eq!(rt.memory().read(slot).as_deref().unwrap(), &[0; 4]);
     assert_eq!(rt.dma_queue().len(), 0);
 }
 
@@ -253,8 +253,8 @@ fn lv2_apply_rolls_back_count_when_idlist_target_is_reserved() {
         .read(cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x4010), 4).unwrap())
         .expect("pInfo+0x10 is in the ReadWrite region");
     assert_eq!(
-        count_bytes,
-        &0xDEAD_BEEFu32.to_be_bytes(),
+        *count_bytes,
+        0xDEAD_BEEFu32.to_be_bytes(),
         "count write must NOT land when a co-batched slot targets a reserved region"
     );
 }
@@ -312,8 +312,8 @@ fn lv2_apply_rolls_back_count_when_idlist_target_is_unmapped() {
         .read(cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x4010), 4).unwrap())
         .expect("pInfo+0x10 is in the backed region");
     assert_eq!(
-        count_bytes,
-        &0xDEAD_BEEFu32.to_be_bytes(),
+        *count_bytes,
+        0xDEAD_BEEFu32.to_be_bytes(),
         "count write must NOT land when a co-batched slot fails memory-subset validation"
     );
 }
@@ -553,7 +553,7 @@ fn lv2_memory_validation_and_commit_resolve_the_same_space() {
          dispatch.lv2_effect_apply_failed break",
     );
     assert_eq!(
-        rt.memory().read(range4(0x4000)).unwrap(),
+        rt.memory().read(range4(0x4000)).as_deref().unwrap(),
         &0xDEAD_BEEFu32.to_be_bytes(),
         "boot bytes must stay untouched: a commit landing here means validation and \
          commit resolved different spaces",
@@ -607,13 +607,13 @@ fn an_lv2_write_into_a_shared_view_is_a_named_invariant_break_in_release() {
         "the shared-view LV2 write must log exactly one invariant break in release",
     );
     assert_eq!(
-        rt.memory().read(range4(0x20000)).unwrap(),
+        &*rt.memory().read(range4(0x20000)).unwrap(),
         &0xAABB_CCDDu32.to_be_bytes(),
         "the write still lands in the targeted view; the break names the incoherence",
     );
     let space = crate::runtime::spaces::AddressSpaceId::new(1);
     assert_eq!(
-        rt.space_memory(space)
+        &*rt.space_memory(space)
             .unwrap()
             .read(range4(0x30000))
             .unwrap(),

@@ -243,7 +243,7 @@ fn append_register_pointer_line(out: &mut String, mem: &GuestMemory, label: &str
     }
 }
 
-/// Render `--dump-mem-fault` ranges as hex+ASCII; partial-straddle ranges emit the readable prefix.
+/// Render `--dump-mem-fault` ranges as hex+ASCII; a range with an unmapped tail emits the readable prefix.
 pub(crate) fn append_explicit_mem_dump(out: &mut String, mem: &GuestMemory, ranges: &[(u64, u64)]) {
     if ranges.is_empty() {
         return;
@@ -263,7 +263,7 @@ pub(crate) fn append_explicit_mem_dump(out: &mut String, mem: &GuestMemory, rang
                 out.push_str(&format!(
                     "\n    mem[0x{addr:016x} ({region}), {len} bytes]:"
                 ));
-                append_hex_ascii_block(out, addr, slice);
+                append_hex_ascii_block(out, addr, &slice);
             }
             None => match longest_readable_prefix(mem, addr, len) {
                 Some((prefix_len, bytes)) => {

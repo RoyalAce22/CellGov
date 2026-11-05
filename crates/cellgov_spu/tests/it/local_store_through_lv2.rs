@@ -149,7 +149,7 @@ fn a_write_lands_in_local_store_and_a_read_returns_it_zero_extended() {
             .memory()
             .read(ByteRange::new(GuestAddr::new(at), 8).unwrap())
             .unwrap();
-        u64::from_be_bytes(bytes.try_into().unwrap())
+        u64::from_be_bytes(bytes[..].try_into().unwrap())
     };
     assert_eq!(word(WRITTEN_PTR), 0xCAFE_BABE);
     assert_eq!(word(UNTOUCHED_PTR), 0x1122_3344);

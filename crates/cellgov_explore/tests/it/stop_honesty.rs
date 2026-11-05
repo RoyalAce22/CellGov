@@ -67,7 +67,7 @@ fn a_run_parked_on_a_transfer_finishes_the_workload() {
         .memory()
         .read(ByteRange::new(GuestAddr::new(128), 4).unwrap())
         .unwrap();
-    assert_eq!(read, &[0xde, 0xad, 0xbe, 0xef], "the transfer landed");
+    assert_eq!(*read, [0xde, 0xad, 0xbe, 0xef], "the transfer landed");
 }
 
 #[test]

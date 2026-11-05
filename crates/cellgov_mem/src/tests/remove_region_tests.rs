@@ -73,7 +73,10 @@ fn a_removed_range_takes_a_fresh_zeroed_install() {
     mem.remove_region(BASE, SIZE).expect("the region exists");
     mem.install_region(BASE, SIZE, "shm", PageSize::Page64K)
         .expect("the range is free again");
-    assert_eq!(mem.read(range(BASE, 4)), Some(&[0u8, 0, 0, 0][..]));
+    assert_eq!(
+        mem.read(range(BASE, 4)).as_deref(),
+        Some(&[0u8, 0, 0, 0][..])
+    );
     assert_eq!(mem.content_hash(), mem.content_hash_from_scratch());
 }
 

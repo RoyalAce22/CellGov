@@ -47,7 +47,7 @@ fn report_trace_tty(mem: &cellgov_mem::GuestMemory, args: &[u64; 9], sink: &dyn 
     let full = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(buf), len)
         .and_then(|r| mem.read(r));
     if let Some(slice) = full {
-        let text = String::from_utf8_lossy(slice);
+        let text = String::from_utf8_lossy(&slice);
         let terminator = if text.ends_with('\n') { "" } else { "\n" };
         sink.guest_text(&format!("       -> tty: {text}{terminator}"));
         return;

@@ -33,8 +33,14 @@ fn a_shared_write_across_two_adjacent_regions_commits_into_both() {
     );
     let outcome = bed.process(&r, &e).expect("every byte lies in a region");
     assert_eq!(outcome.writes_committed, 1);
-    assert_eq!(bed.memory().read(range(EDGE - 2, 2)).unwrap(), &[1, 2]);
-    assert_eq!(bed.memory().read(range(EDGE, 2)).unwrap(), &[3, 4]);
+    assert_eq!(
+        bed.memory().read(range(EDGE - 2, 2)).as_deref().unwrap(),
+        &[1, 2]
+    );
+    assert_eq!(
+        bed.memory().read(range(EDGE, 2)).as_deref().unwrap(),
+        &[3, 4]
+    );
 }
 
 #[test]
@@ -53,5 +59,5 @@ fn a_shared_write_running_past_two_regions_into_a_gap_aborts_the_batch() {
         .process(&r, &e)
         .expect_err("two bytes lie past the high region");
     assert_eq!(err, CommitError::OutOfRange { effect_index: 1 });
-    assert_eq!(bed.memory().read(range(0, 4)).unwrap(), &[0; 4]);
+    assert_eq!(bed.memory().read(range(0, 4)).as_deref().unwrap(), &[0; 4]);
 }

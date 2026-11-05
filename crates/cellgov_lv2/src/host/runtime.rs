@@ -3,6 +3,8 @@
 //! `Lv2Runtime` is the host's input view; [`crate::dispatch::Lv2Dispatch`]
 //! is its output.
 
+use std::borrow::Cow;
+
 use cellgov_event::UnitId;
 use cellgov_time::GuestTicks;
 
@@ -12,10 +14,12 @@ use cellgov_time::GuestTicks;
 /// commit-pipeline ordering at the triggering syscall's tick rather
 /// than tick 0.
 pub trait Lv2Runtime {
+    /// The range may run across regions that sit end to end.
+    ///
     /// # Contract
     /// `Some(bytes)` must carry exactly `len` bytes; short reads are
     /// a trait violation. `None` means the range is out of bounds.
-    fn read_committed(&self, addr: u64, len: usize) -> Option<&[u8]>;
+    fn read_committed(&self, addr: u64, len: usize) -> Option<Cow<'_, [u8]>>;
 
     /// Current guest tick.
     fn current_tick(&self) -> GuestTicks;
@@ -29,10 +33,16 @@ pub trait Lv2Runtime {
     /// - `None` when `addr` is unmapped, no terminator appears within
     ///   `max_len` mapped bytes, or the address is in a
     ///   `ReservedStrict` region.
-    fn read_committed_until(&self, addr: u64, max_len: usize, terminator: u8) -> Option<&[u8]>;
+    fn read_committed_until(
+        &self,
+        addr: u64,
+        max_len: usize,
+        terminator: u8,
+    ) -> Option<Cow<'_, [u8]>>;
 
-    /// True iff a `len`-byte write at `addr` lands entirely inside a
-    /// single `ReadWrite` region.
+    /// True iff every byte of a `len`-byte write at `addr` lands in a
+    /// `ReadWrite` region. The range may run across regions that sit end
+    /// to end.
     fn writable(&self, addr: u64, len: usize) -> bool;
 
     /// The exclusive end of a committed region intersecting

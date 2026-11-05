@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -26,22 +27,28 @@ impl ZeroProbeRuntime {
 }
 
 impl Lv2Runtime for ZeroProbeRuntime {
-    fn read_committed(&self, addr: u64, len: usize) -> Option<&[u8]> {
+    fn read_committed(&self, addr: u64, len: usize) -> Option<Cow<'_, [u8]>> {
         let start = usize::try_from(addr).ok()?;
-        self.memory.as_bytes().get(start..start.checked_add(len)?)
+        let bytes = self.memory.as_bytes().get(start..start.checked_add(len)?)?;
+        Some(Cow::Borrowed(bytes))
     }
 
     fn current_tick(&self) -> GuestTicks {
         GuestTicks::ZERO
     }
 
-    fn read_committed_until(&self, addr: u64, max_len: usize, terminator: u8) -> Option<&[u8]> {
+    fn read_committed_until(
+        &self,
+        addr: u64,
+        max_len: usize,
+        terminator: u8,
+    ) -> Option<Cow<'_, [u8]>> {
         let bytes = self.memory.as_bytes();
         let start = usize::try_from(addr).ok()?;
         let end = start.checked_add(max_len)?.min(bytes.len());
         let window = bytes.get(start..end)?;
         let nul = window.iter().position(|&b| b == terminator)?;
-        Some(&window[..nul])
+        Some(Cow::Borrowed(&window[..nul]))
     }
 
     fn writable(&self, addr: u64, len: usize) -> bool {

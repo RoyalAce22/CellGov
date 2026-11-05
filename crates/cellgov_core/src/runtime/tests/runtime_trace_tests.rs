@@ -675,9 +675,9 @@ impl ExecutionUnit for ReservedReadingUnit {
         use cellgov_mem::{ByteRange, GuestAddr};
         let word = ByteRange::new(GuestAddr::new(0xC000_0010), 4).unwrap();
         let dword = ByteRange::new(GuestAddr::new(0xC000_0020), 8).unwrap();
-        assert_eq!(ctx.memory().read(word), Some(&[0u8; 4][..]));
-        assert_eq!(ctx.memory().read(word), Some(&[0u8; 4][..]));
-        assert_eq!(ctx.memory().read(dword), Some(&[0u8; 8][..]));
+        assert_eq!(ctx.memory().read(word).as_deref(), Some(&[0u8; 4][..]));
+        assert_eq!(ctx.memory().read(word).as_deref(), Some(&[0u8; 4][..]));
+        assert_eq!(ctx.memory().read(dword).as_deref(), Some(&[0u8; 8][..]));
         let n = self.steps.get() + 1;
         self.steps.set(n);
         if self.faults {
@@ -806,7 +806,7 @@ fn a_host_side_read_between_step_and_commit_is_traced_at_the_commit_under_the_co
     // An LV2 arm or the RSX model reading on the committing unit's
     // behalf goes through the same `GuestMemory::read` path.
     let host = ByteRange::new(GuestAddr::new(0xC000_0040), 16).unwrap();
-    assert_eq!(rt.memory().read(host), Some(&[0u8; 16][..]));
+    assert_eq!(rt.memory().read(host).as_deref(), Some(&[0u8; 16][..]));
     rt.commit_step(&mut s1).unwrap();
     let reads = reserved_reads(&rt);
     assert_eq!(reads.len(), step_reads + 1);

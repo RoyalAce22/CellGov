@@ -30,6 +30,7 @@ fn dma_completion_fires_and_applies_transfer() {
     assert_eq!(
         rt.memory()
             .read(ByteRange::new(GuestAddr::new(128), 4).unwrap())
+            .as_deref()
             .unwrap(),
         &[0xaa, 0xbb, 0xcc, 0xdd]
     );
@@ -239,6 +240,7 @@ fn a_dma_completion_for_a_finished_issuer_does_not_resurrect_it() {
     assert_eq!(
         rt.memory()
             .read(ByteRange::new(GuestAddr::new(128), 4).unwrap())
+            .as_deref()
             .unwrap(),
         &[0xaa, 0xbb, 0xcc, 0xdd]
     );
@@ -299,6 +301,7 @@ fn a_dma_completion_for_a_faulted_issuer_does_not_resurrect_it() {
     assert_eq!(
         rt.memory()
             .read(ByteRange::new(GuestAddr::new(128), 4).unwrap())
+            .as_deref()
             .unwrap(),
         &[0x55, 0x66, 0x77, 0x88],
         "the accepted transfer still lands"
@@ -345,6 +348,7 @@ fn a_time_warp_over_a_finished_issuers_completion_terminates_at_all_blocked() {
     assert_eq!(
         rt.memory()
             .read(ByteRange::new(GuestAddr::new(128), 4).unwrap())
+            .as_deref()
             .unwrap(),
         &[0x11, 0x22, 0x33, 0x44],
         "the in-flight payload still lands during the warp"

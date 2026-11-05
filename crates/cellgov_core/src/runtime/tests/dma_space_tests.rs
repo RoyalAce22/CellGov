@@ -163,7 +163,9 @@ fn a_child_space_transfer_over_space_zero_ends_is_accepted_and_completes() {
     // therefore evidence of a completion, not of the placement or of a
     // write by the issuer.
     assert_eq!(
-        rt.memory().read(range(SPACE0_DST)).map(<[u8]>::to_vec),
+        rt.memory()
+            .read(range(SPACE0_DST))
+            .map(std::borrow::Cow::into_owned),
         Some(vec![0u8; LEN as usize]),
         "the destination carried the payload before any completion fired",
     );
@@ -181,7 +183,9 @@ fn a_child_space_transfer_over_space_zero_ends_is_accepted_and_completes() {
          about where the transfer would have landed",
     );
     assert_eq!(
-        rt.memory().read(range(SPACE0_DST)).map(<[u8]>::to_vec),
+        rt.memory()
+            .read(range(SPACE0_DST))
+            .map(std::borrow::Cow::into_owned),
         Some(PAYLOAD.to_vec()),
         "the completion writes the destination in space 0",
     );
@@ -208,7 +212,9 @@ fn a_child_space_transfer_over_a_child_only_source_raises_in_space_zero() {
         cellgov_dma::MfcCommandError::DataSegment { ea: CHILD_ONLY }
     );
     assert_eq!(
-        rt.memory().read(range(SPACE0_DST)).map(<[u8]>::to_vec),
+        rt.memory()
+            .read(range(SPACE0_DST))
+            .map(std::borrow::Cow::into_owned),
         Some(vec![0u8; LEN as usize]),
         "a raised transfer moves nothing",
     );

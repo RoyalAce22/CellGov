@@ -4,6 +4,8 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
+use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
+
 use super::class::{InsnClass, PairClass};
 use super::counts::OperandProfile;
 use crate::decode;
@@ -39,6 +41,31 @@ fn word_at(base: u64, text: &[u8], pc: u64) -> Option<u32> {
     let off = usize::try_from(pc.checked_sub(base)?).ok()?;
     let bytes = text.get(off..off.checked_add(4)?)?;
     Some(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+}
+
+/// Where a report reads the word at a retired address.
+pub trait WordSource {
+    /// The word at `pc`, or `None` when nothing holds all four bytes.
+    fn word(&self, pc: u64) -> Option<u32>;
+}
+
+/// A flat image whose first byte is at address 0.
+impl WordSource for [u8] {
+    fn word(&self, pc: u64) -> Option<u32> {
+        word_at(0, self, pc)
+    }
+}
+
+/// Guest memory: each word comes from the region that holds it. The read
+/// logs no provisional read, because the report is a host observer.
+impl WordSource for GuestMemory {
+    fn word(&self, pc: u64) -> Option<u32> {
+        let range = ByteRange::new(GuestAddr::new(pc), 4)?;
+        self.with_reads_unlogged(|mem| {
+            let b = mem.read(range)?;
+            <[u8; 4]>::try_from(&*b).ok().map(u32::from_be_bytes)
+        })
+    }
 }
 
 /// What `covers` and `fuses` would cover of `profile`'s retirements in
@@ -96,10 +123,10 @@ pub fn coverage(
 ///
 /// A slot counts as quickened when the shadow holds a variant other than
 /// the decode of the word that `mem` holds there.
-pub fn shipped_coverage(
+pub fn shipped_coverage<M: WordSource + ?Sized>(
     profile: &OperandProfile,
     shadow: &PredecodedShadow,
-    mem: &[u8],
+    mem: &M,
 ) -> Coverage {
     let mut out = Coverage {
         retired: profile.retired(),
@@ -120,10 +147,10 @@ pub fn shipped_coverage(
 /// for `profile`, by variant name, most retired first.
 ///
 /// A fused pair counts the retirements of its head.
-pub fn shipped_forms(
+pub fn shipped_forms<M: WordSource + ?Sized>(
     profile: &OperandProfile,
     shadow: &PredecodedShadow,
-    mem: &[u8],
+    mem: &M,
 ) -> Vec<(String, u64)> {
     let mut forms: BTreeMap<String, u64> = BTreeMap::new();
     for_each_shipped(profile, shadow, mem, |slot, n| {
@@ -137,10 +164,10 @@ pub fn shipped_forms(
 ///
 /// A slot is quickened as [`shipped_coverage`] says. The walk skips a
 /// consumed slot, because a branch that reaches it runs its stored word.
-fn for_each_shipped(
+fn for_each_shipped<M: WordSource + ?Sized>(
     profile: &OperandProfile,
     shadow: &PredecodedShadow,
-    mem: &[u8],
+    mem: &M,
     mut each: impl FnMut(&PpuInstruction, u64),
 ) {
     for (&pc, &n) in &profile.pcs {
@@ -151,7 +178,7 @@ fn for_each_shipped(
             continue;
         }
         if !slot.is_super_pair() {
-            let raw = word_at(0, mem, pc).and_then(|w| decode::decode(w).ok());
+            let raw = mem.word(pc).and_then(|w| decode::decode(w).ok());
             if !raw.is_some_and(|raw| raw != slot) {
                 continue;
             }
@@ -169,10 +196,11 @@ fn variant_name(insn: &PpuInstruction) -> String {
 ///
 /// The units must run in the address space whose memory is `mem`. For
 /// units of several spaces, the caller reports each space alone and
-/// merges the reports with [`ProfileReport::merge`].
+/// merges the reports with [`ProfileReport::merge`]. The report reads
+/// each retired word from the region that holds it.
 pub fn report_units<'a>(
     units: impl IntoIterator<Item = &'a PpuExecutionUnit>,
-    mem: &[u8],
+    mem: &GuestMemory,
 ) -> ProfileReport {
     let mut profile = OperandProfile::default();
     let mut shadow = None;
@@ -183,15 +211,40 @@ pub fn report_units<'a>(
     let Some(shadow) = shadow else {
         return ProfileReport::new(&profile, mem, &[], None);
     };
-    let text = usize::try_from(shadow.base())
-        .ok()
-        .zip(usize::try_from(shadow.end()).ok())
-        .and_then(|(lo, hi)| mem.get(lo..hi))
-        .unwrap_or_default();
+    let text = text_bytes(mem, shadow.base(), shadow.end());
     let shipped = shipped_coverage(&profile, shadow, mem);
-    let mut report = ProfileReport::new(&profile, mem, text, Some(shipped));
+    let mut report = ProfileReport::new(&profile, mem, &text, Some(shipped));
     report.shipped_forms = shipped_forms(&profile, shadow, mem);
     report
+}
+
+/// The words of `[base, end)` that a region of `mem` holds, region by
+/// region. Each piece starts and ends on a word boundary of the text.
+///
+/// The boot shadow starts at 0, and the boot unmaps the memory below the
+/// user text floor, so `mem` refuses a read of the whole range. The
+/// region views leave out those bytes, which hold no code.
+fn text_bytes(mem: &GuestMemory, base: u64, end: u64) -> Vec<u8> {
+    let mut text = Vec::new();
+    for view in mem.region_views() {
+        let lo = view.base.max(base);
+        let Some(lo) = lo.checked_add((4 - (lo - base) % 4) % 4) else {
+            continue;
+        };
+        let hi = end.min(view.base.saturating_add(view.bytes.len() as u64));
+        if lo >= hi {
+            continue;
+        }
+        let len = (hi - lo) & !3;
+        let from = usize::try_from(lo - view.base).ok();
+        let to = from
+            .zip(usize::try_from(len).ok())
+            .and_then(|(f, n)| f.checked_add(n));
+        if let Some(piece) = from.zip(to).and_then(|(f, t)| view.bytes.get(f..t)) {
+            text.extend_from_slice(piece);
+        }
+    }
+    text
 }
 
 /// A run's profile ranked for the shadow candidates.
@@ -199,6 +252,9 @@ pub fn report_units<'a>(
 pub struct ProfileReport {
     /// Every retirement the profile counted.
     pub retired: u64,
+    /// The retirements that count in no class, because nothing holds
+    /// their word or it does not decode.
+    pub unresolved: u64,
     /// Each class with its retirements and its words in the text, most
     /// retired first.
     pub insns: Vec<(InsnClass, u64, u64)>,
@@ -214,13 +270,15 @@ pub struct ProfileReport {
 impl ProfileReport {
     /// Ranks `profile` by the words `mem` holds at its addresses, and
     /// counts the words of `text`.
-    pub fn new(
+    pub fn new<M: WordSource + ?Sized>(
         profile: &OperandProfile,
-        mem: &[u8],
+        mem: &M,
         text: &[u8],
         shipped: Option<Coverage>,
     ) -> Self {
-        let (dynamic, pair_counts) = profile.classes(|pc| word_at(0, mem, pc));
+        let (dynamic, pair_counts) = profile.classes(|pc| mem.word(pc));
+        let retired = profile.retired();
+        let unresolved = retired.saturating_sub(dynamic.values().sum());
         let mut rows: BTreeMap<InsnClass, (u64, u64)> = BTreeMap::new();
         for (class, n) in dynamic {
             rows.entry(class).or_default().0 += n;
@@ -229,7 +287,8 @@ impl ProfileReport {
             rows.entry(class).or_default().1 += n;
         }
         Self {
-            retired: profile.retired(),
+            retired,
+            unresolved,
             insns: rank_insns(rows),
             pairs: rank(pair_counts),
             shipped,
@@ -243,6 +302,7 @@ impl ProfileReport {
     /// `None` only when neither report has one.
     pub fn merge(&mut self, other: ProfileReport) {
         self.retired += other.retired;
+        self.unresolved += other.unresolved;
         let mut rows: BTreeMap<InsnClass, (u64, u64)> = BTreeMap::new();
         for (class, d, s) in self.insns.drain(..).chain(other.insns) {
             let row = rows.entry(class).or_default();
@@ -263,16 +323,23 @@ impl ProfileReport {
         self.shipped_forms = rank(sum_rows(forms));
     }
 
-    /// The report as JSON: `retired`, then `insns` rows of `class`,
-    /// `dynamic` and `static`, `pairs` rows of `pair` and `dynamic`,
-    /// `shipped` coverage or `null`, and `shipped_forms` rows of `form`
-    /// and `dynamic`.
+    /// The report as JSON, with these keys in this order:
+    ///
+    /// - `retired` and `unresolved`
+    /// - `insns` rows of `class`, `dynamic` and `static`
+    /// - `pairs` rows of `pair` and `dynamic`
+    /// - `shipped` coverage or `null`
+    /// - `shipped_forms` rows of `form` and `dynamic`
     ///
     /// The label keys each row, so a caller can sum the reports of several
     /// runs row by row.
     pub fn to_json(&self) -> String {
         let mut out = String::new();
-        let _ = write!(out, "{{\n  \"retired\": {},\n  \"insns\": [", self.retired);
+        let _ = write!(
+            out,
+            "{{\n  \"retired\": {},\n  \"unresolved\": {},\n  \"insns\": [",
+            self.retired, self.unresolved
+        );
         for (i, (class, dynamic, stat)) in self.insns.iter().enumerate() {
             let sep = if i == 0 { "" } else { "," };
             let _ = write!(

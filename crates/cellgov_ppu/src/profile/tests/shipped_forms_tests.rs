@@ -31,7 +31,7 @@ fn shipped_forms_count_each_variant_by_its_retirements_most_retired_first() {
     let text = bytes(&[LWZ, CMPWI, LI, ADDI]);
     let shadow = PredecodedShadow::build(0, &text);
 
-    let forms = shipped_forms(&profile(), &shadow, &text);
+    let forms = shipped_forms(&profile(), &shadow, text.as_slice());
 
     assert_eq!(
         forms,
@@ -68,7 +68,7 @@ fn report_units_carries_the_shipped_forms_of_the_units_run() {
         "precondition: ran to the sc"
     );
 
-    let report = super::report_units([&unit], mem.as_bytes());
+    let report = super::report_units([&unit], &mem);
 
     assert_eq!(
         report.shipped_forms,
@@ -79,7 +79,7 @@ fn report_units_carries_the_shipped_forms_of_the_units_run() {
 #[test]
 fn the_report_writes_a_row_per_shipped_form() {
     let text = bytes(&[LWZ, CMPWI, LI, ADDI]);
-    let mut report = ProfileReport::new(&profile(), &text, &text, None);
+    let mut report = ProfileReport::new(&profile(), text.as_slice(), &text, None);
     report.shipped_forms = vec![("Li".to_string(), 3), ("LwzCmpwi".to_string(), 2)];
 
     let json = report.to_json();

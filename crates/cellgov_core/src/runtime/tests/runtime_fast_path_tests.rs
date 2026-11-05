@@ -72,6 +72,7 @@ fn commit_fast_path_defers_to_slow_path_when_dma_pending() {
     assert_eq!(
         rt.memory()
             .read(ByteRange::new(GuestAddr::new(128), 4).unwrap())
+            .as_deref()
             .unwrap(),
         &[0x11, 0x22, 0x33, 0x44]
     );

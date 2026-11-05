@@ -14,7 +14,7 @@ fn context_exposes_committed_memory() {
     mem.apply_commit(range(0, 4), &[1, 2, 3, 4]).unwrap();
     let ctx = ExecutionContext::new(&mem);
     let bytes = ctx.memory().read(range(0, 4)).unwrap();
-    assert_eq!(bytes, &[1, 2, 3, 4]);
+    assert_eq!(*bytes, [1, 2, 3, 4]);
 }
 
 #[test]

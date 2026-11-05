@@ -2,6 +2,7 @@
 //! sandbox, request builders, dispatch-shape assertions, and
 //! per-test temp-dir helpers for mount tests.
 
+use std::borrow::Cow;
 use std::io::ErrorKind;
 use std::path::Path;
 
@@ -56,7 +57,7 @@ impl Lv2Runtime for PathRuntime {
         None
     }
 
-    fn read_committed(&self, addr: u64, len: usize) -> Option<&[u8]> {
+    fn read_committed(&self, addr: u64, len: usize) -> Option<Cow<'_, [u8]>> {
         let start = addr as usize;
         let end = start.checked_add(len)?;
         if end > self.bytes.len() {
@@ -69,21 +70,26 @@ impl Lv2Runtime for PathRuntime {
                 return None;
             }
         }
-        Some(&self.bytes[start..end])
+        Some(Cow::Borrowed(&self.bytes[start..end]))
     }
 
     fn current_tick(&self) -> GuestTicks {
         self.tick
     }
 
-    fn read_committed_until(&self, addr: u64, max_len: usize, terminator: u8) -> Option<&[u8]> {
+    fn read_committed_until(
+        &self,
+        addr: u64,
+        max_len: usize,
+        terminator: u8,
+    ) -> Option<Cow<'_, [u8]>> {
         let start = addr as usize;
         self.read_committed(addr, 1)?;
         let mut len = 0usize;
         while len < max_len {
             let probe = self.read_committed(addr + len as u64, 1)?;
             if probe[0] == terminator {
-                return Some(&self.bytes[start..start + len]);
+                return Some(Cow::Borrowed(&self.bytes[start..start + len]));
             }
             len += 1;
         }
