@@ -1,0 +1,29 @@
+[test]
+name = "ppu_or_rlwinm_pair"
+
+# A hardware probe: the or's target, the rotate's target and CR an
+# adjacent "or rA,rS,rB ; rlwinm rA2,rS2,SH,MB,ME" leaves, for a recording
+# rotate of the or's result, the mr form with a wrapping mask, recording
+# rotates with a negative and a zero result, the mr form with slwi, a
+# rotate into the or's own target, a rotate of another register, and a
+# branch into the rotate. The console capture is the answer; no emulator
+# runs it.
+
+[observe]
+# 27 big-endian u32 words, as ppu/main.c lists: 108 bytes.
+#   0 failed step, 1 its return code; each register as a high word and
+#   a low word:
+#   2-3 r5, 4-5 r8, 6 CR after "or 5,6,7 ; rlwinm. 8,5,8,0,23";
+#   7-8 r8 after "mr 5,6 ; rlwinm 8,5,8,24,7";
+#   9-10 r8, 11 CR after "or 5,6,7 ; rlwinm. 8,5,0,1,0";
+#   12-13 r8, 14 CR after "or 5,6,7 ; rlwinm. 8,5,0,0,7" with XER[SO] = 1;
+#   15-16 r8 after "mr 5,6 ; slwi 8,5,3";
+#   17-18 r5 after "or 5,6,7 ; rlwinm 5,5,16,0,31";
+#   19-20 r5, 21-22 r8 after "or 5,6,7 ; rlwinm 8,9,4,0,27";
+#   23-24 r5, 25-26 r8 after a branch into the rotate.
+memory_regions = [
+  { name = "result", addr = 0, size = 108 },
+]
+
+[expect]
+outcome = "completed"

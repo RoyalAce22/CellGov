@@ -310,6 +310,43 @@ fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
                     quicken_insn(rlwinm).unwrap_or(rlwinm),
                 )
             }),
+        // The first half is an `or` (an `mr` when RS = RB) that is not a
+        // priority hint; the second takes the form the shadow gives it.
+        (
+            reg(),
+            reg(),
+            reg(),
+            reg(),
+            reg(),
+            (0u8..32, 0u8..32, 0u8..32),
+            any::<bool>()
+        )
+            .prop_map(|(ra, rs, rb, rlwinm_ra, rlwinm_rs, (sh, mb, me), rc)| {
+                let ra = if ra == rs && rs == rb {
+                    ra % 31 + 1
+                } else {
+                    ra
+                };
+                let or = if rs == rb {
+                    PpuInstruction::Mr { ra, rs }
+                } else {
+                    PpuInstruction::Or {
+                        ra,
+                        rs,
+                        rb,
+                        rc: false,
+                    }
+                };
+                let rlwinm = PpuInstruction::Rlwinm {
+                    ra: rlwinm_ra,
+                    rs: rlwinm_rs,
+                    sh,
+                    mb,
+                    me,
+                    rc,
+                };
+                (or, quicken_insn(rlwinm).unwrap_or(rlwinm))
+            }),
         // A second base equal to a nonzero RT1 does not fuse, so this arm
         // moves it off RT1. Half the cases share one base.
         (
@@ -424,7 +461,7 @@ fn aim_compare(
 }
 
 proptest! {
-    // Seven of the twenty-five arms are compares that need an aimed
+    // Seven of the twenty-six arms are compares that need an aimed
     // operand to show an off-by-one. Four times the default count
     // makes one such case near certain per run.
     #![proptest_config(ProptestConfig::with_cases(1024))]

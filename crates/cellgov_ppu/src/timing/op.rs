@@ -1476,6 +1476,18 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
                     branch(bo, bi, false, Target::Direct, taken),
                 )
             }
+            FusedPair::OrRlwinm {
+                ra,
+                rs,
+                rb,
+                rlwinm_ra,
+                rlwinm_rs,
+                rc,
+                ..
+            } => two(
+                logical(Op::on(unit::FXU).src(gpr(rs)).src(gpr(rb)), ra, false),
+                logical(Op::on(unit::FXU).src(gpr(rlwinm_rs)), rlwinm_ra, rc),
+            ),
             FusedPair::LwzLwz {
                 rt1,
                 ra1,

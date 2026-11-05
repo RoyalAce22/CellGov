@@ -130,6 +130,10 @@ mod fused_ld_rlwinm_tests;
 mod fused_lwz_pair_tests;
 
 #[cfg(test)]
+#[path = "tests/fused_or_rlwinm_tests.rs"]
+mod fused_or_rlwinm_tests;
+
+#[cfg(test)]
 #[path = "tests/ld_ld_console_tests.rs"]
 mod ld_ld_console_tests;
 
@@ -156,6 +160,10 @@ mod lis_ori_console_tests;
 #[cfg(test)]
 #[path = "tests/or_add_console_tests.rs"]
 mod or_add_console_tests;
+
+#[cfg(test)]
+#[path = "tests/or_rlwinm_console_tests.rs"]
+mod or_rlwinm_console_tests;
 
 #[cfg(test)]
 #[path = "tests/cmpd_nor_console_tests.rs"]

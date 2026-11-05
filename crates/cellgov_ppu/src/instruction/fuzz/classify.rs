@@ -280,7 +280,7 @@ pub(super) fn fused_effect_and_outcome(
         F::CmpwiBc | F::CmpwBc | F::CmpdiBc | F::CmpdBc | F::CmplwBc | F::AddiBc | F::ExtswBlr => {
             (NO_EFFECTS, BRANCH)
         }
-        F::OrAdd | F::LisOri | F::CmpdNor => (NO_EFFECTS, CONTINUE),
+        F::OrAdd | F::LisOri | F::CmpdNor | F::OrRlwinm => (NO_EFFECTS, CONTINUE),
     }
 }
 

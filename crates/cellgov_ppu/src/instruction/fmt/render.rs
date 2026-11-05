@@ -876,6 +876,35 @@ pub(super) fn render(
                 let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
                 write!(f, "; bc {bo}, {bi}, 0x{target:x}")
             }
+            FusedPair::OrRlwinm {
+                ra,
+                rs,
+                rb,
+                rlwinm_ra,
+                rlwinm_rs,
+                sh,
+                mb,
+                me,
+                rc,
+            } => {
+                // [PPC-Book1 p:163 s:B.9] mr rX,rY is or rX,rY,rY, as the
+                // standalone `or` and the quickened `mr` both render.
+                if rs == rb {
+                    op(f, "mr", format_args!("r{ra}, r{rs}"))?;
+                } else {
+                    op(f, "or", format_args!("r{ra}, r{rs}, r{rb}"))?;
+                }
+                f.write_str("; ")?;
+                let rlwinm = I::Rlwinm {
+                    ra: rlwinm_ra,
+                    rs: rlwinm_rs,
+                    sh,
+                    mb,
+                    me,
+                    rc,
+                };
+                render(&rlwinm, addr.wrapping_add(4), symbols, f)
+            }
             FusedPair::LwzLwz {
                 rt1,
                 ra1,

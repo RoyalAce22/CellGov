@@ -1915,6 +1915,20 @@ pub enum FusedPair {
         bi: u8,
         target_offset: i16,
     },
+    /// `or rA, rS, rB` with Rc = 0 (or its quickened `mr`) followed by
+    /// `rlwinm rA2, rS2, sh, mb, me` (or a quickened form of it), with `rc`
+    /// the rlwinm's Rc bit.
+    OrRlwinm {
+        ra: u8,
+        rs: u8,
+        rb: u8,
+        rlwinm_ra: u8,
+        rlwinm_rs: u8,
+        sh: u8,
+        mb: u8,
+        me: u8,
+        rc: bool,
+    },
     /// `lwz rT1, off1(rA1)` followed by `lwz rT2, off2(rA2)`.
     ///
     /// The shadow fuses the pair only when `ra2` is 0 or not `rt1`, so EA2

@@ -368,6 +368,55 @@ fn fuse(a: PpuInstruction, b: PpuInstruction) -> Option<FusedPair> {
             bi,
             target_offset: offset,
         }),
+        // or rA, rS, rB (or mr rA, rS) without Rc + rlwinm in any form. An or
+        // that is a priority hint stays raw, as it does before an add.
+        (
+            PpuInstruction::Or {
+                ra,
+                rs,
+                rb,
+                rc: false,
+            },
+            PpuInstruction::Rlwinm {
+                ra: rlwinm_ra,
+                rs: rlwinm_rs,
+                sh,
+                mb,
+                me,
+                rc,
+            },
+        ) if !(ra == rs && rs == rb) => Some(FusedPair::OrRlwinm {
+            ra,
+            rs,
+            rb,
+            rlwinm_ra,
+            rlwinm_rs,
+            sh,
+            mb,
+            me,
+            rc,
+        }),
+        (
+            PpuInstruction::Mr { ra, rs },
+            PpuInstruction::Rlwinm {
+                ra: rlwinm_ra,
+                rs: rlwinm_rs,
+                sh,
+                mb,
+                me,
+                rc,
+            },
+        ) => Some(FusedPair::OrRlwinm {
+            ra,
+            rs,
+            rb: rs,
+            rlwinm_ra,
+            rlwinm_rs,
+            sh,
+            mb,
+            me,
+            rc,
+        }),
         // lwz rT1, off1(rA1) + lwz rT2, off2(rA2). A second base equal to a
         // nonzero RT1 does not fuse, because EA2 then depends on the first
         // load's value.
@@ -537,3 +586,7 @@ mod ld_rlwinm_tests;
 #[cfg(test)]
 #[path = "tests/superpair_lwz_pair_tests.rs"]
 mod lwz_pair_tests;
+
+#[cfg(test)]
+#[path = "tests/superpair_or_rlwinm_tests.rs"]
+mod or_rlwinm_tests;

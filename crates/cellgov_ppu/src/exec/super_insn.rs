@@ -313,6 +313,30 @@ fn execute_pair(
                 Err(ea) => ExecuteVerdict::MemFault(ea),
             }
         }
+        // [PPC-Book1 p:67 s:3.3.11 OR] or: RA <- (RS) | (RB).
+        // [PPC-Book1 p:73 s:3.3.12] rlwinm: ROTL32 of the low word of RS, ANDed with
+        // MASK(MB+32, ME+32); Rc = 1 sets CR0 from the result. The rlwinm reads its
+        // RS after the or wrote RA.
+        FusedPair::OrRlwinm {
+            ra,
+            rs,
+            rb,
+            rlwinm_ra,
+            rlwinm_rs,
+            sh,
+            mb,
+            me,
+            rc,
+        } => {
+            state.set_gpr(ra as usize, state.gpr[rs as usize] | state.gpr[rb as usize]);
+            let rotated = rotl32(state.gpr[rlwinm_rs as usize] as u32, u32::from(sh));
+            let result = rotated & mask64(mb + 32, me + 32);
+            state.set_gpr(rlwinm_ra as usize, result);
+            if rc {
+                state.set_cr0_from_result(result);
+            }
+            ExecuteVerdict::Continue
+        }
         // [PPC-Book1 p:37 s:3.3.2 Load Word and Zero] lwz (x2): RT <- 32 zeros || MEM(EA,4); EA = (RA|0)+EXTS(D).
         // The fuser keeps RA2 off RT1, so both EAs come from the starting state.
         // The pair writes neither register until both loads pass. A refused
