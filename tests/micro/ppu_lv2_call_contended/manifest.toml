@@ -1,0 +1,21 @@
+[test]
+name = "ppu_lv2_call_contended"
+
+# A hardware probe of the LV2 round trip of a yield with other threads of
+# the caller's priority runnable, and of a semaphore handoff whose wait
+# blocks until another thread posts: five loops, timed with mftb. The
+# probe creates two semaphores and three helper threads, and destroys or
+# joins them before it writes its result. ppu/main.c's header lists the
+# loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 512 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 512 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

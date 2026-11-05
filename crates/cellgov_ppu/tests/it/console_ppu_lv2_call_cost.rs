@@ -44,8 +44,8 @@ const LOOPS: [u64; 15] = [
 /// The loop of [`LOOPS`] whose call returns the time-base frequency in r3.
 const FREQUENCY_LOOP: usize = 0;
 
-/// The loop of `sys_ppu_thread_yield`, which leaves 1 in r3.
-const YIELD_LOOP: usize = 3;
+/// The loop of `sys_ppu_thread_yield`, which leaves 1 in r3 on the console.
+pub(crate) const YIELD_LOOP: usize = 3;
 
 /// The cycles the model's replay of the cheapest call's loop runs over
 /// the console's fastest run.
@@ -146,7 +146,7 @@ const SEEDS: [[Seed; 4]; 15] = {
 };
 
 /// The replay of loop `l`.
-fn call_replay(l: usize) -> Replay {
+pub(crate) fn call_replay(l: usize) -> Replay {
     Replay {
         loop_index: l,
         words: &CALL_LOOP,

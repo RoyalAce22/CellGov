@@ -225,9 +225,9 @@ pub const PPU_SYSCALL_ROUND_TRIP_CYCLES: u64 = 929;
 /// thread runnable takes 1451.
 ///
 /// The `ppu_lv2_call_paths` capture times `sys_process_getpid` and
-/// `sys_memory_get_page_attribute` the same way: each loop's fastest run,
-/// less the 15 cycles the rest of that probe's loop takes beside the
-/// cheapest call's round trip.
+/// `sys_memory_get_page_attribute` the same way. Each entry is its loop's
+/// fastest run, less the 15 cycles the rest of that probe's loop takes
+/// beside the cheapest call's round trip.
 pub const PPU_SYSCALL_ROUND_TRIPS: [(u64, u64); 16] = [
     (syscall::PROCESS_GETPID, 1129),
     (syscall::MEMORY_GET_PAGE_ATTRIBUTE, 8506),

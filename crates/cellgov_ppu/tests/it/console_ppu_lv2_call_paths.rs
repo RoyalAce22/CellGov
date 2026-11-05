@@ -22,7 +22,7 @@ use cellgov_ps3_abi::hw::ppu_issue::{
     ppu_syscall_outcome_round_trip_cycles, ppu_syscall_round_trip_cycles, PPU_CYCLES_PER_TB_TICK,
     PPU_SYSCALL_ERROR_ROUND_TRIPS, PPU_SYSCALL_ROUND_TRIP_CYCLES,
 };
-use cellgov_ps3_abi::lv2::errno::CELL_ESRCH;
+use cellgov_ps3_abi::lv2::errno::{CELL_ENOSYS, CELL_ESRCH};
 use cellgov_ps3_abi::lv2::syscall as sc;
 
 const CONSOLE: &str = "../../tests/micro/ppu_lv2_call_paths/ps3/cech20-cex-493/observation.json";
@@ -240,4 +240,19 @@ fn cellgov_answers_each_error_loop_s_call_with_the_console_s_return_code() {
             "syscall {number}, loop {l}: CellGov's return code against the console's",
         );
     }
+}
+
+#[test]
+fn cellgov_refuses_the_page_attribute_call_the_console_serves() {
+    // The console answers 0. CellGov does not serve the call and answers
+    // ENOSYS, so its replay skips the return-code check's two
+    // instructions that the console runs on every call.
+    let w = console_words();
+    assert_eq!(w[32 + PAGE_ATTRIBUTE_LOOP], 0, "the console serves it");
+    let r3 = replay_r3(&call_replay(PAGE_ATTRIBUTE_LOOP)).expect("the loop replays");
+    assert_eq!(
+        r3 & 0xFFFF_FFFF,
+        u64::from(CELL_ENOSYS.code),
+        "CellGov's answer changed: hold it to the console's 0",
+    );
 }
