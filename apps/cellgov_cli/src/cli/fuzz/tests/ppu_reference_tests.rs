@@ -70,15 +70,14 @@ fn a_differing_file_or_a_gap_fails_and_is_named() {
     assert!(text.contains("fuzz ppu-reference: missing facility:time_base\n"));
 }
 
-/// Copies the committed reference files into `dir`, and the pending list
-/// when `pending` is set.
-fn copy_committed(dir: &Path, pending: bool) {
+/// Copies the committed reference files and the pending list into `dir`.
+fn copy_committed(dir: &Path) {
     for entry in std::fs::read_dir(fixtures()).expect("the fixtures list") {
         let path = entry.expect("an entry").path();
         let name = path.file_name().expect("a name").to_owned();
         let is_json = path.extension().is_some_and(|ext| ext == "json");
         let is_pending = name == cellgov_fuzz::ppu_reference::PPU_REFERENCE_PENDING_FILE;
-        if is_json || (pending && is_pending) {
+        if is_json || is_pending {
             std::fs::copy(&path, dir.join(&name)).expect("copies");
         }
     }
@@ -88,7 +87,8 @@ fn copy_committed(dir: &Path, pending: bool) {
 fn every_vector_matching_still_fails_when_a_unit_has_no_file_or_pending_entry() {
     let scratch = cellgov_testkit::scratch::scratch_labeled("cli_ppu_reference_gap");
     let dir: &Path = &scratch;
-    copy_committed(dir, false);
+    copy_committed(dir);
+    std::fs::remove_file(dir.join("vrefp.json")).expect("removes");
     assert_eq!(
         run_inner(&parse(dir)).expect("runs"),
         CommandExitCode::new(exit_codes::FAILED)
@@ -97,22 +97,18 @@ fn every_vector_matching_still_fails_when_a_unit_has_no_file_or_pending_entry() 
         cellgov_fuzz::ppu_reference::run_reference_directory(dir).expect("the directory reads");
     let text = render_ppu_reference(&campaign);
     assert!(text.contains(" 0 failing; "), "{text}");
-    let pending = std::fs::read_to_string(
-        fixtures().join(cellgov_fuzz::ppu_reference::PPU_REFERENCE_PENDING_FILE),
-    )
-    .expect("the pending list reads");
-    let unit = pending.lines().next().expect("a unit is still pending");
     assert!(
-        text.contains(&format!("fuzz ppu-reference: missing {unit}\n")),
+        text.contains("fuzz ppu-reference: missing instruction:vrefp\n"),
         "{text}"
     );
+    assert!(text.contains(" missing=1 "), "{text}");
 }
 
 #[test]
 fn a_refused_file_fails_counts_as_failing_and_is_unowned() {
     let scratch = cellgov_testkit::scratch::scratch_labeled("cli_ppu_reference_refused");
     let dir: &Path = &scratch;
-    copy_committed(dir, true);
+    copy_committed(dir);
     std::fs::write(dir.join("broken.json"), "{").expect("writes");
     assert_eq!(
         run_inner(&parse(dir)).expect("runs"),

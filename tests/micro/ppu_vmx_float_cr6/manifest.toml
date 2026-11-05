@@ -1,0 +1,19 @@
+[test]
+name = "ppu_vmx_float_cr6"
+
+# A hardware probe of the vector floating-point record compares.
+# cases.tsv lists the 24 cases. The console capture is the answer;
+# no emulator runs it.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case.
+memory_regions = [
+  { name = "result", addr = 0, size = 3088 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

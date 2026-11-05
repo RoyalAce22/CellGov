@@ -83,3 +83,11 @@ mod vmx_int;
 #[cfg(test)]
 #[path = "../tests/ppu_reference_vmx_int_tests.rs"]
 mod vmx_int_tests;
+
+#[cfg(test)]
+#[path = "../tests/ppu_reference_vmx_float.rs"]
+mod vmx_float;
+
+#[cfg(test)]
+#[path = "../tests/ppu_reference_vmx_float_tests.rs"]
+mod vmx_float_tests;

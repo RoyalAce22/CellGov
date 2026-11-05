@@ -52,6 +52,7 @@ use super::floor::{features, floor};
 use super::fp::FP_UNITS;
 use super::multiple::ended_case_vector;
 use super::vmx::{VMX_MEMORY_UNITS, VMX_UNITS};
+use super::vmx_float::VMX_FLOAT_UNITS;
 use super::vmx_int::VMX_INT_UNITS;
 use crate::ppu_reference::{
     word_unit, PpuReferenceInputState, PpuReferenceObservation, PpuReferenceProvenance,
@@ -258,6 +259,7 @@ fn case_units(case: &Case) -> Vec<String> {
                 || FP_UNITS.contains(&m)
                 || VMX_UNITS.contains(&m)
                 || VMX_INT_UNITS.contains(&m)
+                || VMX_FLOAT_UNITS.contains(&m)
         };
         if listed && !units.contains(&mnemonic) {
             units.push(mnemonic);
@@ -396,7 +398,10 @@ fn floating(case: &Case) -> bool {
 fn vector_case(case: &Case) -> bool {
     case_units(case).iter().any(|u| {
         let u = u.as_str();
-        VMX_UNITS.contains(&u) || VMX_MEMORY_UNITS.contains(&u) || VMX_INT_UNITS.contains(&u)
+        VMX_UNITS.contains(&u)
+            || VMX_MEMORY_UNITS.contains(&u)
+            || VMX_INT_UNITS.contains(&u)
+            || VMX_FLOAT_UNITS.contains(&u)
     })
 }
 
