@@ -1,0 +1,3506 @@
+{
+  "schema_version": 3,
+  "unit": {"kind": "instruction", "mnemonic": "fnmsubs"},
+  "vectors": [
+    {
+      "name": "ppu_fp_fma-fnmsubs/a-pzero",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "2": 4613937818241073152,
+          "3": 4611686018427387904,
+          "4": 6510516211317554052
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 0, 4613937818241073152, 4611686018427387904, 4613937818241073152, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 16384},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/a-nzero",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 9223372036854775808,
+          "2": 4613937818241073152,
+          "3": 4611686018427387904,
+          "4": 6510516211317554308
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 9223372036854775808, 4613937818241073152, 4611686018427387904, 4613937818241073152, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 16384},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/a-pden",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4021714467241852928,
+          "2": 4613937818241073152,
+          "3": 4611686018427387904,
+          "4": 6510516211317554564
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4021714467241852928, 4613937818241073152, 4611686018427387904, 4613937818241073152, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 2181447680},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/a-nden",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 13245086504096628736,
+          "2": 4613937818241073152,
+          "3": 4611686018427387904,
+          "4": 6510516211317554820
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 13245086504096628736, 4613937818241073152, 4611686018427387904, 4613937818241073152, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 2181185536},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/a-pnorm",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "2": 4613937818241073152,
+          "3": 4611686018427387904,
+          "4": 6510516211317555076
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 4613937818241073152, 4611686018427387904, 4602678819172646912, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 16384},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/a-nnorm",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 13831680355561635840,
+          "2": 4613937818241073152,
+          "3": 4611686018427387904,
+          "4": 6510516211317555332
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 13831680355561635840, 4613937818241073152, 4611686018427387904, 4617878467915022336, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 16384},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/a-pinf",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 9218868437227405312,
+          "2": 4613937818241073152,
+          "3": 4611686018427387904,
+          "4": 6510516211317555588
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 9218868437227405312, 4613937818241073152, 4611686018427387904, 18442240474082181120, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 36864},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/a-ninf",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 18442240474082181120,
+          "2": 4613937818241073152,
+          "3": 4611686018427387904,
+          "4": 6510516211317555844
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 18442240474082181120, 4613937818241073152, 4611686018427387904, 9218868437227405312, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 20480},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/a-qnan",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 9221120237577961472,
+          "2": 4613937818241073152,
+          "3": 4611686018427387904,
+          "4": 6510516211317556100
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 9221120237577961472, 4613937818241073152, 4611686018427387904, 9221120237577961472, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 69632},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/a-snan",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 9218868437764276224,
+          "2": 4613937818241073152,
+          "3": 4611686018427387904,
+          "4": 6510516211317556356
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 9218868437764276224, 4613937818241073152, 4611686018427387904, 9221120237577961472, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 2701201408},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/b-pzero",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "3": 4611686018427387904,
+          "4": 6510516211317556612
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 0, 4611686018427387904, 13836183955189006336, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 32768},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/b-nzero",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "2": 9223372036854775808,
+          "3": 4611686018427387904,
+          "4": 6510516211317556868
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 9223372036854775808, 4611686018427387904, 13836183955189006336, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 32768},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/b-pden",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "2": 4021714467241852928,
+          "3": 4611686018427387904,
+          "4": 6510516211317557124
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 4021714467241852928, 4611686018427387904, 13836183955189006336, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 2181464064},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/b-nden",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "2": 13245086504096628736,
+          "3": 4611686018427387904,
+          "4": 6510516211317557380
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 13245086504096628736, 4611686018427387904, 13836183955189006336, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 2181201920},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/b-pnorm",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "2": 4608308318706860032,
+          "3": 4611686018427387904,
+          "4": 6510516211317557636
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 4608308318706860032, 4611686018427387904, 13831680355561635840, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 32768},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/b-nnorm",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "2": 13831680355561635840,
+          "3": 4611686018427387904,
+          "4": 6510516211317557892
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 13831680355561635840, 4611686018427387904, 13838998704956112896, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 32768},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/b-pinf",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "2": 9218868437227405312,
+          "3": 4611686018427387904,
+          "4": 6510516211317558148
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 9218868437227405312, 4611686018427387904, 9218868437227405312, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 20480},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/b-ninf",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "2": 18442240474082181120,
+          "3": 4611686018427387904,
+          "4": 6510516211317558404
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 18442240474082181120, 4611686018427387904, 18442240474082181120, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 36864},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/b-qnan",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "2": 9221120237577961472,
+          "3": 4611686018427387904,
+          "4": 6510516211317558660
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 9221120237577961472, 4611686018427387904, 9221120237577961472, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 69632},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/b-snan",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "2": 9218868437764276224,
+          "3": 4611686018427387904,
+          "4": 6510516211317558916
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 9218868437764276224, 4611686018427387904, 9221120237577961472, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 2701201408},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/c-pzero",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "2": 4613937818241073152,
+          "4": 6510516211317559172
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 4613937818241073152, 0, 4613937818241073152, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 16384},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/c-nzero",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "2": 4613937818241073152,
+          "3": 9223372036854775808,
+          "4": 6510516211317559428
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 4613937818241073152, 9223372036854775808, 4613937818241073152, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 16384},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/c-pden",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "2": 4613937818241073152,
+          "3": 4021714467241852928,
+          "4": 6510516211317559684
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 4613937818241073152, 4021714467241852928, 4613937818241073152, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 2181447680},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/c-nden",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "2": 4613937818241073152,
+          "3": 13245086504096628736,
+          "4": 6510516211317559940
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 4613937818241073152, 13245086504096628736, 4613937818241073152, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 2181185536},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/c-pnorm",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "2": 4613937818241073152,
+          "3": 4608308318706860032,
+          "4": 6510516211317560196
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 4613937818241073152, 4608308318706860032, 4609152743636992000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 16384},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/c-nnorm",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "2": 4613937818241073152,
+          "3": 13831680355561635840,
+          "4": 6510516211317560452
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 4613937818241073152, 13831680355561635840, 4616822936752357376, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 16384},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/c-pinf",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "2": 4613937818241073152,
+          "3": 9218868437227405312,
+          "4": 6510516211317560708
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 4613937818241073152, 9218868437227405312, 18442240474082181120, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 36864},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/c-ninf",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "2": 4613937818241073152,
+          "3": 18442240474082181120,
+          "4": 6510516211317560964
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 4613937818241073152, 18442240474082181120, 9218868437227405312, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 20480},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/c-qnan",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "2": 4613937818241073152,
+          "3": 9221120237577961472,
+          "4": 6510516211317561220
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 4613937818241073152, 9221120237577961472, 9221120237577961472, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 69632},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/c-snan",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4608308318706860032,
+          "2": 4613937818241073152,
+          "3": 9218868437764276224,
+          "4": 6510516211317561476
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4608308318706860032, 4613937818241073152, 9218868437764276224, 9221120237577961472, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 2701201408},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/rn0",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4599676419063152640,
+          "2": 4607182418800017408,
+          "3": 4599676419063152640,
+          "4": 6510516211317561732
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4599676419063152640, 4607182418800017408, 4599676419063152640, 4606181618942476288, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 2181185536},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/rn1",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4599676419063152640,
+          "2": 4607182418800017408,
+          "3": 4599676419063152640,
+          "4": 6510516211317561988
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 1,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4599676419063152640, 4607182418800017408, 4599676419063152640, 4606181618942476288, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 2181185537},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/rn2",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4599676419063152640,
+          "2": 4607182418800017408,
+          "3": 4599676419063152640,
+          "4": 6510516211317562244
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 2,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4599676419063152640, 4607182418800017408, 4599676419063152640, 4606181618942476288, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 2181185538},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/rn3",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4599676419063152640,
+          "2": 4607182418800017408,
+          "3": 4599676419063152640,
+          "4": 6510516211317562500
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 3,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4599676419063152640, 4607182418800017408, 4599676419063152640, 4606181619479347200, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 2181447683},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/ox",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 5183643170566569984,
+          "3": 4611686018427387904,
+          "4": 6510516211317562756
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 5183643170566569984, 0, 4611686018427387904, 18442240474082181120, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 2449903616},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/ox-oe",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 5183643170566569984,
+          "3": 4611686018427387904,
+          "4": 6510516211317563012
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 64,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 5183643170566569984, 0, 4611686018427387904, 13546827678593581056, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 3489693760},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/ux",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4039728865751334912,
+          "3": 4599676419063152640,
+          "4": 6510516211317563268
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4039728865751334912, 0, 4599676419063152640, 13255594901795504128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 2315485184},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/ux-ue",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4039728865751334912,
+          "3": 4602678819172646912,
+          "4": 6510516211317563524
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 32,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4039728865751334912, 0, 4602678819172646912, 14123288431433875456, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 3355476000},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/vxisi",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 9218868437227405312,
+          "2": 9218868437227405312,
+          "3": 4607182418800017408,
+          "4": 6510516211317563780
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 9218868437227405312, 9218868437227405312, 4607182418800017408, 9221120237041090560, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 2692812800},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/vxisi-ve",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 9218868437227405312,
+          "2": 9218868437227405312,
+          "3": 4607182418800017408,
+          "4": 6510516211317564036
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 128,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 9218868437227405312, 9218868437227405312, 4607182418800017408, 6510516211317564036, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 3766485120},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/vximz",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 9218868437227405312,
+          "2": 4607182418800017408,
+          "4": 6510516211317564292
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 9218868437227405312, 4607182418800017408, 0, 9221120237041090560, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 2685472768},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/vximz-ve",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 9218868437227405312,
+          "2": 4607182418800017408,
+          "4": 6510516211317564548
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 128,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 9218868437227405312, 4607182418800017408, 0, 6510516211317564548, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 3759145088},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/xx-xe",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881468],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4599676419063152640,
+          "2": 4607182418800017408,
+          "3": 4599676419063152640,
+          "4": 6510516211317564804
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 8,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4599676419063152640, 4607182418800017408, 4599676419063152640, 4606181618942476288, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 3254927368},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/rc-clean",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881469],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 4611686018427387904,
+          "2": 4607182418800017408,
+          "3": 4613937818241073152,
+          "4": 6510516211317565060
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 4611686018427387904, 4607182418800017408, 4613937818241073152, 13840687554816376832, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2428296944},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 32768},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    },
+    {
+      "name": "ppu_fp_fma-fnmsubs/rc-vximz",
+      "provenance": {
+        "kind": "hardware_capture",
+        "capture_id": "ppu_fp_fma/cech20-cex-493",
+        "device": "CECH-2001A",
+        "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
+        "source_sha256": "cf18bdc4ed097c081756b6a272de07b9ac7beeac420f5ca401eb96f7c03b99a5"
+      },
+      "words": [3967881469],
+      "initial_state": {
+        "base": "zeroed",
+        "gpr": {},
+        "fpr": {
+          "1": 9218868437227405312,
+          "2": 4607182418800017408,
+          "4": 6510516211317565316
+        },
+        "vr_hex": {},
+        "pc": 0,
+        "cr": 2596069104,
+        "lr": 0,
+        "ctr": 0,
+        "xer": 0,
+        "fpscr": 0,
+        "vrsave": 0,
+        "vscr": 65536,
+        "tb": 0,
+        "reservation": null
+      },
+      "memory_base": 268435456,
+      "initial_memory": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "expected": {
+        "state": {
+          "gpr": {
+            "status": "value",
+            "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "fpr": {
+            "status": "value",
+            "value": [0, 9218868437227405312, 4607182418800017408, 0, 9221120237041090560, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+          },
+          "vr_hex": {"status": "unsupported", "reason": "the floating-point case records no vector register"},
+          "pc": {"status": "value", "value": 4},
+          "cr": {"status": "value", "value": 2596069104},
+          "lr": {"status": "value", "value": 0},
+          "ctr": {"status": "value", "value": 0},
+          "xer": {"status": "value", "value": 0},
+          "fpscr": {"status": "value", "value": 2685472768},
+          "vrsave": {"status": "value", "value": 0},
+          "vscr": {"status": "value", "value": 65536},
+          "tb": {"status": "undefined", "reason": "the time base advances while the case runs"},
+          "reservation": {"status": "value", "value": null}
+        },
+        "memory": {
+          "status": "value",
+          "value": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        },
+        "stop": {
+          "reason": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "pc": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "lr": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_lev": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "faulting_ea": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "fault_registers": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"},
+          "syscall_args": {"status": "unsupported", "reason": "the console capture does not observe the runtime's stop attribution"}
+        },
+        "retired": {"status": "value", "value": 1},
+        "staged_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "committed_effects": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "reservations": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "store_buffer": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "commit_error": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"},
+        "fault_discarded": {"status": "unsupported", "reason": "the console capture does not observe the runtime's effect pipeline"}
+      }
+    }
+  ]
+}
