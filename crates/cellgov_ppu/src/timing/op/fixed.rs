@@ -13,6 +13,9 @@ use cellgov_ps3_abi::hw::ppu_issue as k;
 /// iterations) + (1 fixup)) x 2`, word minimum 10 and maximum 38,
 /// doubleword minimum 10 and maximum 70; overflow cases complete in 10.
 fn divide_cycles(ra: u64, rb: u64, word: bool, signed: bool) -> u64 {
+    if signed && overflows(ra, rb, word) {
+        return k::PPU_DIVIDE_MIN_CYCLES;
+    }
     let (a, b, max) = if word {
         let (a, b) = (ra as u32, rb as u32);
         let (a, b) = if signed {
@@ -39,6 +42,21 @@ fn divide_cycles(ra: u64, rb: u64, word: bool, signed: bool) -> u64 {
     let span = u64::from(b.leading_zeros() - a.leading_zeros());
     let iterations = span.div_ceil(2) + 1;
     ((1 + iterations + 1) * 2).clamp(k::PPU_DIVIDE_MIN_CYCLES, max)
+}
+
+/// Whether a signed divide of `ra` by `rb` is the most negative value by
+/// -1. A zero divisor, the other overflow case, takes the minimum on the
+/// formula's own path.
+///
+/// [PPC-Book1 p:58 s:3.3.8] `0x8000_0000_0000_0000 / -1` for `divd` and
+/// `0x8000_0000 / -1` for `divw` are overflow cases, beside any value
+/// divided by 0.
+fn overflows(ra: u64, rb: u64, word: bool) -> bool {
+    if word {
+        ra as i32 == i32::MIN && rb as i32 == -1
+    } else {
+        ra as i64 == i64::MIN && rb as i64 == -1
+    }
 }
 
 /// A divide; `(word, signed)` names the form.

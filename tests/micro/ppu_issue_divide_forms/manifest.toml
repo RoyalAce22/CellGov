@@ -1,0 +1,23 @@
+[test]
+name = "ppu_issue_divide_forms"
+
+# A hardware probe of what the overflow-enable and recording forms of a
+# signed divide cost on the most negative value by -1, and what divw
+# costs on it when its operands' high words are not sign extensions:
+# twelve timed loops of eight dependent divides (an addi control, divw
+# with zero and with arbitrary high words, and divwo, divw., divdo and
+# divd. of the most negative value by -1 and by 1). The console capture
+# is the answer; ppu/main.c's header lists the loops and the payload
+# layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 224 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 224 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 120000
