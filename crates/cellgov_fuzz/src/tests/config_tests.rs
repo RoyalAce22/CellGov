@@ -426,7 +426,7 @@ fn campaign_and_replay_artifacts_round_trip() {
         serde_json::to_value(replay).unwrap(),
         serde_json::json!({
             "campaign_version": 4,
-            "generator_revision": 1,
+            "generator_revision": 2,
             "target": "PpuSequence",
             "strategy": "structured",
             "seed": 0x0123_4567_89ab_cdef_u64,

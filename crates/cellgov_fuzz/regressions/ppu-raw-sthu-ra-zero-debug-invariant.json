@@ -40,6 +40,7 @@
   "original": {
     "replay": {
       "campaign_version": 4,
+      "generator_revision": 1,
       "target": "PpuInstruction",
       "strategy": "raw_words",
       "seed": 1,

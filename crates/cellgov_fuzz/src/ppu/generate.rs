@@ -7,7 +7,10 @@ use cellgov_ppu::instruction::fuzz::{
     PpuGenerationDescriptor, PpuGenerationError, PpuOperandClass, PpuSequenceClass, PpuSequenceFlow,
 };
 use cellgov_ppu::instruction::PpuInstruction;
+use cellgov_ppu::observation::PpuArchitecturalState;
 use cellgov_ppu::state::PpuState;
+use cellgov_ps3_abi::hw::ppc_isa::{PPC_FPSCR_ENABLE_BITS, PPC_FPSCR_RN};
+use cellgov_ps3_abi::hw::ppu::{PPU_THREAD_ENTRY_VSCR, VSCR_DEFINED_BITS};
 use cellgov_sync::ReservedLine;
 
 use crate::boundary::call_target;
@@ -237,7 +240,6 @@ fn generated_ppu_parameters(
 
 /// [Martignoni2009 p:128 s:3.1] A test case is code plus data, and the data are the register values and the remaining memory bytes; the registers are drawn here and the memory bytes in the engine.
 pub(super) fn random_state(rng: &mut Rng) -> Result<PpuState, GeneratorError> {
-    let mut state = PpuState::new();
     let mut gpr = [0u64; 32];
     let mut fpr = [0u64; 32];
     let mut vr = [0u128; 32];
@@ -254,24 +256,67 @@ pub(super) fn random_state(rng: &mut Rng) -> Result<PpuState, GeneratorError> {
     for value in &mut vr {
         *value = (u128::from(rng.next_u64()) << 64) | u128::from(rng.next_u64());
     }
-    state.set_gpr_all(gpr);
-    state.set_fpr_all(fpr);
-    state.set_vr_all(vr);
-    state.pc = rng.next_u64() & !3;
-    state.set_cr(rng.next_u32());
-    state.set_lr(rng.next_u64());
-    state.set_ctr(rng.next_u64());
-    state.set_xer(rng.next_u64());
-    state.set_vrsave(rng.next_u32());
-    state.tb = rng.next_u64();
-    state.set_reservation(if rng.chance(1, 2)? {
+    let pc = rng.next_u64() & !3;
+    let cr = rng.next_u32();
+    let lr = rng.next_u64();
+    let ctr = rng.next_u64();
+    let xer = rng.next_u64();
+    let vrsave = rng.next_u32();
+    let tb = rng.next_u64();
+    let reservation = if rng.chance(1, 2)? {
         Some(ReservedLine::containing(
             DATA_BASE + rng.below(DATA_LEN as u64)?,
         ))
     } else {
         None
-    });
+    };
+    // A struct literal names every architected field, so a field the
+    // state gains fails to compile here until the generator draws it.
+    let drawn = PpuArchitecturalState {
+        gpr,
+        fpr,
+        vr,
+        pc,
+        cr,
+        lr,
+        ctr,
+        xer,
+        fpscr: random_fpscr(rng)?,
+        vrsave,
+        vscr: random_vscr(rng)?,
+        tb,
+        reservation,
+    };
+    let mut state = PpuState::new();
+    drawn.apply(&mut state);
     Ok(state)
+}
+
+/// Draws an FPSCR of control bits only, at its reset value in half the draws.
+///
+/// The control bits are a rounding mode and a set of exception enables.
+/// The function draws no status bit, so the VX and FEX summaries are 0, as
+/// an FPSCR write computes them. The function does not draw NI: the PPE
+/// does not implement NI and reads it back as 0 after every write.
+fn random_fpscr(rng: &mut Rng) -> Result<u32, GeneratorError> {
+    if rng.chance(1, 2)? {
+        return Ok(0);
+    }
+    let rounding = rng.next_u32() & PPC_FPSCR_RN;
+    let enables = if rng.chance(1, 2)? {
+        rng.next_u32() & PPC_FPSCR_ENABLE_BITS
+    } else {
+        0
+    };
+    Ok(rounding | enables)
+}
+
+/// Draws the NJ and SAT bits of a VSCR, or the thread-entry VSCR in half the draws.
+fn random_vscr(rng: &mut Rng) -> Result<u32, GeneratorError> {
+    if rng.chance(1, 2)? {
+        return Ok(PPU_THREAD_ENTRY_VSCR);
+    }
+    Ok(rng.next_u32() & VSCR_DEFINED_BITS)
 }
 
 fn random_state_for_instruction(
@@ -365,3 +410,7 @@ fn lswx_registers_are_valid(rt: u8, ra: u8, rb: u8, byte_count: u8) -> bool {
 #[cfg(test)]
 #[path = "tests/generate_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/control_state_tests.rs"]
+mod control_state_tests;

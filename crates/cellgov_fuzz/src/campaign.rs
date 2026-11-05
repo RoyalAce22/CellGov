@@ -33,19 +33,23 @@ impl std::fmt::Display for GeneratorRevision {
 /// The revision of the generator `target` runs under `strategy`, within
 /// [`CAMPAIGN_VERSION`].
 ///
-/// Both registries grew under version 4, which moves every structured
-/// draw, and the SPU sequence engine gained its interactions and scripted
-/// world. The PPU raw-word generators draw whole words with no registry,
-/// and the committed regressions recorded from them still replay, so they
-/// keep revision 0. The SPU raw-word mappings are not shown unchanged, so
-/// they take revision 1 with the rest.
+/// Two changes set the revisions:
+/// - Revision 1 of every mapping but the PPU raw-word ones: both
+///   registries grew under version 4, which moves every structured draw.
+///   The SPU sequence engine also gained its interactions and scripted
+///   world.
+/// - Revision 2 of the structured PPU mappings and revision 1 of the
+///   raw-word ones: the PPU state draws its FPSCR and VSCR. This moves the
+///   state and the data region of each PPU case. The raw-word mappings
+///   draw the words first, and that draw did not move. The committed
+///   regressions recorded from it replay under the new revision.
 pub const fn generator_revision(
     target: FuzzTarget,
     strategy: GenerationStrategy,
 ) -> GeneratorRevision {
     match (target, strategy) {
-        (FuzzTarget::PpuInstruction | FuzzTarget::PpuSequence, GenerationStrategy::RawWords) => {
-            GeneratorRevision(0)
+        (FuzzTarget::PpuInstruction | FuzzTarget::PpuSequence, GenerationStrategy::Structured) => {
+            GeneratorRevision(2)
         }
         _ => GeneratorRevision(1),
     }
