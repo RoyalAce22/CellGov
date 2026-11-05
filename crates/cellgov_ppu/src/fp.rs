@@ -4,20 +4,22 @@
 //!
 //! The FPSCR move instructions read and write the register
 //! ([`crate::fpscr`]), and a record form copies FPSCR bits 0:3 to CR1.
-//! The arithmetic arms, the multiply-add forms included, compute on the
-//! `cellgov_float` engine in both widths. The engine rounds in the mode
-//! `FPSCR[RN]` selects, with every exception disabled. The other arms
-//! write the FPSCR as follows:
+//! The arithmetic arms, the multiply-add forms included, and the
+//! rounding and conversion arms compute on the `cellgov_float` engine.
+//! The engine runs with every exception disabled. It rounds in the mode
+//! `FPSCR[RN]` selects; `fctiwz` and `fctidz` round toward zero. The
+//! other arms write the FPSCR as follows:
 //!
 //! - the estimates write the status [`crate::fp_status`] gives them;
 //! - the compares write FPCC and their invalid causes through
 //!   [`crate::fpscr::write_compare_status`];
-//! - the conversions, `fsel` and the moves leave the FPSCR unchanged.
+//! - `fsel` and the moves leave the FPSCR unchanged.
 // [PPC-Book1 p:89 s:4.2.2] FPSCR[RN] encoding: 0b00 selects Round to Nearest.
 
 use cellgov_float::{
-    ppc_add, ppc_div, ppc_div_sqrt_precision, ppc_madd, ppc_msub, ppc_mul, ppc_nmadd, ppc_nmsub,
-    ppc_sqrt, ppc_sub, PpcPrecision, PpcResult,
+    ppc_add, ppc_convert_to_integer, ppc_div, ppc_div_sqrt_precision, ppc_from_integer, ppc_madd,
+    ppc_msub, ppc_mul, ppc_nmadd, ppc_nmsub, ppc_round_to_single, ppc_sqrt, ppc_sub, PpcInteger,
+    PpcPrecision, PpcResult, Rounding,
 };
 
 use crate::exec::ExecuteVerdict;
@@ -56,7 +58,6 @@ pub fn execute_fp63(
         state.fpr[frb as usize],
         state.fpr[frc as usize],
     );
-    let b = f64::from_bits(rb);
     let result_bits = match op {
         // [PPC-Book1 p:113 s:4.6.5.2] fmadd: FRT <- (FRA * FRC) + FRB, single rounding.
         // [PPC-Book1 p:113 s:4.6.5.2] fmsub: FRT <- (FRA * FRC) - FRB.
@@ -126,56 +127,37 @@ pub fn execute_fp63(
         }
         // [PPC-Book1 p:115 s:4.6.6] frsp: round FRB to single precision.
         Fp63Op::Frsp => {
-            let s = b as f32;
-            (s as f64).to_bits()
+            let rounding = fpscr::rounding(state.fpscr());
+            let result = ppc_round_to_single(rounding, rb);
+            return write_engine_result(state, frt, result, PpcPrecision::Single);
         }
-        // fctiw and fctiwz are distinct rounding modes, not synonyms:
-        // the `z` form truncates, the plain form follows FPSCR[RN],
-        // and this arm rounds to nearest even in every mode. A NaN
-        // input must produce 0x8000_0000; Rust's `f64 as i32` returns
-        // 0 for NaN, so guard. ((+/-)inf clamps via saturating cast
-        // already.) Result is zero-extended into FRT[32:63];
-        // FRT[0:31] is architecturally undefined.
+        // The `z` forms round toward zero; the others round in the mode
+        // FPSCR[RN] selects. FPRF keeps its value.
         // [PPC-Book1 p:117 s:4.6.6] fctiw rounds per FPSCR[RN]; fctiwz rounds toward zero.
         // [PPC-Book1 p:117 s:4.6.6] fctiw: result placed in FRT[32:63]; FRT[0:31] undefined.
         // [PPC-Book1 p:144 s:A.2] QNaN-operand convert-to-integer model: FRT[32:63] <- 0x8000_0000.
-        Fp63Op::Fctiw | Fp63Op::Fctiwz => {
-            let rounded = if matches!(op, Fp63Op::Fctiw) {
-                b.round_ties_even()
-            } else {
-                b
-            };
-            let i = if rounded.is_nan() {
-                i32::MIN
-            } else {
-                rounded as i32
-            };
-            (i as u64) & 0xFFFF_FFFF
-        }
-        // Same rounding-mode split and NaN guard at 64-bit width.
         // [PPC-Book1 p:116 s:4.6.6] fctid rounds per FPSCR[RN]; fctidz rounds toward zero.
         // [PPC-Book1 p:144 s:A.2] QNaN-operand 64-bit convert-to-integer: FRT <- 0x8000_0000_0000_0000.
-        Fp63Op::Fctid | Fp63Op::Fctidz => {
-            let rounded = if matches!(op, Fp63Op::Fctid) {
-                b.round_ties_even()
-            } else {
-                b
+        Fp63Op::Fctiw | Fp63Op::Fctiwz | Fp63Op::Fctid | Fp63Op::Fctidz => {
+            let width = match op {
+                Fp63Op::Fctiw | Fp63Op::Fctiwz => PpcInteger::Word,
+                _ => PpcInteger::Doubleword,
             };
-            let i = if rounded.is_nan() {
-                i64::MIN
-            } else {
-                rounded as i64
+            let rounding = match op {
+                Fp63Op::Fctiwz | Fp63Op::Fctidz => Rounding::TowardZero,
+                _ => fpscr::rounding(state.fpscr()),
             };
-            i as u64
+            let result = ppc_convert_to_integer(width, rounding, rb);
+            state.set_fpr(frt as usize, result.bits);
+            fpscr::write_convert_status(state, &result.status);
+            return ExecuteVerdict::Continue;
         }
-        // fcfid: convert a 64-bit signed integer in the FPR
-        // raw bits to f64. `u64 as i64` is a bitwise reinterpret
-        // in Rust (not a value conversion), which is what the
-        // spec wants -- the FPR contents are read as i64.
+        // The engine reads the bits of FRB as a 64-bit signed integer.
         // [PPC-Book1 p:118 s:4.6.6] fcfid: convert 64-bit signed integer to FP.
         Fp63Op::Fcfid => {
-            let i = state.fpr[frb as usize] as i64;
-            (i as f64).to_bits()
+            let rounding = fpscr::rounding(state.fpscr());
+            let result = ppc_from_integer(rounding, rb);
+            return write_engine_result(state, frt, result, PpcPrecision::Double);
         }
         // [PPC-Book1 p:125 s:5.2.1.1] fsqrt: FRT <- square root of FRB.
         Fp63Op::Fsqrt => {

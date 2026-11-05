@@ -1,0 +1,21 @@
+[test]
+name = "ppu_fp_convert_modes"
+
+# A hardware probe of the conversions in each FPSCR rounding mode: fctiw,
+# fctiwz, fctid and fctidz on halves, values near each integer range's
+# ends, zeros, denormals, infinities and NaNs, with the whole FRT and
+# what FPRF, FR and FI hold afterward; fcfid on integers that need
+# rounding; frsp on ties, overflow, tiny values and NaNs with low
+# payload bits. The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u32 words, as ppu/main.c lists: 3 header words (failed
+# step, its code, case count), then 11 words per case (operation, FPSCR
+# before, FRA, FRB, FRC and FRT as high/low pairs, FPSCR after): 153
+# cases, 1686 words, 6744 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 6744 },
+]
+
+[expect]
+outcome = "completed"

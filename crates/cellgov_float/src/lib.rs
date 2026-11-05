@@ -40,6 +40,7 @@ mod fp_estimate;
 mod operand;
 mod ppc;
 mod ppc_arith;
+mod ppc_convert;
 mod round;
 mod vmx;
 mod vmx_estimate;
@@ -59,6 +60,7 @@ pub use ppc_arith::{
     ppc_add, ppc_div, ppc_div_sqrt_precision, ppc_madd, ppc_msub, ppc_mul, ppc_nmadd, ppc_nmsub,
     ppc_sqrt, ppc_sub,
 };
+pub use ppc_convert::{ppc_convert_to_integer, ppc_from_integer, ppc_round_to_single, PpcInteger};
 pub use round::{round_pack, Exact, Flags, Packed, Policy, Rounding};
 pub use vmx::{
     vmx_add, vmx_compare, vmx_flush, vmx_from_integer, vmx_madd, vmx_nan, vmx_nmsub, vmx_round,
@@ -132,6 +134,10 @@ mod ppc_arith_tests;
 #[cfg(test)]
 #[path = "tests/ppc_fma_tests.rs"]
 mod ppc_fma_tests;
+
+#[cfg(test)]
+#[path = "tests/ppc_convert_tests.rs"]
+mod ppc_convert_tests;
 
 #[cfg(test)]
 #[path = "tests/ppc_divsqrt_tests.rs"]

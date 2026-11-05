@@ -3,10 +3,6 @@
 //! `ppu_fp_status_writeback`. Each case runs the probe's one instruction
 //! on the probe's operands, from the probe's FPSCR. The test compares FRT
 //! and the FPSCR with the words the console stored.
-//!
-//! frsp writes no status. A constant below names its cases, and
-//! its test asserts both the console's value and CellGov's different
-//! value.
 
 use crate::fp::{execute_fp59, execute_fp63};
 use crate::instruction::ops::{Fp59Op, Fp63Op};
@@ -141,16 +137,10 @@ fn every_status_writeback_case_matches_the_console() {
     assert_eq!(compared, 57);
 }
 
-/// `ppu_fp_scalar_rules` cases of frsp on a NaN.
-const SCALAR_FRSP: &[usize] = &[20, 21];
-
 #[test]
-fn every_scalar_rules_case_but_frsp_matches_the_console() {
+fn every_scalar_rules_case_matches_the_console() {
     let mut compared = 0;
     for (k, case) in cases("ppu_fp_scalar_rules", 51).iter().enumerate() {
-        if SCALAR_FRSP.contains(&k) {
-            continue;
-        }
         let op = scalar_rules_op(case.op);
         let (frt, fpscr) = run(op, case.word1, case.a, case.b, case.c);
         let tag = format!(
@@ -165,19 +155,5 @@ fn every_scalar_rules_case_but_frsp_matches_the_console() {
         );
         compared += 1;
     }
-    assert_eq!(compared, 49);
-}
-
-/// Until frsp runs on the soft-float engine, it writes no status. The
-/// console sets FPRF for a NaN and VXSNAN for an SNaN.
-#[test]
-fn frsp_of_a_nan_writes_no_status_where_the_console_sets_fprf() {
-    let all = cases("ppu_fp_scalar_rules", 51);
-    for &k in SCALAR_FRSP {
-        let case = &all[k];
-        assert_ne!(case.fpscr, 0, "case {k}: console FPSCR");
-        let (frt, fpscr) = run(scalar_rules_op(case.op), case.word1, case.a, case.b, case.c);
-        assert_eq!(frt, case.frt, "case {k}: FRT");
-        assert_eq!(fpscr, case.word1, "case {k}: CellGov FPSCR");
-    }
+    assert_eq!(compared, 51);
 }

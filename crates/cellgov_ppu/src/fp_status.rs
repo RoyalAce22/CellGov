@@ -132,3 +132,7 @@ mod fp_divsqrt_console_tests;
 #[cfg(test)]
 #[path = "tests/fp_fma_console_tests.rs"]
 mod fp_fma_console_tests;
+
+#[cfg(test)]
+#[path = "tests/fp_convert_console_tests.rs"]
+mod fp_convert_console_tests;

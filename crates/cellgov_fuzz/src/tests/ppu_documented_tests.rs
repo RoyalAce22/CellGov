@@ -113,24 +113,7 @@ const KNOWN_STOPPED: &[(&str, &str)] = &[];
 
 /// Documented components CellGov does not reproduce, as a vector id
 /// prefix and a component name, and why.
-const KNOWN_DIFFERENCES: &[(&str, &str, &str)] = &[
-    (
-        "fctiw-high-word/",
-        "fpscr.fi",
-        "the conversion arms set no FPSCR status bit",
-    ),
-    ("fctiw-high-word/", "fpscr.fr", "as above"),
-    ("fctiw-high-word/", "fpscr.xx", "as above"),
-    ("fctiw-high-word/", "fpscr.vx-bits", "as above"),
-    ("fctiw-high-word/", "fpscr.summary", "as above"),
-    (
-        "fctiw-high-word/fctiw/rn1/",
-        "f3.lo",
-        "fctiw rounds to nearest whatever FPSCR RN selects",
-    ),
-    ("fctiw-high-word/fctiw/rn2/", "f3.lo", "as above"),
-    ("fctiw-high-word/fctiw/rn3/", "f3.lo", "as above"),
-];
+const KNOWN_DIFFERENCES: &[(&str, &str, &str)] = &[];
 
 /// Every entry of `found` matches a known entry, and every known entry
 /// matches at least one: a fix and a new gap both fail.
@@ -225,18 +208,11 @@ fn capture() -> ConsoleCapture {
 /// Undefined components the console gives one way and CellGov another,
 /// as a vector id prefix and a component name, and what the console
 /// does.
-const KNOWN_CONTRADICTED: &[(&str, &str, &str)] = &[
-    (
-        "fctiw-high-word/",
-        "f3.hi",
-        "the console sign-extends the converted word into FRT[0:31]",
-    ),
-    (
-        "lve-other-lanes/",
-        "v1.other",
-        "the console loads the whole aligned quadword into vD",
-    ),
-];
+const KNOWN_CONTRADICTED: &[(&str, &str, &str)] = &[(
+    "lve-other-lanes/",
+    "v1.other",
+    "the console loads the whole aligned quadword into vD",
+)];
 
 #[test]
 fn the_capture_agrees_with_the_documents_and_contradicts_cellgov_only_where_known() {

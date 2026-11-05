@@ -76,6 +76,20 @@ impl Fprf {
 /// [PPC-Book1 p:88 s:4.2.2] FR and FI are not sticky; FPRF is set from the result and the target precision.
 /// [PPC-Book1 p:97 s:4.4.1] an invalid operation sets one bit per cause.
 pub(crate) fn write_status(state: &mut PpuState, status: &PpcStatus, fprf: Fprf) {
+    write_status_fields(state, status, Some(fprf));
+}
+
+/// Writes the status of a conversion to integer into the FPSCR: what
+/// [`write_status`] writes, with FPRF unchanged.
+///
+/// [PPC-Book1 p:117 s:4.6.6] a convert to integer leaves FPRF undefined.
+/// The ppu_fp_convert_modes console capture reads the FPRF bits the instruction started with.
+pub(crate) fn write_convert_status(state: &mut PpuState, status: &PpcStatus) {
+    write_status_fields(state, status, None);
+}
+
+/// [`write_status`], with FPRF replaced when `fprf` names a class.
+fn write_status_fields(state: &mut PpuState, status: &PpcStatus, fprf: Option<Fprf>) {
     let old = state.fpscr();
     let invalid = &status.invalid;
     let mut raised = 0;
@@ -96,7 +110,10 @@ pub(crate) fn write_status(state: &mut PpuState, status: &PpcStatus, fprf: Fprf)
             raised |= bit;
         }
     }
-    let mut v = old & !(PPC_FPSCR_FPRF | PPC_FPSCR_FR | PPC_FPSCR_FI);
+    let mut v = old & !(PPC_FPSCR_FR | PPC_FPSCR_FI);
+    if let Some(fprf) = fprf {
+        v = v & !PPC_FPSCR_FPRF | (fprf as u32) << 12;
+    }
     if status.fr {
         v |= PPC_FPSCR_FR;
     }
@@ -104,7 +121,7 @@ pub(crate) fn write_status(state: &mut PpuState, status: &PpcStatus, fprf: Fprf)
         v |= PPC_FPSCR_FI;
         raised |= PPC_FPSCR_XX;
     }
-    v |= raised | (fprf as u32) << 12;
+    v |= raised;
     if raised & !old != 0 {
         v |= PPC_FPSCR_FX;
     }
