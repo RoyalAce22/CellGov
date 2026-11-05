@@ -110,8 +110,16 @@ mod fused_lbzu_cmpwi_tests;
 mod fused_extsw_blr_tests;
 
 #[cfg(test)]
+#[path = "tests/fused_ldu_pair_tests.rs"]
+mod fused_ldu_pair_tests;
+
+#[cfg(test)]
 #[path = "tests/ld_ld_console_tests.rs"]
 mod ld_ld_console_tests;
+
+#[cfg(test)]
+#[path = "tests/ldu_ldu_console_tests.rs"]
+mod ldu_ldu_console_tests;
 
 #[cfg(test)]
 #[path = "tests/lbzu_cmpwi_console_tests.rs"]

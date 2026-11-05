@@ -308,6 +308,39 @@ fn execute_pair(
                 Err(ea) => ExecuteVerdict::MemFault(ea),
             }
         }
+        // [PPC-Book1 p:39 s:3.3.2 Load Doubleword with Update] ldu: RT <- MEM(EA,8); RA <- EA; EA = (RA)+EXTS(DS||0b00).
+        // [PPC-Book1 p:17 s:2.2] the second ldu runs after the first, so a second base equal to RA1 reads EA1.
+        // The pair writes no register until both loads pass, so a refused pair reruns split from the state it began in.
+        FusedPair::LduLdu {
+            rt1,
+            ra1,
+            off1,
+            rt2,
+            ra2,
+            off2,
+        } => {
+            let ea1 = state.ea_d_form(ra1, off1);
+            let base2 = if ra2 == ra1 {
+                ea1
+            } else {
+                state.gpr[ra2 as usize]
+            };
+            let ea2 = base2.wrapping_add(off2 as i64 as u64);
+            let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
+            let first = match load_ze(&mut port, ea1, Width::B8) {
+                Ok(val) => val,
+                Err(ea) => return ExecuteVerdict::MemFault(ea),
+            };
+            let second = match load_ze(&mut port, ea2, Width::B8) {
+                Ok(val) => val,
+                Err(ea) => return ExecuteVerdict::MemFault(ea),
+            };
+            state.set_gpr(rt1 as usize, first);
+            state.set_gpr(ra1 as usize, ea1);
+            state.set_gpr(rt2 as usize, second);
+            state.set_gpr(ra2 as usize, ea2);
+            ExecuteVerdict::Continue
+        }
         // [PPC-Book1 p:69 s:3.3.11 Extend Sign Word] extsw: RA <- EXTS((RS)32:63).
         // [PPC-Book1 p:25 s:2.4 Branch Conditional to Link Register] bclr with BO 1z1zz: NIA <- LR[0:61] || 0b00.
         FusedPair::ExtswBlr { ra, rs, .. } => {

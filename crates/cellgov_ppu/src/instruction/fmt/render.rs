@@ -763,6 +763,17 @@ pub(super) fn render(
                     write!(f, "; cmpwi cr{bf}, r{cmp_ra}, 0")
                 }
             }
+            FusedPair::LduLdu {
+                rt1,
+                ra1,
+                off1,
+                rt2,
+                ra2,
+                off2,
+            } => {
+                op(f, "ldu", format_args!("r{rt1}, {off1}(r{ra1})"))?;
+                write!(f, "; ldu r{rt2}, {off2}(r{ra2})")
+            }
             FusedPair::ExtswBlr { ra, rs, bo, bi } => {
                 op(f, "extsw", format_args!("r{ra}, r{rs}"))?;
                 write!(f, "; bclr {bo}, {bi}")

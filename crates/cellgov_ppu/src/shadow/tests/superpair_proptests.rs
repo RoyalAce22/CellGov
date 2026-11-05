@@ -5,7 +5,7 @@ use proptest::prelude::*;
 
 use super::make_super_pair;
 use crate::exec::ExecuteVerdict;
-use crate::instruction::PpuInstruction;
+use crate::instruction::{FusedPair, PpuInstruction};
 use crate::shadow::semantics_support::{
     compare_immediate, cr_field, displacement, ds_displacement, reg, run_pair, run_sequence,
     state_seed, MEM_BASE,
@@ -211,6 +211,46 @@ fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
                 )
             }
         ),
+        // An ldu with RA = 0 or RA = RT is invalid, and a second base equal
+        // to RT1 does not fuse, so this arm moves each base off those. Half
+        // the cases share one base.
+        (
+            reg(),
+            reg(),
+            ds_displacement(),
+            reg(),
+            reg(),
+            ds_displacement(),
+            any::<bool>()
+        )
+            .prop_map(|(rt1, ra1, off1, rt2, ra2, off2, same)| {
+                let ra1 = if ra1 == 0 || ra1 == rt1 {
+                    rt1 % 31 + 1
+                } else {
+                    ra1
+                };
+                let mut ra2 = if same { ra1 } else { ra2 };
+                // The guard rejects three values, so four steps always
+                // reach a valid base.
+                for _ in 0..4 {
+                    if ra2 != 0 && ra2 != rt2 && ra2 != rt1 {
+                        break;
+                    }
+                    ra2 = ra2 % 31 + 1;
+                }
+                (
+                    PpuInstruction::Ldu {
+                        rt: rt1,
+                        ra: ra1,
+                        imm: off1,
+                    },
+                    PpuInstruction::Ldu {
+                        rt: rt2,
+                        ra: ra2,
+                        imm: off2,
+                    },
+                )
+            }),
         // The shadow quickens a bclr to Blr only when BO is 1z1zz.
         (
             reg(),
@@ -302,7 +342,7 @@ fn aim_compare(
 }
 
 proptest! {
-    // Six of the twenty arms are compares that need an aimed
+    // Six of the twenty-one arms are compares that need an aimed
     // operand to show an off-by-one. Four times the default count
     // makes one such case near certain per run.
     #![proptest_config(ProptestConfig::with_cases(1024))]
@@ -333,7 +373,15 @@ proptest! {
         let (verdict_pair, effects_pair) = run_pair(&fused, &mut pair, &mem);
 
         prop_assert_eq!(&verdict_pair, &verdict_halves);
-        prop_assert_eq!(pair.fingerprint(), halves.fingerprint());
+        let refused = !matches!(verdict_pair, ExecuteVerdict::Continue | ExecuteVerdict::Branch);
+        if refused && matches!(fused, PpuInstruction::Fused(FusedPair::LduLdu { .. })) {
+            // The ldu pair's first half writes the base it reads, so a
+            // refused pair leaves the state it began in. The batch's
+            // split rerun reaches the halves' state from there.
+            prop_assert_eq!(pair.fingerprint(), seed.state().fingerprint());
+        } else {
+            prop_assert_eq!(pair.fingerprint(), halves.fingerprint());
+        }
         prop_assert_eq!(effects_pair, effects_halves);
         // The executor reports a refusal inside the second half at the
         // pair's address. The batch then runs the pair split, so the

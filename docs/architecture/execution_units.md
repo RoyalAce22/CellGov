@@ -64,7 +64,8 @@ The variant count also includes:
 - the `Fused` variant, whose `FusedPair` holds the super-pair
   fusions (`LwzCmpwi`, `LwzMtlr`, `MflrStw`, `MflrStd`, `LiStw`,
   `CmpwiBc`, `CmpwBc`, `CmpdiBc`, `CmpdBc`, `CmplwBc`, `LdMtlr`,
-  `LdLd`, `StdStd`, `LbzuCmpwi`, `ExtswBlr`, `OrAdd`, `LisOri`);
+  `LdLd`, `StdStd`, `LbzuCmpwi`, `LduLdu`, `ExtswBlr`, `OrAdd`,
+  `LisOri`);
 - the `Consumed` placeholder.
 
 ### PPU loaders
@@ -309,6 +310,7 @@ Frequent 2-instruction sequences fuse into single dispatch entries:
 - `cmpd + bc` -> `CmpdBc`
 - `cmplw + bc` -> `CmplwBc`
 - `lbzu + cmpwi` -> `LbzuCmpwi`
+- `ldu + ldu` -> `LduLdu`
 - `extsw + blr` -> `ExtswBlr`
 - `or + add` -> `OrAdd`
 - `lis + ori` -> `LisOri`

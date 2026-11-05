@@ -134,6 +134,30 @@ fn fuse(a: PpuInstruction, b: PpuInstruction) -> Option<FusedPair> {
                 cmp_ra,
             })
         }
+        // ldu rT1, off1(rA1) + ldu rT2, off2(rA2). An invalid half (RA = 0 or
+        // RA = RT) does not fuse. A second base equal to RT1 does not fuse,
+        // because EA2 then depends on the first load's value.
+        (
+            PpuInstruction::Ldu {
+                rt: rt1,
+                ra: ra1,
+                imm: off1,
+            },
+            PpuInstruction::Ldu {
+                rt: rt2,
+                ra: ra2,
+                imm: off2,
+            },
+        ) if ra1 != 0 && ra1 != rt1 && ra2 != 0 && ra2 != rt2 && ra2 != rt1 => {
+            Some(FusedPair::LduLdu {
+                rt1,
+                ra1,
+                off1,
+                rt2,
+                ra2,
+                off2,
+            })
+        }
         // extsw rA, rS + blr. The shadow quickens only a branch-always bclr
         // to Blr.
         (PpuInstruction::Extsw { ra, rs, rc: false }, PpuInstruction::Blr { bo, bi }) => {
@@ -380,3 +404,7 @@ mod lbzu_tests;
 #[cfg(test)]
 #[path = "tests/superpair_extsw_tests.rs"]
 mod extsw_tests;
+
+#[cfg(test)]
+#[path = "tests/superpair_ldu_tests.rs"]
+mod ldu_tests;

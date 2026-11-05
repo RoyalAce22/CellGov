@@ -1824,6 +1824,19 @@ pub enum FusedPair {
         bf: u8,
         cmp_ra: u8,
     },
+    /// `ldu rT1, off1(rA1)` followed by `ldu rT2, off2(rA2)`.
+    ///
+    /// The shadow fuses only valid halves whose second base is not `rt1`.
+    /// The second base thus holds EA1 when `ra2 == ra1`, and its own value
+    /// otherwise.
+    LduLdu {
+        rt1: u8,
+        ra1: u8,
+        off1: i16,
+        rt2: u8,
+        ra2: u8,
+        off2: i16,
+    },
     /// `extsw rA, rS` with Rc = 0, followed by a branch-always `bclr`
     /// (the quickened `blr`).
     ExtswBlr {

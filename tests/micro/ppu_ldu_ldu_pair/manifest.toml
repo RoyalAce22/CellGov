@@ -1,0 +1,26 @@
+[test]
+name = "ppu_ldu_ldu_pair"
+
+# A hardware probe: the loaded doublewords and the updated bases two
+# adjacent "ldu rT,D(rA)" leave, with one shared base, two bases, the
+# second target on the first base, one shared target, a branch over the
+# first load, and negative offsets. The console capture is the answer;
+# no emulator runs it.
+
+[observe]
+# 42 big-endian u32 words, as ppu/main.c lists: 168 bytes.
+#   0 failed step, 1 its return code; each register as a high word and
+#   a low word, each base as its distance from its start value:
+#   2-3 r7, 4-5 r8, 6-7 r5 distance with one base;
+#   8-9 r7, 10-11 r8, 12-13 r5 distance, 14-15 r6 distance with two bases;
+#   16-17 r7, 18-19 r5, 20-21 r6 distance with the second target r5;
+#   22-23 r7, 24-25 r5 distance, 26-27 r6 distance with one target r7;
+#   28-29 r7, 30-31 r8, 32-33 r5 distance, 34-35 r6 distance after a
+#   branch over the first load; 36-37 r7, 38-39 r8, 40-41 r5 distance
+#   with offset -8 on one base.
+memory_regions = [
+  { name = "result", addr = 0, size = 168 },
+]
+
+[expect]
+outcome = "completed"
