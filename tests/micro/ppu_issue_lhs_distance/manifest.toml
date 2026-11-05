@@ -1,0 +1,20 @@
+[test]
+name = "ppu_issue_lhs_distance"
+
+# A hardware probe of how far apart a store and a load of the same bytes
+# must be before the load stops waiting for the store: an std and an ld,
+# and an stmw and an lmw, with 0 to 16 independent li between them, timed
+# with mftb. The console capture is the answer; ppu/main.c's header lists
+# the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 312 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 312 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
