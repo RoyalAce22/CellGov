@@ -1,14 +1,128 @@
-//! The FPSCR move instructions and the summary bits every FPSCR write recomputes.
+//! The FPSCR move instructions, the summary bits every FPSCR write
+//! recomputes, and the status writeback of a computational instruction.
 //!
-//! Each instruction takes its fields from the primary-63 decode: `frt`
-//! is instruction bits 6:10, `fra` bits 11:15 and `frb` bits 16:20.
+//! Each move instruction takes its fields from the primary-63 decode:
+//! `frt` is instruction bits 6:10, `fra` bits 11:15 and `frb` bits 16:20.
 
+use cellgov_float::{PpcPrecision, PpcStatus};
 use cellgov_ps3_abi::hw::ppc_isa::{
-    PPC_FPSCR_ENABLE_BITS, PPC_FPSCR_EXCEPTION_BITS, PPC_FPSCR_FEX, PPC_FPSCR_FX, PPC_FPSCR_VX,
-    PPC_FPSCR_VX_BITS, PPE_FPSCR_UNIMPLEMENTED_BITS, PPE_MFFS_HIGH_WORD,
+    PPC_FPSCR_ENABLE_BITS, PPC_FPSCR_EXCEPTION_BITS, PPC_FPSCR_FEX, PPC_FPSCR_FI, PPC_FPSCR_FPRF,
+    PPC_FPSCR_FR, PPC_FPSCR_FX, PPC_FPSCR_OX, PPC_FPSCR_UX, PPC_FPSCR_VX, PPC_FPSCR_VXCVI,
+    PPC_FPSCR_VXIDI, PPC_FPSCR_VXIMZ, PPC_FPSCR_VXISI, PPC_FPSCR_VXSNAN, PPC_FPSCR_VXSQRT,
+    PPC_FPSCR_VXVC, PPC_FPSCR_VXZDZ, PPC_FPSCR_VX_BITS, PPC_FPSCR_XX, PPC_FPSCR_ZX,
+    PPE_FPSCR_UNIMPLEMENTED_BITS, PPE_MFFS_HIGH_WORD,
 };
 
 use crate::state::PpuState;
+
+/// The class of a result, as FPRF records it: the class descriptor C
+/// then FPCC's <, >, = and ?.
+///
+/// [PPC-Book1 p:89 s:4.2.2] Figure 29 gives the five FPRF bits of each result class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub(crate) enum Fprf {
+    QuietNan = 0b10001,
+    NegativeInfinity = 0b01001,
+    NegativeNormal = 0b01000,
+    NegativeDenormal = 0b11000,
+    NegativeZero = 0b10010,
+    PositiveZero = 0b00010,
+    PositiveDenormal = 0b10100,
+    PositiveNormal = 0b00100,
+    PositiveInfinity = 0b00101,
+}
+
+impl Fprf {
+    /// The class of the double-format result `bits` of a `precision`
+    /// operation. A single-precision value below 2^-126 is denormalized
+    /// in single format, although double format stores it normalized.
+    ///
+    /// [PPC-Book1 p:88 s:4.2.2] a single-precision operation with a denormalized result sets FPRF to a denormalized number.
+    pub(crate) fn of(bits: u64, precision: PpcPrecision) -> Fprf {
+        let negative = bits >> 63 == 1;
+        let biased = (bits >> 52 & 0x7FF) as u32;
+        let fraction = bits & ((1 << 52) - 1);
+        // The lowest biased double exponent of a normalized result.
+        let normal_from = match precision {
+            PpcPrecision::Double => 1,
+            PpcPrecision::Single => 1023 - 126,
+        };
+        match (biased, fraction, negative) {
+            (0x7FF, 0, false) => Fprf::PositiveInfinity,
+            (0x7FF, 0, true) => Fprf::NegativeInfinity,
+            (0x7FF, _, _) => Fprf::QuietNan,
+            (0, 0, false) => Fprf::PositiveZero,
+            (0, 0, true) => Fprf::NegativeZero,
+            (e, _, false) if e < normal_from => Fprf::PositiveDenormal,
+            (e, _, true) if e < normal_from => Fprf::NegativeDenormal,
+            (_, _, false) => Fprf::PositiveNormal,
+            (_, _, true) => Fprf::NegativeNormal,
+        }
+    }
+}
+
+/// Whether a computational instruction's status sets FR and FI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FrFi {
+    /// FR and FI take the status's values, and FI ORs into XX.
+    Set,
+    /// FR, FI and XX keep their values: the arm computed its result on
+    /// the host, which reports no rounding.
+    Unchanged,
+}
+
+/// Writes one computational instruction's status into the FPSCR.
+///
+/// It writes:
+///
+/// - the sticky exception bits;
+/// - FX, when one of them turns from 0 to 1;
+/// - FR and FI, as `fr_fi` selects;
+/// - FPRF;
+/// - the VX and FEX summaries.
+///
+/// [PPC-Book1 p:87 s:4.2.2] the exception bits are sticky; FX is set when an instruction turns an exception bit from 0 to 1; XX ORs in each new FI.
+/// [PPC-Book1 p:88 s:4.2.2] FR and FI are not sticky; FPRF is set from the result and the target precision.
+/// [PPC-Book1 p:97 s:4.4.1] an invalid operation sets one bit per cause.
+pub(crate) fn write_status(state: &mut PpuState, status: &PpcStatus, fprf: Fprf, fr_fi: FrFi) {
+    let old = state.fpscr();
+    let invalid = &status.invalid;
+    let mut raised = 0;
+    for (set, bit) in [
+        (status.ox, PPC_FPSCR_OX),
+        (status.ux, PPC_FPSCR_UX),
+        (status.zx, PPC_FPSCR_ZX),
+        (invalid.snan, PPC_FPSCR_VXSNAN),
+        (invalid.inf_minus_inf, PPC_FPSCR_VXISI),
+        (invalid.inf_div_inf, PPC_FPSCR_VXIDI),
+        (invalid.zero_div_zero, PPC_FPSCR_VXZDZ),
+        (invalid.inf_times_zero, PPC_FPSCR_VXIMZ),
+        (invalid.compare, PPC_FPSCR_VXVC),
+        (invalid.sqrt, PPC_FPSCR_VXSQRT),
+        (invalid.convert, PPC_FPSCR_VXCVI),
+    ] {
+        if set {
+            raised |= bit;
+        }
+    }
+    let mut v = old & !PPC_FPSCR_FPRF;
+    if fr_fi == FrFi::Set {
+        v &= !(PPC_FPSCR_FR | PPC_FPSCR_FI);
+        if status.fr {
+            v |= PPC_FPSCR_FR;
+        }
+        if status.fi {
+            v |= PPC_FPSCR_FI;
+            raised |= PPC_FPSCR_XX;
+        }
+    }
+    v |= raised | (fprf as u32) << 12;
+    if raised & !old != 0 {
+        v |= PPC_FPSCR_FX;
+    }
+    state.set_fpscr(with_summaries(v));
+}
 
 /// `fpscr` with VX and FEX recomputed from the bits they summarize.
 ///

@@ -1,11 +1,8 @@
 //! The FPSCR move instructions held to the reference console. Each test
 //! replays a probe's sequence through `execute` and compares the payload
-//! word for word with the committed capture.
-//!
-//! The console agrees with CellGov on every word a move instruction
-//! decides. A word that follows an arithmetic instruction also holds the
-//! status bits that instruction sets (FPRF, ZX), which CellGov's
-//! arithmetic does not set yet: those words are named below.
+//! word for word with the committed capture. A word that follows an
+//! arithmetic instruction also holds the status bits that instruction
+//! sets: FPRF after fadd, and ZX and FPRF after a divide by zero.
 
 use crate::exec::{execute, ExecuteVerdict};
 use crate::state::PpuState;
@@ -301,34 +298,23 @@ fn replay_ni_write() -> Vec<u32> {
     r.out
 }
 
-/// The words of each probe that hold an arithmetic instruction's status
-/// bits: fadd sets FPRF, fdiv by zero sets ZX and FPRF. Every other word
-/// from 2 on agrees.
-const MOVES_ARITH: &[usize] = &[28];
-const STATUS_WRITES_ARITH: &[usize] = &[2, 3, 4, 6, 7, 8, 9];
-const SETTLE_ARITH: &[usize] = &[11, 12];
-
-/// Each probe: name, CellGov's replay, its arithmetic words.
-fn probes() -> [(&'static str, Vec<u32>, &'static [usize]); 4] {
+/// Each probe: name and CellGov's replay.
+fn probes() -> [(&'static str, Vec<u32>); 4] {
     [
-        ("ppu_fpscr_moves", replay_moves(), MOVES_ARITH),
-        (
-            "ppu_fpscr_status_writes",
-            replay_status_writes(),
-            STATUS_WRITES_ARITH,
-        ),
-        ("ppu_fpscr_settle", replay_settle(), SETTLE_ARITH),
-        ("ppu_fpscr_ni_write", replay_ni_write(), &[]),
+        ("ppu_fpscr_moves", replay_moves()),
+        ("ppu_fpscr_status_writes", replay_status_writes()),
+        ("ppu_fpscr_settle", replay_settle()),
+        ("ppu_fpscr_ni_write", replay_ni_write()),
     ]
 }
 
 #[test]
-fn every_word_a_move_instruction_decides_matches_the_console() {
+fn every_word_matches_the_console() {
     let mut compared = 0;
-    for (probe, cellgov, arith) in probes() {
+    for (probe, cellgov) in probes() {
         let console = captured(probe);
         assert_eq!(console.len(), cellgov.len(), "{probe} payload length");
-        for w in (2..console.len()).filter(|w| !arith.contains(w)) {
+        for w in 2..console.len() {
             assert_eq!(
                 cellgov[w], console[w],
                 "{probe} word {w}: CellGov 0x{:08x}, console 0x{:08x}",
@@ -337,16 +323,5 @@ fn every_word_a_move_instruction_decides_matches_the_console() {
             compared += 1;
         }
     }
-    assert_eq!(compared, 27 + 7 + 15 + 12);
-}
-
-/// Goes red when the arithmetic sets the FPSCR status bits.
-#[test]
-fn an_arithmetic_status_bit_differs_from_the_console_until_the_arithmetic_sets_it() {
-    for (probe, cellgov, arith) in probes() {
-        let console = captured(probe);
-        for &w in arith {
-            assert_ne!(cellgov[w], console[w], "{probe} word {w} now agrees");
-        }
-    }
+    assert_eq!(compared, 28 + 14 + 17 + 12);
 }

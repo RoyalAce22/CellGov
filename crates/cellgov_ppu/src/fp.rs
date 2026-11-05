@@ -5,15 +5,49 @@
 //! The FPSCR move instructions read and write the register
 //! ([`crate::fpscr`]), and a record form copies FPSCR bits 0:3 to CR1.
 //! The computational arms do not read `FPSCR[RN]`: each rounds to
-//! nearest. They also leave the status flags (FPRF, FR, FI, FX, OX, UX,
-//! XX, VXSNAN ...) unchanged, so `mffs`, `mcrfs` and CR1 report only
-//! what the move instructions wrote.
+//! nearest. The arithmetic arms and the estimates write their status
+//! through [`crate::fp_status`], which names the bits a host-computed
+//! result leaves unchanged. The compares and the conversions leave the
+//! FPSCR unchanged.
 // [PPC-Book1 p:89 s:4.2.2] FPSCR[RN] encoding: 0b00 selects Round to Nearest.
 
+use cellgov_float::PpcPrecision;
+
 use crate::exec::ExecuteVerdict;
-use crate::fpscr;
+use crate::fp_status::{fres_status, frsqrte_status, write_host_arith_status, HostArith};
+use crate::fpscr::{self, write_status, Fprf, FrFi};
 use crate::instruction::ops::{Fp59Op, Fp63Op};
 use crate::state::PpuState;
+
+/// The host-computed arithmetic a primary-63 op performs, or `None` for
+/// an op that writes no arithmetic status.
+fn fp63_arith(op: Fp63Op) -> Option<HostArith> {
+    match op {
+        Fp63Op::Fmadd | Fp63Op::Fnmadd => Some(HostArith::MultiplyAdd { subtract: false }),
+        Fp63Op::Fmsub | Fp63Op::Fnmsub => Some(HostArith::MultiplyAdd { subtract: true }),
+        Fp63Op::Fmul => Some(HostArith::Multiply),
+        Fp63Op::Fdiv => Some(HostArith::Divide),
+        Fp63Op::Fadd => Some(HostArith::Add),
+        Fp63Op::Fsub => Some(HostArith::Subtract),
+        Fp63Op::Fsqrt => Some(HostArith::SquareRoot),
+        _ => None,
+    }
+}
+
+/// The host-computed arithmetic a primary-59 op performs, or `None` for
+/// `fres`.
+fn fp59_arith(op: Fp59Op) -> Option<HostArith> {
+    match op {
+        Fp59Op::Fmadds | Fp59Op::Fnmadds => Some(HostArith::MultiplyAdd { subtract: false }),
+        Fp59Op::Fmsubs | Fp59Op::Fnmsubs => Some(HostArith::MultiplyAdd { subtract: true }),
+        Fp59Op::Fmuls => Some(HostArith::Multiply),
+        Fp59Op::Fdivs => Some(HostArith::Divide),
+        Fp59Op::Fadds => Some(HostArith::Add),
+        Fp59Op::Fsubs => Some(HostArith::Subtract),
+        Fp59Op::Fsqrts => Some(HostArith::SquareRoot),
+        Fp59Op::Fres => None,
+    }
+}
 
 /// Execute a primary-63 op.
 pub fn execute_fp63(
@@ -24,9 +58,14 @@ pub fn execute_fp63(
     frb: u8,
     frc: u8,
 ) -> ExecuteVerdict {
-    let a = f64::from_bits(state.fpr[fra as usize]);
-    let b = f64::from_bits(state.fpr[frb as usize]);
-    let c = f64::from_bits(state.fpr[frc as usize]);
+    let (ra, rb, rc) = (
+        state.fpr[fra as usize],
+        state.fpr[frb as usize],
+        state.fpr[frc as usize],
+    );
+    let a = f64::from_bits(ra);
+    let b = f64::from_bits(rb);
+    let c = f64::from_bits(rc);
     let result_bits = match op {
         // mul_add gives the IEEE fused multiply-add (single rounding);
         // `a * c + b` would round twice. `nan_resolved_bits` overrides
@@ -156,7 +195,13 @@ pub fn execute_fp63(
         Fp63Op::Fsqrt => nan_resolved_bits(b.sqrt(), &[b]),
         // [PPC-Book1 p:126 s:5.2.1.1] frsqrte: an estimate within one part in 32 of 1/sqrt(FRB); the special-operand table fixes -inf and < 0 to QNaN, -0 to -inf, +0 to +inf, +inf to +0.
         // The PPE's own table, read back by the ppu_fp_estimate_readout capture.
-        Fp63Op::Frsqrte => cellgov_float::frsqrte_estimate(state.fpr[frb as usize]),
+        Fp63Op::Frsqrte => {
+            let bits = cellgov_float::frsqrte_estimate(rb);
+            state.set_fpr(frt as usize, bits);
+            let fprf = Fprf::of(bits, PpcPrecision::Double);
+            write_status(state, &frsqrte_status(rb), fprf, FrFi::Set);
+            return ExecuteVerdict::Continue;
+        }
         Fp63Op::Mffs => {
             fpscr::mffs(state, frt);
             return ExecuteVerdict::Continue;
@@ -183,6 +228,15 @@ pub fn execute_fp63(
         }
     };
     state.set_fpr(frt as usize, result_bits);
+    if let Some(arith) = fp63_arith(op) {
+        write_host_arith_status(
+            state,
+            arith,
+            (ra, rb, rc),
+            result_bits,
+            PpcPrecision::Double,
+        );
+    }
     ExecuteVerdict::Continue
 }
 
@@ -206,9 +260,14 @@ pub fn execute_fp59(
     // throughout.
     // [PPC-Book1 p:206 s:Appendix J] Primary 59 holds fdivs, fsubs, fadds, fsqrts, fres, fmuls, fmsubs, fmadds, fnmsubs, fnmadds.
     // [PPC-Book1 p:93 s:4.3.5.1] Single-precision arithmetic: all input values must be representable in single format.
-    let a64 = f64::from_bits(state.fpr[fra as usize]);
-    let b64 = f64::from_bits(state.fpr[frb as usize]);
-    let c64 = f64::from_bits(state.fpr[frc as usize]);
+    let (ra, rb, rc) = (
+        state.fpr[fra as usize],
+        state.fpr[frb as usize],
+        state.fpr[frc as usize],
+    );
+    let a64 = f64::from_bits(ra);
+    let b64 = f64::from_bits(rb);
+    let c64 = f64::from_bits(rc);
     // A NaN operand is stored in FRT as-is, at full double width --
     // only frsp truncates the propagated NaN's low-order bits -- so the
     // precedence walk runs on the register values, not on the f32
@@ -239,8 +298,10 @@ pub fn execute_fp59(
         // [PPC-Book1 p:125 s:5.2.1.1] fres: an estimate within one part in 256 of 1/FRB; the special-operand table fixes -inf to -0, -0 to -inf, +0 to +inf, +inf to +0.
         // The PPE's own table, read back by the ppu_fp_estimate_readout capture.
         Fp59Op::Fres => {
-            let bits = cellgov_float::fres_estimate(state.fpr[frb as usize]);
+            let bits = cellgov_float::fres_estimate(rb);
             state.set_fpr(frt as usize, bits);
+            let fprf = Fprf::of(bits, PpcPrecision::Single);
+            write_status(state, &fres_status(rb, bits), fprf, FrFi::Set);
             return ExecuteVerdict::Continue;
         }
     };
@@ -249,6 +310,9 @@ pub fn execute_fp59(
     // never has an f32 NaN payload to lose.
     let bits = nan_resolved_bits(result as f64, operands);
     state.set_fpr(frt as usize, bits);
+    if let Some(arith) = fp59_arith(op) {
+        write_host_arith_status(state, arith, (ra, rb, rc), bits, PpcPrecision::Single);
+    }
     ExecuteVerdict::Continue
 }
 

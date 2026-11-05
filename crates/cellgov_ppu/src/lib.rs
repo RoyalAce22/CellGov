@@ -22,6 +22,7 @@ pub mod disasm;
 pub mod exec;
 mod fault_codes;
 mod fp;
+mod fp_status;
 mod fpscr;
 pub mod funcmap;
 pub mod instruction;

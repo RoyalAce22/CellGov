@@ -179,6 +179,81 @@ pub const PPC_FPSCR_FEX: u32 = 1 << 30;
 /// [PPC-Book1 p:87 s:4.2.2] VX is the OR of the invalid operation exception bits.
 pub const PPC_FPSCR_VX: u32 = 1 << 29;
 
+/// FPSCR bit 3, the overflow exception (OX).
+///
+/// [PPC-Book1 p:87 s:4.2.2] bit 3 is OX.
+pub const PPC_FPSCR_OX: u32 = 1 << 28;
+
+/// FPSCR bit 4, the underflow exception (UX).
+///
+/// [PPC-Book1 p:87 s:4.2.2] bit 4 is UX.
+pub const PPC_FPSCR_UX: u32 = 1 << 27;
+
+/// FPSCR bit 5, the zero divide exception (ZX).
+///
+/// [PPC-Book1 p:87 s:4.2.2] bit 5 is ZX.
+pub const PPC_FPSCR_ZX: u32 = 1 << 26;
+
+/// FPSCR bit 6, the inexact exception (XX), the sticky copy of FI.
+///
+/// [PPC-Book1 p:87 s:4.2.2] bit 6 is XX; an instruction that sets FI ORs it into XX.
+pub const PPC_FPSCR_XX: u32 = 1 << 25;
+
+/// FPSCR bit 7, the invalid operation exception for an SNaN (VXSNAN).
+///
+/// [PPC-Book1 p:88 s:4.2.2] bit 7 is VXSNAN.
+pub const PPC_FPSCR_VXSNAN: u32 = 1 << 24;
+
+/// FPSCR bit 8, infinity minus infinity (VXISI).
+///
+/// [PPC-Book1 p:88 s:4.2.2] bit 8 is VXISI.
+pub const PPC_FPSCR_VXISI: u32 = 1 << 23;
+
+/// FPSCR bit 9, infinity divided by infinity (VXIDI).
+///
+/// [PPC-Book1 p:88 s:4.2.2] bit 9 is VXIDI.
+pub const PPC_FPSCR_VXIDI: u32 = 1 << 22;
+
+/// FPSCR bit 10, zero divided by zero (VXZDZ).
+///
+/// [PPC-Book1 p:88 s:4.2.2] bit 10 is VXZDZ.
+pub const PPC_FPSCR_VXZDZ: u32 = 1 << 21;
+
+/// FPSCR bit 11, infinity times zero (VXIMZ).
+///
+/// [PPC-Book1 p:88 s:4.2.2] bit 11 is VXIMZ.
+pub const PPC_FPSCR_VXIMZ: u32 = 1 << 20;
+
+/// FPSCR bit 12, an invalid compare (VXVC).
+///
+/// [PPC-Book1 p:88 s:4.2.2] bit 12 is VXVC.
+pub const PPC_FPSCR_VXVC: u32 = 1 << 19;
+
+/// FPSCR bit 13, fraction rounded (FR).
+///
+/// [PPC-Book1 p:88 s:4.2.2] bit 13 is FR; it is not sticky.
+pub const PPC_FPSCR_FR: u32 = 1 << 18;
+
+/// FPSCR bit 14, fraction inexact (FI).
+///
+/// [PPC-Book1 p:88 s:4.2.2] bit 14 is FI; it is not sticky.
+pub const PPC_FPSCR_FI: u32 = 1 << 17;
+
+/// FPSCR bits 15:19, the floating-point result flags (FPRF).
+///
+/// [PPC-Book1 p:88 s:4.2.2] bits 15:19 are FPRF: the class descriptor C and the condition code FPCC.
+pub const PPC_FPSCR_FPRF: u32 = 0x1F << 12;
+
+/// FPSCR bit 22, the square root of a negative number (VXSQRT).
+///
+/// [PPC-Book1 p:88 s:4.2.2] bit 22 is VXSQRT.
+pub const PPC_FPSCR_VXSQRT: u32 = 1 << 9;
+
+/// FPSCR bit 23, an invalid integer convert (VXCVI).
+///
+/// [PPC-Book1 p:89 s:4.2.2] bit 23 is VXCVI.
+pub const PPC_FPSCR_VXCVI: u32 = 1 << 8;
+
 /// The FPSCR exception bits, 3:12 and 21:23 (OX through VXVC, then
 /// VXSOFT, VXSQRT and VXCVI).
 ///

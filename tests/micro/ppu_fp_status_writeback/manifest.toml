@@ -1,0 +1,21 @@
+[test]
+name = "ppu_fp_status_writeback"
+
+# A hardware probe of the FPSCR status one arithmetic or estimate
+# instruction writes: the multiply-add and single-precision invalid
+# causes, ZX and FPRF, whether an invalid operation or a zero divide
+# clears FR and FI that an earlier rounding set, FX for an exception bit
+# already set, and fres and frsqrte on operands that are not powers of
+# two. The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u32 words, as ppu/main.c lists: 3 header words (failed
+# step, its code, case count), then 11 words per case (operation, FPSCR
+# before, FRA, FRB, FRC and FRT as high/low pairs, FPSCR after): 57
+# cases, 630 words, 2520 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 2520 },
+]
+
+[expect]
+outcome = "completed"
