@@ -69,7 +69,7 @@ fn the_unit_list_names_each_unit_once() {
 }
 
 #[test]
-fn a_one_bit_change_to_each_vectors_expected_pc_or_lr_fails_its_replay() {
+fn a_change_to_each_vectors_expected_pc_lr_or_stop_reason_fails_its_replay() {
     let campaign = run_reference_directory(&fixtures()).expect("the directory reads");
     let mut broken = 0;
     for run in &campaign.files {
@@ -79,21 +79,29 @@ fn a_one_bit_change_to_each_vectors_expected_pc_or_lr_fails_its_replay() {
         };
         for index in 0..set.vectors.len() {
             let mut mutated = set.clone();
-            let state = &mut mutated.vectors[index].expected.state;
+            let expected = &mut mutated.vectors[index].expected;
             // A vector that stops at a system call leaves its PC open;
-            // its LR is a value.
-            match (&mut state.pc, &mut state.lr) {
-                (ReferenceField::Value { value }, _) => *value ^= 4,
-                (_, ReferenceField::Value { value }) => *value ^= 4,
+            // its LR is a value. A vector whose console run ended the
+            // process expects only the fault stop.
+            match (
+                &mut expected.state.pc,
+                &mut expected.state.lr,
+                &mut expected.stop.reason,
+            ) {
+                (ReferenceField::Value { value }, _, _) => *value ^= 4,
+                (_, ReferenceField::Value { value }, _) => *value ^= 4,
+                (_, _, ReferenceField::Value { value }) => {
+                    *value = PpuReferenceYieldReason::Finished;
+                }
                 _ => panic!(
-                    "{} {}: neither the expected PC nor LR is a value",
+                    "{} {}: none of the expected PC, LR and stop reason is a value",
                     run.file, set.vectors[index].name
                 ),
             }
             let replay = replay_reference(&mutated.vectors[index].to_artifact()).expect("replays");
             assert!(
                 !replay.is_match(),
-                "{} {}: the changed PC or LR still matches",
+                "{} {}: the changed PC, LR or stop reason still matches",
                 run.file,
                 set.vectors[index].name
             );

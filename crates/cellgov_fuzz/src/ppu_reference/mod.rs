@@ -43,3 +43,11 @@ mod documented_tests;
 #[cfg(test)]
 #[path = "../tests/ppu_reference_capture_tests.rs"]
 mod capture_tests;
+
+#[cfg(test)]
+#[path = "../tests/ppu_reference_multiple.rs"]
+mod multiple;
+
+#[cfg(test)]
+#[path = "../tests/ppu_reference_multiple_tests.rs"]
+mod multiple_tests;

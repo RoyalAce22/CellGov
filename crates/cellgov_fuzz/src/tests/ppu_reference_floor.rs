@@ -87,6 +87,31 @@ pub(super) struct Floor {
     pub(super) fxm: Fxm,
     /// The special-purpose registers the set moves.
     pub(super) sprs: &'static [u16],
+    /// The storage access the unit makes, if any.
+    pub(super) access: Option<Access>,
+}
+
+/// The storage access of a load or store unit.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Access {
+    /// The bytes the access moves.
+    pub(super) size: u64,
+    /// How the word forms the address.
+    pub(super) form: AddressForm,
+    /// Whether the unit writes the address back to RA.
+    pub(super) update: bool,
+    pub(super) store: bool,
+    /// Whether the unit reverses the bytes it moves.
+    pub(super) reverse: bool,
+}
+
+/// How a load or store word forms its effective address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AddressForm {
+    /// `(RA|0)` plus a 16-bit displacement, or a DS displacement.
+    Displacement,
+    /// `(RA|0)` plus RB.
+    Index,
 }
 
 /// The field mask counts a CR move's set shows.
@@ -113,7 +138,33 @@ const NONE: Floor = Floor {
     mcrf: false,
     fxm: Fxm::None,
     sprs: &[],
+    access: None,
 };
+
+/// The floor of a load or store unit.
+///
+/// A non-update indexed form reads `(RA|0)`, so its set shows RA = 0.
+const fn access(size: u64, form: AddressForm, update: bool, store: bool, reverse: bool) -> Floor {
+    Floor {
+        ra0: matches!(form, AddressForm::Index) && !update,
+        access: Some(Access {
+            size,
+            form,
+            update,
+            store,
+            reverse,
+        }),
+        ..NONE
+    }
+}
+
+const fn load(size: u64, form: AddressForm, update: bool) -> Floor {
+    access(size, form, update, false, false)
+}
+
+const fn store(size: u64, form: AddressForm, update: bool) -> Floor {
+    access(size, form, update, true, false)
+}
 
 const RA: &[Field] = &[Field::Ra];
 const RA_RB: &[Field] = &[Field::Ra, Field::Rb];
@@ -230,7 +281,149 @@ pub(super) fn floor(unit: &str) -> Floor {
             sprs: &MTSPR_SPRS,
             ..NONE
         },
-        other => panic!("no floor for {other}"),
+        other => memory_floor(other).unwrap_or_else(|| panic!("no floor for {other}")),
+    }
+}
+
+/// The floor of a load or store unit, or `None` for any other unit.
+fn memory_floor(unit: &str) -> Option<Floor> {
+    use AddressForm::{Displacement as D, Index as X};
+    Some(match unit {
+        "lbz" => load(1, D, false),
+        "lbzu" => load(1, D, true),
+        "lbzx" => load(1, X, false),
+        "lbzux" => load(1, X, true),
+        "lhz" | "lha" => load(2, D, false),
+        "lhzu" | "lhau" => load(2, D, true),
+        "lhzx" | "lhax" => load(2, X, false),
+        "lhzux" | "lhaux" => load(2, X, true),
+        "lwz" | "lwa" => load(4, D, false),
+        "lwzu" => load(4, D, true),
+        "lwzx" | "lwax" => load(4, X, false),
+        "lwzux" | "lwaux" => load(4, X, true),
+        "ld" => load(8, D, false),
+        "ldu" => load(8, D, true),
+        "ldx" => load(8, X, false),
+        "ldux" => load(8, X, true),
+        "lhbrx" => access(2, X, false, false, true),
+        "lwbrx" => access(4, X, false, false, true),
+        "ldbrx" => access(8, X, false, false, true),
+        "stb" => store(1, D, false),
+        "stbu" => store(1, D, true),
+        "stbx" => store(1, X, false),
+        "stbux" => store(1, X, true),
+        "sth" => store(2, D, false),
+        "sthu" => store(2, D, true),
+        "sthx" => store(2, X, false),
+        "sthux" => store(2, X, true),
+        "stw" => store(4, D, false),
+        "stwu" => store(4, D, true),
+        "stwx" => store(4, X, false),
+        "stwux" => store(4, X, true),
+        "std" => store(8, D, false),
+        "stdu" => store(8, D, true),
+        "stdx" => store(8, X, false),
+        "stdux" => store(8, X, true),
+        "sthbrx" => access(2, X, false, true, true),
+        "stwbrx" => access(4, X, false, true, true),
+        "sdbrx" => access(8, X, false, true, true),
+        _ => return None,
+    })
+}
+
+/// A sign-extended 16-bit value.
+fn exts16(v: u32) -> u64 {
+    i64::from(v as u16 as i16) as u64
+}
+
+/// The GPR bank the unit's word at `at` reads: the start values, with each
+/// `addi` before it applied. The words before a load or store only place
+/// its address.
+fn bank_at(v: &PpuReferenceVector, at: usize) -> [u64; 32] {
+    let mut g = [0u64; 32];
+    for (&n, &value) in &v.initial_state.gpr {
+        g[usize::from(n)] = value;
+    }
+    for &w in &v.words[..at] {
+        if w >> 26 == 14 {
+            let ra = Field::Ra.of(w);
+            let base = if ra == 0 { 0 } else { g[ra] };
+            g[Field::Rs.of(w)] = base.wrapping_add(exts16(w));
+        }
+    }
+    g
+}
+
+/// The features a load or store word shows: its address form's operand
+/// sign, the alignment of its address, and the datum's top bit or the
+/// stored value's class.
+fn access_features(a: &Access, v: &PpuReferenceVector, at: usize, out: &mut BTreeSet<String>) {
+    let word = v.words[at];
+    let g = bank_at(v, at);
+    let ra = Field::Ra.of(word);
+    let base = if ra == 0 { 0 } else { g[ra] };
+    let sign = |x: u64| match x as i64 {
+        0 => "zero",
+        x if x > 0 => "pos",
+        _ => "neg",
+    };
+    let offset = match a.form {
+        AddressForm::Displacement => {
+            // A DS-form word keeps its two low bits for the opcode extension.
+            let ds = matches!(word >> 26, 58 | 62);
+            let d = exts16(if ds { word & 0xfffc } else { word });
+            out.insert(format!("disp:{}", sign(d)));
+            d
+        }
+        AddressForm::Index => {
+            let index = g[Field::Rb.of(word)];
+            if ra != 0 {
+                out.insert(format!("index:{}", sign(index)));
+            }
+            index
+        }
+    };
+    let ea = base.wrapping_add(offset).wrapping_sub(v.memory_base) as usize;
+    if a.size > 1 {
+        let aligned = (ea as u64).is_multiple_of(a.size);
+        out.insert(
+            if aligned {
+                "ea:aligned"
+            } else {
+                "ea:misaligned"
+            }
+            .into(),
+        );
+    }
+    if a.store {
+        out.insert(format!("rs:{}", operand_class(g[Field::Rs.of(word)])));
+        return;
+    }
+    let first = if a.reverse {
+        ea + a.size as usize - 1
+    } else {
+        ea
+    };
+    if let Some(byte) = v.initial_memory.get(first) {
+        out.insert(format!("msb:{}", byte >> 7));
+    }
+}
+
+/// The features a load or store unit's set must show.
+fn access_required(a: &Access, out: &mut BTreeSet<String>) {
+    let mut add = |names: &[&str]| out.extend(names.iter().map(|n| (*n).to_owned()));
+    match (a.form, a.update) {
+        (AddressForm::Displacement, _) => add(&["disp:zero", "disp:pos", "disp:neg"]),
+        (AddressForm::Index, false) => add(&["index:zero", "index:pos"]),
+        (AddressForm::Index, true) => add(&["index:zero", "index:pos", "index:neg"]),
+    }
+    if a.size > 1 {
+        add(&["ea:aligned", "ea:misaligned"]);
+    }
+    if a.store {
+        add(&["rs:zero", "rs:m1", "rs:hi"]);
+    } else {
+        add(&["msb:0", "msb:1"]);
     }
 }
 
@@ -314,9 +507,13 @@ fn expected_xer(v: &PpuReferenceVector) -> Option<u64> {
 pub(super) fn features(floor: &Floor, unit: &str, v: &PpuReferenceVector) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     let of_unit = |w: &&u32| matches!(word_unit(**w), Some(PpuReferenceUnit::Instruction { mnemonic }) if mnemonic == unit);
-    let Some(&word) = v.words.iter().find(of_unit) else {
+    let Some(at) = v.words.iter().position(|w| of_unit(&w)) else {
         return out;
     };
+    let word = v.words[at];
+    if let Some(a) = &floor.access {
+        access_features(a, v, at, &mut out);
+    }
     out.insert(format!("word:0x{word:08x}"));
     let gpr = |n: usize| {
         v.initial_state
@@ -431,5 +628,8 @@ pub(super) fn required(floor: &Floor) -> BTreeSet<String> {
         Fxm::Ocrf => add(&["fxm:one", "fxm:several"]),
     }
     out.extend(floor.sprs.iter().map(|n| format!("spr:{n}")));
+    if let Some(a) = &floor.access {
+        access_required(a, &mut out);
+    }
     out
 }

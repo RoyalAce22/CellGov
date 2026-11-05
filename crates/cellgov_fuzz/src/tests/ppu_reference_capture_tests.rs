@@ -25,7 +25,7 @@ fn committed_set(unit: &str) -> PpuReferenceSet {
 fn each_converted_file_is_its_captures_converted() {
     let conversion = convert(&captured_probes());
     let mut stale = Vec::new();
-    for unit in UNITS {
+    for unit in units() {
         let candidates = conversion.candidates.get(unit).cloned().unwrap_or_default();
         assert!(!candidates.is_empty(), "{unit}: no captured case");
         let want = render(&unit_set(unit, &candidates));
@@ -49,26 +49,57 @@ fn each_converted_file_is_its_captures_converted() {
 fn the_converter_skips_only_other_units_and_the_cases_it_cannot_represent() {
     let conversion = convert(&captured_probes());
     let skipped: Vec<(Skip, usize)> = conversion.skipped.into_iter().collect();
-    // - Ended: the tdi and twi cases that trapped, and the privileged
-    //   and reserved SPR reads. Each one ended the console run.
+    // - WritesUnrecorded: the lswx case that copies the buffer's address
+    //   into a register it does not record.
+    // - Ended: the tdi and twi cases that trapped; the lq and lswi cases,
+    //   whose address move is an `or`; the four invalid or unmapped lswx
+    //   forms; and the lwz and stw cases at a null or low address. Each
+    //   one ended the console run.
     // - Flow: the two bcctr probes that move SPRs around a branch.
-    // - Memory: the one case of a converted unit that names the memory
-    //   buffer.
     assert_eq!(
         skipped,
         [
-            (Skip::OtherUnit, 819),
-            (Skip::Memory, 1),
-            (Skip::Ended, 7),
+            (Skip::OtherUnit, 814),
+            (Skip::WritesUnrecorded, 1),
+            (Skip::Ended, 11),
             (Skip::Flow, 2)
         ]
     );
 }
 
 #[test]
+fn a_case_that_leaves_changed_data_unrecorded_or_records_past_the_data_is_skipped() {
+    use cellgov_testkit::console_cases::{parse_table, Run};
+    let run = Run {
+        slots: [0; 4],
+        xer: 0,
+        cr: 0,
+        fpscr: 0,
+    };
+    // stw r3,0(r10); stfd f1,0(r10) then add r3,r4,r5.
+    let rows = [
+        ("0x906a0000", "m0", Err(Skip::WritesUnrecorded)),
+        ("0x906a0000", "m0,m8", Ok(())),
+        ("0x906a0000", "m0,m8,m16", Err(Skip::Memory)),
+        ("0xd82a0000,0x7c642a14", "r3", Err(Skip::WritesUnrecorded)),
+        ("0xd82a0000,0x7c642a14", "r3,m0,m8", Ok(())),
+    ];
+    for (words, record, want) in rows {
+        let text = format!(
+            "id\tasm\twords\tinputs\trecord\tmay_end_process\n\
+             c\t-\t{words}\tmem=0x0102030405060708,r3=0x1\t{record}\t0\n"
+        );
+        let cases = parse_table(&text).expect("the row parses");
+        let start = cases[0].initial(0, MEMORY_BASE);
+        let got = skip_reason(&cases[0], &start, &[run, run]);
+        assert_eq!(got, want, "{words} recording {record}");
+    }
+}
+
+#[test]
 fn each_converted_set_meets_the_floor_of_its_unit() {
     let mut short = Vec::new();
-    for unit in UNITS {
+    for unit in units() {
         let f = floor(unit);
         let set = committed_set(unit);
         let shown: BTreeSet<String> = set
@@ -86,7 +117,7 @@ fn each_converted_set_meets_the_floor_of_its_unit() {
 
 #[test]
 fn a_one_bit_change_to_an_expected_gpr_fails_each_converted_file() {
-    for unit in UNITS {
+    for unit in units() {
         let mut set = committed_set(unit);
         let clean = replay_reference(&set.vectors[0].to_artifact()).expect("replays");
         assert!(
@@ -103,11 +134,51 @@ fn a_one_bit_change_to_an_expected_gpr_fails_each_converted_file() {
 }
 
 #[test]
+fn a_stored_byte_expected_at_its_start_value_fails_each_converted_store_file() {
+    let stores: Vec<&str> = MEMORY_UNITS.into_iter().filter(|u| is_store(u)).collect();
+    assert_eq!(stores.len(), 19);
+    for unit in stores {
+        let mut set = committed_set(unit);
+        // The first vector whose store changes a data byte, and that byte.
+        let found = set.vectors.iter().enumerate().find_map(|(i, v)| {
+            let ReferenceField::Value { value } = &v.expected.memory else {
+                return None;
+            };
+            let at = value
+                .iter()
+                .zip(&v.initial_memory)
+                .position(|(a, b)| a != b)?;
+            Some((i, at))
+        });
+        let Some((index, at)) = found else {
+            panic!("{unit}: no vector stores a changed byte");
+        };
+        let vector = &mut set.vectors[index];
+        assert!(
+            replay_reference(&vector.to_artifact())
+                .expect("replays")
+                .is_match(),
+            "{unit}: the unchanged vector does not match"
+        );
+        let start = vector.initial_memory[at];
+        let ReferenceField::Value { value } = &mut vector.expected.memory else {
+            unreachable!("the vector was found by its expected data");
+        };
+        value[at] = start;
+        let replay = replay_reference(&vector.to_artifact()).expect("replays");
+        assert!(
+            !replay.is_match(),
+            "{unit}: byte {at} at its start value still matches"
+        );
+    }
+}
+
+#[test]
 fn no_converted_unit_is_pending() {
     let pending =
         std::fs::read_to_string(fixtures().join("pending.txt")).expect("pending.txt reads");
     let listed: BTreeSet<&str> = pending.lines().map(str::trim).collect();
-    for unit in UNITS {
+    for unit in units() {
         assert!(
             !listed.contains(format!("instruction:{unit}").as_str()),
             "{unit} is still pending"

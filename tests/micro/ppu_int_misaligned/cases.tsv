@@ -1,0 +1,209 @@
+id	asm	words	inputs	record	may_end_process
+lhz_d1_p0	lhz r3, 1(r10)	0xa06a0001	mem=0x123456781a2b3c4d5e6f700123456709	r3	0
+lhz_d1_p1	lhz r3, 1(r10)	0xa06a0001	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc	r3	0
+lhz_d3_p0	lhz r3, 3(r10)	0xa06a0003	mem=0x123456781a2b3c4d5e6f700123456709	r3	0
+lhz_d3_p1	lhz r3, 3(r10)	0xa06a0003	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc	r3	0
+lhzu_u1_p0	addi r4, r10, 1; lhzu r3, 2(r4); subf r4, r10, r4	0x388a0001,0xa4640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709	r3,r4	0
+lhzu_u1_p1	addi r4, r10, 1; lhzu r3, 2(r4); subf r4, r10, r4	0x388a0001,0xa4640002,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc	r3,r4	0
+lhzu_u3_p0	addi r4, r10, 3; lhzu r3, 2(r4); subf r4, r10, r4	0x388a0003,0xa4640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709	r3,r4	0
+lhzu_u3_p1	addi r4, r10, 3; lhzu r3, 2(r4); subf r4, r10, r4	0x388a0003,0xa4640002,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc	r3,r4	0
+lhzx_x1_p0	lhzx r3, r10, r5	0x7c6a2a2e	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x1	r3	0
+lhzx_x1_p1	lhzx r3, r10, r5	0x7c6a2a2e	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x1	r3	0
+lhzx_x3_p0	lhzx r3, r10, r5	0x7c6a2a2e	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x3	r3	0
+lhzx_x3_p1	lhzx r3, r10, r5	0x7c6a2a2e	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x3	r3	0
+lhzux_u1_p0	addi r4, r10, 0; lhzux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642a6e,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x1	r3,r4	0
+lhzux_u1_p1	addi r4, r10, 0; lhzux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642a6e,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x1	r3,r4	0
+lhzux_u3_p0	addi r4, r10, 0; lhzux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642a6e,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x3	r3,r4	0
+lhzux_u3_p1	addi r4, r10, 0; lhzux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642a6e,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x3	r3,r4	0
+lha_d1_p0	lha r3, 1(r10)	0xa86a0001	mem=0x123456781a2b3c4d5e6f700123456709	r3	0
+lha_d1_p1	lha r3, 1(r10)	0xa86a0001	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc	r3	0
+lha_d3_p0	lha r3, 3(r10)	0xa86a0003	mem=0x123456781a2b3c4d5e6f700123456709	r3	0
+lha_d3_p1	lha r3, 3(r10)	0xa86a0003	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc	r3	0
+lhau_u1_p0	addi r4, r10, 1; lhau r3, 2(r4); subf r4, r10, r4	0x388a0001,0xac640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709	r3,r4	0
+lhau_u1_p1	addi r4, r10, 1; lhau r3, 2(r4); subf r4, r10, r4	0x388a0001,0xac640002,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc	r3,r4	0
+lhau_u3_p0	addi r4, r10, 3; lhau r3, 2(r4); subf r4, r10, r4	0x388a0003,0xac640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709	r3,r4	0
+lhau_u3_p1	addi r4, r10, 3; lhau r3, 2(r4); subf r4, r10, r4	0x388a0003,0xac640002,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc	r3,r4	0
+lhax_x1_p0	lhax r3, r10, r5	0x7c6a2aae	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x1	r3	0
+lhax_x1_p1	lhax r3, r10, r5	0x7c6a2aae	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x1	r3	0
+lhax_x3_p0	lhax r3, r10, r5	0x7c6a2aae	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x3	r3	0
+lhax_x3_p1	lhax r3, r10, r5	0x7c6a2aae	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x3	r3	0
+lhaux_u1_p0	addi r4, r10, 0; lhaux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642aee,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x1	r3,r4	0
+lhaux_u1_p1	addi r4, r10, 0; lhaux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642aee,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x1	r3,r4	0
+lhaux_u3_p0	addi r4, r10, 0; lhaux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642aee,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x3	r3,r4	0
+lhaux_u3_p1	addi r4, r10, 0; lhaux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642aee,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x3	r3,r4	0
+lwz_d1_p0	lwz r3, 1(r10)	0x806a0001	mem=0x123456781a2b3c4d5e6f700123456709	r3	0
+lwz_d1_p1	lwz r3, 1(r10)	0x806a0001	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc	r3	0
+lwz_d3_p0	lwz r3, 3(r10)	0x806a0003	mem=0x123456781a2b3c4d5e6f700123456709	r3	0
+lwz_d3_p1	lwz r3, 3(r10)	0x806a0003	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc	r3	0
+lwzu_u1_p0	addi r4, r10, 1; lwzu r3, 2(r4); subf r4, r10, r4	0x388a0001,0x84640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709	r3,r4	0
+lwzu_u1_p1	addi r4, r10, 1; lwzu r3, 2(r4); subf r4, r10, r4	0x388a0001,0x84640002,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc	r3,r4	0
+lwzu_u3_p0	addi r4, r10, 3; lwzu r3, 2(r4); subf r4, r10, r4	0x388a0003,0x84640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709	r3,r4	0
+lwzu_u3_p1	addi r4, r10, 3; lwzu r3, 2(r4); subf r4, r10, r4	0x388a0003,0x84640002,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc	r3,r4	0
+lwzx_x1_p0	lwzx r3, r10, r5	0x7c6a282e	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x1	r3	0
+lwzx_x1_p1	lwzx r3, r10, r5	0x7c6a282e	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x1	r3	0
+lwzx_x3_p0	lwzx r3, r10, r5	0x7c6a282e	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x3	r3	0
+lwzx_x3_p1	lwzx r3, r10, r5	0x7c6a282e	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x3	r3	0
+lwzux_u1_p0	addi r4, r10, 0; lwzux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64286e,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x1	r3,r4	0
+lwzux_u1_p1	addi r4, r10, 0; lwzux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64286e,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x1	r3,r4	0
+lwzux_u3_p0	addi r4, r10, 0; lwzux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64286e,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x3	r3,r4	0
+lwzux_u3_p1	addi r4, r10, 0; lwzux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64286e,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x3	r3,r4	0
+lwa_b1_p0	addi r4, r10, -3; lwa r3, 4(r4); subf r4, r10, r4	0x388afffd,0xe8640006,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709	r3,r4	0
+lwa_b1_p1	addi r4, r10, -3; lwa r3, 4(r4); subf r4, r10, r4	0x388afffd,0xe8640006,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc	r3,r4	0
+lwa_b3_p0	addi r4, r10, -1; lwa r3, 4(r4); subf r4, r10, r4	0x388affff,0xe8640006,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709	r3,r4	0
+lwa_b3_p1	addi r4, r10, -1; lwa r3, 4(r4); subf r4, r10, r4	0x388affff,0xe8640006,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc	r3,r4	0
+lwax_x1_p0	lwax r3, r10, r5	0x7c6a2aaa	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x1	r3	0
+lwax_x1_p1	lwax r3, r10, r5	0x7c6a2aaa	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x1	r3	0
+lwax_x3_p0	lwax r3, r10, r5	0x7c6a2aaa	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x3	r3	0
+lwax_x3_p1	lwax r3, r10, r5	0x7c6a2aaa	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x3	r3	0
+lwaux_u1_p0	addi r4, r10, 0; lwaux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642aea,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x1	r3,r4	0
+lwaux_u1_p1	addi r4, r10, 0; lwaux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642aea,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x1	r3,r4	0
+lwaux_u3_p0	addi r4, r10, 0; lwaux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642aea,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x3	r3,r4	0
+lwaux_u3_p1	addi r4, r10, 0; lwaux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642aea,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x3	r3,r4	0
+ld_b1_p0	addi r4, r10, -3; ld r3, 4(r4); subf r4, r10, r4	0x388afffd,0xe8640004,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709	r3,r4	0
+ld_b1_p1	addi r4, r10, -3; ld r3, 4(r4); subf r4, r10, r4	0x388afffd,0xe8640004,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc	r3,r4	0
+ld_b3_p0	addi r4, r10, -1; ld r3, 4(r4); subf r4, r10, r4	0x388affff,0xe8640004,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709	r3,r4	0
+ld_b3_p1	addi r4, r10, -1; ld r3, 4(r4); subf r4, r10, r4	0x388affff,0xe8640004,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc	r3,r4	0
+ldu_u1_p0	addi r4, r10, 1; ldu r3, 4(r4); subf r4, r10, r4	0x388a0001,0xe8640005,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709	r3,r4	0
+ldu_u1_p1	addi r4, r10, 1; ldu r3, 4(r4); subf r4, r10, r4	0x388a0001,0xe8640005,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc	r3,r4	0
+ldu_u3_p0	addi r4, r10, 3; ldu r3, 4(r4); subf r4, r10, r4	0x388a0003,0xe8640005,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709	r3,r4	0
+ldu_u3_p1	addi r4, r10, 3; ldu r3, 4(r4); subf r4, r10, r4	0x388a0003,0xe8640005,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc	r3,r4	0
+ldx_x1_p0	ldx r3, r10, r5	0x7c6a282a	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x1	r3	0
+ldx_x1_p1	ldx r3, r10, r5	0x7c6a282a	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x1	r3	0
+ldx_x3_p0	ldx r3, r10, r5	0x7c6a282a	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x3	r3	0
+ldx_x3_p1	ldx r3, r10, r5	0x7c6a282a	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x3	r3	0
+ldux_u1_p0	addi r4, r10, 0; ldux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64286a,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x1	r3,r4	0
+ldux_u1_p1	addi r4, r10, 0; ldux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64286a,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x1	r3,r4	0
+ldux_u3_p0	addi r4, r10, 0; ldux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64286a,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x3	r3,r4	0
+ldux_u3_p1	addi r4, r10, 0; ldux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64286a,0x7c8a2050	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x3	r3,r4	0
+lhbrx_x1_p0	lhbrx r3, r10, r5	0x7c6a2e2c	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x1	r3	0
+lhbrx_x1_p1	lhbrx r3, r10, r5	0x7c6a2e2c	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x1	r3	0
+lhbrx_x3_p0	lhbrx r3, r10, r5	0x7c6a2e2c	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x3	r3	0
+lhbrx_x3_p1	lhbrx r3, r10, r5	0x7c6a2e2c	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x3	r3	0
+lwbrx_x1_p0	lwbrx r3, r10, r5	0x7c6a2c2c	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x1	r3	0
+lwbrx_x1_p1	lwbrx r3, r10, r5	0x7c6a2c2c	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x1	r3	0
+lwbrx_x3_p0	lwbrx r3, r10, r5	0x7c6a2c2c	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x3	r3	0
+lwbrx_x3_p1	lwbrx r3, r10, r5	0x7c6a2c2c	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x3	r3	0
+ldbrx_x1_p0	ldbrx r3, r10, r5	0x7c6a2c28	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x1	r3	0
+ldbrx_x1_p1	ldbrx r3, r10, r5	0x7c6a2c28	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x1	r3	0
+ldbrx_x3_p0	ldbrx r3, r10, r5	0x7c6a2c28	mem=0x123456781a2b3c4d5e6f700123456709,r5=0x3	r3	0
+ldbrx_x3_p1	ldbrx r3, r10, r5	0x7c6a2c28	mem=0x89abcdef91a2b3c4d5e6f78899aabbcc,r5=0x3	r3	0
+sth_d1_v0	sth r3, 1(r10)	0xb06a0001	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0	m0,m8	0
+sth_d1_v1	sth r3, 1(r10)	0xb06a0001	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff	m0,m8	0
+sth_d1_v2	sth r3, 1(r10)	0xb06a0001	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef	m0,m8	0
+sth_d1_v3	sth r3, 1(r10)	0xb06a0001	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567	m0,m8	0
+sth_d3_v0	sth r3, 3(r10)	0xb06a0003	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0	m0,m8	0
+sth_d3_v1	sth r3, 3(r10)	0xb06a0003	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff	m0,m8	0
+sth_d3_v2	sth r3, 3(r10)	0xb06a0003	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef	m0,m8	0
+sth_d3_v3	sth r3, 3(r10)	0xb06a0003	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567	m0,m8	0
+sthu_u1_v0	addi r4, r10, 1; sthu r3, 2(r4); subf r4, r10, r4	0x388a0001,0xb4640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0	r4,m0,m8	0
+sthu_u1_v1	addi r4, r10, 1; sthu r3, 2(r4); subf r4, r10, r4	0x388a0001,0xb4640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff	r4,m0,m8	0
+sthu_u1_v2	addi r4, r10, 1; sthu r3, 2(r4); subf r4, r10, r4	0x388a0001,0xb4640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef	r4,m0,m8	0
+sthu_u1_v3	addi r4, r10, 1; sthu r3, 2(r4); subf r4, r10, r4	0x388a0001,0xb4640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567	r4,m0,m8	0
+sthu_u3_v0	addi r4, r10, 3; sthu r3, 2(r4); subf r4, r10, r4	0x388a0003,0xb4640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0	r4,m0,m8	0
+sthu_u3_v1	addi r4, r10, 3; sthu r3, 2(r4); subf r4, r10, r4	0x388a0003,0xb4640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff	r4,m0,m8	0
+sthu_u3_v2	addi r4, r10, 3; sthu r3, 2(r4); subf r4, r10, r4	0x388a0003,0xb4640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef	r4,m0,m8	0
+sthu_u3_v3	addi r4, r10, 3; sthu r3, 2(r4); subf r4, r10, r4	0x388a0003,0xb4640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567	r4,m0,m8	0
+sthx_x1_v0	sthx r3, r10, r5	0x7c6a2b2e	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0,r5=0x1	m0,m8	0
+sthx_x1_v1	sthx r3, r10, r5	0x7c6a2b2e	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff,r5=0x1	m0,m8	0
+sthx_x1_v2	sthx r3, r10, r5	0x7c6a2b2e	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef,r5=0x1	m0,m8	0
+sthx_x1_v3	sthx r3, r10, r5	0x7c6a2b2e	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567,r5=0x1	m0,m8	0
+sthx_x3_v0	sthx r3, r10, r5	0x7c6a2b2e	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0,r5=0x3	m0,m8	0
+sthx_x3_v1	sthx r3, r10, r5	0x7c6a2b2e	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff,r5=0x3	m0,m8	0
+sthx_x3_v2	sthx r3, r10, r5	0x7c6a2b2e	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef,r5=0x3	m0,m8	0
+sthx_x3_v3	sthx r3, r10, r5	0x7c6a2b2e	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567,r5=0x3	m0,m8	0
+sthux_u1_v0	addi r4, r10, 0; sthux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642b6e,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0,r5=0x1	r4,m0,m8	0
+sthux_u1_v1	addi r4, r10, 0; sthux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642b6e,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff,r5=0x1	r4,m0,m8	0
+sthux_u1_v2	addi r4, r10, 0; sthux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642b6e,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef,r5=0x1	r4,m0,m8	0
+sthux_u1_v3	addi r4, r10, 0; sthux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642b6e,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567,r5=0x1	r4,m0,m8	0
+sthux_u3_v0	addi r4, r10, 0; sthux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642b6e,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0,r5=0x3	r4,m0,m8	0
+sthux_u3_v1	addi r4, r10, 0; sthux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642b6e,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff,r5=0x3	r4,m0,m8	0
+sthux_u3_v2	addi r4, r10, 0; sthux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642b6e,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef,r5=0x3	r4,m0,m8	0
+sthux_u3_v3	addi r4, r10, 0; sthux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c642b6e,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567,r5=0x3	r4,m0,m8	0
+stw_d1_v0	stw r3, 1(r10)	0x906a0001	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0	m0,m8	0
+stw_d1_v1	stw r3, 1(r10)	0x906a0001	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff	m0,m8	0
+stw_d1_v2	stw r3, 1(r10)	0x906a0001	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef	m0,m8	0
+stw_d1_v3	stw r3, 1(r10)	0x906a0001	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567	m0,m8	0
+stw_d3_v0	stw r3, 3(r10)	0x906a0003	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0	m0,m8	0
+stw_d3_v1	stw r3, 3(r10)	0x906a0003	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff	m0,m8	0
+stw_d3_v2	stw r3, 3(r10)	0x906a0003	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef	m0,m8	0
+stw_d3_v3	stw r3, 3(r10)	0x906a0003	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567	m0,m8	0
+stwu_u1_v0	addi r4, r10, 1; stwu r3, 2(r4); subf r4, r10, r4	0x388a0001,0x94640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0	r4,m0,m8	0
+stwu_u1_v1	addi r4, r10, 1; stwu r3, 2(r4); subf r4, r10, r4	0x388a0001,0x94640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff	r4,m0,m8	0
+stwu_u1_v2	addi r4, r10, 1; stwu r3, 2(r4); subf r4, r10, r4	0x388a0001,0x94640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef	r4,m0,m8	0
+stwu_u1_v3	addi r4, r10, 1; stwu r3, 2(r4); subf r4, r10, r4	0x388a0001,0x94640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567	r4,m0,m8	0
+stwu_u3_v0	addi r4, r10, 3; stwu r3, 2(r4); subf r4, r10, r4	0x388a0003,0x94640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0	r4,m0,m8	0
+stwu_u3_v1	addi r4, r10, 3; stwu r3, 2(r4); subf r4, r10, r4	0x388a0003,0x94640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff	r4,m0,m8	0
+stwu_u3_v2	addi r4, r10, 3; stwu r3, 2(r4); subf r4, r10, r4	0x388a0003,0x94640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef	r4,m0,m8	0
+stwu_u3_v3	addi r4, r10, 3; stwu r3, 2(r4); subf r4, r10, r4	0x388a0003,0x94640002,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567	r4,m0,m8	0
+stwx_x1_v0	stwx r3, r10, r5	0x7c6a292e	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0,r5=0x1	m0,m8	0
+stwx_x1_v1	stwx r3, r10, r5	0x7c6a292e	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff,r5=0x1	m0,m8	0
+stwx_x1_v2	stwx r3, r10, r5	0x7c6a292e	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef,r5=0x1	m0,m8	0
+stwx_x1_v3	stwx r3, r10, r5	0x7c6a292e	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567,r5=0x1	m0,m8	0
+stwx_x3_v0	stwx r3, r10, r5	0x7c6a292e	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0,r5=0x3	m0,m8	0
+stwx_x3_v1	stwx r3, r10, r5	0x7c6a292e	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff,r5=0x3	m0,m8	0
+stwx_x3_v2	stwx r3, r10, r5	0x7c6a292e	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef,r5=0x3	m0,m8	0
+stwx_x3_v3	stwx r3, r10, r5	0x7c6a292e	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567,r5=0x3	m0,m8	0
+stwux_u1_v0	addi r4, r10, 0; stwux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64296e,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0,r5=0x1	r4,m0,m8	0
+stwux_u1_v1	addi r4, r10, 0; stwux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64296e,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff,r5=0x1	r4,m0,m8	0
+stwux_u1_v2	addi r4, r10, 0; stwux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64296e,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef,r5=0x1	r4,m0,m8	0
+stwux_u1_v3	addi r4, r10, 0; stwux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64296e,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567,r5=0x1	r4,m0,m8	0
+stwux_u3_v0	addi r4, r10, 0; stwux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64296e,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0,r5=0x3	r4,m0,m8	0
+stwux_u3_v1	addi r4, r10, 0; stwux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64296e,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff,r5=0x3	r4,m0,m8	0
+stwux_u3_v2	addi r4, r10, 0; stwux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64296e,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef,r5=0x3	r4,m0,m8	0
+stwux_u3_v3	addi r4, r10, 0; stwux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64296e,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567,r5=0x3	r4,m0,m8	0
+std_b1_v0	addi r4, r10, -3; std r3, 4(r4); subf r4, r10, r4	0x388afffd,0xf8640004,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0	r4,m0,m8	0
+std_b1_v1	addi r4, r10, -3; std r3, 4(r4); subf r4, r10, r4	0x388afffd,0xf8640004,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff	r4,m0,m8	0
+std_b1_v2	addi r4, r10, -3; std r3, 4(r4); subf r4, r10, r4	0x388afffd,0xf8640004,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef	r4,m0,m8	0
+std_b1_v3	addi r4, r10, -3; std r3, 4(r4); subf r4, r10, r4	0x388afffd,0xf8640004,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567	r4,m0,m8	0
+std_b3_v0	addi r4, r10, -1; std r3, 4(r4); subf r4, r10, r4	0x388affff,0xf8640004,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0	r4,m0,m8	0
+std_b3_v1	addi r4, r10, -1; std r3, 4(r4); subf r4, r10, r4	0x388affff,0xf8640004,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff	r4,m0,m8	0
+std_b3_v2	addi r4, r10, -1; std r3, 4(r4); subf r4, r10, r4	0x388affff,0xf8640004,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef	r4,m0,m8	0
+std_b3_v3	addi r4, r10, -1; std r3, 4(r4); subf r4, r10, r4	0x388affff,0xf8640004,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567	r4,m0,m8	0
+stdu_u1_v0	addi r4, r10, 1; stdu r3, 4(r4); subf r4, r10, r4	0x388a0001,0xf8640005,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0	r4,m0,m8	0
+stdu_u1_v1	addi r4, r10, 1; stdu r3, 4(r4); subf r4, r10, r4	0x388a0001,0xf8640005,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff	r4,m0,m8	0
+stdu_u1_v2	addi r4, r10, 1; stdu r3, 4(r4); subf r4, r10, r4	0x388a0001,0xf8640005,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef	r4,m0,m8	0
+stdu_u1_v3	addi r4, r10, 1; stdu r3, 4(r4); subf r4, r10, r4	0x388a0001,0xf8640005,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567	r4,m0,m8	0
+stdu_u3_v0	addi r4, r10, 3; stdu r3, 4(r4); subf r4, r10, r4	0x388a0003,0xf8640005,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0	r4,m0,m8	0
+stdu_u3_v1	addi r4, r10, 3; stdu r3, 4(r4); subf r4, r10, r4	0x388a0003,0xf8640005,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff	r4,m0,m8	0
+stdu_u3_v2	addi r4, r10, 3; stdu r3, 4(r4); subf r4, r10, r4	0x388a0003,0xf8640005,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef	r4,m0,m8	0
+stdu_u3_v3	addi r4, r10, 3; stdu r3, 4(r4); subf r4, r10, r4	0x388a0003,0xf8640005,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567	r4,m0,m8	0
+stdx_x1_v0	stdx r3, r10, r5	0x7c6a292a	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0,r5=0x1	m0,m8	0
+stdx_x1_v1	stdx r3, r10, r5	0x7c6a292a	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff,r5=0x1	m0,m8	0
+stdx_x1_v2	stdx r3, r10, r5	0x7c6a292a	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef,r5=0x1	m0,m8	0
+stdx_x1_v3	stdx r3, r10, r5	0x7c6a292a	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567,r5=0x1	m0,m8	0
+stdx_x3_v0	stdx r3, r10, r5	0x7c6a292a	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0,r5=0x3	m0,m8	0
+stdx_x3_v1	stdx r3, r10, r5	0x7c6a292a	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff,r5=0x3	m0,m8	0
+stdx_x3_v2	stdx r3, r10, r5	0x7c6a292a	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef,r5=0x3	m0,m8	0
+stdx_x3_v3	stdx r3, r10, r5	0x7c6a292a	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567,r5=0x3	m0,m8	0
+stdux_u1_v0	addi r4, r10, 0; stdux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64296a,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0,r5=0x1	r4,m0,m8	0
+stdux_u1_v1	addi r4, r10, 0; stdux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64296a,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff,r5=0x1	r4,m0,m8	0
+stdux_u1_v2	addi r4, r10, 0; stdux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64296a,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef,r5=0x1	r4,m0,m8	0
+stdux_u1_v3	addi r4, r10, 0; stdux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64296a,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567,r5=0x1	r4,m0,m8	0
+stdux_u3_v0	addi r4, r10, 0; stdux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64296a,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0,r5=0x3	r4,m0,m8	0
+stdux_u3_v1	addi r4, r10, 0; stdux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64296a,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff,r5=0x3	r4,m0,m8	0
+stdux_u3_v2	addi r4, r10, 0; stdux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64296a,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef,r5=0x3	r4,m0,m8	0
+stdux_u3_v3	addi r4, r10, 0; stdux r3, r4, r5; subf r4, r10, r4	0x388a0000,0x7c64296a,0x7c8a2050	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567,r5=0x3	r4,m0,m8	0
+sthbrx_x1_v0	sthbrx r3, r10, r5	0x7c6a2f2c	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0,r5=0x1	m0,m8	0
+sthbrx_x1_v1	sthbrx r3, r10, r5	0x7c6a2f2c	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff,r5=0x1	m0,m8	0
+sthbrx_x1_v2	sthbrx r3, r10, r5	0x7c6a2f2c	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef,r5=0x1	m0,m8	0
+sthbrx_x1_v3	sthbrx r3, r10, r5	0x7c6a2f2c	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567,r5=0x1	m0,m8	0
+sthbrx_x3_v0	sthbrx r3, r10, r5	0x7c6a2f2c	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0,r5=0x3	m0,m8	0
+sthbrx_x3_v1	sthbrx r3, r10, r5	0x7c6a2f2c	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff,r5=0x3	m0,m8	0
+sthbrx_x3_v2	sthbrx r3, r10, r5	0x7c6a2f2c	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef,r5=0x3	m0,m8	0
+sthbrx_x3_v3	sthbrx r3, r10, r5	0x7c6a2f2c	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567,r5=0x3	m0,m8	0
+stwbrx_x1_v0	stwbrx r3, r10, r5	0x7c6a2d2c	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0,r5=0x1	m0,m8	0
+stwbrx_x1_v1	stwbrx r3, r10, r5	0x7c6a2d2c	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff,r5=0x1	m0,m8	0
+stwbrx_x1_v2	stwbrx r3, r10, r5	0x7c6a2d2c	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef,r5=0x1	m0,m8	0
+stwbrx_x1_v3	stwbrx r3, r10, r5	0x7c6a2d2c	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567,r5=0x1	m0,m8	0
+stwbrx_x3_v0	stwbrx r3, r10, r5	0x7c6a2d2c	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0,r5=0x3	m0,m8	0
+stwbrx_x3_v1	stwbrx r3, r10, r5	0x7c6a2d2c	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff,r5=0x3	m0,m8	0
+stwbrx_x3_v2	stwbrx r3, r10, r5	0x7c6a2d2c	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef,r5=0x3	m0,m8	0
+stwbrx_x3_v3	stwbrx r3, r10, r5	0x7c6a2d2c	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567,r5=0x3	m0,m8	0
+sdbrx_x1_v0	sdbrx r3, r10, r5	0x7c6a2d28	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0,r5=0x1	m0,m8	0
+sdbrx_x1_v1	sdbrx r3, r10, r5	0x7c6a2d28	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff,r5=0x1	m0,m8	0
+sdbrx_x1_v2	sdbrx r3, r10, r5	0x7c6a2d28	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef,r5=0x1	m0,m8	0
+sdbrx_x1_v3	sdbrx r3, r10, r5	0x7c6a2d28	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567,r5=0x1	m0,m8	0
+sdbrx_x3_v0	sdbrx r3, r10, r5	0x7c6a2d28	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x0,r5=0x3	m0,m8	0
+sdbrx_x3_v1	sdbrx r3, r10, r5	0x7c6a2d28	mem=0x123456781a2b3c4d5e6f700123456709,r3=0xffffffffffffffff,r5=0x3	m0,m8	0
+sdbrx_x3_v2	sdbrx r3, r10, r5	0x7c6a2d28	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x123456789abcdef,r5=0x3	m0,m8	0
+sdbrx_x3_v3	sdbrx r3, r10, r5	0x7c6a2d28	mem=0x123456781a2b3c4d5e6f700123456709,r3=0x89abcdef01234567,r5=0x3	m0,m8	0

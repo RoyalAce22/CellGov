@@ -7,14 +7,24 @@
 //! registers the case records. LR, CTR and VRSAVE end at their start
 //! values. The exception is one the words change: the case's last word
 //! reads it back into a recorded GPR, and that read is its end value.
+//!
+//! A vector's data is the first [`DATA_BYTES`] bytes of the case's memory
+//! buffer, at [`MEMORY_BASE`]. Its expected data takes each recorded
+//! doubleword from the capture. Every other byte keeps its start value.
+//!
 //! CellGov runs each case for three checks:
 //!
 //! - its recorded result reads no register the routine keeps;
-//! - its words write no GPR the case leaves unrecorded;
+//! - its words write no GPR and no data byte the case leaves unrecorded;
 //! - its words change no LR, CTR or VRSAVE they do not read back.
 //!
-//! The converter skips a case that fails a check, and a case whose words
-//! branch. No expected value comes from CellGov.
+//! The converter also skips each case of these kinds:
+//!
+//! - its words branch;
+//! - it records memory past the data;
+//! - its words store and it leaves a data doubleword unrecorded.
+//!
+//! No expected value comes from CellGov.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -34,8 +44,8 @@ use crate::ppu_reference::{
 /// The address of the data bytes every reference vector names.
 pub(super) const MEMORY_BASE: u64 = 0x1000_0000;
 
-/// The count of data bytes each vector names. A fixed-point case reads and
-/// writes none, so they end as they start.
+/// The count of data bytes each vector names. A case with no memory buffer
+/// names 16 zero bytes, and its words neither read nor write them.
 pub(super) const DATA_BYTES: usize = 16;
 
 /// The VSCR a new PPU thread starts with: NJ set.
@@ -59,6 +69,28 @@ pub(super) const UNITS: [&str; 85] = [
     "crorc", "crxor", "mcrf", "mfcr", "mfocrf", "mtcrf", "mtocrf", "mfspr", "mtspr",
 ];
 
+/// The integer loads and stores this converter fills.
+pub(super) const MEMORY_UNITS: [&str; 45] = [
+    "lbz", "lbzu", "lbzux", "lbzx", "lhz", "lhzu", "lhzux", "lhzx", "lha", "lhau", "lhaux", "lhax",
+    "lwz", "lwzu", "lwzux", "lwzx", "lwa", "lwaux", "lwax", "ld", "ldu", "ldux", "ldx", "lhbrx",
+    "lwbrx", "ldbrx", "stb", "stbu", "stbux", "stbx", "sth", "sthu", "sthux", "sthx", "stw",
+    "stwu", "stwux", "stwx", "std", "stdu", "stdux", "stdx", "sthbrx", "stwbrx", "sdbrx",
+];
+
+/// The documented units whose sets also take the converted cases: the
+/// console settles the form the document leaves undefined.
+pub(super) const FED_UNITS: [&str; 1] = ["lswx"];
+
+/// Every unit the converter writes a file for.
+pub(super) fn units() -> impl Iterator<Item = &'static str> {
+    UNITS.into_iter().chain(MEMORY_UNITS)
+}
+
+/// Whether a load or store unit writes memory.
+pub(super) fn is_store(unit: &str) -> bool {
+    unit.starts_with("st") || unit == "sdbrx"
+}
+
 /// The units whose words move the PC somewhere other than the next word.
 /// The converter runs a case's words one after another, so it skips a
 /// case that holds one.
@@ -69,7 +101,7 @@ const FLOW_UNITS: [&str; 5] = ["b", "bc", "bclr", "bcctr", "sc"];
 pub(super) enum Skip {
     /// The case's unit is not one this converter fills.
     OtherUnit,
-    /// The case names a memory buffer.
+    /// The case records memory past the vector's data.
     Memory,
     /// The two console runs disagree.
     Varies,
@@ -77,7 +109,7 @@ pub(super) enum Skip {
     Refused,
     /// The result depends on a register the routine keeps for itself.
     ReadsRoutineRegister,
-    /// The words write a GPR the case does not record.
+    /// The words can write a GPR or data doubleword the case does not record.
     WritesUnrecorded,
     /// The console run ended the process, so the capture did not complete.
     Ended,
@@ -167,16 +199,50 @@ fn word_mnemonic(word: u32) -> Option<String> {
     }
 }
 
-/// The units a case covers: each unit of [`UNITS`] one of its words
-/// belongs to, in word order, each once.
+/// The units a case covers, in word order, each once.
+///
+/// A case with a word of a load or store unit covers those units alone:
+/// its other words only place an address or read one back. Any other
+/// case covers each unit of [`UNITS`] one of its words belongs to.
 fn case_units(case: &Case) -> Vec<String> {
+    let mnemonics: Vec<String> = case
+        .words
+        .iter()
+        .filter_map(|&w| word_mnemonic(w))
+        .collect();
+    let memory = |m: &str| MEMORY_UNITS.contains(&m) || FED_UNITS.contains(&m);
+    let any_memory = mnemonics.iter().any(|m| memory(m));
     let mut units: Vec<String> = Vec::new();
-    for mnemonic in case.words.iter().filter_map(|&w| word_mnemonic(w)) {
-        if UNITS.contains(&mnemonic.as_str()) && !units.contains(&mnemonic) {
+    for mnemonic in mnemonics {
+        let listed = if any_memory {
+            memory(&mnemonic)
+        } else {
+            UNITS.contains(&mnemonic.as_str())
+        };
+        if listed && !units.contains(&mnemonic) {
             units.push(mnemonic);
         }
     }
     units
+}
+
+/// The case's data: the first [`DATA_BYTES`] bytes of its memory buffer,
+/// or zeros.
+fn data(case: &Case) -> Vec<u8> {
+    case.mem
+        .as_ref()
+        .map_or_else(|| vec![0; DATA_BYTES], |m| m[..DATA_BYTES].to_vec())
+}
+
+/// The doubleword offsets of the data the case records.
+fn recorded_data(case: &Case) -> Vec<usize> {
+    case.record
+        .iter()
+        .filter_map(|r| match *r {
+            Reg::Mem(off) => Some(usize::from(off)),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Whether a word of the case moves the PC somewhere other than the next
@@ -243,22 +309,30 @@ fn spr_readbacks(
     Some(out)
 }
 
-/// CellGov's state after the case's words from `start`.
-fn cellgov_end(case: &Case, start: &PpuStateSnapshot) -> Option<PpuStateSnapshot> {
+/// CellGov's state and data after the case's words from `start`.
+fn cellgov_end(case: &Case, start: &PpuStateSnapshot) -> Option<(PpuStateSnapshot, Vec<u8>)> {
     let mut s = start.clone();
+    let mut bytes = data(case);
     for &w in &case.words {
-        s = execute_state_in(w, &s, 0, Vec::new()).ok()?.0;
+        (s, bytes) = execute_state_in(w, &s, MEMORY_BASE, bytes).ok()?;
     }
-    Some(s)
+    Some((s, bytes))
 }
 
-/// The recorded components of `s`: each recorded GPR, then CR and XER.
-fn recorded(case: &Case, s: &PpuStateSnapshot) -> Vec<u64> {
+/// The big-endian doubleword at `off` of `bytes`.
+fn doubleword(bytes: &[u8], off: usize) -> u64 {
+    u64::from_be_bytes(bytes[off..off + 8].try_into().expect("8 bytes"))
+}
+
+/// The recorded components of an end: each recorded GPR and data
+/// doubleword, then CR and XER.
+fn recorded(case: &Case, (s, bytes): &(PpuStateSnapshot, Vec<u8>)) -> Vec<u64> {
     let mut out: Vec<u64> = case
         .record
         .iter()
         .filter_map(|r| match *r {
             Reg::Gpr(n) => Some(s.gpr[usize::from(n)]),
+            Reg::Mem(off) => Some(doubleword(bytes, usize::from(off))),
             _ => None,
         })
         .collect();
@@ -293,10 +367,56 @@ fn expected_gprs(case: &Case, start: &PpuStateSnapshot, run: &Run) -> Vec<u64> {
     gpr
 }
 
-/// Whether CellGov's end leaves every unrecorded GPR at its start value.
-fn writes_only_recorded(case: &Case, start: &PpuStateSnapshot, end: &PpuStateSnapshot) -> bool {
+/// The expected data: the start bytes, with each recorded doubleword set
+/// to the console's value.
+fn expected_data(case: &Case, run: &Run) -> Vec<u8> {
+    let mut bytes = data(case);
+    for (r, slot) in case.slots() {
+        if let Reg::Mem(off) = r {
+            let off = usize::from(off);
+            bytes[off..off + 8].copy_from_slice(&run.slots[slot].to_be_bytes());
+        }
+    }
+    bytes
+}
+
+/// Whether CellGov's end leaves every unrecorded GPR and data byte at its
+/// start value.
+fn writes_only_recorded(
+    case: &Case,
+    start: &PpuStateSnapshot,
+    (end, bytes): &(PpuStateSnapshot, Vec<u8>),
+) -> bool {
+    let recorded = recorded_data(case);
+    let in_record = |i: usize| recorded.iter().any(|&off| (off..off + 8).contains(&i));
     (0..start.gpr.len())
         .all(|n| start.gpr[n] == end.gpr[n] || case.record.contains(&Reg::Gpr(n as u8)))
+        && data(case)
+            .iter()
+            .zip(bytes)
+            .enumerate()
+            .all(|(i, (a, b))| a == b || in_record(i))
+}
+
+/// Whether the case's words store and it leaves a data doubleword
+/// unrecorded. The console may change that doubleword, and only CellGov
+/// would say it did not.
+fn stores_unrecorded(case: &Case) -> bool {
+    let stores = case_units(case).iter().any(|u| is_store(u));
+    let recorded = recorded_data(case);
+    stores
+        && (0..DATA_BYTES)
+            .step_by(8)
+            .any(|off| !recorded.contains(&off))
+}
+
+/// Why the converter leaves the case out, or `Ok` when it converts it.
+pub(super) fn skip_reason(
+    case: &Case,
+    start: &PpuStateSnapshot,
+    runs: &[Run; 2],
+) -> Result<(), Skip> {
+    convertible(case, start, runs).map(|_| ())
 }
 
 /// The special-purpose register values a converted case ends with, or
@@ -312,11 +432,14 @@ fn convertible(
     if has_flow(case) {
         return Err(Skip::Flow);
     }
-    if case.mem.is_some() {
+    if recorded_data(case).iter().any(|&off| off + 8 > DATA_BYTES) {
         return Err(Skip::Memory);
     }
     if runs[0] != runs[1] {
         return Err(Skip::Varies);
+    }
+    if stores_unrecorded(case) {
+        return Err(Skip::WritesUnrecorded);
     }
     let end = cellgov_end(case, start).ok_or(Skip::Refused)?;
     // A refusal only under other routine registers is a dependence on them.
@@ -327,7 +450,7 @@ fn convertible(
     if !writes_only_recorded(case, start, &end) {
         return Err(Skip::WritesUnrecorded);
     }
-    spr_readbacks(case, start, &end, &runs[0]).ok_or(Skip::WritesUnrecorded)
+    spr_readbacks(case, start, &end.0, &runs[0]).ok_or(Skip::WritesUnrecorded)
 }
 
 pub(super) fn value<T>(value: T) -> ReferenceField<T> {
@@ -420,7 +543,7 @@ fn expected(
             },
             reservation: value(None),
         },
-        memory: value(vec![0; DATA_BYTES]),
+        memory: value(expected_data(case, run)),
         stop: unobserved_stop(),
         retired: value(words),
         staged_effects: unsupported(RUNTIME),
@@ -451,7 +574,7 @@ fn vector(
         words: case.words.clone(),
         initial_state: input_state(case, start),
         memory_base: MEMORY_BASE,
-        initial_memory: vec![0; DATA_BYTES],
+        initial_memory: data(case),
         expected: expected(case, start, run, sprs),
     }
 }
@@ -485,7 +608,7 @@ fn convert_probe(probe: &str, out: &mut Conversion) {
     };
     let source = capture_source(probe);
     for (index, (case, runs)) in cases.iter().zip(&runs).enumerate() {
-        let start = case.initial(index, 0);
+        let start = case.initial(index, MEMORY_BASE);
         let sprs = match convertible(case, &start, runs) {
             Ok(sprs) => sprs,
             Err(skip) => {
