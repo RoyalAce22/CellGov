@@ -11,6 +11,9 @@
 //!
 //! For any other result the arm leaves FR, FI, OX, UX and XX unchanged,
 //! because the host's arithmetic does not report whether it rounded.
+//!
+//! The module also gives the FPCC and the invalid causes of a compare,
+//! and the operand `fsel` selects.
 
 use cellgov_float::{
     ppc_invalid_product, ppc_invalid_quotient, ppc_invalid_sqrt, ppc_invalid_sum, ppc_is_nan,
@@ -210,9 +213,62 @@ pub(crate) fn frsqrte_status(b: u64) -> PpcStatus {
     }
 }
 
+/// The key two non-NaN doubles order by: the magnitude, negated for a
+/// negative value. Both zeros key to 0.
+fn order_key(bits: u64) -> i64 {
+    let magnitude = (bits & !SIGN) as i64;
+    if bits & SIGN != 0 {
+        -magnitude
+    } else {
+        magnitude
+    }
+}
+
+/// The FPCC nibble (FL, FG, FE, FU) a compare of `a` with `b` gives.
+///
+/// [PPC-Book1 p:119 s:4.6.7] a NaN operand gives 0b0001; otherwise FRA < FRB gives 0b1000, FRA > FRB 0b0100 and equality 0b0010, with +0 equal to -0.
+pub(crate) fn compare_fpcc(a: u64, b: u64) -> u8 {
+    if ppc_is_nan(a) || ppc_is_nan(b) {
+        return 0b0001;
+    }
+    match order_key(a).cmp(&order_key(b)) {
+        std::cmp::Ordering::Less => 0b1000,
+        std::cmp::Ordering::Greater => 0b0100,
+        std::cmp::Ordering::Equal => 0b0010,
+    }
+}
+
+/// The invalid causes `fcmpo` (`ordered`) or `fcmpu` raises on `a` and `b` when VE is `ve`.
+///
+/// [PPC-Book1 p:119 s:4.6.7] fcmpu sets VXSNAN for an SNaN operand; fcmpo sets VXSNAN and, if VE = 0, VXVC for an SNaN operand, and VXVC for a QNaN operand when neither is an SNaN.
+pub(crate) fn compare_invalid(a: u64, b: u64, ordered: bool, ve: bool) -> PpcInvalid {
+    let snan = PpcInvalid::signaling(&[a, b]).snan;
+    let nan = ppc_is_nan(a) || ppc_is_nan(b);
+    PpcInvalid {
+        snan,
+        compare: ordered && if snan { !ve } else { nan },
+        ..PpcInvalid::default()
+    }
+}
+
+/// Whether `fsel` takes FRC for the FRA value `a`.
+///
+/// [PPC-Book1 p:126 s:5.2.2] fsel: FRT <- FRC if FRA >= 0.0, else FRB; a NaN FRA selects FRB, and +0 and -0 are both >= 0.
+pub(crate) fn fsel_takes_frc(a: u64) -> bool {
+    !ppc_is_nan(a) && (a & SIGN == 0 || is_zero(a))
+}
+
 #[cfg(test)]
 #[path = "tests/fp_status_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/fp_compare_tests.rs"]
+mod fp_compare_tests;
+
+#[cfg(test)]
+#[path = "tests/fp_compare_console_tests.rs"]
+mod fp_compare_console_tests;
 
 #[cfg(test)]
 #[path = "tests/fp_status_console_tests.rs"]

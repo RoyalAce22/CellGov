@@ -1,0 +1,17 @@
+[test]
+name = "ppu_fcmp_status"
+
+# A hardware probe: what fcmpu and fcmpo write to a CR field and to the
+# FPSCR (FPCC, VXSNAN, VXVC, FX and the summaries), and which FPSCR bits
+# they keep. The console capture is the answer; no emulator runs it.
+
+[observe]
+# 30 big-endian u32 words, as ppu/main.c lists: 120 bytes. Words 0 and 1
+# are the failed step and its return code; each case after them is a CR
+# word then an FPSCR word, at words 2..29.
+memory_regions = [
+  { name = "result", addr = 0, size = 120 },
+]
+
+[expect]
+outcome = "completed"

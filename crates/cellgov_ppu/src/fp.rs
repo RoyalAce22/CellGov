@@ -7,14 +7,18 @@
 //! The computational arms do not read `FPSCR[RN]`: each rounds to
 //! nearest. The arithmetic arms and the estimates write their status
 //! through [`crate::fp_status`], which names the bits a host-computed
-//! result leaves unchanged. The compares and the conversions leave the
-//! FPSCR unchanged.
+//! result leaves unchanged. The compares write FPCC and their invalid
+//! causes through [`crate::fpscr::write_compare_status`]. The
+//! conversions, `fsel` and the moves leave the FPSCR unchanged.
 // [PPC-Book1 p:89 s:4.2.2] FPSCR[RN] encoding: 0b00 selects Round to Nearest.
 
 use cellgov_float::PpcPrecision;
 
 use crate::exec::ExecuteVerdict;
-use crate::fp_status::{fres_status, frsqrte_status, write_host_arith_status, HostArith};
+use crate::fp_status::{
+    compare_fpcc, compare_invalid, fres_status, frsqrte_status, fsel_takes_frc,
+    write_host_arith_status, HostArith,
+};
 use crate::fpscr::{self, write_status, Fprf, FrFi};
 use crate::instruction::ops::{Fp59Op, Fp63Op};
 use crate::state::PpuState;
@@ -88,17 +92,12 @@ pub fn execute_fp63(
         // list -- a NaN parked in it must not win the precedence walk.
         // [PPC-Book1 p:112 s:4.6.5.1] fmul: FRT <- FRA * FRC.
         Fp63Op::Fmul => nan_resolved_bits(a * c, &[a, c]),
-        // fsel: FRT <- FRC if FRA >= 0.0 else FRB. NaN is "not >="
-        // by IEEE semantics, so a NaN FRA falls through to FRB --
-        // matching the "if FRA is NaN then FRT <- FRB" rule. The
-        // match on the f64 comparison happens to honor the same
-        // sign-of-zero quirk the spec calls out.
-        // [PPC-Book1 p:126 s:5.2.2] fsel: FRT <- FRC if FRA>=0 else FRB.
+        // [PPC-Book1 p:126 s:5.2.2] fsel: FRT <- FRC if FRA >= 0 else FRB; it leaves the FPSCR unchanged.
         Fp63Op::Fsel => {
-            if a >= 0.0 {
-                c.to_bits()
+            if fsel_takes_frc(ra) {
+                rc
             } else {
-                b.to_bits()
+                rb
             }
         }
         // [PPC-Book1 p:112 s:4.6.5.1] fdiv: FRT <- FRA / FRB.
@@ -107,32 +106,20 @@ pub fn execute_fp63(
         Fp63Op::Fadd => nan_resolved_bits(a + b, &[a, b]),
         // [PPC-Book1 p:111 s:4.6.5.1] fsub: FRT <- FRA - FRB.
         Fp63Op::Fsub => nan_resolved_bits(a - b, &[a, b]),
-        // [PPC-Book1 p:110 s:4.6.4] fmr: FRT <- FRB (move register).
-        Fp63Op::Fmr => b.to_bits(),
-        // [PPC-Book1 p:110 s:4.6.4] fneg: FRT <- ~FRB[0] || FRB[1:63].
-        Fp63Op::Fneg => (-b).to_bits(),
-        // [PPC-Book1 p:110 s:4.6.4] fabs: FRT <- 0 || FRB[1:63].
-        Fp63Op::Fabs => b.abs().to_bits(),
-        // [PPC-Book1 p:110 s:4.6.4] fnabs: FRT <- 1 || FRB[1:63].
-        Fp63Op::Fnabs => (-b.abs()).to_bits(),
-        // fcmpu / fcmpo: BF is bits 6:8 of the instruction word,
-        // i.e. the top 3 bits of the 5-bit FRT field the decoder
-        // passes through here. Bit 3 of the CR field is FU
-        // (unordered), set when either operand is a NaN --
-        // distinct from the integer-compare SO bit.
-        // [PPC-Book1 p:119 s:4.6.7] fcmpu / fcmpo: CR[BF] <- {LT,GT,EQ,FU}.
+        // [PPC-Book1 p:110 s:4.6.4] the moves copy FRB with bit 0 kept, flipped, cleared or set, a NaN like any value, and leave the FPSCR unchanged.
+        Fp63Op::Fmr => rb,
+        Fp63Op::Fneg => rb ^ PPC_F64_SIGN_BIT,
+        Fp63Op::Fabs => rb & !PPC_F64_SIGN_BIT,
+        Fp63Op::Fnabs => rb | PPC_F64_SIGN_BIT,
+        // BF is instruction bits 6:8, the top three bits of the FRT
+        // field the decoder passes here.
+        // [PPC-Book1 p:119 s:4.6.7] fcmpu / fcmpo set CR field BF and FPCC to one of FL, FG, FE, FU.
         Fp63Op::Fcmpu | Fp63Op::Fcmpo => {
-            let bf = (frt >> 2) & 7;
-            let cr_val = if a.is_nan() || b.is_nan() {
-                0b0001
-            } else if a < b {
-                0b1000
-            } else if a > b {
-                0b0100
-            } else {
-                0b0010
-            };
-            state.set_cr_field(bf, cr_val);
+            let fpcc = compare_fpcc(ra, rb);
+            state.set_cr_field((frt >> 2) & 7, fpcc);
+            let ve = state.fpscr() & PPC_FPSCR_VE != 0;
+            let invalid = compare_invalid(ra, rb, op == Fp63Op::Fcmpo, ve);
+            fpscr::write_compare_status(state, fpcc, &invalid);
             return ExecuteVerdict::Continue;
         }
         // [PPC-Book1 p:115 s:4.6.6] frsp: round FRB to single precision.
@@ -316,7 +303,9 @@ pub fn execute_fp59(
     ExecuteVerdict::Continue
 }
 
-use cellgov_ps3_abi::hw::ppc_isa::{PPC_F64_QUIET_BIT, PPC_GENERATED_QNAN_F64};
+use cellgov_ps3_abi::hw::ppc_isa::{
+    PPC_F64_QUIET_BIT, PPC_F64_SIGN_BIT, PPC_FPSCR_VE, PPC_GENERATED_QNAN_F64,
+};
 
 /// Result bits for a computational arm, with the architected NaN
 /// answer substituted for the host's whenever the result is a NaN.

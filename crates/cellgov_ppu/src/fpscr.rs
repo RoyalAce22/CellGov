@@ -4,13 +4,13 @@
 //! Each move instruction takes its fields from the primary-63 decode:
 //! `frt` is instruction bits 6:10, `fra` bits 11:15 and `frb` bits 16:20.
 
-use cellgov_float::{PpcPrecision, PpcStatus};
+use cellgov_float::{PpcInvalid, PpcPrecision, PpcStatus};
 use cellgov_ps3_abi::hw::ppc_isa::{
-    PPC_FPSCR_ENABLE_BITS, PPC_FPSCR_EXCEPTION_BITS, PPC_FPSCR_FEX, PPC_FPSCR_FI, PPC_FPSCR_FPRF,
-    PPC_FPSCR_FR, PPC_FPSCR_FX, PPC_FPSCR_OX, PPC_FPSCR_UX, PPC_FPSCR_VX, PPC_FPSCR_VXCVI,
-    PPC_FPSCR_VXIDI, PPC_FPSCR_VXIMZ, PPC_FPSCR_VXISI, PPC_FPSCR_VXSNAN, PPC_FPSCR_VXSQRT,
-    PPC_FPSCR_VXVC, PPC_FPSCR_VXZDZ, PPC_FPSCR_VX_BITS, PPC_FPSCR_XX, PPC_FPSCR_ZX,
-    PPE_FPSCR_UNIMPLEMENTED_BITS, PPE_MFFS_HIGH_WORD,
+    PPC_FPSCR_ENABLE_BITS, PPC_FPSCR_EXCEPTION_BITS, PPC_FPSCR_FEX, PPC_FPSCR_FI, PPC_FPSCR_FPCC,
+    PPC_FPSCR_FPRF, PPC_FPSCR_FR, PPC_FPSCR_FX, PPC_FPSCR_OX, PPC_FPSCR_UX, PPC_FPSCR_VX,
+    PPC_FPSCR_VXCVI, PPC_FPSCR_VXIDI, PPC_FPSCR_VXIMZ, PPC_FPSCR_VXISI, PPC_FPSCR_VXSNAN,
+    PPC_FPSCR_VXSQRT, PPC_FPSCR_VXVC, PPC_FPSCR_VXZDZ, PPC_FPSCR_VX_BITS, PPC_FPSCR_XX,
+    PPC_FPSCR_ZX, PPE_FPSCR_UNIMPLEMENTED_BITS, PPE_MFFS_HIGH_WORD,
 };
 
 use crate::state::PpuState;
@@ -118,6 +118,35 @@ pub(crate) fn write_status(state: &mut PpuState, status: &PpcStatus, fprf: Fprf,
         }
     }
     v |= raised | (fprf as u32) << 12;
+    if raised & !old != 0 {
+        v |= PPC_FPSCR_FX;
+    }
+    state.set_fpscr(with_summaries(v));
+}
+
+/// Writes a compare's status into the FPSCR.
+///
+/// It writes:
+///
+/// - FPCC, from `fpcc`;
+/// - VXSNAN and VXVC, as `invalid.snan` and `invalid.compare` raise them;
+/// - FX, when one of them turns from 0 to 1;
+/// - the VX and FEX summaries.
+///
+/// C, FR and FI keep their values.
+///
+/// [PPC-Book1 p:119 s:4.6.7] fcmpu and fcmpo alter FPCC, FX, VXSNAN and VXVC.
+/// [PPC-Book1 p:97 s:4.4.1] a compare with an invalid operation leaves FR, FI and C unchanged.
+pub(crate) fn write_compare_status(state: &mut PpuState, fpcc: u8, invalid: &PpcInvalid) {
+    let old = state.fpscr();
+    let mut raised = 0;
+    if invalid.snan {
+        raised |= PPC_FPSCR_VXSNAN;
+    }
+    if invalid.compare {
+        raised |= PPC_FPSCR_VXVC;
+    }
+    let mut v = (old & !PPC_FPSCR_FPCC) | raised | u32::from(fpcc & 0xF) << 12;
     if raised & !old != 0 {
         v |= PPC_FPSCR_FX;
     }

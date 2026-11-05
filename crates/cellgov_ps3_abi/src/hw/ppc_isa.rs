@@ -121,6 +121,11 @@ pub const PPC_EIEIO_XO: u32 = 854;
 /// [AltiVec-PEM p:6-10 s:6.2] dst 342; [AltiVec-PEM p:6-12 s:6.2] dstst 374; [AltiVec-PEM p:6-9 s:6.2] dss 822.
 pub const PPC_CACHE_BLOCK_XOS: [u32; 8] = [54, 86, 246, 278, 342, 374, 822, 982];
 
+/// The sign bit (S) of a double-format value.
+///
+/// [PPC-Book1 p:90 s:4.3.1] bit 0 of the double format is the sign bit S.
+pub const PPC_F64_SIGN_BIT: u64 = 0x8000_0000_0000_0000;
+
 /// High-order fraction bit that distinguishes a QNaN from an SNaN in
 /// double format; setting it quiets a propagated SNaN.
 ///
@@ -265,6 +270,17 @@ pub const PPC_FPSCR_EXCEPTION_BITS: u32 = 0x1FF8_0700;
 ///
 /// [PPC-Book1 p:88 s:4.2.2] Bits 7:12 and 21:23 are the invalid operation exception bits.
 pub const PPC_FPSCR_VX_BITS: u32 = 0x01F8_0700;
+
+/// FPSCR bit 24, the invalid operation exception enable (VE).
+///
+/// [PPC-Book1 p:89 s:4.2.2] bit 24 is VE.
+pub const PPC_FPSCR_VE: u32 = 1 << 7;
+
+/// FPSCR bits 16:19, the floating-point condition code (FPCC): FL, FG,
+/// FE and FU.
+///
+/// [PPC-Book1 p:88 s:4.2.2] bits 16:19 are FPCC, inside FPRF.
+pub const PPC_FPSCR_FPCC: u32 = 0xF << 12;
 
 /// The FPSCR exception enable bits VE, OE, UE, ZE and XE (24:28).
 ///

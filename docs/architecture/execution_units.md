@@ -13,7 +13,8 @@ results always follow IEEE 754. A floating-point record form copies
 FPSCR bits 0:3 to CR1. The arithmetic does not read the rounding mode.
 The arithmetic and estimate instructions write their FPSCR status,
 except FR, FI, OX, UX and XX of a result the operands do not make
-exact; the compares and conversions set no FPSCR status bit.
+exact; the compares set FPCC, VXSNAN and VXVC, and the conversions
+set no FPSCR status bit.
 
 The `PpuInstruction` set covers:
 
