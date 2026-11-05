@@ -9,7 +9,7 @@ use crate::instruction::PpuDecodeError;
 use crate::state::PpuState;
 use crate::store_buffer::StoreBuffer;
 
-use super::{InstructionCase, PpuStateSnapshot};
+use super::{ControlRegisters, InstructionCase, PpuStateSnapshot};
 
 /// One byte position diverging between expected and observed memory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -216,7 +216,19 @@ pub fn run_case(case: &InstructionCase) -> CaseOutcome {
         Err(e) => return e.into(),
     };
 
-    let state_diff = diff_state(&case.expected_state, &observed_state);
+    let mut state_diff = diff_state(&case.expected_state, &observed_state);
+    if case.source.control_registers() == ControlRegisters::NotRecorded {
+        state_diff.vrsave = None;
+        state_diff.fpscr = None;
+        state_diff.vscr = None;
+    }
+    let compared = case.source.compared_control_bits();
+    state_diff.fpscr = state_diff
+        .fpscr
+        .filter(|(expected, observed)| (expected ^ observed) & compared.fpscr != 0);
+    state_diff.vscr = state_diff
+        .vscr
+        .filter(|(expected, observed)| (expected ^ observed) & compared.vscr != 0);
     if !state_diff.is_empty() {
         return CaseOutcome::StateMismatch(state_diff);
     }
@@ -490,3 +502,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/vscr_snapshot_tests.rs"]
 mod vscr_snapshot_tests;
+
+#[cfg(test)]
+#[path = "tests/rpcs3_control_bits_tests.rs"]
+mod rpcs3_control_bits_tests;

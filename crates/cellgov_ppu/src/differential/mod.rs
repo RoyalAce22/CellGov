@@ -24,7 +24,10 @@ pub mod rpcs3_capture;
 pub mod rpcs3_hle_trace;
 pub mod vectors;
 
-pub use case::{InstructionCase, MemorySnapshot, OracleSource, PpuStateSnapshot};
+pub use case::{
+    ComparedControlBits, ControlRegisters, InstructionCase, MemorySnapshot, OracleSource,
+    PpuStateSnapshot, RPCS3_FPSCR_MODELLED, RPCS3_VSCR_MODELLED,
+};
 pub use context::is_context_dependent;
 pub use runner::{
     assert_case, execute_into_memory, execute_state, execute_state_in, run_case, run_vectors,

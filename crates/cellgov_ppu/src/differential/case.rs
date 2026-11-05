@@ -1,6 +1,7 @@
 //! Per-instruction differential input and its provenance tag.
 
-use cellgov_ps3_abi::hw::ppu::{FPR_COUNT, GPR_COUNT, VR_COUNT};
+use cellgov_ps3_abi::hw::ppc_isa::PPC_FPSCR_FPCC;
+use cellgov_ps3_abi::hw::ppu::{FPR_COUNT, GPR_COUNT, VR_COUNT, VSCR_NJ, VSCR_SAT};
 use cellgov_sync::ReservedLine;
 
 use crate::observation::PpuArchitecturalState;
@@ -155,6 +156,8 @@ pub enum OracleSource {
     Rpcs3Capture {
         /// Capture identifier (e.g. dump filename or run tag).
         capture_id: &'static str,
+        /// Whether the capture recorded VRSAVE, the FPSCR and the VSCR.
+        control_registers: ControlRegisters,
     },
     /// Expectations read from a committed console capture.
     ConsoleCapture {
@@ -163,6 +166,75 @@ pub enum OracleSource {
     },
     /// Hand-authored sanity case, not tied to a spec page.
     Manual,
+}
+
+impl OracleSource {
+    /// Whether the expected state records VRSAVE, the FPSCR and the
+    /// VSCR. The runner compares those three only for a `Recorded` source.
+    pub fn control_registers(&self) -> ControlRegisters {
+        match self {
+            Self::Rpcs3Capture {
+                control_registers, ..
+            } => *control_registers,
+            Self::Spec { .. } | Self::ConsoleCapture { .. } | Self::Manual => {
+                ControlRegisters::Recorded
+            }
+        }
+    }
+
+    /// The FPSCR and VSCR bits the runner compares.
+    ///
+    /// The runner compares an RPCS3 capture on [`RPCS3_FPSCR_MODELLED`]
+    /// and [`RPCS3_VSCR_MODELLED`] alone. It compares every other source
+    /// on the whole of both registers.
+    pub fn compared_control_bits(&self) -> ComparedControlBits {
+        match self {
+            Self::Rpcs3Capture { .. } => ComparedControlBits {
+                fpscr: RPCS3_FPSCR_MODELLED,
+                vscr: RPCS3_VSCR_MODELLED,
+            },
+            Self::Spec { .. } | Self::ConsoleCapture { .. } | Self::Manual => ComparedControlBits {
+                fpscr: u32::MAX,
+                vscr: u32::MAX,
+            },
+        }
+    }
+}
+
+/// The FPSCR and VSCR bits the runner compares for one [`OracleSource`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ComparedControlBits {
+    /// The FPSCR bits compared.
+    pub fpscr: u32,
+    /// The VSCR bits compared.
+    pub vscr: u32,
+}
+
+/// The FPSCR bits an RPCS3 capture holds from RPCS3's own model: FPCC.
+///
+/// RPCS3 sets no other status bit from an arithmetic or compare
+/// instruction. The captured FX, FEX, VX, the exception bits, FR, FI
+/// and the class bit C thus keep their values from before the
+/// instruction.
+/// The bridge README names the RPCS3 setting a capture needs for FPCC.
+pub const RPCS3_FPSCR_MODELLED: u32 = PPC_FPSCR_FPCC;
+
+/// The VSCR bits an RPCS3 capture holds from RPCS3's own model: NJ
+/// and SAT.
+///
+/// RPCS3 tracks SAT only under the setting the bridge README names.
+pub const RPCS3_VSCR_MODELLED: u32 = VSCR_NJ | VSCR_SAT;
+
+/// Whether a source recorded VRSAVE, the FPSCR and the VSCR.
+///
+/// [CBE-Handbook p:297 s:10.2.1] each PPE thread holds its own FPSCR and VSCR beside its other architected registers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlRegisters {
+    /// The source recorded all three.
+    Recorded,
+    /// The source recorded none of them; the state holds the
+    /// thread-entry values in their place.
+    NotRecorded,
 }
 
 /// One differential case: initial state and memory, the raw

@@ -59,6 +59,9 @@ namespace cellgov_ppu_trace
 			u64 lr = 0;
 			u64 ctr = 0;
 			u64 xer = 0;
+			u32 vrsave = 0;
+			u32 fpscr = 0;
+			u32 vscr = 0;
 			u32 raddr = 0;          // RPCS3 ppu_thread::raddr at entry
 			u64 rtime = 0;          // RPCS3 ppu_thread::rtime at entry
 			u64 mem_addr = 0;       // populated by classify_mem_access
@@ -271,6 +274,16 @@ namespace cellgov_ppu_trace
 			return r;
 		}
 
+		// Pack the ppu_thread's VSCR state into the architected word:
+		// NJ at 0x00010000, SAT at bit 0. The struct keeps NJ as a bool
+		// and SAT as a sticky vector that is nonzero once any lane
+		// saturated, which is how its mfvscr reads it back.
+		u32 pack_vscr(const ppu_thread& ppu)
+		{
+			const bool sat = (ppu.sat._u64[0] | ppu.sat._u64[1]) != 0;
+			return (ppu.nj ? 0x10000u : 0u) | (sat ? 1u : 0u);
+		}
+
 		bool pc_passes_filter(u64 pc)
 		{
 			if (!g_pc_range.active) return true;
@@ -363,6 +376,9 @@ namespace cellgov_ppu_trace
 		tls_pre.lr = ppu.lr;
 		tls_pre.ctr = ppu.ctr;
 		tls_pre.xer = pack_xer(ppu);
+		tls_pre.vrsave = ppu.vrsave;
+		tls_pre.fpscr = ppu.fpscr.bits.pack();
+		tls_pre.vscr = pack_vscr(ppu);
 		tls_pre.raddr = ppu.raddr;
 		tls_pre.rtime = ppu.rtime;
 
@@ -402,6 +418,9 @@ namespace cellgov_ppu_trace
 		write_u64(tls_pre.lr);
 		write_u64(tls_pre.ctr);
 		write_u64(tls_pre.xer);
+		write_u32(tls_pre.vrsave);
+		write_u32(tls_pre.fpscr);
+		write_u32(tls_pre.vscr);
 		write_u32(tls_pre.raddr);
 		write_u64(tls_pre.rtime);
 
@@ -417,6 +436,9 @@ namespace cellgov_ppu_trace
 		write_u64(ppu.lr);
 		write_u64(ppu.ctr);
 		write_u64(pack_xer(ppu));
+		write_u32(ppu.vrsave);
+		write_u32(ppu.fpscr.bits.pack());
+		write_u32(pack_vscr(ppu));
 		write_u32(ppu.raddr);
 		write_u64(ppu.rtime);
 

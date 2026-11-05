@@ -10,7 +10,8 @@
 use cellgov_ps3_abi::hw::ppu::{FPR_COUNT, GPR_COUNT, VR_COUNT};
 use thiserror::Error;
 
-use super::{InstructionCase, MemorySnapshot, OracleSource, PpuStateSnapshot};
+use super::{ControlRegisters, InstructionCase, MemorySnapshot, OracleSource, PpuStateSnapshot};
+use crate::state::PpuState;
 
 /// Header magic written first to a CellGov PPU trace file. Matches
 /// the C++ constant in `cellgov_ppu_trace.h`.
@@ -19,8 +20,14 @@ pub const HEADER_MAGIC: u32 = 0xC0E6_0003;
 /// Per-record magic. Matches the C++ constant in `cellgov_ppu_trace.h`.
 pub const RECORD_MAGIC: u32 = 0xC0E6_0004;
 
-/// Format version this reader understands.
-pub const FORMAT_VERSION: u32 = 3;
+/// Newest format version. Matches the C++ constant in
+/// `cellgov_ppu_trace.h`. Version 4 records VRSAVE, the FPSCR and the
+/// VSCR after XER.
+pub const FORMAT_VERSION: u32 = 4;
+
+/// Oldest format version this reader still loads. A version 3 record
+/// carries no VRSAVE, FPSCR or VSCR.
+pub const OLDEST_FORMAT_VERSION: u32 = 3;
 
 /// Parse error class for [`read_trace_bytes`].
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -41,12 +48,12 @@ pub enum Rpcs3CaptureError {
         /// Expected magic, copied here for the error display.
         expected: u32,
     },
-    /// Header version differed from [`FORMAT_VERSION`].
+    /// Header version fell outside [`OLDEST_FORMAT_VERSION`]..=[`FORMAT_VERSION`].
     #[error("rpcs3_capture: format version mismatch (got {got}, expected {expected})")]
     Version {
         /// Version the file declared.
         got: u32,
-        /// Version this reader supports.
+        /// Newest version this reader supports.
         expected: u32,
     },
     /// A record's magic did not match [`RECORD_MAGIC`].
@@ -127,10 +134,16 @@ impl<'a> Cursor<'a> {
 
 /// Read one state plus its trailing `rtime` (`ppu_thread::rtime`).
 /// `rtime` lives on [`CapturedRecord`], not [`PpuStateSnapshot`].
-fn read_state(cursor: &mut Cursor<'_>) -> Result<(PpuStateSnapshot, u64), Rpcs3CaptureError> {
+///
+/// A record whose `control` is [`ControlRegisters::NotRecorded`] leaves
+/// VRSAVE, the FPSCR and the VSCR at their thread-entry values.
+fn read_state(
+    cursor: &mut Cursor<'_>,
+    control: ControlRegisters,
+) -> Result<(PpuStateSnapshot, u64), Rpcs3CaptureError> {
     use cellgov_sync::ReservedLine;
 
-    let mut state = PpuStateSnapshot::zero();
+    let mut state = PpuStateSnapshot::capture(&PpuState::new());
     for i in 0..GPR_COUNT {
         state.gpr[i] = cursor.read_u64("gpr")?;
     }
@@ -147,7 +160,11 @@ fn read_state(cursor: &mut Cursor<'_>) -> Result<(PpuStateSnapshot, u64), Rpcs3C
     state.lr = cursor.read_u64("lr")?;
     state.ctr = cursor.read_u64("ctr")?;
     state.xer = cursor.read_u64("xer")?;
-    // The capture format carries no FPSCR, VRSAVE or VSCR, so each keeps its zero value.
+    if control == ControlRegisters::Recorded {
+        state.vrsave = cursor.read_u32("vrsave")?;
+        state.fpscr = cursor.read_u32("fpscr")?;
+        state.vscr = cursor.read_u32("vscr")?;
+    }
     // `ppu_thread::raddr` is a u32; 0 means no reservation. The
     // reserved line is the 128-byte-aligned line containing it.
     let raddr = cursor.read_u32("raddr")?;
@@ -173,6 +190,8 @@ pub struct CapturedRecord {
     pub pre_state: PpuStateSnapshot,
     /// State after the instruction.
     pub post_state: PpuStateSnapshot,
+    /// Whether both states carry the recorded VRSAVE, FPSCR and VSCR.
+    pub control_registers: ControlRegisters,
     /// RPCS3's reservation acquire timestamp (`ppu_thread::rtime`)
     /// before the instruction. RPCS3-only diagnostic; CellGov does
     /// not model rtime.
@@ -209,7 +228,10 @@ impl CapturedRecord {
                 base: self.mem_addr,
                 bytes: self.mem_post.clone(),
             },
-            source: OracleSource::Rpcs3Capture { capture_id },
+            source: OracleSource::Rpcs3Capture {
+                capture_id,
+                control_registers: self.control_registers,
+            },
         }
     }
 }
@@ -226,12 +248,17 @@ pub fn read_trace_bytes(bytes: &[u8]) -> Result<Vec<CapturedRecord>, Rpcs3Captur
         });
     }
     let version = cursor.read_u32("header_version")?;
-    if version != FORMAT_VERSION {
+    if !(OLDEST_FORMAT_VERSION..=FORMAT_VERSION).contains(&version) {
         return Err(Rpcs3CaptureError::Version {
             got: version,
             expected: FORMAT_VERSION,
         });
     }
+    let control_registers = if version >= 4 {
+        ControlRegisters::Recorded
+    } else {
+        ControlRegisters::NotRecorded
+    };
 
     let mut records = Vec::new();
     while cursor.remaining() > 0 {
@@ -247,8 +274,8 @@ pub fn read_trace_bytes(bytes: &[u8]) -> Result<Vec<CapturedRecord>, Rpcs3Captur
         let raw = cursor.read_u32("raw_instruction")?;
         let thread_id = cursor.read_u32("thread_id")?;
 
-        let (pre_state, pre_reservation_rtime) = read_state(&mut cursor)?;
-        let (post_state, post_reservation_rtime) = read_state(&mut cursor)?;
+        let (pre_state, pre_reservation_rtime) = read_state(&mut cursor, control_registers)?;
+        let (post_state, post_reservation_rtime) = read_state(&mut cursor, control_registers)?;
 
         let mem_addr = cursor.read_u64("mem_addr")?;
         let mem_len = cursor.read_u32("mem_len")?;
@@ -268,6 +295,7 @@ pub fn read_trace_bytes(bytes: &[u8]) -> Result<Vec<CapturedRecord>, Rpcs3Captur
             thread_id,
             pre_state,
             post_state,
+            control_registers,
             pre_reservation_rtime,
             post_reservation_rtime,
             mem_addr,

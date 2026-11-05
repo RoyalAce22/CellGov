@@ -347,7 +347,7 @@ filter, the patched RPCS3 dumps a record carrying:
 
 - PC, raw instruction word, RPCS3 PPU thread id
 - Full pre-state register file (32 GPR + 32 FPR + 32 VR + CR + LR
-  - CTR + XER)
+  - CTR + XER + VRSAVE + FPSCR + VSCR)
 - Full post-state register file
 - The touched memory window (bytes before and after the instruction)
 
@@ -355,7 +355,7 @@ The Rust side ingests the dump via
 [crates/cellgov_ppu/src/differential/rpcs3_capture.rs](../../crates/cellgov_ppu/src/differential/rpcs3_capture.rs)
 and converts each record into a
 `differential::InstructionCase` tagged
-`OracleSource::Rpcs3Capture { capture_id }`. The harness then
+`OracleSource::Rpcs3Capture { capture_id, control_registers }`. The harness then
 replays each case through CellGov's decoder + executor and asserts
 bit-equality against the captured post-state -- the per-instruction
 differential against RPCS3 ground truth.
@@ -439,6 +439,40 @@ landed 988 / 1000 passing in validation, with the residual
 12 being legitimate semantic divergences (`stwcx.` / `stdcx.`
 CR0, `mftb` time-base read) that the harness now surfaces.
 
+## RPCS3 settings a version 4 capture needs
+
+RPCS3 models only part of the FPSCR and the VSCR, and two of its
+accuracy settings decide which part a capture records. Set both in the
+`Core` section of the config the capture runs under:
+
+```yaml
+Core:
+  PPU Set FPCC Bits: true
+  PPU Set Saturation Bit: true
+```
+
+- With `PPU Set FPCC Bits` off, the interpreter writes FPCC only for
+  `fcmpu` / `fcmpo` and the record forms (`Rc` = 1, such as `fadd.`).
+  With it on, every arithmetic and conversion instruction writes FPCC
+  from its result (`ppu_set_fpcc` in `PPUInterpreter.cpp`). No setting
+  makes RPCS3 write FX, FEX, VX, the exception bits, FR, FI or the
+  class bit C for an arithmetic instruction. `mtfsf` writes no FPSCR
+  bit, `mtfsfi` writes field 4 alone, and `mtfsb0` / `mtfsb1` write
+  the one bit they name (`MTFSB0`, `MTFSB1`), which the harness does
+  not compare outside FPCC.
+- With `PPU Set Saturation Bit` off, the saturating vector arms,
+  `mtvscr` and `mfvscr` leave SAT at 0 (`MTVSCR`, `MFVSCR` and the
+  saturating arms in `PPUInterpreter.cpp`). NJ is tracked under either
+  value.
+
+The harness compares an RPCS3 capture's FPSCR on FPCC alone and its
+VSCR on NJ and SAT alone
+(`cellgov_ppu::differential::{RPCS3_FPSCR_MODELLED, RPCS3_VSCR_MODELLED}`).
+Every other bit of either register is an oracle limit: a difference
+there says nothing about CellGov. The trace does not record the
+settings, so a capture made with either one off reports SAT or FPCC
+mismatches that come from RPCS3's gap.
+
 ## Environment variables
 
 ```
@@ -461,7 +495,8 @@ zero or more fixed-size records (plus a variable-length memory
 window per record). Magic constants 0xC0E60003 (header) and
 0xC0E60004 (record) match Rust constants in
 `cellgov_ppu::differential::rpcs3_capture::{HEADER_MAGIC,
-RECORD_MAGIC}`. Format version is pinned at `FORMAT_VERSION = 1`;
-bumping requires a coordinated change to the C++ header, the Rust
-reader, and any existing captured dumps the operator wants to
-keep readable.
+RECORD_MAGIC}`. The writer emits `FORMAT_VERSION = 4`, which adds
+VRSAVE, the FPSCR and the VSCR after XER. The reader still loads
+version 3 dumps, and marks those three registers as not recorded,
+so the harness leaves them out of the comparison. A version bump
+changes the C++ header and the Rust reader together.

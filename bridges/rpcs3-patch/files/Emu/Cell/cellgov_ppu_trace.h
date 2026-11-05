@@ -38,7 +38,7 @@
 //
 //   [Header]
 //     u32 magic = 0xC0E60003
-//     u32 version = 1
+//     u32 version = 4
 //
 //   [Record], repeated:
 //     u32 record_magic = 0xC0E60004
@@ -53,6 +53,9 @@
 //     u64 pre_lr
 //     u64 pre_ctr
 //     u64 pre_xer
+//     u32 pre_vrsave                   // VRSAVE (SPR 256)
+//     u32 pre_fpscr                    // FPSCR, bit 0 = MSB
+//     u32 pre_vscr                     // VSCR: NJ = 0x00010000, SAT = 1
 //     u32 pre_raddr                    // reservation address before
 //                                      // the instruction (0 means no
 //                                      // active reservation)
@@ -67,6 +70,9 @@
 //     u64 post_lr
 //     u64 post_ctr
 //     u64 post_xer
+//     u32 post_vrsave
+//     u32 post_fpscr
+//     u32 post_vscr
 //     u32 post_raddr                   // reservation address after
 //     u64 post_rtime                   // reservation timestamp after
 //     u64 mem_addr                     // start of touched memory window
@@ -106,10 +112,12 @@ namespace cellgov_ppu_trace
 	// explain why a captured stwcx fails: RPCS3 invalidates a
 	// reservation when the reservation table's per-line timestamp
 	// no longer matches rtime, and that invalidation is invisible
-	// to single-instruction replay.
+	// to single-instruction replay. Version 4 adds VRSAVE, the
+	// FPSCR and the VSCR (each u32) after xer, so a capture can show
+	// a disagreement in an FP status bit, a rounding mode, NJ or SAT.
 	constexpr u32 HEADER_MAGIC = 0xC0E60003u;
 	constexpr u32 RECORD_MAGIC = 0xC0E60004u;
-	constexpr u32 FORMAT_VERSION = 3u;
+	constexpr u32 FORMAT_VERSION = 4u;
 
 	// Called once per process on first instruction dispatch. Reads the
 	// CELLGOV_PPU_TRACE_* env vars, opens the trace file if a path is
