@@ -154,11 +154,13 @@ pub struct PpuState {
     /// Instrument counter (hash-excluded): `ldarx` execution witness
     /// for its EA-alignment `debug_assert!`.
     pub ldarx_executed: u64,
-    /// Instrument counter (hash-excluded): `stdcx` execution witness.
+    /// Instrument counter (hash-excluded): `stdcx.` retirements. A
+    /// buffer-full retry or a fault does not count.
     pub stdcx_executed: u64,
     /// Instrument counter (hash-excluded): `lwarx` execution witness.
     pub lwarx_executed: u64,
-    /// Instrument counter (hash-excluded): `stwcx` execution witness.
+    /// Instrument counter (hash-excluded): `stwcx.` retirements. A
+    /// buffer-full retry or a fault does not count.
     pub stwcx_executed: u64,
     /// Instrument counter (hash-excluded): every entry to the
     /// `ExecuteVerdict::MemFault` arm. Paired with
@@ -169,8 +171,8 @@ pub struct PpuState {
     /// Instrument counter (hash-excluded): `MemError::Unmapped`
     /// discriminator, the path the catch-all `debug_assert!` protects.
     pub mem_fault_unmapped_routed: u64,
-    /// Instrument counter (hash-excluded): `dcbz` execution witness
-    /// for the RSX-MMIO-window `debug_assert!`.
+    /// Instrument counter (hash-excluded): `dcbz` retirements. A
+    /// buffer-full retry or a fault does not count.
     pub dcbz_executed: u64,
     /// The CTRL value an `mfspr 136` returns (hash-excluded): the unit
     /// sets it from the PPE placement at the start of each batch.

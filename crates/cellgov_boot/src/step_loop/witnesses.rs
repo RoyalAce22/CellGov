@@ -41,11 +41,11 @@ pub struct BenchWitnesses {
     /// are counted per mnemonic so word-width and doubleword paths
     /// report independently.
     pub ldarx: u64,
-    /// `stdcx.` executions summed over every PPU unit.
+    /// `stdcx.` retirements summed over every PPU unit.
     pub stdcx: u64,
     /// `lwarx` executions summed over every PPU unit.
     pub lwarx: u64,
-    /// `stwcx.` executions summed over every PPU unit.
+    /// `stwcx.` retirements summed over every PPU unit.
     pub stwcx: u64,
     /// Entries to the PPU's memory-fault verdict.
     pub mem_fault_arm_entries: u64,
@@ -58,7 +58,8 @@ pub struct BenchWitnesses {
     pub rsx_label_writes: u64,
     /// RSX set-reference dispatches.
     pub rsx_set_reference: u64,
-    /// `dcbz` executions summed over every PPU unit.
+    /// `dcbz` retirements summed over every PPU unit. A `dcbz` that
+    /// faults or retries on a full store buffer is not counted.
     pub dcbz: u64,
     /// SPU image registrations with the content store.
     pub spu_image_register: u64,

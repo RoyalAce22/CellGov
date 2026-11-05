@@ -151,13 +151,19 @@ pub(crate) fn execute(
         // [PPC-Book2 p:25 s:3.3] stwcx./stdcx.: if RESERVE && RESERVE_ADDR == real_addr(EA) then store + CR0 = 0b00||1||XER[SO], else CR0 = 0b00||0||XER[SO]; reservation cleared.
         PpuInstruction::Stdcx { rs, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
-            state.stdcx_executed = state.stdcx_executed.wrapping_add(1);
-            store_conditional(state, region_views, store_buf, effects, rs, ea, Width::B8)
+            let v = store_conditional(state, region_views, store_buf, effects, rs, ea, Width::B8);
+            if v == ExecuteVerdict::Continue {
+                state.stdcx_executed = state.stdcx_executed.wrapping_add(1);
+            }
+            v
         }
         PpuInstruction::Stwcx { rs, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
-            state.stwcx_executed = state.stwcx_executed.wrapping_add(1);
-            store_conditional(state, region_views, store_buf, effects, rs, ea, Width::B4)
+            let v = store_conditional(state, region_views, store_buf, effects, rs, ea, Width::B4);
+            if v == ExecuteVerdict::Continue {
+                state.stwcx_executed = state.stwcx_executed.wrapping_add(1);
+            }
+            v
         }
 
         // Vector loads / stores
@@ -360,12 +366,15 @@ pub(crate) fn execute(
             if caching_inhibited(region_views, ea) {
                 return ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(target));
             }
-            state.dcbz_executed = state.dcbz_executed.wrapping_add(1);
             // Capacity pre-check prevents a partial block from
             // committing on `BufferFull` mid-loop.
             const DCBZ_STORES: usize = DCBZ_BLOCK_BYTES / 8;
             let zeros = (0..DCBZ_STORES).map(|i| (ea + (i as u64) * 8, 8, 0));
-            store_prechecked(store_buf, region_views, DCBZ_STORES, zeros, "dcbz")
+            let v = store_prechecked(store_buf, region_views, DCBZ_STORES, zeros, "dcbz");
+            if v == ExecuteVerdict::Continue {
+                state.dcbz_executed = state.dcbz_executed.wrapping_add(1);
+            }
+            v
         }
         // [PPC-Book2 p:18 s:3.2.1] icbi is treated as a Load for translation and protection.
         // [PPC-Book2 p:21 s:3.2.2] dcbst and dcbf are treated as a Load.
@@ -420,7 +429,7 @@ fn load_reserve(
     }
 }
 
-/// stwcx. / stdcx. after the counter bump.
+/// Runs `stwcx.` or `stdcx.`; the caller counts it on `Continue`.
 ///
 /// The local reservation is authoritative: cross-unit clears happen at
 /// step start, and the unit's own stores leave it.

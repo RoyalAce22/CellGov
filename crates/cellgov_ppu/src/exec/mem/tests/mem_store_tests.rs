@@ -175,10 +175,6 @@ fn dcbz_ea_is_aligned_down_to_block_boundary() {
 
 #[test]
 fn dcbz_increments_counter_on_each_execution() {
-    // Liveness witness: dcbz_executed increments per Dcbz
-    // arm entry. The MMIO-window debug_assert is evaluated
-    // before the counter resolves; this proves silence is
-    // non-vacuous when the counter is > 0.
     let base = 0x1000u64;
     let mem = vec![0u8; 384];
     let mut s = PpuState::new();

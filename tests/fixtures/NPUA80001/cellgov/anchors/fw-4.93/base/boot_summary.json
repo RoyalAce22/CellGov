@@ -12,7 +12,7 @@
       "class": "absent"
     },
     "dcbz": {
-      "value": 29,
+      "value": 23,
       "class": "at-least"
     },
     "event_port_ipc_connect_attempts": {

@@ -46,5 +46,7 @@ mod stores;
 mod string_form;
 #[path = "mem_string_tests.rs"]
 mod strings;
+#[path = "mem_witness_retry_tests.rs"]
+mod witness_retry;
 #[path = "mem_wrap_tests.rs"]
 mod wrap;

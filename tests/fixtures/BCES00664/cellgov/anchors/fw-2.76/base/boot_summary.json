@@ -12,7 +12,7 @@
       "class": "absent"
     },
     "dcbz": {
-      "value": 614,
+      "value": 492,
       "class": "at-least"
     },
     "event_port_ipc_connect_attempts": {
@@ -112,7 +112,7 @@
       "class": "at-least"
     },
     "stwcx": {
-      "value": 9820,
+      "value": 9819,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {

@@ -58,5 +58,9 @@ mod fused_entry_console_tests;
 mod fault_prefix_tests;
 
 #[cfg(test)]
+#[path = "tests/witness_fault_prefix_tests.rs"]
+mod witness_fault_prefix_tests;
+
+#[cfg(test)]
 #[path = "tests/store_fault_tests.rs"]
 mod store_fault_tests;
