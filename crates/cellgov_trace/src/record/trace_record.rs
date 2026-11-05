@@ -11,6 +11,7 @@ use super::codec::{
     TAG_SPU_REGISTERS, TAG_SPU_STATE_FULL, TAG_SPU_STATE_HASH, TAG_STATE_HASH_CHECKPOINT,
     TAG_STATE_HASH_SCHEME, TAG_STEP_COMPLETED, TAG_SYSCALL_ENTERED, TAG_SYSCALL_RETURNED,
     TAG_UNIT_BLOCKED, TAG_UNIT_SCHEDULED, TAG_UNIT_STOPPED, TAG_UNIT_WOKEN,
+    TAG_UNSYNCED_CODE_FETCH,
 };
 use super::reasons::{
     HashCheckpointKind, HostWriter, TracedBarrierKind, TracedBlockReason, TracedEffectKind,
@@ -22,7 +23,17 @@ use super::reasons::{
 ///
 /// A stream whose first record is not `RunIdentity` is version 1 and
 /// carries no run identity.
-pub const TRACE_FORMAT_VERSION: u32 = 7;
+pub const TRACE_FORMAT_VERSION: u32 = 8;
+
+/// [`TraceRecord::UnsyncedCodeFetch`] `sequence` bit: a `dcbst` on the
+/// line ran after the store.
+pub const SEQUENCE_DCBST: u8 = 1;
+/// [`TraceRecord::UnsyncedCodeFetch`] `sequence` bit: a heavyweight
+/// `sync` ran after the store.
+pub const SEQUENCE_SYNC: u8 = 2;
+/// [`TraceRecord::UnsyncedCodeFetch`] `sequence` bit: an `icbi` on the
+/// line ran after the store.
+pub const SEQUENCE_ICBI: u8 = 4;
 
 /// A single structured trace record.
 #[allow(clippy::large_enum_variant)]
@@ -329,6 +340,37 @@ pub enum TraceRecord {
         /// significant.
         regs: [u128; 16],
     },
+    /// A unit fetched from a changed code line before the sequence completed.
+    ///
+    /// A guest store changed the line, and the instruction-modification
+    /// sequence did not complete for that line and that unit before the
+    /// fetch.
+    ///
+    /// [PPC-Book2 p:11 s:1.8] the result of running the location is
+    /// boundedly undefined; CellGov runs the stored word once the store
+    /// commits. The runtime emits one record per line and unit until the
+    /// next store to the line.
+    UnsyncedCodeFetch {
+        /// Unit that fetched.
+        unit: UnitId,
+        /// Guest address of the fetched word.
+        pc: u64,
+        /// Address space of the line; 0 is the boot space.
+        space: u32,
+        /// Base of the 128-byte line.
+        line: u64,
+        /// Unit whose store last changed the line.
+        writer: UnitId,
+        /// Runtime step that committed that store.
+        store_step: u64,
+        /// The steps of the sequence that ran after the store:
+        /// [`SEQUENCE_DCBST`], [`SEQUENCE_SYNC`] and [`SEQUENCE_ICBI`].
+        sequence: u8,
+        /// Every store to the line since the sequence last invalidated it
+        /// replaced a whole patch-class word (`b[l][a]` or `ori 0,0,0`)
+        /// with another [PPC-Book2 p:13 s:1.8.1].
+        patch_class: bool,
+    },
 }
 
 impl TraceRecord {
@@ -356,6 +398,7 @@ impl TraceRecord {
             TraceRecord::SpuStateHash { .. } => TAG_SPU_STATE_HASH,
             TraceRecord::SpuStateFull { .. } => TAG_SPU_STATE_FULL,
             TraceRecord::SpuRegisters { .. } => TAG_SPU_REGISTERS,
+            TraceRecord::UnsyncedCodeFetch { .. } => TAG_UNSYNCED_CODE_FETCH,
         }
     }
 
@@ -386,6 +429,7 @@ impl TraceRecord {
             TAG_SPU_STATE_HASH => 1 + 8 * 4,
             TAG_SPU_STATE_FULL => 1 + 8 * 3 + 16 + 4 + 1 + 4 + 1 + 8,
             TAG_SPU_REGISTERS => 1 + 8 + 8 + 1 + 16 * 16,
+            TAG_UNSYNCED_CODE_FETCH => 1 + 8 + 8 + 4 + 8 + 8 + 8 + 1 + 1,
             _ => return None,
         })
     }
@@ -406,7 +450,9 @@ impl TraceRecord {
             | TraceRecord::SpuStateHash { .. }
             | TraceRecord::SpuStateFull { .. }
             | TraceRecord::SpuRegisters { .. } => TraceLevel::Hashes,
-            TraceRecord::EffectEmitted { .. } | TraceRecord::Barrier { .. } => TraceLevel::Effects,
+            TraceRecord::EffectEmitted { .. }
+            | TraceRecord::Barrier { .. }
+            | TraceRecord::UnsyncedCodeFetch { .. } => TraceLevel::Effects,
             TraceRecord::HostInvariantBreak { .. } => TraceLevel::Scheduling,
             TraceRecord::SyscallEntered { .. } => TraceLevel::Scheduling,
             TraceRecord::ReservedRegionRead { .. } => TraceLevel::Hashes,

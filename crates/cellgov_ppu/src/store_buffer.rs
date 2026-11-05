@@ -171,6 +171,22 @@ impl StoreBuffer {
             .map(|e| (e.addr, e.len))
     }
 
+    /// [`Self::stores_from`] with a third field, `word`.
+    ///
+    /// `word` is the stored value of a 4-byte store, and `None` for any
+    /// other width.
+    pub(crate) fn words_from(
+        &self,
+        from: usize,
+    ) -> impl Iterator<Item = (u64, u8, Option<u32>)> + '_ {
+        self.entries
+            .get(from..)
+            .unwrap_or_default()
+            .iter()
+            // An entry holds its bytes in the low `len` bytes of `value`.
+            .map(|e| (e.addr, e.len, (e.len == 4).then_some(e.value as u32)))
+    }
+
     /// Whether `n` more entries fit. Multi-store instructions
     /// (`stvx`, `dcbz`) call this before staging any store so a
     /// `BufferFull` mid-instruction does not leave a partial commit

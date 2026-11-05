@@ -43,7 +43,7 @@ impl PpuExecutionUnit {
     ///
     /// Retirements discarded by the rollback never reach the trace
     /// stream: the rollback truncates their `PpuStateHash` /
-    /// `PpuStateFull` entries and barrier records, and restores
+    /// `PpuStateFull` entries, barrier records and code events, and restores
     /// `retirement_counter` and the issue model's scalar state. The caches
     /// and the branch predictor keep the changes of the discarded
     /// instructions.
@@ -60,6 +60,7 @@ impl PpuExecutionUnit {
         self.per_step_hashes.truncate(entry.hashes);
         self.per_step_full_states.truncate(entry.fulls);
         self.barriers.truncate(entry.barriers);
+        self.code_events.truncate(entry.code_events);
         self.retirement_counter = entry.retired;
         self.status = UnitStatus::Faulted;
     }

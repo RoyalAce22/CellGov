@@ -143,6 +143,9 @@ pub struct Runtime {
     /// Committed guest stores into declared code; a snapshot does not
     /// capture it.
     pub(super) code_writes: crate::runtime::code_writes::CodeWriteWitness,
+    /// The record of fetches from code before its instruction-modification
+    /// sequence completed; a restore clears it.
+    pub(super) code_coherence: crate::runtime::code_coherence::CodeCoherence,
     /// The host's debug observer; a snapshot does not capture it.
     pub(super) tap: Option<Box<dyn crate::runtime::RuntimeTap>>,
 }

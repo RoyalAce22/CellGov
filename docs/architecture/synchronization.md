@@ -330,6 +330,30 @@ A traced run records each retired barrier as a `Barrier` record
 reordering hardware has the location of every barrier instruction
 the run retired.
 
+**Instruction storage.** CellGov runs a stored instruction as soon as
+its store commits. The PPE can run the old instruction until the
+program runs `dcbst`, `sync`, `icbi` and `isync` on the line
+[PPC-Book2 p:11 s:1.8], because its L1 instruction cache does not
+snoop [CBE-Handbook p:145 s:6.1.6.1]. A fetch in the batch of the
+store still reads the old word, so where the batch ends decides which
+word an unsynchronized fetch runs.
+
+A traced run records each fetch from a stored-to code line before the
+sequence completed for the fetching unit, as an `UnsyncedCodeFetch`
+record. The record holds:
+
+- the fetching unit, the address and the 128-byte line;
+- the writer and the step that committed the store;
+- the steps of the sequence that ran;
+- whether every store swapped words of the patch class, the case the
+  architecture defines [PPC-Book2 p:13 s:1.8.1].
+
+For its own stores a unit needs `isync`; a unit that runs another
+unit's stores may use any context-synchronizing instruction, `sc`
+among them [PPC-Book2 p:12 s:1.8]. The record does not depend on where
+a batch ends, except for the step number it carries. It is host-side:
+it moves no result and no hash, and a snapshot restore clears it.
+
 The SPU's MFC ordering commands (`mfcsync`, `mfceieio`, `barrier`)
 and the fence and barrier forms of put, get and sndsig record the
 same way when they queue. Unlike the instructions, they also order

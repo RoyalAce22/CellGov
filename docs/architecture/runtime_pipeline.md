@@ -405,7 +405,12 @@ The full vocabulary of guest-visible operations:
   - `HostWrite` (mechanism, space, address, length, reservations
     cleared), one per write the runtime itself lands in guest
     memory. Those writes have no `UnitId`, so the mechanism takes
-    the place of the `UnitId`.
+    the place of the `UnitId`;
+  - `UnsyncedCodeFetch` (unit, address, space, line, writer, store
+    step, sequence steps, patch class), one per fetch from a
+    stored-to code line before the instruction-modification sequence
+    completed for that unit; see
+    [synchronization](synchronization.md).
 
 ### Trace gating
 

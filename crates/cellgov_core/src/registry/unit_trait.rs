@@ -8,9 +8,9 @@ use core::any::Any;
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{
-    ExecutionContext, ExecutionStepResult, ExecutionUnit, FaultRegisterDump, PpuFingerprint,
-    ProblemStateError, RestartError, RetiredBarrier, SignalNotifier, SpuFingerprint, StopRegisters,
-    UnitStatus,
+    CodeEvent, ExecutionContext, ExecutionStepResult, ExecutionUnit, FaultRegisterDump,
+    PpuFingerprint, ProblemStateError, RestartError, RetiredBarrier, SignalNotifier,
+    SpuFingerprint, StopRegisters, UnitStatus,
 };
 use cellgov_time::Budget;
 
@@ -59,6 +59,10 @@ pub trait RegisteredUnit: 'static {
     /// Drain the barrier instructions retired during the most recent
     /// `run_until_yield`. See [`ExecutionUnit::drain_barriers`].
     fn drain_barriers(&mut self) -> Vec<RetiredBarrier>;
+
+    /// Drain the code-coherence events retired during the most recent
+    /// `run_until_yield`. See [`ExecutionUnit::drain_code_events`].
+    fn drain_code_events(&mut self) -> Vec<CodeEvent>;
 
     /// Drain instruction-variant profiling data.
     /// See [`ExecutionUnit::drain_profile_insns`].
@@ -277,6 +281,11 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn drain_barriers(&mut self) -> Vec<RetiredBarrier> {
         ExecutionUnit::drain_barriers(self)
+    }
+
+    #[inline]
+    fn drain_code_events(&mut self) -> Vec<CodeEvent> {
+        ExecutionUnit::drain_code_events(self)
     }
 
     #[inline]

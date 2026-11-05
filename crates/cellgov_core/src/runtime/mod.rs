@@ -23,6 +23,7 @@
 //! and resume the thread.
 
 mod accessors;
+mod code_coherence;
 mod code_writes;
 mod commit_step;
 mod commit_trace;
@@ -54,6 +55,7 @@ mod types;
 mod unit_clocks;
 mod unit_stop;
 
+pub use code_coherence::UnsyncedCodeFetch;
 pub use code_writes::{CodeWrite, CodeWriteWitness};
 pub use construction::DEFAULT_DMA_LATENCY_TICKS;
 pub use host_write::HostWrite;

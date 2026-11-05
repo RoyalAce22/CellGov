@@ -49,6 +49,7 @@ impl ExecutionUnit for PpuExecutionUnit {
             per_step_hashes: _,
             per_step_full_states: _,
             barriers: _,
+            code_events: _,
             // Trace instruments: the step the records carry and the
             // window of full records.
             retirement_counter: _,
@@ -91,6 +92,10 @@ impl ExecutionUnit for PpuExecutionUnit {
 
     fn drain_barriers(&mut self) -> Vec<cellgov_exec::RetiredBarrier> {
         std::mem::take(&mut self.barriers)
+    }
+
+    fn drain_code_events(&mut self) -> Vec<cellgov_exec::CodeEvent> {
+        std::mem::take(&mut self.code_events)
     }
 
     fn drain_profile_insns(&mut self) -> Vec<(&'static str, u64)> {

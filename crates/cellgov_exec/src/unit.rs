@@ -228,6 +228,16 @@ pub trait ExecutionUnit {
         Vec::new()
     }
 
+    /// Drain the code-coherence events of the last `run_until_yield`, in program order.
+    ///
+    /// The default returns an empty vec and allocates nothing.
+    ///
+    /// A unit collects them only when
+    /// [`ExecutionContext::trace_per_step`] is true.
+    fn drain_code_events(&mut self) -> Vec<crate::CodeEvent> {
+        Vec::new()
+    }
+
     /// Drain instruction-variant frequency data from profiling mode.
     fn drain_profile_insns(&mut self) -> Vec<(&'static str, u64)> {
         Vec::new()

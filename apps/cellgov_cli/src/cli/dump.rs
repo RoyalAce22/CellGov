@@ -258,6 +258,22 @@ fn dump_trace(result: &ScenarioResult) -> Result<(), CommandError> {
                     unit.raw()
                 );
             }
+            TraceRecord::UnsyncedCodeFetch {
+                unit,
+                pc,
+                space,
+                line,
+                writer,
+                store_step,
+                sequence,
+                patch_class,
+            } => {
+                println!(
+                    "{i:4}  UnsyncedCodeFetch  unit={} pc=0x{pc:016x} space={space} line=0x{line:016x} writer={} store_step={store_step} sequence=0b{sequence:03b} patch_class={patch_class}",
+                    unit.raw(),
+                    writer.raw()
+                );
+            }
         }
     }
     println!("--- {count} records total ---");

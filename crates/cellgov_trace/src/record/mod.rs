@@ -17,7 +17,9 @@ pub use reasons::{
     HashCheckpointKind, HostWriter, TracedBarrierKind, TracedBlockReason, TracedEffectKind,
     TracedInvariantBreakReason, TracedSyscallDisposition, TracedWakeReason, TracedYieldReason,
 };
-pub use trace_record::{TraceRecord, TRACE_FORMAT_VERSION};
+pub use trace_record::{
+    TraceRecord, SEQUENCE_DCBST, SEQUENCE_ICBI, SEQUENCE_SYNC, TRACE_FORMAT_VERSION,
+};
 
 #[cfg(test)]
 #[path = "tests/record_tests.rs"]
@@ -42,3 +44,7 @@ mod format_version_tests;
 #[cfg(test)]
 #[path = "tests/record_scheme_tests.rs"]
 mod scheme_tests;
+
+#[cfg(test)]
+#[path = "tests/record_code_fetch_tests.rs"]
+mod code_fetch_tests;

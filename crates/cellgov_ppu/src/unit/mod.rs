@@ -2,6 +2,7 @@
 //! tracking, fault rollback, and the `ExecutionUnit` impl.
 
 mod batch;
+mod code_events;
 mod exec_unit;
 mod fault;
 mod fetch;
@@ -273,3 +274,7 @@ mod code_write_record_tests;
 #[cfg(test)]
 #[path = "tests/snapshot_restore_tests.rs"]
 mod snapshot_restore_tests;
+
+#[cfg(test)]
+#[path = "tests/code_event_tests.rs"]
+mod code_event_tests;

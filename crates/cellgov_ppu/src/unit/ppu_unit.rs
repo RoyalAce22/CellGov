@@ -54,6 +54,11 @@ pub struct PpuExecutionUnit {
     /// per-step trace data. A faulted batch truncates this list to its
     /// length at batch entry.
     pub(super) barriers: Vec<cellgov_exec::RetiredBarrier>,
+    /// Fetches and instruction-modification steps retired since the last
+    /// drain, in program order.
+    ///
+    /// The unit records and truncates this list as it does `barriers`.
+    pub(super) code_events: Vec<cellgov_exec::CodeEvent>,
     pub(super) instruction_shadow: Option<shadow::PredecodedShadow>,
     pub(super) shadow_hits: u64,
     pub(super) shadow_misses: u64,
@@ -113,6 +118,7 @@ impl PpuExecutionUnit {
             retirement_counter: 0,
             per_step_full_states: Vec::new(),
             barriers: Vec::new(),
+            code_events: Vec::new(),
             instruction_shadow: None,
             shadow_hits: 0,
             shadow_misses: 0,
@@ -235,6 +241,7 @@ impl PpuExecutionUnit {
             per_step_hashes,
             per_step_full_states,
             barriers,
+            code_events,
             // Trace instruments and settings.
             retirement_counter: _,
             full_state_window: _,
@@ -265,5 +272,6 @@ impl PpuExecutionUnit {
         per_step_hashes.clear();
         per_step_full_states.clear();
         barriers.clear();
+        code_events.clear();
     }
 }

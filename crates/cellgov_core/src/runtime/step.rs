@@ -330,7 +330,8 @@ impl Runtime {
 
     /// Turn the retired state a traced step drained from `unit_id` into
     /// trace records, in the order PpuStateHash, PpuStateFull,
-    /// SpuStateHash, SpuStateFull with its SpuRegisters, Barrier.
+    /// SpuStateHash, SpuStateFull with its SpuRegisters, Barrier, and
+    /// hold its code events for the commit.
     #[inline]
     fn record_retired_state(&mut self, unit_id: UnitId, retired: RetiredState) {
         let RetiredState {
@@ -339,7 +340,11 @@ impl Runtime {
             spu_hashes,
             spu_full,
             barriers,
+            code_events,
         } = retired;
+        // The events wait for the step's commit, which replays them only
+        // when the batch applies.
+        self.code_coherence.stash(unit_id, code_events);
         // PpuStateHash and PpuStateFull pair by step index so the diff
         // printer matches a hash divergence with its full-state snapshot.
         for (pc, hash) in ppu_hashes {
@@ -529,6 +534,7 @@ struct RetiredState {
     spu_hashes: Vec<(u64, u64, u64)>,
     spu_full: Vec<(u64, u64, cellgov_exec::SpuFingerprint)>,
     barriers: Vec<cellgov_exec::RetiredBarrier>,
+    code_events: Vec<cellgov_exec::CodeEvent>,
 }
 
 impl RetiredState {
@@ -541,6 +547,7 @@ impl RetiredState {
             spu_hashes: unit.drain_retired_spu_state_hashes(),
             spu_full: unit.drain_retired_spu_state_full(),
             barriers: unit.drain_barriers(),
+            code_events: unit.drain_code_events(),
         }
     }
 }

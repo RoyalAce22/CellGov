@@ -32,6 +32,7 @@ pub(super) const TAG_BARRIER: u8 = 0x11;
 pub(super) const TAG_SPU_STATE_HASH: u8 = 0x12;
 pub(super) const TAG_SPU_STATE_FULL: u8 = 0x13;
 pub(super) const TAG_SPU_REGISTERS: u8 = 0x14;
+pub(super) const TAG_UNSYNCED_CODE_FETCH: u8 = 0x15;
 
 impl TraceRecord {
     /// Append the binary encoding to `buf`.
@@ -264,6 +265,25 @@ impl TraceRecord {
                 for r in regs.iter() {
                     write_u128(buf, *r);
                 }
+            }
+            TraceRecord::UnsyncedCodeFetch {
+                unit,
+                pc,
+                space,
+                line,
+                writer,
+                store_step,
+                sequence,
+                patch_class,
+            } => {
+                write_u64(buf, unit.raw());
+                write_u64(buf, *pc);
+                write_u32(buf, *space);
+                write_u64(buf, *line);
+                write_u64(buf, writer.raw());
+                write_u64(buf, *store_step);
+                buf.push(*sequence);
+                buf.push(u8::from(*patch_class));
             }
         }
         debug_assert_eq!(
@@ -565,6 +585,26 @@ impl TraceRecord {
                     step,
                     first,
                     regs,
+                }
+            }
+            TAG_UNSYNCED_CODE_FETCH => {
+                let unit = UnitId::new(read_u64(bytes, &mut pos)?);
+                let pc = read_u64(bytes, &mut pos)?;
+                let space = read_u32(bytes, &mut pos)?;
+                let line = read_u64(bytes, &mut pos)?;
+                let writer = UnitId::new(read_u64(bytes, &mut pos)?);
+                let store_step = read_u64(bytes, &mut pos)?;
+                let sequence = read_u8(bytes, &mut pos)?;
+                let patch_class = read_bool(bytes, &mut pos)?;
+                TraceRecord::UnsyncedCodeFetch {
+                    unit,
+                    pc,
+                    space,
+                    line,
+                    writer,
+                    store_step,
+                    sequence,
+                    patch_class,
                 }
             }
             other => return Err(DecodeError::UnknownTag(other)),

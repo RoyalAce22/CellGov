@@ -22,6 +22,7 @@
 )]
 
 pub mod barrier;
+pub mod code_event;
 pub mod context;
 pub mod fake_isa;
 pub mod operand;
@@ -33,6 +34,7 @@ pub mod unit;
 pub mod yield_reason;
 
 pub use barrier::{BarrierKind, RetiredBarrier};
+pub use code_event::CodeEvent;
 pub use context::{ExecutionContext, MfcOrderingView};
 pub use fake_isa::{FakeIsaUnit, FakeOp};
 pub use problem_state::{OutMailboxes, ProblemStateError, SignalNotifier};

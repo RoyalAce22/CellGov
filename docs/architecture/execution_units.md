@@ -372,6 +372,15 @@ The loaders' own writes are host-side. PRX relocation and import
 binding (GOT slot patching) write guest memory through the loader's
 staging while a module loads, and no unit commits them as a store.
 
+The invalidation is eager: the first fetch after the commit runs the
+new word, with no `icbi` and no `isync`. The PPE can run the old word
+until the program completes the instruction-modification sequence
+[PPC-Book2 p:11 s:1.8], because its L1 instruction cache does not
+snoop [CBE-Handbook p:145 s:6.1.6.1]. A fetch in the store's own batch
+reads the old word, so the word an unsynchronized fetch runs depends
+on the batch budget. A traced run records each such fetch; see
+[synchronization](synchronization.md).
+
 The invalidation is widened to super-pair partners so both halves
 transition together.
 

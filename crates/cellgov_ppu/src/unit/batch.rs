@@ -19,6 +19,7 @@ pub(super) struct BatchEntry {
     pub(super) hashes: usize,
     pub(super) fulls: usize,
     pub(super) barriers: usize,
+    pub(super) code_events: usize,
     pub(super) retired: u64,
     /// The issue model's cycle at entry.
     pub(super) cycle: u64,
@@ -86,6 +87,7 @@ impl PpuExecutionUnit {
             hashes: self.per_step_hashes.len(),
             fulls: self.per_step_full_states.len(),
             barriers: self.barriers.len(),
+            code_events: self.code_events.len(),
             retired: self.retirement_counter,
             cycle: self.timing.now(),
             timing: (max_budget > 1).then(|| self.timing.core()),
@@ -249,6 +251,7 @@ impl PpuExecutionUnit {
                     if ctx.trace_per_step() {
                         self.per_step_hashes
                             .push((step_pc, self.state.state_hash()));
+                        self.note_syscall_code_events(step_pc);
                     }
                     self.record_retirement(step_pc);
                     self.close_block(effects);
@@ -328,6 +331,9 @@ impl PpuExecutionUnit {
                     self.barriers
                         .push(cellgov_exec::RetiredBarrier { pc: step_pc, kind });
                 }
+                // A traced batch runs no fused pair, so `insn` is one
+                // instruction.
+                self.note_code_events(&insn, step_pc, stores_before);
             }
             self.record_retirement(step_pc);
             let mut last_pc = step_pc;

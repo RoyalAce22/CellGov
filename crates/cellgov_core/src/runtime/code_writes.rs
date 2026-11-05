@@ -110,7 +110,8 @@ fn first_code_word(spans: &[(u64, u64)], range: ByteRange) -> Option<u64> {
     (b < end && start < e).then(|| start.max(b) & !3)
 }
 
-fn read_word(memory: &GuestMemory, addr: u64) -> Option<u32> {
+/// The big-endian word at `addr`, or `None` when it is not mapped.
+pub(super) fn read_word(memory: &GuestMemory, addr: u64) -> Option<u32> {
     let range = ByteRange::new(GuestAddr::new(addr), 4)?;
     memory
         .read(range)

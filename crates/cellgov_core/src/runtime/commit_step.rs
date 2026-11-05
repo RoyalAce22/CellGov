@@ -120,6 +120,8 @@ impl Runtime {
         // so `process()` increments it adjacent to the guard it witnesses.
         let rsx_label_base = self.resolved_rsx_label_base();
         let code_writes = self.code_writes_before(source_space, effects);
+        let code_events = self.code_coherence.take(source);
+        let code_event_old_words = self.code_event_old_words(source_space, &code_events);
         let (space_memory, space_reservations) = crate::runtime::spaces::resolve_commit_targets(
             &mut self.memory,
             &mut self.reservations,
@@ -159,6 +161,7 @@ impl Runtime {
             self.lv2_host.note_committed_effects(writer, effects);
             self.invalidate_committed_code(effects, rsx_label_base);
             self.record_code_writes(source, source_space, &code_writes);
+            self.apply_code_events(source, source_space, &code_events, &code_event_old_words);
             // Same batch boundary: writes landing in a shared view
             // replicate to sibling views before any checkpoint hashes.
             let fanout_cleared = self.fanout_shared_writes(source_space, effects);

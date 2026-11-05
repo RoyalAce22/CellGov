@@ -79,6 +79,7 @@ mod console_ppu_vsplat_vsrab;
 mod console_ppu_vsub_carry;
 mod console_ppu_vsum_across;
 mod console_ppu_vunpack;
+mod ppu_unsynced_code_fetch;
 mod reloc_addr16_lo_ds;
 mod reloc_addr64;
 mod reloc_rel24;

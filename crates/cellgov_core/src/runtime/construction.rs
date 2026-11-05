@@ -126,6 +126,7 @@ impl Runtime {
             rsx_consume_fifo: false,
             lv2_direct_committed_writes: 0,
             code_writes: Default::default(),
+            code_coherence: Default::default(),
             tap: None,
         }
     }

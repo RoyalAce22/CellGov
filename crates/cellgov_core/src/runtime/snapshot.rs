@@ -151,6 +151,7 @@ fn snapshot_field_categories(rt: &Runtime) {
         timer_sleep_dispatches: _,        // host-side counter only
         lv2_direct_committed_writes: _,   // staging-bypass witness, host-side only
         code_writes: _,                   // host-side witness only
+        code_coherence: _,                // cleared on restore
         tap: _,                           // host-installed observer, like the factories
     } = rt;
 }
@@ -267,6 +268,8 @@ impl Runtime {
         self.mfc_exception = None;
         self.trace.clear();
         self.zoom_trace.clear();
+        // The marked lines can describe stores that the restore undoes.
+        self.code_coherence.clear();
         self.scheduler_dirty_after_restore = true;
     }
 }
