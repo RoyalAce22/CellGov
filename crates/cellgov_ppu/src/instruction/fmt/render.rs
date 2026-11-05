@@ -654,6 +654,7 @@ pub(super) fn render(
         I::Clrldi { ra, rs, n } => op(f, "clrldi", format_args!("r{ra}, r{rs}, {n}")),
         I::Nop => op0(f, "nop"),
         I::CmpwZero { bf, ra } => cmp!(f, "cmpwi", bf, "r{}, {}", ra, 0),
+        I::CmpdZero { bf, ra } => cmp!(f, "cmpdi", bf, "r{}, {}", ra, 0),
 
         // -- Superinstructions (shadow-builder only). Rendered as the
         //    two fused halves joined with `; ` so the reader sees real

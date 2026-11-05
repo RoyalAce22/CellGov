@@ -1543,6 +1543,11 @@ pub enum PpuInstruction {
         bf: u8,
         ra: u8,
     },
+    /// Quickened form of `cmpdi crF, rA, 0`.
+    CmpdZero {
+        bf: u8,
+        ra: u8,
+    },
     Clrldi {
         ra: u8,
         rs: u8,

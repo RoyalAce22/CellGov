@@ -875,7 +875,7 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
         | I::Cmplwi { bf, ra, .. }
         | I::Cmpdi { bf, ra, .. }
         | I::Cmpldi { bf, ra, .. } => one(cmp(bf, ra, None)),
-        I::CmpwZero { bf, ra } => one(cmp(bf, ra, None)),
+        I::CmpwZero { bf, ra } | I::CmpdZero { bf, ra } => one(cmp(bf, ra, None)),
         I::Cmpw { bf, ra, rb }
         | I::Cmplw { bf, ra, rb }
         | I::Cmpd { bf, ra, rb }

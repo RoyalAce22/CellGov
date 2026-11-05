@@ -79,6 +79,9 @@ pub(super) fn quicken_insn(insn: PpuInstruction) -> Option<PpuInstruction> {
         } => Some(PpuInstruction::Nop),
         // cmpwi crF, rA, 0 => CmpwZero
         PpuInstruction::Cmpwi { bf, ra, imm: 0 } => Some(PpuInstruction::CmpwZero { bf, ra }),
+        // cmpdi crF, rA, 0 => CmpdZero
+        // [PPC-Book1 p:157 s:B.5 Table 6] cmpdi bf,ra,si == cmpi bf,1,ra,si.
+        PpuInstruction::Cmpdi { bf, ra, imm: 0 } => Some(PpuInstruction::CmpdZero { bf, ra }),
         // rldicl rA, rS, 0, n => Clrldi
         // [PPC-Book1 p:160 s:B.7.1 Table 10] clrldi ra,rs,n (n<64) == rldicl ra,rs,0,n.
         PpuInstruction::Rldicl {
@@ -125,3 +128,7 @@ mod proptests;
 #[cfg(test)]
 #[path = "tests/quicken_lis_tests.rs"]
 mod lis_tests;
+
+#[cfg(test)]
+#[path = "tests/quicken_cmpd_tests.rs"]
+mod cmpd_tests;

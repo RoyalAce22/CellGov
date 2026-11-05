@@ -696,6 +696,7 @@ pub fn encode(insn: &PpuInstruction) -> Result<u32, EncodeError> {
         // [PPC-Book1 p:162 s:B.9 No-op] the preferred no-op form is ori 0,0,0.
         I::Nop => d(24, 0, 0, 0),
         I::CmpwZero { bf, ra: a } => d(11, bf << 2, a, 0),
+        I::CmpdZero { bf, ra: a } => d(11, (bf << 2) | 1, a, 0),
 
         I::LwzCmpwi { .. }
         | I::LiStw { .. }

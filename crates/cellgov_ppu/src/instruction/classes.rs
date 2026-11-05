@@ -241,6 +241,7 @@ impl PpuInstruction {
             | PpuInstruction::Clrlwi { .. }
             | PpuInstruction::Nop
             | PpuInstruction::CmpwZero { .. }
+            | PpuInstruction::CmpdZero { .. }
             | PpuInstruction::Clrldi { .. }
             | PpuInstruction::Sldi { .. }
             | PpuInstruction::Srdi { .. }

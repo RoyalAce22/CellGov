@@ -26,6 +26,8 @@ fn encoders_produce_the_documented_words() {
     assert_eq!(li(3, 7), 0x3860_0007);
     // [PPC-Book1 p:66 s:3.3.13 Fixed-Point Logical Instructions] ori D-form: OPCD 24, RS, RA, UI.
     assert_eq!(ori(3, 3, 0), 0x6063_0000);
+    // [PPC-Book1 p:60 s:3.3.9] cmpi D-form: OPCD 11, BF, L = 1 for cmpdi, RA, SI.
+    assert_eq!(cmpdi(1, 6, 0), 0x2ca6_0000);
     // [PPC-Book1 p:42 s:3.3.3 Fixed-Point Store Instructions] stw D-form: OPCD 36, RS, RA, D.
     assert_eq!(stw(3, 4, 0), 0x9064_0000);
     // [PPC-Book1 p:37 s:3.3 Fixed-Point Load Instructions] lwz D-form: OPCD 32, RT, RA, D.
@@ -154,6 +156,7 @@ fn each_family_generates_its_documented_words_state_and_features() {
                     ori(3, 3, 0),
                     addi(3, 3, 1),
                     lis(6, value),
+                    cmpdi(1, 6, 0),
                     ori(7, 6, 0),
                     addi(8, 7, 0),
                     nor(9, 8, 8),

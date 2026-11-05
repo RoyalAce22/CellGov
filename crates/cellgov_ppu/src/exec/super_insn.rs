@@ -61,6 +61,13 @@ pub(crate) fn execute(
             cmpw(state, bf, state.gpr[ra as usize] as i32, 0);
             ExecuteVerdict::Continue
         }
+        PpuInstruction::CmpdZero { bf, ra } => {
+            // [PPC-Book1 p:60 s:3.3.9] cmpi with L = 1 compares all 64
+            // bits of RA, signed.
+            let a = state.gpr[ra as usize] as i64;
+            state.set_cr_field(bf, cmp_cr_field(a < 0, a > 0, state.xer_so()));
+            ExecuteVerdict::Continue
+        }
         PpuInstruction::Clrldi { ra, rs, n } => {
             let mask = if n >= 64 { 0 } else { u64::MAX >> n };
             state.set_gpr(ra as usize, state.gpr[rs as usize] & mask);

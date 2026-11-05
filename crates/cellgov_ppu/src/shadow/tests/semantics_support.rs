@@ -38,6 +38,11 @@ fn gpr_value() -> impl Strategy<Value = u64> {
         1 => Just(0u64),
         1 => Just(u64::MAX),
         2 => (-8i64..8).prop_map(|v| v as u64),
+        1 => prop_oneof![
+            Just(0xFFFF_FFFF_0000_0000u64),
+            Just(i32::MIN as u32 as u64),
+            Just(i64::MIN as u64),
+        ],
     ]
 }
 

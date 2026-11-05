@@ -245,6 +245,7 @@ pub fn reserved_bits(insn: &PpuInstruction) -> u32 {
         | I::Clrlwi { .. }
         | I::Nop
         | I::CmpwZero { .. }
+        | I::CmpdZero { .. }
         | I::Clrldi { .. }
         | I::Sldi { .. }
         | I::Srdi { .. }

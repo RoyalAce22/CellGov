@@ -582,6 +582,7 @@ pub(super) fn simplify(insn: &PpuInstruction, addr: u64) -> Option<Simplified> {
         | I::Clrlwi { .. }
         | I::Nop
         | I::CmpwZero { .. }
+        | I::CmpdZero { .. }
         | I::Clrldi { .. }
         | I::Sldi { .. }
         | I::Srdi { .. }

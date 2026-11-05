@@ -48,6 +48,7 @@ fn quickenable() -> impl Strategy<Value = PpuInstruction> {
             imm: 0
         }),
         (0u8..8, reg()).prop_map(|(bf, ra)| PpuInstruction::Cmpwi { bf, ra, imm: 0 }),
+        (0u8..8, reg()).prop_map(|(bf, ra)| PpuInstruction::Cmpdi { bf, ra, imm: 0 }),
         (reg(), reg(), 0u8..64).prop_map(|(ra, rs, n)| PpuInstruction::Rldicl {
             ra,
             rs,
