@@ -738,6 +738,10 @@ pub(super) fn render(
             let offset2 = offset1 as i32 + 8;
             write!(f, "; std r{rs2}, {offset2}(r{ra})")
         }
+        I::LisOri { rt, value } => {
+            op(f, "lis", format_args!("r{rt}, {}", (value >> 16) as i16))?;
+            write!(f, "; ori r{rt}, r{rt}, 0x{:x}", value as u16)
+        }
         I::CmpwiBc {
             bf,
             ra,

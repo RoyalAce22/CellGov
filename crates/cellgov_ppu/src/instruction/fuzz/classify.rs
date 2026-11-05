@@ -132,6 +132,7 @@ pub(super) fn form_for_word(kind: PpuInstructionKind, raw: u32) -> PpuEncodingFo
             | K::MflrStd
             | K::LdMtlr
             | K::StdStd
+            | K::LisOri
             | K::CmpwiBc
             | K::CmpwBc
             | K::CmpdiBc
@@ -598,6 +599,7 @@ pub(super) fn classify_kind(kind: PpuInstructionKind) {
         | PpuInstructionKind::MflrStd
         | PpuInstructionKind::LdMtlr
         | PpuInstructionKind::StdStd
+        | PpuInstructionKind::LisOri
         | PpuInstructionKind::CmpwiBc
         | PpuInstructionKind::CmpwBc
         | PpuInstructionKind::CmpdiBc

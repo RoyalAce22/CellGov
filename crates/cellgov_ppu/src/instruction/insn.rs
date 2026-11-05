@@ -1649,6 +1649,11 @@ pub enum PpuInstruction {
         ra: u8,
         offset1: i16,
     },
+    /// `lis rT, hi` followed by `ori rT, rT, lo`. `value` is `hi || lo`.
+    LisOri {
+        rt: u8,
+        value: i32,
+    },
     CmpwiBc {
         bf: u8,
         ra: u8,

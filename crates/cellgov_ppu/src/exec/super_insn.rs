@@ -236,6 +236,12 @@ pub(crate) fn execute(
             ];
             store_prechecked(store_buf, region_views, 2, stores.into_iter(), "stdstd")
         }
+        // [PPC-Book1 p:51 s:3.3.8 Add Immediate Shifted] addis (lis when RA=0): RT <- EXTS(SI || 0x0000).
+        // [PPC-Book1 p:66 s:3.3.11 OR Immediate] ori: RA <- (RS) | (48 zeros || UI), so the word is hi || lo, sign-extended.
+        PpuInstruction::LisOri { rt, value } => {
+            state.set_gpr(rt as usize, value as i64 as u64);
+            ExecuteVerdict::Continue
+        }
         // [PPC-Book1 p:60 s:3.3.9 Compare Immediate] cmpi (cmpwi when L=0): signed 32-bit compare against EXTS(SI), CR field <- c || XER[SO].
         // [PPC-Book1 p:18 s:2.3.1 Condition Register] CR field bits LT/GT/EQ/SO occupy positions 0/1/2/3 within the 4-bit field.
         // [PPC-Book1 p:24 s:2.4 Branch Conditional] bc: BO/BI gate the branch; target = CIA + EXTS(BD||0b00). Here CIA is the bc slot (super + 4).

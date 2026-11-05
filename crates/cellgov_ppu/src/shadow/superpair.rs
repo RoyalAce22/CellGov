@@ -95,6 +95,16 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
             ra: ra1,
             offset1: off1,
         }),
+        // lis rT, hi + ori rT, rT, lo. The shadow quickens `ori 0, 0, 0` to
+        // Nop first, so that shape never reaches this arm.
+        (PpuInstruction::Lis { rt, imm: hi }, PpuInstruction::Ori { ra, rs, imm: lo })
+            if ra == rt && rs == rt && !(rt == 0 && lo == 0) =>
+        {
+            Some(PpuInstruction::LisOri {
+                rt,
+                value: (i32::from(hi) << 16) | i32::from(lo),
+            })
+        }
         // lwz rT, off(rA) + CmpwZero crF, rT (quickened cmpwi-zero)
         (PpuInstruction::Lwz { rt, ra, imm }, PpuInstruction::CmpwZero { bf, ra: cmp_ra })
             if rt == cmp_ra =>
@@ -266,3 +276,7 @@ mod proptests;
 #[cfg(test)]
 #[path = "tests/superpair_compare_bc_tests.rs"]
 mod compare_bc_tests;
+
+#[cfg(test)]
+#[path = "tests/superpair_lis_tests.rs"]
+mod lis_tests;

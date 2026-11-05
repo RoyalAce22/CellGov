@@ -607,6 +607,7 @@ pub(super) fn simplify(insn: &PpuInstruction, addr: u64) -> Option<Simplified> {
         | I::MflrStd { .. }
         | I::LdMtlr { .. }
         | I::StdStd { .. }
+        | I::LisOri { .. }
         | I::CmpwiBc { .. }
         | I::CmpwBc { .. }
         | I::CmpdiBc { .. }

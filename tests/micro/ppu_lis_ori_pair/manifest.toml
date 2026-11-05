@@ -1,0 +1,20 @@
+[test]
+name = "ppu_lis_ori_pair"
+
+# A hardware probe: the 64-bit register "lis rT,hi" then
+# "ori rT,rT,lo" leaves, and the register a branch over the lis into
+# the ori leaves. The console capture is the answer; no emulator runs
+# it.
+
+[observe]
+# 14 big-endian u32 words, as ppu/main.c lists: 56 bytes.
+#   0 failed step, 1 its return code; then each case's register as a
+#   high word and a low word: 2-3 hi 0x8001, 4-5 hi 0x7FFF,
+#   6-7 hi 0xFFFF, 8-9 the branch into the ori, 10-11 r0 with lo 0,
+#   12-13 r0 with lo 1.
+memory_regions = [
+  { name = "result", addr = 0, size = 56 },
+]
+
+[expect]
+outcome = "completed"

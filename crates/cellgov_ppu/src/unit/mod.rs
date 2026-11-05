@@ -90,6 +90,14 @@ mod witness_fault_prefix_tests;
 mod fused_refusal_tests;
 
 #[cfg(test)]
+#[path = "tests/fused_lis_entry_tests.rs"]
+mod fused_lis_entry_tests;
+
+#[cfg(test)]
+#[path = "tests/lis_ori_console_tests.rs"]
+mod lis_ori_console_tests;
+
+#[cfg(test)]
 #[path = "tests/store_fault_tests.rs"]
 mod store_fault_tests;
 

@@ -23,6 +23,7 @@ impl PpuInstruction {
             | PpuInstruction::MflrStd { .. }
             | PpuInstruction::LdMtlr { .. }
             | PpuInstruction::StdStd { .. }
+            | PpuInstruction::LisOri { .. }
             | PpuInstruction::CmpwiBc { .. }
             | PpuInstruction::CmpwBc { .. }
             | PpuInstruction::CmpdiBc { .. }

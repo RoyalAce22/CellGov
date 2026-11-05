@@ -32,6 +32,14 @@ fn branch_offset() -> impl Strategy<Value = i16> {
     ]
 }
 
+/// A halfword, often one on either side of a sign boundary.
+fn halfword() -> impl Strategy<Value = u16> {
+    prop_oneof![
+        1 => any::<u16>(),
+        1 => prop::sample::select(vec![0u16, 0x7FFF, 0x8000, 0xFFFF]),
+    ]
+}
+
 /// Instruction pairs every fusion rule accepts, one arm per rule.
 fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
     prop_oneof![
@@ -134,6 +142,16 @@ fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
         (cr_field(), reg(), reg(), reg(), reg(), branch_offset()).prop_map(
             |(bf, ra, rb, bo, bi, off)| (PpuInstruction::Cmplw { bf, ra, rb }, bc(bo, bi, off))
         ),
+        // The shadow quickens `ori 0, 0, 0` to Nop before pairing, so
+        // this arm moves lo = 0 on r0 to 1.
+        (reg(), halfword(), halfword()).prop_map(|(rt, hi, lo)| (
+            PpuInstruction::Lis { rt, imm: hi as i16 },
+            PpuInstruction::Ori {
+                ra: rt,
+                rs: rt,
+                imm: if rt == 0 && lo == 0 { 1 } else { lo },
+            },
+        )),
     ]
 }
 
@@ -214,7 +232,7 @@ fn aim_compare(
 }
 
 proptest! {
-    // Six of the fifteen arms are compares that need an aimed
+    // Six of the sixteen arms are compares that need an aimed
     // operand to show an off-by-one. Four times the default count
     // makes one such case near certain per run.
     #![proptest_config(ProptestConfig::with_cases(1024))]
