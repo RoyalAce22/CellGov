@@ -1,0 +1,22 @@
+[test]
+name = "ppu_fp_addmul_edges"
+
+# A hardware probe of fadd, fsub and fmul, double and single, on the
+# operand classes the ppu_fp_addmul_modes probe does not send: a NaN only
+# in FRB of fsub, an infinity of either sign in either operand, denormal
+# operands of the double arms, sums whose smaller operand is only a sticky
+# bit in each rounding mode, signed zero products, and a single-precision
+# operand out of single range beside an infinity, a NaN or a zero, or in
+# FRB of fsubs. The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u32 words, as ppu/main.c lists: 3 header words (failed
+# step, its code, case count), then 11 words per case (operation, FPSCR
+# before, FRA, FRB, FRC and FRT as high/low pairs, FPSCR after): 63
+# cases, 696 words, 2784 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 2784 },
+]
+
+[expect]
+outcome = "completed"

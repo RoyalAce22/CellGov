@@ -1,8 +1,8 @@
 //! The FPSCR status each computational FP instruction reports, from its
 //! operands and its result.
 //!
-//! The estimates report their full status. An arithmetic arm computes on
-//! the host and reports the bits its operands and result decide:
+//! The estimates report their full status. A host-computed arithmetic
+//! arm reports the bits its operands and result decide:
 //!
 //! - the invalid-operation causes;
 //! - ZX;
@@ -42,12 +42,6 @@ fn is_nonzero_finite(bits: u64) -> bool {
 /// operands FRA, FRB and FRC.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HostArith {
-    /// FRA + FRB.
-    Add,
-    /// FRA - FRB.
-    Subtract,
-    /// FRA x FRC.
-    Multiply,
     /// FRA / FRB.
     Divide,
     /// The square root of FRB.
@@ -82,9 +76,6 @@ pub(crate) fn write_host_arith_status(
 /// [PPC-Book1 p:92 s:4.3.3] a multiply-add applies the rules to the product first, then to the sum.
 fn host_arith_status(op: HostArith, a: u64, b: u64, c: u64) -> PpcStatus {
     let invalid = match op {
-        HostArith::Add => PpcInvalid::signaling(&[a, b]).or(ppc_invalid_sum(a, b)),
-        HostArith::Subtract => PpcInvalid::signaling(&[a, b]).or(ppc_invalid_sum(a, b ^ SIGN)),
-        HostArith::Multiply => PpcInvalid::signaling(&[a, c]).or(ppc_invalid_product(a, c)),
         HostArith::Divide => PpcInvalid::signaling(&[a, b]).or(ppc_invalid_quotient(a, b)),
         HostArith::SquareRoot => PpcInvalid::signaling(&[b]).or(ppc_invalid_sqrt(b)),
         HostArith::MultiplyAdd { subtract } => {
@@ -124,7 +115,6 @@ fn infinite_product(a: u64, c: u64) -> u64 {
 /// They do for:
 ///
 /// - a NaN or an infinity operand;
-/// - a zero factor of [`HostArith::Multiply`];
 /// - a zero dividend of [`HostArith::Divide`];
 /// - the square root of a zero.
 ///
@@ -133,14 +123,12 @@ fn infinite_product(a: u64, c: u64) -> u64 {
 /// The ppu_fp_status_writeback console capture reads FR = FI = 0 after a QNaN operand, an infinity operand, infinity over zero and the square root of -0.
 fn host_arith_exact(op: HostArith, a: u64, b: u64, c: u64) -> bool {
     let read: &[u64] = match op {
-        HostArith::Add | HostArith::Subtract | HostArith::Divide => &[a, b],
-        HostArith::Multiply => &[a, c],
+        HostArith::Divide => &[a, b],
         HostArith::SquareRoot => &[b],
         HostArith::MultiplyAdd { .. } => &[a, b, c],
     };
     read.iter().any(|&x| x & INFINITY == INFINITY)
         || match op {
-            HostArith::Multiply => is_zero(a) || is_zero(c),
             HostArith::Divide => is_zero(a),
             HostArith::SquareRoot => is_zero(b),
             _ => false,
@@ -273,3 +261,7 @@ mod fp_compare_console_tests;
 #[cfg(test)]
 #[path = "tests/fp_status_console_tests.rs"]
 mod fp_status_console_tests;
+
+#[cfg(test)]
+#[path = "tests/fp_addmul_console_tests.rs"]
+mod fp_addmul_console_tests;

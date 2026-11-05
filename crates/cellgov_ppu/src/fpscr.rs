@@ -4,13 +4,13 @@
 //! Each move instruction takes its fields from the primary-63 decode:
 //! `frt` is instruction bits 6:10, `fra` bits 11:15 and `frb` bits 16:20.
 
-use cellgov_float::{PpcInvalid, PpcPrecision, PpcStatus};
+use cellgov_float::{PpcInvalid, PpcPrecision, PpcStatus, Rounding};
 use cellgov_ps3_abi::hw::ppc_isa::{
     PPC_FPSCR_ENABLE_BITS, PPC_FPSCR_EXCEPTION_BITS, PPC_FPSCR_FEX, PPC_FPSCR_FI, PPC_FPSCR_FPCC,
-    PPC_FPSCR_FPRF, PPC_FPSCR_FR, PPC_FPSCR_FX, PPC_FPSCR_OX, PPC_FPSCR_UX, PPC_FPSCR_VX,
-    PPC_FPSCR_VXCVI, PPC_FPSCR_VXIDI, PPC_FPSCR_VXIMZ, PPC_FPSCR_VXISI, PPC_FPSCR_VXSNAN,
-    PPC_FPSCR_VXSQRT, PPC_FPSCR_VXVC, PPC_FPSCR_VXZDZ, PPC_FPSCR_VX_BITS, PPC_FPSCR_XX,
-    PPC_FPSCR_ZX, PPE_FPSCR_UNIMPLEMENTED_BITS, PPE_MFFS_HIGH_WORD,
+    PPC_FPSCR_FPRF, PPC_FPSCR_FR, PPC_FPSCR_FX, PPC_FPSCR_OX, PPC_FPSCR_RN, PPC_FPSCR_UX,
+    PPC_FPSCR_VX, PPC_FPSCR_VXCVI, PPC_FPSCR_VXIDI, PPC_FPSCR_VXIMZ, PPC_FPSCR_VXISI,
+    PPC_FPSCR_VXSNAN, PPC_FPSCR_VXSQRT, PPC_FPSCR_VXVC, PPC_FPSCR_VXZDZ, PPC_FPSCR_VX_BITS,
+    PPC_FPSCR_XX, PPC_FPSCR_ZX, PPE_FPSCR_UNIMPLEMENTED_BITS, PPE_MFFS_HIGH_WORD,
 };
 
 use crate::state::PpuState;
@@ -170,6 +170,18 @@ pub(crate) fn with_summaries(fpscr: u32) -> u32 {
         v |= PPC_FPSCR_FEX;
     }
     v
+}
+
+/// The rounding mode FPSCR RN selects.
+///
+/// The ppu_fp_addmul_modes console capture rounds by this encoding in all four modes.
+pub(crate) fn rounding(fpscr: u32) -> Rounding {
+    match fpscr & PPC_FPSCR_RN {
+        0 => Rounding::NearestEven,
+        1 => Rounding::TowardZero,
+        2 => Rounding::TowardPositive,
+        _ => Rounding::TowardNegative,
+    }
 }
 
 /// The mask of FPSCR field `field` (0..=7), field 0 in the high nibble.

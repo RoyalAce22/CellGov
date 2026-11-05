@@ -1,7 +1,7 @@
 //! Tests for the FPSCR status writeback:
 //! - the FPRF bits of each result class
 //! - the sticky bits, FX, FR and FI
-//! - the causes that each host arm and each estimate reports
+//! - the causes that each arithmetic arm and each estimate reports
 
 use super::*;
 use crate::fp::{execute_fp59, execute_fp63};
@@ -253,11 +253,15 @@ fn a_host_arm_clears_fr_and_fi_on_an_invalid_zero_divide_or_operand_exact_result
         execute_fp63(&mut s, op, 0, 1, 2, 3);
         s.fpscr() & (PPC_FPSCR_FR | PPC_FPSCR_FI)
     };
-    assert_eq!(run(Fp63Op::Fsub, INF, INF), 0);
+    assert_eq!(run(Fp63Op::Fdiv, INF, INF), 0);
     assert_eq!(run(Fp63Op::Fdiv, ONE, 0), 0);
-    assert_eq!(run(Fp63Op::Fadd, INF, ONE), 0);
+    assert_eq!(run(Fp63Op::Fdiv, INF, TWO), 0);
     assert_eq!(run(Fp63Op::Fdiv, 0, TWO), 0);
-    assert_eq!(run(Fp63Op::Fadd, ONE, TWO), PPC_FPSCR_FR | PPC_FPSCR_FI);
+    // 1 / 3: a finite result the operands do not make exact.
+    assert_eq!(
+        run(Fp63Op::Fdiv, ONE, 0x4008_0000_0000_0000),
+        PPC_FPSCR_FR | PPC_FPSCR_FI
+    );
 }
 
 /// The `ppu_fp_estimate_readout` capture shows the status of each estimate:

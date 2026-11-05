@@ -130,16 +130,6 @@ const KNOWN_DIFFERENCES: &[(&str, &str, &str)] = &[
     ),
     ("fctiw-high-word/fctiw/rn2/", "f3.lo", "as above"),
     ("fctiw-high-word/fctiw/rn3/", "f3.lo", "as above"),
-    (
-        "fp-overflow-fr/",
-        "f3.all",
-        "multiply rounds an overflow to infinity whatever FPSCR RN selects",
-    ),
-    (
-        "fp-overflow-fr/",
-        "fpscr.rest",
-        "multiply sets no FPSCR status bit",
-    ),
 ];
 
 /// Every entry of `found` matches a known entry, and every known entry
@@ -242,24 +232,20 @@ const KNOWN_CONTRADICTED: &[(&str, &str, &str)] = &[
         "the console sign-extends the converted word into FRT[0:31]",
     ),
     (
-        "fp59-wide-operand/",
+        "fp59-wide-operand/fdivs/",
         "f3.all",
         "the console computes on the whole double operand",
     ),
     (
-        "fp59-wide-operand/",
+        "fp59-wide-operand/fdivs/",
         "fpscr.status",
         "the console sets the status bits of that result",
     ),
-    (
-        "fp-overflow-fr/",
-        "fpscr.fr",
-        "the console sets FR after an overflow with OE=0",
-    ),
+    ("fp59-wide-operand/fmadds/", "fpscr.status", "as above"),
     (
         "fpscr-ni/",
         "f3.all",
-        "the console rounds in the mode FPSCR RN selects; CellGov rounds to nearest",
+        "the console rounds in the mode FPSCR RN selects; CellGov rounds to nearest outside fadd, fsub and fmul",
     ),
     (
         "lve-other-lanes/",

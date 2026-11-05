@@ -207,15 +207,40 @@ pub(crate) fn ppc_round_in<F: Format>(
     exact: Exact,
     enables: PpcEnables,
 ) -> Result<PpcResult, PpcEnabled> {
-    let traced = round_ieee_traced::<F>(rounding, exact);
-    let flags = traced.packed.flags;
-    if enables.overflow && flags.overflow {
+    let (result, tiny) = round_disabled_in::<F>(rounding, exact);
+    if enables.overflow && result.status.ox {
         return Err(PpcEnabled::Overflow);
     }
-    if enables.underflow && traced.tiny {
+    if enables.underflow && tiny {
         return Err(PpcEnabled::Underflow);
     }
-    Ok(PpcResult {
+    Ok(result)
+}
+
+/// [`ppc_round`] with every exception disabled.
+pub(crate) fn ppc_round_disabled(
+    precision: PpcPrecision,
+    rounding: Rounding,
+    exact: Exact,
+) -> PpcResult {
+    match precision {
+        PpcPrecision::Double => round_disabled_in::<Binary64>(rounding, exact).0,
+        PpcPrecision::Single => {
+            let r = round_disabled_in::<Binary32>(rounding, exact).0;
+            PpcResult {
+                bits: widen_single(r.bits),
+                ..r
+            }
+        }
+    }
+}
+
+/// `exact` rounded into format `F` with every exception disabled, in
+/// `F`'s own encoding, and whether the value is tiny.
+fn round_disabled_in<F: Format>(rounding: Rounding, exact: Exact) -> (PpcResult, bool) {
+    let traced = round_ieee_traced::<F>(rounding, exact);
+    let flags = traced.packed.flags;
+    let result = PpcResult {
         bits: traced.packed.bits,
         status: PpcStatus {
             fr: traced.incremented || flags.overflow,
@@ -224,7 +249,8 @@ pub(crate) fn ppc_round_in<F: Format>(
             ux: flags.underflow,
             ..PpcStatus::default()
         },
-    })
+    };
+    (result, traced.tiny)
 }
 
 /// The binary32 word `bits` in double format. A rounded single result is
@@ -250,16 +276,20 @@ fn widen_single(bits: u64) -> u64 {
 ///
 /// [PPC-Book1 p:92 s:4.3.3] the exact zero sum of opposite-signed operands is positive in every mode except round toward -infinity, where it is negative.
 pub fn ppc_sum(rounding: Rounding, a: Exact, b: Exact) -> Option<Exact> {
-    let s = add(a, b)?;
+    add(a, b).map(|s| signed_zero_sum(rounding, a, b, s))
+}
+
+/// `s`, the sum of `a` and `b`, with the PowerPC sign when it is zero.
+pub(crate) fn signed_zero_sum(rounding: Rounding, a: Exact, b: Exact, s: Exact) -> Exact {
     if s.significand() != 0 {
-        return Some(s);
+        return s;
     }
     let negative = if a.negative() == b.negative() {
         a.negative()
     } else {
         rounding == Rounding::TowardNegative
     };
-    Some(Exact::from_parts(negative, 0, s.exponent(), false))
+    Exact::from_parts(negative, 0, s.exponent(), false)
 }
 
 /// Whether the double-format `bits` is a NaN.

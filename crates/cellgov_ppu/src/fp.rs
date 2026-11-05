@@ -4,15 +4,17 @@
 //!
 //! The FPSCR move instructions read and write the register
 //! ([`crate::fpscr`]), and a record form copies FPSCR bits 0:3 to CR1.
-//! The computational arms do not read `FPSCR[RN]`: each rounds to
-//! nearest. The arithmetic arms and the estimates write their status
-//! through [`crate::fp_status`], which names the bits a host-computed
-//! result leaves unchanged. The compares write FPCC and their invalid
+//! `fadd`, `fsub` and `fmul`, in both widths, compute on the
+//! `cellgov_float` engine in the rounding mode `FPSCR[RN]` selects, with
+//! every exception disabled. The other computational arms round to
+//! nearest on the host, and write their status through
+//! [`crate::fp_status`], which names the bits a host-computed result
+//! leaves unchanged. The compares write FPCC and their invalid
 //! causes through [`crate::fpscr::write_compare_status`]. The
 //! conversions, `fsel` and the moves leave the FPSCR unchanged.
 // [PPC-Book1 p:89 s:4.2.2] FPSCR[RN] encoding: 0b00 selects Round to Nearest.
 
-use cellgov_float::PpcPrecision;
+use cellgov_float::{ppc_add, ppc_mul, ppc_sub, PpcPrecision, PpcResult};
 
 use crate::exec::ExecuteVerdict;
 use crate::fp_status::{
@@ -24,33 +26,41 @@ use crate::instruction::ops::{Fp59Op, Fp63Op};
 use crate::state::PpuState;
 
 /// The host-computed arithmetic a primary-63 op performs, or `None` for
-/// an op that writes no arithmetic status.
+/// an op the engine computes or one that writes no arithmetic status.
 fn fp63_arith(op: Fp63Op) -> Option<HostArith> {
     match op {
         Fp63Op::Fmadd | Fp63Op::Fnmadd => Some(HostArith::MultiplyAdd { subtract: false }),
         Fp63Op::Fmsub | Fp63Op::Fnmsub => Some(HostArith::MultiplyAdd { subtract: true }),
-        Fp63Op::Fmul => Some(HostArith::Multiply),
         Fp63Op::Fdiv => Some(HostArith::Divide),
-        Fp63Op::Fadd => Some(HostArith::Add),
-        Fp63Op::Fsub => Some(HostArith::Subtract),
         Fp63Op::Fsqrt => Some(HostArith::SquareRoot),
         _ => None,
     }
 }
 
 /// The host-computed arithmetic a primary-59 op performs, or `None` for
-/// `fres`.
+/// an op the engine computes and for `fres`.
 fn fp59_arith(op: Fp59Op) -> Option<HostArith> {
     match op {
         Fp59Op::Fmadds | Fp59Op::Fnmadds => Some(HostArith::MultiplyAdd { subtract: false }),
         Fp59Op::Fmsubs | Fp59Op::Fnmsubs => Some(HostArith::MultiplyAdd { subtract: true }),
-        Fp59Op::Fmuls => Some(HostArith::Multiply),
         Fp59Op::Fdivs => Some(HostArith::Divide),
-        Fp59Op::Fadds => Some(HostArith::Add),
-        Fp59Op::Fsubs => Some(HostArith::Subtract),
         Fp59Op::Fsqrts => Some(HostArith::SquareRoot),
-        Fp59Op::Fres => None,
+        Fp59Op::Fmuls | Fp59Op::Fadds | Fp59Op::Fsubs | Fp59Op::Fres => None,
     }
+}
+
+/// Writes an engine `result` of `precision` to FRT and its status to the
+/// FPSCR.
+fn write_engine_result(
+    state: &mut PpuState,
+    frt: u8,
+    result: PpcResult,
+    precision: PpcPrecision,
+) -> ExecuteVerdict {
+    state.set_fpr(frt as usize, result.bits);
+    let fprf = Fprf::of(result.bits, precision);
+    write_status(state, &result.status, fprf, FrFi::Set);
+    ExecuteVerdict::Continue
 }
 
 /// Execute a primary-63 op.
@@ -88,10 +98,14 @@ pub fn execute_fp63(
         Fp63Op::Fnmadd => nan_resolved_bits(negate_unless_nan(a.mul_add(c, b)), &[a, b, c]),
         // [PPC-Book1 p:114 s:4.6.5.2] fnmsub: FRT <- -((FRA * FRC) - FRB).
         Fp63Op::Fnmsub => nan_resolved_bits(negate_unless_nan(a.mul_add(c, -b)), &[a, b, c]),
-        // FRB is a reserved field here, so it is not in the operand
-        // list -- a NaN parked in it must not win the precedence walk.
+        // FRB is a reserved field here, so it is not an operand: a NaN
+        // parked in it does not win the NaN selection.
         // [PPC-Book1 p:112 s:4.6.5.1] fmul: FRT <- FRA * FRC.
-        Fp63Op::Fmul => nan_resolved_bits(a * c, &[a, c]),
+        Fp63Op::Fmul => {
+            let rounding = fpscr::rounding(state.fpscr());
+            let result = ppc_mul(PpcPrecision::Double, rounding, ra, rc);
+            return write_engine_result(state, frt, result, PpcPrecision::Double);
+        }
         // [PPC-Book1 p:126 s:5.2.2] fsel: FRT <- FRC if FRA >= 0 else FRB; it leaves the FPSCR unchanged.
         Fp63Op::Fsel => {
             if fsel_takes_frc(ra) {
@@ -103,9 +117,17 @@ pub fn execute_fp63(
         // [PPC-Book1 p:112 s:4.6.5.1] fdiv: FRT <- FRA / FRB.
         Fp63Op::Fdiv => nan_resolved_bits(a / b, &[a, b]),
         // [PPC-Book1 p:111 s:4.6.5.1] fadd: FRT <- FRA + FRB.
-        Fp63Op::Fadd => nan_resolved_bits(a + b, &[a, b]),
+        Fp63Op::Fadd => {
+            let rounding = fpscr::rounding(state.fpscr());
+            let result = ppc_add(PpcPrecision::Double, rounding, ra, rb);
+            return write_engine_result(state, frt, result, PpcPrecision::Double);
+        }
         // [PPC-Book1 p:111 s:4.6.5.1] fsub: FRT <- FRA - FRB.
-        Fp63Op::Fsub => nan_resolved_bits(a - b, &[a, b]),
+        Fp63Op::Fsub => {
+            let rounding = fpscr::rounding(state.fpscr());
+            let result = ppc_sub(PpcPrecision::Double, rounding, ra, rb);
+            return write_engine_result(state, frt, result, PpcPrecision::Double);
+        }
         // [PPC-Book1 p:110 s:4.6.4] the moves copy FRB with bit 0 kept, flipped, cleared or set, a NaN like any value, and leave the FPSCR unchanged.
         Fp63Op::Fmr => rb,
         Fp63Op::Fneg => rb ^ PPC_F64_SIGN_BIT,
@@ -129,7 +151,7 @@ pub fn execute_fp63(
         }
         // fctiw and fctiwz are distinct rounding modes, not synonyms:
         // the `z` form truncates, the plain form follows FPSCR[RN],
-        // which this module fixes at round-to-nearest-even. A NaN
+        // and this arm rounds to nearest even in every mode. A NaN
         // input must produce 0x8000_0000; Rust's `f64 as i32` returns
         // 0 for NaN, so guard. ((+/-)inf clamps via saturating cast
         // already.) Result is zero-extended into FRT[32:63];
@@ -241,10 +263,8 @@ pub fn execute_fp59(
     frb: u8,
     frc: u8,
 ) -> ExecuteVerdict {
-    // Single-precision arithmetic. Inputs are pre-converted to f32
-    // because opcode-59 results must be single-precision-representable;
-    // doing the math in f32 keeps rounding at single-precision
-    // throughout.
+    // The host arms convert the inputs to f32 and compute in f32, so
+    // each result rounds to single precision.
     // [PPC-Book1 p:206 s:Appendix J] Primary 59 holds fdivs, fsubs, fadds, fsqrts, fres, fmuls, fmsubs, fmadds, fnmsubs, fnmadds.
     // [PPC-Book1 p:93 s:4.3.5.1] Single-precision arithmetic: all input values must be representable in single format.
     let (ra, rb, rc) = (
@@ -276,10 +296,18 @@ pub fn execute_fp59(
         Fp59Op::Fmsubs => a.mul_add(c, -b),
         Fp59Op::Fnmadds => negate_unless_nan_f32(a.mul_add(c, b)),
         Fp59Op::Fnmsubs => negate_unless_nan_f32(a.mul_add(c, -b)),
-        Fp59Op::Fmuls => a * c,
+        // The engine computes on the double-format register values and
+        // rounds once to single precision.
+        Fp59Op::Fmuls | Fp59Op::Fadds | Fp59Op::Fsubs => {
+            let rounding = fpscr::rounding(state.fpscr());
+            let result = match op {
+                Fp59Op::Fmuls => ppc_mul(PpcPrecision::Single, rounding, ra, rc),
+                Fp59Op::Fadds => ppc_add(PpcPrecision::Single, rounding, ra, rb),
+                _ => ppc_sub(PpcPrecision::Single, rounding, ra, rb),
+            };
+            return write_engine_result(state, frt, result, PpcPrecision::Single);
+        }
         Fp59Op::Fdivs => a / b,
-        Fp59Op::Fadds => a + b,
-        Fp59Op::Fsubs => a - b,
         // [PPC-Book1 p:125 s:5.2.1.1] fsqrts: FRT <- square root of FRB, single precision.
         Fp59Op::Fsqrts => b.sqrt(),
         // [PPC-Book1 p:125 s:5.2.1.1] fres: an estimate within one part in 256 of 1/FRB; the special-operand table fixes -inf to -0, -0 to -inf, +0 to +inf, +inf to +0.
@@ -318,8 +346,7 @@ use cellgov_ps3_abi::hw::ppc_isa::{
 /// Both substitutions are observable on this host: an x86 FMA answers
 /// `fma(1, FRC_nan, FRB_nan)` with the FRC NaN where the architecture
 /// names FRB, and every invalid operation there yields a sign-bit-set
-/// QNaN. The two-operand arms happen to agree today; routing them
-/// through here stops the answer depending on codegen.
+/// QNaN.
 ///
 /// [PPC-Book1 p:91 s:4.3.2] NaN-operand result: FRA, else FRB, else FRC, stored with the high-order fraction bit set.
 /// [PPC-Book1 p:114 s:4.6.5.2] A generated QNaN has sign 0; an SNaN quieted in its place keeps the SNaN's sign.
@@ -376,3 +403,7 @@ mod fp_estimate_console_tests;
 #[cfg(test)]
 #[path = "tests/fp_writes_tests.rs"]
 mod fp_writes_tests;
+
+#[cfg(test)]
+#[path = "tests/fp_format_facts_tests.rs"]
+mod fp_format_facts_tests;

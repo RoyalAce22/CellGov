@@ -1,0 +1,21 @@
+[test]
+name = "ppu_fp_addmul_modes"
+
+# A hardware probe of fadd, fsub and fmul, double and single, under each
+# FPSCR rounding mode, and of the single-precision arms on operands that
+# single format cannot hold: where the single exponent range ends for an
+# operand, x - x and the exact zero sums, round and sticky cases, overflow,
+# tiny results, and a NaN in a reserved field. The console capture is the
+# answer; no emulator runs it.
+
+[observe]
+# Big-endian u32 words, as ppu/main.c lists: 3 header words (failed
+# step, its code, case count), then 11 words per case (operation, FPSCR
+# before, FRA, FRB, FRC and FRT as high/low pairs, FPSCR after): 97
+# cases, 1070 words, 4280 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 4280 },
+]
+
+[expect]
+outcome = "completed"

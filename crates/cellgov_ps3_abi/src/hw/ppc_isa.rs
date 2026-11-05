@@ -282,6 +282,16 @@ pub const PPC_FPSCR_VE: u32 = 1 << 7;
 /// [PPC-Book1 p:88 s:4.2.2] bits 16:19 are FPCC, inside FPRF.
 pub const PPC_FPSCR_FPCC: u32 = 0xF << 12;
 
+/// FPSCR bits 30:31, the rounding control (RN):
+///
+/// - 0b00: round to nearest;
+/// - 0b01: round toward zero;
+/// - 0b10: round toward +infinity;
+/// - 0b11: round toward -infinity.
+///
+/// [PPC-Book1 p:89 s:4.2.2] bits 30:31 are RN, with that encoding.
+pub const PPC_FPSCR_RN: u32 = 0b11;
+
 /// The FPSCR exception enable bits VE, OE, UE, ZE and XE (24:28).
 ///
 /// [PPC-Book1 p:89 s:4.2.2] Bits 24:28 enable the invalid operation, overflow, underflow, zero divide and inexact exceptions.
