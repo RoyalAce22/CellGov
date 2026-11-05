@@ -263,10 +263,16 @@ fn maybe_clobbers_r11(raw: u32) -> bool {
     let rt = (raw >> 21) & 0x1f;
     let ra = (raw >> 16) & 0x1f;
     match primary {
-        7 | 8 | 12..=15 | 32 | 34 | 36 | 38 | 40 | 42 | 46 | 58 => rt == 11,
+        7 | 8 | 12..=15 | 32 | 34 | 36 | 38 | 40 | 42 | 46 => rt == 11,
         20..=30 => ra == 11,
         31 => rt == 11 || ra == 11,
         33 | 35 | 37 | 39 | 41 | 43 | 45 => rt == 11 || ra == 11,
+        // ldu (DS XO 1) also writes the EA into RA [PowerISA-3.1 p:I57].
+        58 => rt == 11 || (raw & 3 == 1 && ra == 11),
+        // lfsu, lfdu, stfsu and stfdu write the EA into RA and target an
+        // FPR [PowerISA-3.1 p:I150] [PowerISA-3.1 p:I152]
+        // [PowerISA-3.1 p:I155] [PowerISA-3.1 p:I157].
+        49 | 51 | 53 | 55 => ra == 11,
         62 => ra == 11,
         _ => false,
     }
@@ -279,3 +285,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/caller_census_refused_tests.rs"]
 mod refused_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_update_form_tests.rs"]
+mod update_form_tests;
