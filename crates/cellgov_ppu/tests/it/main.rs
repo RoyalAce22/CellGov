@@ -20,6 +20,8 @@ mod console_ppu_int_loads_stores;
 mod console_ppu_issue_chain;
 mod console_ppu_issue_layout;
 mod console_ppu_issue_lha_place;
+mod console_ppu_issue_load_hit_store;
+mod console_ppu_issue_load_hit_store_sibling;
 mod console_ppu_issue_loop_shape;
 mod console_ppu_issue_mftb;
 mod console_ppu_issue_miss;

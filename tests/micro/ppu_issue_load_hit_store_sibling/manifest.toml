@@ -1,0 +1,22 @@
+[test]
+name = "ppu_issue_load_hit_store_sibling"
+
+# A hardware probe of what a load that hits the store queue costs the
+# other PPE hardware thread: four timed chains (dependent add,
+# independent addi, an std and ld chain, an std and ld pair then
+# independent addi), alone and beside a sibling running independent
+# addi or its own std and ld chain, with the sibling's rounds beside
+# each chain. The console capture is the answer; ppu/main.c's header
+# lists the phases and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 552 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 552 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 90000

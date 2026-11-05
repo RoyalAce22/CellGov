@@ -1,0 +1,22 @@
+[test]
+name = "ppu_issue_load_hit_store"
+
+# A hardware probe of a load that hits a store still in the store queue:
+# twelve loops, each timed with mftb. A store to line A with stores to
+# other lines before or after it and a load of A, the same stores with a
+# load that hits none of them, and a store multiple and load multiple
+# pair, a load multiple alone and one std and ld pair, each followed by
+# independent addi. The console capture is the answer; ppu/main.c's
+# header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 216 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 216 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

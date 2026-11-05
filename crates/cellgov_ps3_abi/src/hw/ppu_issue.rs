@@ -144,6 +144,15 @@ pub const PPU_DCBST_MODIFIED_LINE_BUSY_CYCLES: u64 = 52;
 /// the `ld` before it loaded, take 194.5 cycles an iteration.
 pub const PPU_LOAD_HIT_STORE_CYCLES: u64 = 49;
 
+/// The cycles from a store to the issue of the instructions after a
+/// load of the same bytes, while the store is still in the store queue.
+///
+/// In the `ppu_issue_load_hit_store` capture, 32 independent `addi` after
+/// an `std` and an `ld` of the same doubleword take 63.0 to 64.8 cycles an
+/// iteration. Alone they take 33.2 to 34.5, so they issue about 30 cycles
+/// after the `std`.
+pub const PPU_LOAD_HIT_STORE_RELEASE_CYCLES: u64 = 30;
+
 /// The bytes of one store-queue entry.
 ///
 /// [CBE-Handbook p:134 s:6.1.2.2] the store subunit contains a store

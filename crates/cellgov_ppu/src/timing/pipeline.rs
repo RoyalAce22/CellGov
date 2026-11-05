@@ -647,6 +647,9 @@ impl PpeTiming {
     /// - a touch of the line still on its way;
     /// - a flush or store-back still busy with the line;
     /// - a store to the same bytes still in the store queue.
+    ///
+    /// A load that waits for such a store also holds the issue of the
+    /// instructions after it.
     fn load(&mut self, t: u64, op: &Op, ea: u64, len: u8, class: LoadClass) {
         let tables = &mut *self.tables;
         let level = tables.caches.load(ea, class == LoadClass::Reserve);
@@ -671,6 +674,15 @@ impl PpeTiming {
         // [CBE-Handbook p:762 s:A.7.4] a load that hits a store still in
         // the store queue waits until the store has written its data into
         // the cache, and is then recycled.
+        //
+        // The same note says the PPU recycles the load after all older
+        // stores complete. The load waits only for the entries it overlaps:
+        // - In the `ppu_issue_multiple` capture an `lwz` of the first word
+        //   of an 8-word `stmw` takes 71 cycles an iteration. A wait for
+        //   the second entry too gives 100.
+        // - In the `ppu_issue_load_hit_store` capture three stores to
+        //   other lines before or after the store to the loaded line add
+        //   at most 3 cycles to a 46-cycle chain.
         let forwarded = tables
             .stores
             .iter()
@@ -687,6 +699,15 @@ impl PpeTiming {
                 }
             });
         let c = &mut self.core;
+        // The recycled load holds the instructions after it until the
+        // store writes the cache, and gets its data later.
+        if let Some(f) = forwarded {
+            let release = f - (k::PPU_LOAD_HIT_STORE_CYCLES - k::PPU_LOAD_HIT_STORE_RELEASE_CYCLES);
+            if release > c.floor {
+                c.floor = release;
+                c.older = None;
+            }
+        }
         let micro = u64::from(op.span);
         let targets =
             op.dsts
@@ -923,8 +944,10 @@ fn queue_store(tables: &mut Tables, t: u64, op: &Op, ea: u64, len: u8) {
     // 16-byte entries. [CBE-Handbook p:144 s:6.1.5.7] the L2
     // store queue that takes each CIU request unloads first in,
     // first out. The interval between two entries of one store
-    // is fitted to the `ppu_issue_multiple` capture; the model
-    // does not chain it across stores.
+    // is fitted to the `ppu_issue_multiple` capture. Each store
+    // starts its own chain: in the `ppu_issue_load_hit_store`
+    // capture, a store to the loaded line after three stores to
+    // other lines takes as long as that store alone.
     let mut done = t + u64::from(op.span.saturating_sub(1)) + k::PPU_LOAD_HIT_STORE_CYCLES;
     // [PPC-Book1 p:49 s:3.3.6] an `stswx` with a byte count of
     // zero stores no bytes, so it takes no entry.
