@@ -52,6 +52,7 @@ use super::floor::{features, floor};
 use super::fp::FP_UNITS;
 use super::multiple::ended_case_vector;
 use super::vmx::{VMX_MEMORY_UNITS, VMX_UNITS};
+use super::vmx_int::VMX_INT_UNITS;
 use crate::ppu_reference::{
     word_unit, PpuReferenceInputState, PpuReferenceObservation, PpuReferenceProvenance,
     PpuReferenceSet, PpuReferenceState, PpuReferenceStateBase, PpuReferenceStop, PpuReferenceUnit,
@@ -253,7 +254,10 @@ fn case_units(case: &Case) -> Vec<String> {
         let listed = if any_memory {
             memory(m)
         } else {
-            UNITS.contains(&m) || FP_UNITS.contains(&m) || VMX_UNITS.contains(&m)
+            UNITS.contains(&m)
+                || FP_UNITS.contains(&m)
+                || VMX_UNITS.contains(&m)
+                || VMX_INT_UNITS.contains(&m)
         };
         if listed && !units.contains(&mnemonic) {
             units.push(mnemonic);
@@ -390,9 +394,10 @@ fn floating(case: &Case) -> bool {
 /// Whether the case covers a vector unit, so its vector expects the whole
 /// VR bank.
 fn vector_case(case: &Case) -> bool {
-    case_units(case)
-        .iter()
-        .any(|u| VMX_UNITS.contains(&u.as_str()) || VMX_MEMORY_UNITS.contains(&u.as_str()))
+    case_units(case).iter().any(|u| {
+        let u = u.as_str();
+        VMX_UNITS.contains(&u) || VMX_MEMORY_UNITS.contains(&u) || VMX_INT_UNITS.contains(&u)
+    })
 }
 
 /// [AltiVec-PEM p:2-5 s:2.3.2] VSCR bit 31 is SAT, the saturation bit.

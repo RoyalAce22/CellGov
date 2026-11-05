@@ -63,7 +63,7 @@ fn the_converter_skips_only_other_units_and_the_cases_it_cannot_represent() {
     assert_eq!(
         skipped,
         [
-            (Skip::OtherUnit, 137),
+            (Skip::OtherUnit, 37),
             (Skip::WritesUnrecorded, 234),
             (Skip::Ended, 11),
             (Skip::Flow, 2)

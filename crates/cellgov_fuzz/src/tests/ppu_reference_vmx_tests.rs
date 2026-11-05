@@ -9,7 +9,7 @@ use crate::ppu_reference::{
 };
 use crate::regenerate::write_if_asked;
 
-fn fixtures() -> PathBuf {
+pub(super) fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ppu_reference")
 }
 
@@ -17,7 +17,7 @@ fn units() -> impl Iterator<Item = &'static str> {
     VMX_UNITS.into_iter().chain(VMX_MEMORY_UNITS)
 }
 
-fn committed(name: &str) -> PpuReferenceSet {
+pub(super) fn committed(name: &str) -> PpuReferenceSet {
     let path = fixtures().join(name);
     let json = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     match parse_reference_file(&json).unwrap_or_else(|e| panic!("{}: {e}", path.display())) {
@@ -133,7 +133,7 @@ fn a_changed_expected_vrsave_or_gpr_fails_the_vrsave_facility_file() {
 
 /// Asserts that `vector` with `change` made to its expected state no
 /// longer matches.
-fn fails(
+pub(super) fn fails(
     vector: &PpuReferenceVector,
     name: &str,
     what: &str,

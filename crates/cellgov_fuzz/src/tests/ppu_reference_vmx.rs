@@ -183,12 +183,12 @@ pub(super) fn vmx_floor(unit: &str) -> VmxFloor {
 }
 
 /// A word field: the five bits at `shift`.
-fn field(word: u32, shift: u32) -> u8 {
+pub(super) fn field(word: u32, shift: u32) -> u8 {
     ((word >> shift) & 31) as u8
 }
 
 /// The start value of VR `n`, or zero when the vector loads none.
-fn start_vr(v: &PpuReferenceVector, n: u8) -> u128 {
+pub(super) fn start_vr(v: &PpuReferenceVector, n: u8) -> u128 {
     v.initial_state.vr_hex.get(&n).map_or(0, |h| {
         u128::from_str_radix(h, 16).unwrap_or_else(|e| panic!("{}: v{n} {h:?}: {e}", v.name))
     })
@@ -262,7 +262,7 @@ pub(super) fn mnemonic(word: u32) -> Option<String> {
 
 /// The lanes of `v`, each `width` bytes, high lane first, as signed or
 /// unsigned values.
-fn lanes(v: u128, width: u32, signed: bool) -> Vec<i64> {
+pub(super) fn lanes(v: u128, width: u32, signed: bool) -> Vec<i64> {
     let bits = 8 * width;
     (0..128 / bits)
         .rev()
@@ -416,7 +416,7 @@ fn lane_class(s: Saturate, lane: i64) -> &'static str {
 }
 
 /// SAT before the word at `at` and after the vector, as `sat:<before><after>`.
-fn sat_feature(v: &PpuReferenceVector, at: usize) -> String {
+pub(super) fn sat_feature(v: &PpuReferenceVector, at: usize) -> String {
     format!("sat:{}{}", sat_before(v, at), expected_vscr(v) & SAT)
 }
 

@@ -25,29 +25,35 @@ const PROBES: [(&str, usize); 7] = [
 #[test]
 fn every_vector_memory_permute_pack_stream_and_vscr_case_matches_the_console_on_both_runs() {
     for (probe, count) in PROBES {
-        let cases = table(probe);
-        let Capture::Done(runs) = capture(probe, cases.len()) else {
-            panic!("{probe}: the run ended inside a case");
-        };
-        assert_eq!(runs.len(), count, "{probe}");
-        let mut wrong = Vec::new();
-        for (index, (case, runs)) in cases.iter().zip(&runs).enumerate() {
-            let v = varies(case, runs);
-            if !v.is_empty() {
-                wrong.push(format!("{}: the runs differ in {v:?}", case.id));
-            }
-            match replay(probe, case, index, &runs[0]) {
-                CaseOutcome::Pass => {}
-                other => wrong.push(format!("{} [{}]: {other:?}", case.id, case.asm)),
-            }
-        }
-        assert!(
-            wrong.is_empty(),
-            "{probe}: {} case(s):\n{}",
-            wrong.len(),
-            wrong.join("\n")
-        );
+        assert_probe_matches(probe, count);
     }
+}
+
+/// Asserts that the capture of `probe` holds `count` cases, that its two
+/// runs agree, and that CellGov gives each case's console values.
+pub(crate) fn assert_probe_matches(probe: &str, count: usize) {
+    let cases = table(probe);
+    let Capture::Done(runs) = capture(probe, cases.len()) else {
+        panic!("{probe}: the run ended inside a case");
+    };
+    assert_eq!(runs.len(), count, "{probe}");
+    let mut wrong = Vec::new();
+    for (index, (case, runs)) in cases.iter().zip(&runs).enumerate() {
+        let v = varies(case, runs);
+        if !v.is_empty() {
+            wrong.push(format!("{}: the runs differ in {v:?}", case.id));
+        }
+        match replay(probe, case, index, &runs[0]) {
+            CaseOutcome::Pass => {}
+            other => wrong.push(format!("{} [{}]: {other:?}", case.id, case.asm)),
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{probe}: {} case(s):\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
 }
 
 /// Whether `insn` is the left or right load or store the console runs for `xo`.

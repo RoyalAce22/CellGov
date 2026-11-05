@@ -63,6 +63,7 @@ mod console_ppu_vmul_even_odd;
 mod console_ppu_vmx;
 mod console_ppu_vmx_float_policy;
 mod console_ppu_vmx_gap_edges;
+mod console_ppu_vmx_int;
 mod console_ppu_vmx_int_edges;
 mod console_ppu_vpack;
 mod console_ppu_vrotate_shift;
