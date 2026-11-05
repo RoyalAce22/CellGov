@@ -2,7 +2,7 @@
 #0002 < 200 (5725 bytes)
 #0003 = console: model CECH-2001A, kernel cex, firmware 4.93, cfw EvilNAT 4.93 PEX, cobra 8.5, webman 1.47.48t, debugger not attached
 #0004 = console satisfies profile cech20-cex-493
-#0005 = load: Cell 68 C, RSX 64 C, fan 39%, /dev_hdd0 99840 MiB free; cool
+#0005 = load: Cell 67 C, RSX 61 C, fan 40%, /dev_hdd0 99840 MiB free; cool
 #0006 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
 #0007 > USER anonymous
 #0008 < 331 OK
@@ -13,28 +13,28 @@
 #0013 > MKD /dev_hdd0/tmp/cellgov_lease
 #0014 < 257 "/dev_hdd0/tmp/cellgov_lease" OK
 #0015 > PASV
-#0016 < 227 Entering Passive Mode (10,77,0,2,132,127)
+#0016 < 227 Entering Passive Mode (10,77,0,2,176,71)
 #0017 > STOR /dev_hdd0/tmp/cellgov_lease/holder (77 bytes)
 #0018 < 150 OK
 #0019 < 226 OK
 #0020 > GET /dev_hdd0/tmp/cgov_ppu_sc_reserved_bits.bin
 #0021 < 404 (514 bytes)
 #0022 > PASV
-#0023 < 227 Entering Passive Mode (10,77,0,2,132,63)
+#0023 < 227 Entering Passive Mode (10,77,0,2,176,6)
 #0024 > NLST /dev_hdd0/game
 #0025 < 150 OK
-#0026 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 68C | RSX: 64C]
+#0026 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 61C]
 #0027 > MKD /dev_hdd0/game/CGOV00001
 #0028 < 257 "/dev_hdd0/game/CGOV00001" OK
 #0029 > MKD /dev_hdd0/game/CGOV00001/USRDIR
 #0030 < 257 "/dev_hdd0/game/CGOV00001/USRDIR" OK
 #0031 > PASV
-#0032 < 227 Entering Passive Mode (10,77,0,2,134,107)
+#0032 < 227 Entering Passive Mode (10,77,0,2,178,109)
 #0033 > STOR /dev_hdd0/game/CGOV00001/PARAM.SFO (1040 bytes)
 #0034 < 150 OK
 #0035 < 226 OK
 #0036 > PASV
-#0037 < 227 Entering Passive Mode (10,77,0,2,134,23)
+#0037 < 227 Entering Passive Mode (10,77,0,2,178,30)
 #0038 > STOR /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN (4864 bytes)
 #0039 < 150 OK
 #0040 < 226 OK
@@ -65,65 +65,61 @@
 #0065 > GET /dev_hdd0/tmp/cgov_ppu_sc_reserved_bits.bin
 #0066 < 404 (514 bytes)
 #0067 > GET /cpursx.ps3
-#0068 < 200 (5933 bytes)
+#0068 < 200 (6434 bytes)
 #0069 = left the XMB after 6 poll(s)
 #0070 > GET /dev_hdd0/tmp/cgov_ppu_sc_reserved_bits.bin
 #0071 < 404 (514 bytes)
 #0072 > GET /dev_hdd0/tmp/cgov_ppu_sc_reserved_bits.bin
-#0073 < 404 (514 bytes)
-#0074 > GET /dev_hdd0/tmp/cgov_ppu_sc_reserved_bits.bin
-#0075 < 404 (514 bytes)
-#0076 > GET /dev_hdd0/tmp/cgov_ppu_sc_reserved_bits.bin
-#0077 < 200 (144 bytes)
-#0078 = result present after 4 poll(s)
+#0073 < 200 (144 bytes)
+#0074 = result present after 2 poll(s)
+#0075 > GET /cpursx.ps3
+#0076 < 200 (6440 bytes)
+#0077 > GET /cpursx.ps3
+#0078 < 200 (6440 bytes)
 #0079 > GET /cpursx.ps3
-#0080 < 200 (6440 bytes)
+#0080 < 200 (5933 bytes)
 #0081 > GET /cpursx.ps3
-#0082 < 200 (6440 bytes)
+#0082 < 200 (5933 bytes)
 #0083 > GET /cpursx.ps3
-#0084 < 200 (5933 bytes)
-#0085 > GET /cpursx.ps3
-#0086 < 200 (5933 bytes)
-#0087 > GET /cpursx.ps3
-#0088 < 200 (5725 bytes)
-#0089 = back at the XMB after 5 poll(s)
-#0090 > GET /dev_hdd0/tmp/cgov_ppu_sc_reserved_bits.bin
-#0091 < 200 (144 bytes)
-#0092 = captured micro:ppu_sc_reserved_bits#abcae83f6b66
-#0093 > GET /mount.ps3/unmount
-#0094 < 200 (4441 bytes)
-#0095 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
-#0096 > USER anonymous
-#0097 < 331 OK
-#0098 > PASS anonymous@
-#0099 < 230 OK
-#0100 > TYPE I
-#0101 < 200 TYPE OK
-#0102 > PASV
-#0103 < 227 Entering Passive Mode (10,77,0,2,248,222)
-#0104 > NLST /dev_hdd0/game
-#0105 < 150 OK
-#0106 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 61C]
-#0107 > PASV
-#0108 < 227 Entering Passive Mode (10,77,0,2,248,170)
-#0109 > NLST /dev_hdd0/game/CGOV00001
-#0110 < 150 OK
-#0111 < 226 [/dev_hdd0/game/CGOV00001/] [ 97.5 GB free CPU: 67C | RSX: 61C]
-#0112 > PASV
-#0113 < 227 Entering Passive Mode (10,77,0,2,250,44)
-#0114 > NLST /dev_hdd0/game/CGOV00001/USRDIR
-#0115 < 150 OK
-#0116 < 226 [/dev_hdd0/game/CGOV00001/USRDIR/] [ 0.0 MB free CPU: 67C | RSX: 61C]
-#0117 > DELE /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN
+#0084 < 200 (5725 bytes)
+#0085 = back at the XMB after 5 poll(s)
+#0086 > GET /dev_hdd0/tmp/cgov_ppu_sc_reserved_bits.bin
+#0087 < 200 (144 bytes)
+#0088 = captured micro:ppu_sc_reserved_bits#7861ec0af7f4
+#0089 > GET /mount.ps3/unmount
+#0090 < 200 (4441 bytes)
+#0091 < 220 webMANftpd 1.47.48t MOD [NTFS:0]
+#0092 > USER anonymous
+#0093 < 331 OK
+#0094 > PASS anonymous@
+#0095 < 230 OK
+#0096 > TYPE I
+#0097 < 200 TYPE OK
+#0098 > PASV
+#0099 < 227 Entering Passive Mode (10,77,0,2,162,160)
+#0100 > NLST /dev_hdd0/game
+#0101 < 150 OK
+#0102 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 59C]
+#0103 > PASV
+#0104 < 227 Entering Passive Mode (10,77,0,2,162,122)
+#0105 > NLST /dev_hdd0/game/CGOV00001
+#0106 < 150 OK
+#0107 < 226 [/dev_hdd0/game/CGOV00001/] [ 97.5 GB free CPU: 67C | RSX: 59C]
+#0108 > PASV
+#0109 < 227 Entering Passive Mode (10,77,0,2,164,111)
+#0110 > NLST /dev_hdd0/game/CGOV00001/USRDIR
+#0111 < 150 OK
+#0112 < 226 [/dev_hdd0/game/CGOV00001/USRDIR/] [ 0.0 MB free CPU: 67C | RSX: 59C]
+#0113 > DELE /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN
+#0114 < 250 OK
+#0115 > RMD /dev_hdd0/game/CGOV00001/USRDIR
+#0116 < 250 OK
+#0117 > DELE /dev_hdd0/game/CGOV00001/PARAM.SFO
 #0118 < 250 OK
-#0119 > RMD /dev_hdd0/game/CGOV00001/USRDIR
+#0119 > RMD /dev_hdd0/game/CGOV00001
 #0120 < 250 OK
-#0121 > DELE /dev_hdd0/game/CGOV00001/PARAM.SFO
-#0122 < 250 OK
-#0123 > RMD /dev_hdd0/game/CGOV00001
+#0121 > GET /dev_hdd0/tmp/cgov_ppu_sc_reserved_bits.bin
+#0122 < 200 (144 bytes)
+#0123 > DELE /dev_hdd0/tmp/cgov_ppu_sc_reserved_bits.bin
 #0124 < 250 OK
-#0125 > GET /dev_hdd0/tmp/cgov_ppu_sc_reserved_bits.bin
-#0126 < 200 (144 bytes)
-#0127 > DELE /dev_hdd0/tmp/cgov_ppu_sc_reserved_bits.bin
-#0128 < 250 OK
-#0129 = console restored
+#0125 = console restored

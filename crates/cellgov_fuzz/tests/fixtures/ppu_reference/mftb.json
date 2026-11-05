@@ -80,7 +80,7 @@
         "capture_id": "ppu_may_trap_mfspr268/cech20-cex-493",
         "device": "CECH-2001A",
         "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
-        "source_sha256": "2115e038e84b6c7bba68be10ac073304858e0a7657d0c4329b067e952cc1e858"
+        "source_sha256": "43f0027fcb98c938eb6f07d6714817dd0e47d963afc20571aaf103dc8ac9bc35"
       },
       "words": [2091664038],
       "initial_state": {
@@ -224,7 +224,7 @@
         "capture_id": "ppu_may_trap_mfspr269/cech20-cex-493",
         "device": "CECH-2001A",
         "environment": "firmware 4.93, EvilNAT 4.93 PEX, PPU thread",
-        "source_sha256": "026b2396181a2429ffe2fc24b812e56bfc71eea56747096f9f53b67f653f4684"
+        "source_sha256": "034ad69076be260ea37f07a3b03d33bcc8d7c4dae490f82720090584da7831ac"
       },
       "words": [2091729574],
       "initial_state": {

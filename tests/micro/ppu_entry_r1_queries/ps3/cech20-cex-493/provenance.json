@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "capture_id": "micro:ppu_entry_r1_queries#443060635d91",
-  "captured_at": "2026-10-27T21:11:02Z",
+  "capture_id": "micro:ppu_entry_r1_queries#066d50ae771c",
+  "captured_at": "2026-10-31T19:51:46Z",
   "console": {
     "profile": "cech20-cex-493",
     "model": "CECH-2001A",
@@ -14,7 +14,7 @@
     "load_at_start": {
       "cpu_c": 67,
       "rsx_c": 63,
-      "fan_percent": 41
+      "fan_percent": 44
     }
   },
   "transport": {
@@ -22,14 +22,14 @@
   },
   "harness": {
     "runner": "runner_ps3",
-    "revision": "83dc0aa6809181f80b4b9fc54228a52631c94778",
-    "link": "https://github.com/RoyalAce22/CellGov/commit/83dc0aa6809181f80b4b9fc54228a52631c94778"
+    "revision": "f3a6bc2571183c84b86212b07572081c5d634cfd",
+    "link": "https://github.com/RoyalAce22/CellGov/commit/f3a6bc2571183c84b86212b07572081c5d634cfd"
   },
   "microtest": {
     "name": "ppu_entry_r1_queries",
     "manifest_sha256": "396e94c5ef7af3e17a3392162635efadd914e644ed13a0e56294fbb2cab45037",
     "sources": {
-      "../common/cgov_cases.h": "720934cedafeaca58f41b1bfbfbfa46376590324a8b1b032184a2f3e7d57abcf",
+      "../common/cgov_cases.h": "2cc9df4e06e27071ec36fd32a33acdec781c8ed863f2871ccc1b31e8b30b3f78",
       "../common/cgov_lv2.h": "18efe6e4e763676e4b215a12af9d37a68f82a01f93e6ee816a882abee5132c0e",
       "../common/cgov_out.h": "dcd53f330ba62b8aba0acd9cff2a580b5bfdcdc4f18c9e4d5ac64caee4efab9a",
       "../common/cgov_spu_load.h": "999392b83cb8965f4cd5612632a73b8021861a6a588d9e3ebb2c405cfdf726c3",
@@ -45,7 +45,7 @@
     }
   },
   "artifacts": {
-    "eboot_sha256": "fae4887b14a39a7dddb060ffa59b253b89662e3926360ade77418ab859fb3eba",
+    "eboot_sha256": "54a6d031b4b18ab58ed5d479da65419adeca2689f60c3d2bc6413f1cc50d7487",
     "ps3_elf_sha256": "301ce7fbde162836d189a7f131489326607c5a95d8250429aea25b573e1b69ae",
     "reference_elf_sha256": "209da3479ce9b66e61b25785fd7ffa0704748d672c944c3ffef1c9ece104c325",
     "siblings": {},
@@ -53,10 +53,10 @@
   },
   "frame": {
     "file": "cgov_frame.bin",
-    "sha256": "443060635d91ddc46f15d7a899359901f2d54601678f8cbb47c7c0df28317be4",
+    "sha256": "066d50ae771ce9785fc167fccd83792f376dbb11212420d10101ecb741c2532e",
     "bytes": 1224,
     "result_path": "/dev_hdd0/tmp/cgov_ppu_entry_r1_queries.bin"
   },
-  "digest": "443060635d91ddc46f15d7a899359901f2d54601678f8cbb47c7c0df28317be4  micro:ppu_entry_r1_queries  1224",
-  "recapture_reason": null
+  "digest": "066d50ae771ce9785fc167fccd83792f376dbb11212420d10101ecb741c2532e  micro:ppu_entry_r1_queries  1224",
+  "recapture_reason": "the case driver's frame-header comment changed the cgov_cases.h source hash, and the console tests on this probe now hold across runs"
 }
