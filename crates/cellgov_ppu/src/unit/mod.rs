@@ -146,6 +146,14 @@ mod fused_ld_any_tests;
 mod fused_or_b_tests;
 
 #[cfg(test)]
+#[path = "tests/fused_lbz_pair_tests.rs"]
+mod fused_lbz_pair_tests;
+
+#[cfg(test)]
+#[path = "tests/lbz_lbz_console_tests.rs"]
+mod lbz_lbz_console_tests;
+
+#[cfg(test)]
 #[path = "tests/std_lwz_console_tests.rs"]
 mod std_lwz_console_tests;
 

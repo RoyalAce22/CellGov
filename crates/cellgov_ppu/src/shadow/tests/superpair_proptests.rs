@@ -462,6 +462,37 @@ fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
                     },
                 )
             }),
+        // A second base equal to a nonzero RT1 does not fuse, so this arm
+        // moves it off RT1. Half the cases share one base.
+        (
+            reg(),
+            reg(),
+            displacement(),
+            reg(),
+            reg(),
+            displacement(),
+            any::<bool>()
+        )
+            .prop_map(|(rt1, ra1, off1, rt2, ra2, off2, same)| {
+                let ra2 = if same { ra1 } else { ra2 };
+                let ra2 = if ra2 != 0 && ra2 == rt1 {
+                    ra2 % 31 + 1
+                } else {
+                    ra2
+                };
+                (
+                    PpuInstruction::Lbz {
+                        rt: rt1,
+                        ra: ra1,
+                        imm: off1,
+                    },
+                    PpuInstruction::Lbz {
+                        rt: rt2,
+                        ra: ra2,
+                        imm: off2,
+                    },
+                )
+            }),
     ]
 }
 
@@ -545,7 +576,7 @@ fn aim_compare(
 }
 
 proptest! {
-    // Seven of the twenty-nine arms are compares that need an aimed
+    // Seven of the thirty arms are compares that need an aimed
     // operand to show an off-by-one. Four times the default count
     // makes one such case near certain per run.
     #![proptest_config(ProptestConfig::with_cases(1024))]
@@ -581,11 +612,14 @@ proptest! {
             && matches!(
                 fused,
                 PpuInstruction::Fused(
-                    FusedPair::LduLdu { .. } | FusedPair::LwzLwz { .. } | FusedPair::LdLdAny { .. }
+                    FusedPair::LduLdu { .. }
+                        | FusedPair::LwzLwz { .. }
+                        | FusedPair::LdLdAny { .. }
+                        | FusedPair::LbzLbz { .. }
                 )
             )
         {
-            // The ldu, lwz and ld pairs write no register until both loads
+            // The ldu, lwz, ld and lbz pairs write no register until both loads
             // pass, so a refused pair leaves the state it began in. The
             // batch's split rerun reaches the halves' state from there.
             prop_assert_eq!(pair.fingerprint(), seed.state().fingerprint());

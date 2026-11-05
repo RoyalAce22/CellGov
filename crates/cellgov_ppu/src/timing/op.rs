@@ -1544,6 +1544,17 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
                 logical(Op::on(unit::FXU).src(gpr(rs)).src(gpr(rb)), ra, rc),
                 branch(PPC_BO_ALWAYS, 0, false, Target::Direct, true),
             ),
+            FusedPair::LbzLbz {
+                rt1,
+                ra1,
+                off1,
+                rt2,
+                ra2,
+                off2,
+            } => two(
+                int_load(ea_d(state, ra1, off1), 1, rt1).base(ra1),
+                int_load(ea_d(state, ra2, off2), 1, rt2).base(ra2),
+            ),
         },
         I::Consumed => ([none, none], 0),
         I::Dcbz { ra, rb } => one(Op::on(unit::LSU)

@@ -278,7 +278,8 @@ pub(super) fn fused_effect_and_outcome(
         | F::LduLdu
         | F::LdRlwinm
         | F::LwzLwz
-        | F::LdLdAny => (READ_EFFECTS, LOAD),
+        | F::LdLdAny
+        | F::LbzLbz => (READ_EFFECTS, LOAD),
         F::LiStw | F::MflrStw | F::MflrStd | F::StdStd => (WRITE_EFFECTS, STORE),
         F::StdLwz => (READ_WRITE_EFFECTS, STORE),
         F::CmpwiBc | F::CmpwBc | F::CmpdiBc | F::CmpdBc | F::CmplwBc | F::AddiBc | F::ExtswBlr => {

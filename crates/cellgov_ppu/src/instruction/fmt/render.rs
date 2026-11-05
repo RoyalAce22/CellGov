@@ -1008,6 +1008,18 @@ pub(super) fn render(
                 };
                 render(&b, addr.wrapping_add(4), symbols, f)
             }
+            FusedPair::LbzLbz {
+                rt1,
+                ra1,
+                off1,
+                rt2,
+                ra2,
+                off2,
+            } => {
+                mem_d(f, "lbz", 'r', rt1, off1, ra1)?;
+                f.write_str("; ")?;
+                mem_d(f, "lbz", 'r', rt2, off2, ra2)
+            }
         },
         I::Consumed => op0(f, ".consumed"),
 

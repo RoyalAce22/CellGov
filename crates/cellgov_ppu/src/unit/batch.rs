@@ -350,6 +350,7 @@ impl PpuExecutionUnit {
     /// - `ldu; ldu`
     /// - `lwz; lwz`
     /// - `ld; ld` outside the same-base pair
+    /// - `lbz; lbz`
     ///
     /// No other first half reads what it writes.
     ///
