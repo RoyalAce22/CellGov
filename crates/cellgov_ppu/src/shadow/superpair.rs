@@ -666,6 +666,146 @@ fn fuse(a: PpuInstruction, b: PpuInstruction) -> Option<FusedPair> {
             and_rb,
             rc,
         }),
+        _ => fuse_multi_form(a, decoded_form(b)),
+    }
+}
+
+/// The fused pair of `a` then `b` for the pairs whose halves take more than
+/// one form, or `None` if no rule applies. `b` is in its decoded form.
+///
+/// An `or` in either half fuses raw or as the quickened `mr`. Every first
+/// half here other than a load neither faults nor branches.
+fn fuse_multi_form(a: PpuInstruction, b: PpuInstruction) -> Option<FusedPair> {
+    if let Some(first) = or_form(a) {
+        return fuse_after_or(first, b);
+    }
+    match (decoded_form(a), b) {
+        // rldicr rA, rS, sh, me (or sldi) + oris rA2, rS2, imm
+        (
+            PpuInstruction::Rldicr { ra, rs, sh, me, rc },
+            PpuInstruction::Oris {
+                ra: oris_ra,
+                rs: oris_rs,
+                imm,
+            },
+        ) => Some(FusedPair::RldicrOris {
+            ra,
+            rs,
+            sh,
+            me,
+            rc,
+            oris_ra,
+            oris_rs,
+            imm,
+        }),
+        // ld rT, off(r1) + addi rT2, rA, imm. The shadow quickens addi rT, 0,
+        // imm to Li, so that shape fuses as an addi with RA = 0.
+        (
+            PpuInstruction::Ld { rt, ra: 1, imm },
+            PpuInstruction::Addi {
+                rt: addi_rt,
+                ra: addi_ra,
+                imm: addi_imm,
+            },
+        ) => Some(FusedPair::LdAddi {
+            rt,
+            offset: imm,
+            addi_rt,
+            addi_ra,
+            imm: addi_imm,
+        }),
+        (
+            PpuInstruction::Ld { rt, ra: 1, imm },
+            PpuInstruction::Li {
+                rt: addi_rt,
+                imm: addi_imm,
+            },
+        ) => Some(FusedPair::LdAddi {
+            rt,
+            offset: imm,
+            addi_rt,
+            addi_ra: 0,
+            imm: addi_imm,
+        }),
+        // lwz rT, off(rA) + or. The lwz writes nothing when it faults.
+        (PpuInstruction::Lwz { rt, ra, imm }, second) => {
+            or_form(second).map(|(or_ra, or_rs, or_rb, rc)| FusedPair::LwzOr {
+                rt,
+                ra,
+                offset: imm,
+                or_ra,
+                or_rs,
+                or_rb,
+                rc,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// The fused pair of an `or` with fields `(ra, rs, rb, rc)` then `b`, or
+/// `None` if no rule applies.
+fn fuse_after_or((ra, rs, rb, rc): (u8, u8, u8, bool), b: PpuInstruction) -> Option<FusedPair> {
+    match b {
+        // bc with AA = 0 and LK = 0, in any quickened form.
+        PpuInstruction::Bc {
+            bo,
+            bi,
+            offset,
+            aa: false,
+            link: false,
+        } => Some(FusedPair::OrBc {
+            ra,
+            rs,
+            rb,
+            rc,
+            bo,
+            bi,
+            target_offset: offset,
+        }),
+        PpuInstruction::Lwz {
+            rt,
+            ra: lwz_ra,
+            imm,
+        } => Some(FusedPair::OrLwz {
+            ra,
+            rs,
+            rb,
+            rc,
+            rt,
+            lwz_ra,
+            offset: imm,
+        }),
+        // [PPC-Book1 p:20 s:2.4.1] BO 1z1zz branches always and leaves CTR alone.
+        PpuInstruction::Bcctr { bo, bi, link: true } if bo & 0b10100 == 0b10100 => {
+            Some(FusedPair::OrBctrl {
+                ra,
+                rs,
+                rb,
+                rc,
+                bo,
+                bi,
+            })
+        }
+        second => or_form(second).map(|(ra2, rs2, rb2, rc2)| FusedPair::OrOr {
+            ra1: ra,
+            rs1: rs,
+            rb1: rb,
+            rc1: rc,
+            ra2,
+            rs2,
+            rb2,
+            rc2,
+        }),
+    }
+}
+
+/// The fields `(ra, rs, rb, rc)` of `insn` as an `or`, raw or as the
+/// quickened `mr`, or `None` for any other instruction.
+fn or_form(insn: PpuInstruction) -> Option<(u8, u8, u8, bool)> {
+    match insn {
+        PpuInstruction::Or { ra, rs, rb, rc } => Some((ra, rs, rb, rc)),
+        PpuInstruction::Mr { ra, rs } => Some((ra, rs, rs, false)),
         _ => None,
     }
 }
@@ -708,6 +848,14 @@ fn decoded_form(insn: PpuInstruction) -> PpuInstruction {
             rs,
             sh: 0,
             mb: n,
+            rc: false,
+        },
+        // [PPC-Book1 p:159 s:B.7.1 Table 9] sldi n is rldicr n,63-n.
+        PpuInstruction::Sldi { ra, rs, n } => PpuInstruction::Rldicr {
+            ra,
+            rs,
+            sh: n,
+            me: 63 - n,
             rc: false,
         },
         PpuInstruction::Srdi { ra, rs, n } => PpuInstruction::Rldicl {
@@ -804,3 +952,7 @@ mod rldicl_pair_tests;
 #[cfg(test)]
 #[path = "tests/superpair_ori_and_tests.rs"]
 mod ori_and_tests;
+
+#[cfg(test)]
+#[path = "tests/superpair_multi_form_tests.rs"]
+mod multi_form_tests;

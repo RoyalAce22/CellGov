@@ -1596,6 +1596,111 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
                     rc,
                 ),
             ),
+            FusedPair::RldicrOris {
+                ra,
+                rs,
+                rc,
+                oris_ra,
+                oris_rs,
+                ..
+            } => two(
+                logical(Op::on(unit::FXU).src(gpr(rs)), ra, rc),
+                fx(gpr(oris_ra)).src(gpr(oris_rs)),
+            ),
+            FusedPair::OrOr {
+                ra1,
+                rs1,
+                rb1,
+                rc1,
+                ra2,
+                rs2,
+                rb2,
+                rc2,
+            } => two(
+                logical(Op::on(unit::FXU).src(gpr(rs1)).src(gpr(rb1)), ra1, rc1),
+                logical(Op::on(unit::FXU).src(gpr(rs2)).src(gpr(rb2)), ra2, rc2),
+            ),
+            FusedPair::OrBc {
+                ra,
+                rs,
+                rb,
+                rc,
+                bo,
+                bi,
+                ..
+            } => {
+                // [PPC-Book1 p:67 s:3.3.11] a recording or sets CR0 from its
+                // 64-bit result, and the bc reads that CR0.
+                let taken = if rc {
+                    fused_branches(state, 0, ((g(rs) | g(rb)) as i64, 0), bo, bi)
+                } else {
+                    branches(state, bo, bi)
+                };
+                two(
+                    logical(Op::on(unit::FXU).src(gpr(rs)).src(gpr(rb)), ra, rc),
+                    branch(bo, bi, false, Target::Direct, taken),
+                )
+            }
+            FusedPair::OrLwz {
+                ra,
+                rs,
+                rb,
+                rc,
+                rt,
+                lwz_ra,
+                offset,
+            } => {
+                let base = match lwz_ra {
+                    0 => 0,
+                    r if r == ra => g(rs) | g(rb),
+                    r => g(r),
+                };
+                let ea = base.wrapping_add(offset as i64 as u64);
+                two(
+                    logical(Op::on(unit::FXU).src(gpr(rs)).src(gpr(rb)), ra, rc),
+                    int_load(ea, 4, rt).base(lwz_ra),
+                )
+            }
+            FusedPair::OrBctrl {
+                ra,
+                rs,
+                rb,
+                rc,
+                bo,
+                bi,
+            } => two(
+                logical(Op::on(unit::FXU).src(gpr(rs)).src(gpr(rb)), ra, rc),
+                branch(bo, bi, true, Target::Count, branches(state, bo, bi)),
+            ),
+            FusedPair::LdAddi {
+                rt,
+                offset,
+                addi_rt,
+                addi_ra,
+                ..
+            } => {
+                let add = fx(gpr(addi_rt));
+                two(
+                    int_load(ea_d(state, 1, offset), 8, rt).base(1),
+                    if addi_ra == 0 {
+                        add
+                    } else {
+                        add.src(gpr(addi_ra))
+                    },
+                )
+            }
+            FusedPair::LwzOr {
+                rt,
+                ra,
+                offset,
+                or_ra,
+                or_rs,
+                or_rb,
+                rc,
+            } => two(
+                int_load(ea_d(state, ra, offset), 4, rt).base(ra),
+                logical(Op::on(unit::FXU).src(gpr(or_rs)).src(gpr(or_rb)), or_ra, rc),
+            ),
         },
         I::Consumed => ([none, none], 0),
         I::Dcbz { ra, rb } => one(Op::on(unit::LSU)

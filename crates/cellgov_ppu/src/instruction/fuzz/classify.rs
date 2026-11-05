@@ -279,21 +279,33 @@ pub(super) fn fused_effect_and_outcome(
         | F::LdRlwinm
         | F::LwzLwz
         | F::LdLdAny
-        | F::LbzLbz => (READ_EFFECTS, LOAD),
+        | F::LbzLbz
+        | F::OrLwz
+        | F::LdAddi
+        | F::LwzOr => (READ_EFFECTS, LOAD),
         F::LiStw | F::MflrStw | F::MflrStd | F::StdStd => (WRITE_EFFECTS, STORE),
         F::StdLwz => (READ_WRITE_EFFECTS, STORE),
-        F::CmpwiBc | F::CmpwBc | F::CmpdiBc | F::CmpdBc | F::CmplwBc | F::AddiBc | F::ExtswBlr => {
-            (NO_EFFECTS, BRANCH)
-        }
+        F::CmpwiBc
+        | F::CmpwBc
+        | F::CmpdiBc
+        | F::CmpdBc
+        | F::CmplwBc
+        | F::AddiBc
+        | F::ExtswBlr
+        | F::OrBc => (NO_EFFECTS, BRANCH),
         // [PPC-Book1 p:24 s:2.4] a b always branches, so the pair never falls through.
         F::OrB => (NO_EFFECTS, UNCONDITIONAL_BRANCH),
+        // [PPC-Book1 p:25 s:2.4] a bcctrl with BO 1z1zz always branches.
+        F::OrBctrl => (NO_EFFECTS, UNCONDITIONAL_BRANCH),
         F::OrAdd
         | F::LisOri
         | F::CmpdNor
         | F::OrRlwinm
         | F::MtlrAddi
         | F::RldiclRldicl
-        | F::OriAnd => (NO_EFFECTS, CONTINUE),
+        | F::OriAnd
+        | F::RldicrOris
+        | F::OrOr => (NO_EFFECTS, CONTINUE),
     }
 }
 

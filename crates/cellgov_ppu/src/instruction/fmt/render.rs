@@ -1081,6 +1081,135 @@ pub(super) fn render(
                 };
                 render(&and, addr.wrapping_add(4), symbols, f)
             }
+            // Each half below renders as it does unfused: an `or` with
+            // RS = RB as `mr`, and a rotate as its extended mnemonic.
+            FusedPair::RldicrOris {
+                ra,
+                rs,
+                sh,
+                me,
+                rc,
+                oris_ra,
+                oris_rs,
+                imm,
+            } => {
+                let rldicr = I::Rldicr { ra, rs, sh, me, rc };
+                render(&rldicr, addr, symbols, f)?;
+                f.write_str("; ")?;
+                let oris = I::Oris {
+                    ra: oris_ra,
+                    rs: oris_rs,
+                    imm,
+                };
+                render(&oris, addr.wrapping_add(4), symbols, f)
+            }
+            FusedPair::OrOr {
+                ra1,
+                rs1,
+                rb1,
+                rc1,
+                ra2,
+                rs2,
+                rb2,
+                rc2,
+            } => {
+                let first = I::Or {
+                    ra: ra1,
+                    rs: rs1,
+                    rb: rb1,
+                    rc: rc1,
+                };
+                render(&first, addr, symbols, f)?;
+                f.write_str("; ")?;
+                let second = I::Or {
+                    ra: ra2,
+                    rs: rs2,
+                    rb: rb2,
+                    rc: rc2,
+                };
+                render(&second, addr.wrapping_add(4), symbols, f)
+            }
+            FusedPair::OrBc {
+                ra,
+                rs,
+                rb,
+                rc,
+                bo,
+                bi,
+                target_offset,
+            } => {
+                render(&I::Or { ra, rs, rb, rc }, addr, symbols, f)?;
+                f.write_str("; ")?;
+                let bc = I::Bc {
+                    bo,
+                    bi,
+                    offset: target_offset,
+                    aa: false,
+                    link: false,
+                };
+                render(&bc, addr.wrapping_add(4), symbols, f)
+            }
+            FusedPair::OrLwz {
+                ra,
+                rs,
+                rb,
+                rc,
+                rt,
+                lwz_ra,
+                offset,
+            } => {
+                render(&I::Or { ra, rs, rb, rc }, addr, symbols, f)?;
+                f.write_str("; ")?;
+                mem_d(f, "lwz", 'r', rt, offset, lwz_ra)
+            }
+            FusedPair::OrBctrl {
+                ra,
+                rs,
+                rb,
+                rc,
+                bo,
+                bi,
+            } => {
+                render(&I::Or { ra, rs, rb, rc }, addr, symbols, f)?;
+                f.write_str("; ")?;
+                let bcctr = I::Bcctr { bo, bi, link: true };
+                render(&bcctr, addr.wrapping_add(4), symbols, f)
+            }
+            FusedPair::LdAddi {
+                rt,
+                offset,
+                addi_rt,
+                addi_ra,
+                imm,
+            } => {
+                mem_d(f, "ld", 'r', rt, offset, 1)?;
+                // [PPC-Book1 p:162 s:B.9] li rX,v is addi rX,0,v, as the
+                // quickened `li` renders.
+                if addi_ra == 0 {
+                    write!(f, "; li r{addi_rt}, {imm}")
+                } else {
+                    write!(f, "; addi r{addi_rt}, r{addi_ra}, {imm}")
+                }
+            }
+            FusedPair::LwzOr {
+                rt,
+                ra,
+                offset,
+                or_ra,
+                or_rs,
+                or_rb,
+                rc,
+            } => {
+                mem_d(f, "lwz", 'r', rt, offset, ra)?;
+                f.write_str("; ")?;
+                let or = I::Or {
+                    ra: or_ra,
+                    rs: or_rs,
+                    rb: or_rb,
+                    rc,
+                };
+                render(&or, addr.wrapping_add(4), symbols, f)
+            }
         },
         I::Consumed => op0(f, ".consumed"),
 

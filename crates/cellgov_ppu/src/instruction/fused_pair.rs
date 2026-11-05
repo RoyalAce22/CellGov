@@ -290,4 +290,83 @@ pub enum FusedPair {
         and_rb: u8,
         rc: bool,
     },
+    /// `rldicr rA, rS, sh, me` (or its quickened `sldi`), with `rc` its Rc
+    /// bit, followed by `oris rA2, rS2, imm`.
+    RldicrOris {
+        ra: u8,
+        rs: u8,
+        sh: u8,
+        me: u8,
+        rc: bool,
+        oris_ra: u8,
+        oris_rs: u8,
+        imm: u16,
+    },
+    /// `or` followed by `or`, each raw or as the quickened `mr`, with
+    /// `rc1` and `rc2` their Rc bits.
+    OrOr {
+        ra1: u8,
+        rs1: u8,
+        rb1: u8,
+        rc1: bool,
+        ra2: u8,
+        rs2: u8,
+        rb2: u8,
+        rc2: bool,
+    },
+    /// `or` (or `mr`), with `rc` its Rc bit, followed by a non-linking
+    /// relative `bc`.
+    OrBc {
+        ra: u8,
+        rs: u8,
+        rb: u8,
+        rc: bool,
+        bo: u8,
+        bi: u8,
+        target_offset: i16,
+    },
+    /// `or` (or `mr`), with `rc` its Rc bit, followed by
+    /// `lwz rT, offset(rA2)`, where `lwz_ra` is rA2.
+    ///
+    /// The pair writes no register until the load passes. The load's EA
+    /// reads the or's result when its base is the or's RA.
+    OrLwz {
+        ra: u8,
+        rs: u8,
+        rb: u8,
+        rc: bool,
+        rt: u8,
+        lwz_ra: u8,
+        offset: i16,
+    },
+    /// `or` (or `mr`), with `rc` its Rc bit, followed by a branch-always
+    /// `bcctrl`.
+    OrBctrl {
+        ra: u8,
+        rs: u8,
+        rb: u8,
+        rc: bool,
+        bo: u8,
+        bi: u8,
+    },
+    /// `ld rT, offset(r1)` followed by `addi rT2, rA, imm` (or its
+    /// quickened `li` when `addi_ra` is 0).
+    LdAddi {
+        rt: u8,
+        offset: i16,
+        addi_rt: u8,
+        addi_ra: u8,
+        imm: i16,
+    },
+    /// `lwz rT, offset(rA)` followed by `or` (or `mr`), with `rc` the or's
+    /// Rc bit.
+    LwzOr {
+        rt: u8,
+        ra: u8,
+        offset: i16,
+        or_ra: u8,
+        or_rs: u8,
+        or_rb: u8,
+        rc: bool,
+    },
 }

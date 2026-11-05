@@ -15,7 +15,7 @@ use crate::exec::mem::store_prechecked;
 use crate::exec::memory_helpers::{buffer_store, load_ze, LoadPort, Width};
 use crate::exec::ExecuteVerdict;
 use crate::instruction::{branch_target, FusedPair, PpuInstruction};
-use crate::state::{cmp_cr_field, PpuState};
+use crate::state::{cmp_cr_field, effective_address, PpuState};
 use crate::store_buffer::StoreBuffer;
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
@@ -720,6 +720,152 @@ fn execute_pair(
             }
             ExecuteVerdict::Continue
         }
+        // [PPC-Book1 p:72 s:3.3.12] rldicr: ROTL64 of RS, ANDed with MASK(0, ME); Rc = 1 sets CR0.
+        // [PPC-Book1 p:66 s:3.3.11] oris: RA <- (RS) | (32 zeros || UI || 16 zeros), read after the rldicr.
+        FusedPair::RldicrOris {
+            ra,
+            rs,
+            sh,
+            me,
+            rc,
+            oris_ra,
+            oris_rs,
+            imm,
+        } => {
+            let result = state.gpr[rs as usize].rotate_left(u32::from(sh)) & mask64(0, me);
+            state.set_gpr(ra as usize, result);
+            if rc {
+                state.set_cr0_from_result(result);
+            }
+            let value = state.gpr[oris_rs as usize] | (u64::from(imm) << 16);
+            state.set_gpr(oris_ra as usize, value);
+            ExecuteVerdict::Continue
+        }
+        // [PPC-Book1 p:67 s:3.3.11 OR] or (x2): RA <- (RS) | (RB); the second reads after the first.
+        FusedPair::OrOr {
+            ra1,
+            rs1,
+            rb1,
+            rc1,
+            ra2,
+            rs2,
+            rb2,
+            rc2,
+        } => {
+            or(state, ra1, rs1, rb1, rc1);
+            or(state, ra2, rs2, rb2, rc2);
+            ExecuteVerdict::Continue
+        }
+        // [PPC-Book1 p:67 s:3.3.11 OR] or: RA <- (RS) | (RB); Rc = 1 sets CR0, which the bc then reads.
+        // [PPC-Book1 p:24 s:2.4] bc: target = CIA + EXTS(BD||0b00). Here CIA is the bc slot (super + 4).
+        FusedPair::OrBc {
+            ra,
+            rs,
+            rb,
+            rc,
+            bo,
+            bi,
+            target_offset,
+        } => {
+            or(state, ra, rs, rb, rc);
+            take_bc(state, bo, bi, target_offset)
+        }
+        // [PPC-Book1 p:67 s:3.3.11 OR] or: RA <- (RS) | (RB).
+        // [PPC-Book1 p:37 s:3.3.2 Load Word and Zero] lwz: RT <- 32 zeros || MEM(EA,4); EA = (RA|0)+EXTS(D), read after the or.
+        // The pair writes no register until the load passes. A refused pair
+        // thus leaves its start state, and the split rerun reads the same
+        // operands.
+        FusedPair::OrLwz {
+            ra,
+            rs,
+            rb,
+            rc,
+            rt,
+            lwz_ra,
+            offset,
+        } => {
+            let result = state.gpr[rs as usize] | state.gpr[rb as usize];
+            let base = match lwz_ra {
+                0 => 0,
+                r if r == ra => result,
+                r => state.gpr[r as usize],
+            };
+            let ea = effective_address(base.wrapping_add(offset as i64 as u64));
+            let val = match load_ze(
+                &mut LoadPort::new(region_views, store_buf, effects, unit_id),
+                ea,
+                Width::B4,
+            ) {
+                Ok(v) => v,
+                Err(ea) => return ExecuteVerdict::MemFault(ea),
+            };
+            state.set_gpr(ra as usize, result);
+            if rc {
+                state.set_cr0_from_result(result);
+            }
+            state.set_gpr(rt as usize, val);
+            ExecuteVerdict::Continue
+        }
+        // [PPC-Book1 p:67 s:3.3.11 OR] or: RA <- (RS) | (RB).
+        // [PPC-Book1 p:25 s:2.4] bcctrl with BO 1z1zz: LR <- CIA + 4, NIA <- CTR[0:61] || 0b00. Here CIA is the bcctrl slot (super + 4).
+        FusedPair::OrBctrl { ra, rs, rb, rc, .. } => {
+            or(state, ra, rs, rb, rc);
+            state.set_lr(state.pc.wrapping_add(8));
+            state.pc = state.ctr() & !3;
+            ExecuteVerdict::Branch
+        }
+        // [PPC-Book1 p:39 s:3.3.2 Load Doubleword] ld: RT <- MEM(EA,8); EA = (r1)+EXTS(DS||0b00).
+        // [PPC-Book1 p:51 s:3.3.8 Add Immediate] addi: RT <- (RA|0) + EXTS(SI), read after the load.
+        FusedPair::LdAddi {
+            rt,
+            offset,
+            addi_rt,
+            addi_ra,
+            imm,
+        } => {
+            let ea = state.ea_d_form(1, offset);
+            let val = match load_ze(
+                &mut LoadPort::new(region_views, store_buf, effects, unit_id),
+                ea,
+                Width::B8,
+            ) {
+                Ok(v) => v,
+                Err(ea) => return ExecuteVerdict::MemFault(ea),
+            };
+            state.set_gpr(rt as usize, val);
+            let base = if addi_ra == 0 {
+                0
+            } else {
+                state.gpr[addi_ra as usize]
+            };
+            state.set_gpr(addi_rt as usize, base.wrapping_add(imm as i64 as u64));
+            ExecuteVerdict::Continue
+        }
+        // [PPC-Book1 p:37 s:3.3.2 Load Word and Zero] lwz: RT <- 32 zeros || MEM(EA,4); EA = (RA|0)+EXTS(D).
+        // [PPC-Book1 p:67 s:3.3.11 OR] or: RA <- (RS) | (RB), read after the load wrote RT.
+        FusedPair::LwzOr {
+            rt,
+            ra,
+            offset,
+            or_ra,
+            or_rs,
+            or_rb,
+            rc,
+        } => {
+            let ea = state.ea_d_form(ra, offset);
+            match load_ze(
+                &mut LoadPort::new(region_views, store_buf, effects, unit_id),
+                ea,
+                Width::B4,
+            ) {
+                Ok(val) => {
+                    state.set_gpr(rt as usize, val);
+                    or(state, or_ra, or_rs, or_rb, rc);
+                    ExecuteVerdict::Continue
+                }
+                Err(ea) => ExecuteVerdict::MemFault(ea),
+            }
+        }
     }
 }
 
@@ -736,6 +882,16 @@ fn cmpw<T: Ord>(state: &mut PpuState, bf: u8, a: T, b: T) {
 fn rlwinm(state: &mut PpuState, ra: u8, rs: u8, sh: u8, mb: u8, me: u8, rc: bool) {
     let rotated = rotl32(state.gpr[rs as usize] as u32, u32::from(sh));
     let result = rotated & mask64(mb + 32, me + 32);
+    state.set_gpr(ra as usize, result);
+    if rc {
+        state.set_cr0_from_result(result);
+    }
+}
+
+/// `or rA, rS, rB` into RA, and into CR0 when `rc` is set.
+#[inline]
+fn or(state: &mut PpuState, ra: u8, rs: u8, rb: u8, rc: bool) {
+    let result = state.gpr[rs as usize] | state.gpr[rb as usize];
     state.set_gpr(ra as usize, result);
     if rc {
         state.set_cr0_from_result(result);

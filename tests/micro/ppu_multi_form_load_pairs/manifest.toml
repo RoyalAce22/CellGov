@@ -1,0 +1,31 @@
+[test]
+name = "ppu_multi_form_load_pairs"
+
+# A hardware probe: the registers and CR0 that an "ld rT,d(r1)" then
+# "addi" (or "li"), an "lwz" then "or" (or "mr"), and an "or" then "lwz"
+# leave: chained halves, an addi naming RA = 0 after an ld into r0, a
+# half that writes the other's source or base, an lwz base computed by
+# the or, and a branch into the second half. The console capture is the
+# answer; no emulator runs it.
+
+[observe]
+# 56 big-endian u32 words, as ppu/main.c lists: 224 bytes.
+#   0 failed step, 1 its return code; each register is a high word and a
+#   low word, each CR0 one word holding LT GT EQ SO in bits 3..0:
+#   ld ; addi: 2-3 r5, 4-5 r6 chained; 6-7 r5, 8-9 r6 li with r0 nonzero;
+#   10-11 r6 - r1 the addi reading r1; 12-13 r5 the addi overwriting the
+#   ld's target; 14-15 r0, 16-17 r6 an ld into r0 then addi from RA = 0.
+#   lwz ; or: 18-19 r5, 20-21 r6, 22 CR0 chained and recording; 23-24 r5,
+#   25-26 r6 lwz then mr; 27-28 r7, 29-30 r6 the lwz overwriting its base.
+#   or ; lwz: 31-32 r5 - buf, 33-34 r6 the lwz base from the or; 35-36 r5,
+#   37-38 r6, 39 CR0 a recording or and another base; 40-41 r7 - buf,
+#   42-43 r6 or 7,7,4 then an lwz on r7; 44-45 r6 - buf, 46-47 r5 the lwz
+#   writing the or's source.
+#   a branch into the second half: 48-49 r5, 50-51 r6 of lwz ; or; 52-53
+#   r5, 54-55 r6 of ld ; addi.
+memory_regions = [
+  { name = "result", addr = 0, size = 224 },
+]
+
+[expect]
+outcome = "completed"

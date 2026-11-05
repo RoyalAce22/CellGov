@@ -1,0 +1,37 @@
+[test]
+name = "ppu_multi_form_reg_pairs"
+
+# A hardware probe: the registers, CR and LR that an "rldicr" (or "sldi")
+# then "oris", an "or" (or "mr") then "or", an "or" then "bc", and an
+# "or" then "bctrl" leave: chained and recording halves, a half that
+# writes the other's source, a recorded zero under XER[SO], the bc on the
+# CR0 the or wrote or on a preset CR0, a bdnz to its own address, a
+# branch into the second half, and a CTR with its low two bits set. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# 74 big-endian u32 words, as ppu/main.c lists: 296 bytes.
+#   0 failed step, 1 its return code; each register is a high word and a
+#   low word, each CR0 one word holding LT GT EQ SO in bits 3..0, each CR
+#   one word holding the whole CR:
+#   rldicr ; oris: 2-3 r5, 4-5 r6, 6 CR0 chained and recording; 7-8 r5,
+#   9-10 r6, 11 CR0 sldi then oris; 12-13 r5, 14-15 r4, 16 CR0 with the
+#   oris writing the rldicr's source; 17-18 r5, 19-20 r6, 21 CR0 a zero
+#   result under XER[SO].
+#   or ; or: 22-23 r5, 24-25 r6, 26 CR0 chained, the second recording;
+#   27-28 r5, 29-30 r6 mr then mr; 31-32 r5, 33-34 r6, 35 CR0 both
+#   recording; 36-37 r4, 38-39 r3, 40 CR0 the second writing the first's
+#   source.
+#   or ; bc: 41-42 r7, 43 CR0 a recorded zero then beq; 44-45 r5, 46-47
+#   r7, 48 CR0 a recorded negative then blt; 49-50 r7, 51 CR a
+#   non-recording or then beq on a preset CR; 52-53 r7, 54 CR a recording
+#   or then beq on its own CR0; 55-56 r5, 57-58 CTR a bdnz to its own
+#   address; 59-60 r5, 61-62 r6 a branch into the second or of or ; or.
+#   or ; bctrl: 63-64 r5, 65-66 r7, 67-68 LR - CTR, 69 CR0 a word CTR;
+#   70-71 r7, 72-73 LR - CTR a CTR with its low two bits set.
+memory_regions = [
+  { name = "result", addr = 0, size = 296 },
+]
+
+[expect]
+outcome = "completed"

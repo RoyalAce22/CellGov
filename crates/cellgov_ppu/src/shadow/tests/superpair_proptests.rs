@@ -569,7 +569,82 @@ fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
                     )
                 }
             ),
+        // The rldicr takes the form the shadow gives it. Half the cases read
+        // its RA in the oris.
+        (
+            (reg(), reg(), 0u8..64, 0u8..64, any::<bool>()),
+            (reg(), reg(), halfword()),
+            any::<bool>()
+        )
+            .prop_map(|((ra, rs, sh, me, rc), (oris_ra, oris_rs, imm), chained)| {
+                let rldicr = PpuInstruction::Rldicr { ra, rs, sh, me, rc };
+                (
+                    quicken_insn(rldicr).unwrap_or(rldicr),
+                    PpuInstruction::Oris {
+                        ra: oris_ra,
+                        rs: if chained { ra } else { oris_rs },
+                        imm,
+                    },
+                )
+            }),
+        (any_or(), any_or()),
+        (any_or(), reg(), reg(), branch_offset()).prop_map(|(or, bo, bi, off)| {
+            let bc = bc(bo, bi, off);
+            (or, quicken_insn(bc).unwrap_or(bc))
+        }),
+        // Half the cases take the lwz base from the or's RA. The
+        // displacement often reads past the region, so the pair refuses.
+        (any_or(), reg(), reg(), displacement(), any::<bool>()).prop_map(
+            |(or, rt, ra, imm, chained)| {
+                let ra = match or {
+                    PpuInstruction::Or { ra, .. } | PpuInstruction::Mr { ra, .. } if chained => ra,
+                    _ => ra,
+                };
+                (or, PpuInstruction::Lwz { rt, ra, imm })
+            }
+        ),
+        (
+            any_or(),
+            prop::sample::select(vec![20u8, 21, 22, 23, 28, 29, 30, 31]),
+            reg()
+        )
+            .prop_map(|(or, bo, bi)| (or, PpuInstruction::Bcctr { bo, bi, link: true })),
+        // The addi takes the form the shadow gives it: li when RA is 0.
+        (
+            reg(),
+            ds_displacement(),
+            reg(),
+            prop_oneof![Just(0u8), reg()],
+            any::<i16>()
+        )
+            .prop_map(|(rt, imm, addi_rt, addi_ra, addi_imm)| {
+                let addi = PpuInstruction::Addi {
+                    rt: addi_rt,
+                    ra: addi_ra,
+                    imm: addi_imm,
+                };
+                (
+                    PpuInstruction::Ld { rt, ra: 1, imm },
+                    quicken_insn(addi).unwrap_or(addi),
+                )
+            }),
+        (reg(), reg(), displacement(), any_or())
+            .prop_map(|(rt, ra, imm, or)| (PpuInstruction::Lwz { rt, ra, imm }, or)),
     ]
+}
+
+/// An `or` in any form, as the shadow quickens it. About half are `mr`
+/// shapes.
+fn any_or() -> impl Strategy<Value = PpuInstruction> {
+    (reg(), reg(), reg(), any::<bool>(), any::<bool>()).prop_map(|(ra, rs, rb, rc, mr)| {
+        let or = PpuInstruction::Or {
+            ra,
+            rs,
+            rb: if mr { rs } else { rb },
+            rc,
+        };
+        quicken_insn(or).unwrap_or(or)
+    })
 }
 
 /// The word at `ea` in the region, if the region holds all of it.
@@ -652,7 +727,7 @@ fn aim_compare(
 }
 
 proptest! {
-    // Seven of the thirty-three arms are compares that need an aimed
+    // Seven of the forty arms are compares that need an aimed
     // operand to show an off-by-one. Four times the default count
     // makes one such case near certain per run.
     #![proptest_config(ProptestConfig::with_cases(1024))]
@@ -692,12 +767,14 @@ proptest! {
                         | FusedPair::LwzLwz { .. }
                         | FusedPair::LdLdAny { .. }
                         | FusedPair::LbzLbz { .. }
+                        | FusedPair::OrLwz { .. }
                 )
             )
         {
             // The ldu, lwz, ld and lbz pairs write no register until both loads
-            // pass, so a refused pair leaves the state it began in. The
-            // batch's split rerun reaches the halves' state from there.
+            // pass. The or; lwz pair writes no register until its load passes.
+            // A refused pair thus leaves the state it began in. The batch's
+            // split rerun reaches the halves' state from there.
             prop_assert_eq!(pair.fingerprint(), seed.state().fingerprint());
         } else {
             prop_assert_eq!(pair.fingerprint(), halves.fingerprint());

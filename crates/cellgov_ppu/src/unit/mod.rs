@@ -162,6 +162,10 @@ mod fused_rldicl_pair_tests;
 mod fused_ori_and_tests;
 
 #[cfg(test)]
+#[path = "tests/fused_multi_form_tests.rs"]
+mod fused_multi_form_tests;
+
+#[cfg(test)]
 #[path = "tests/lbz_lbz_console_tests.rs"]
 mod lbz_lbz_console_tests;
 
@@ -224,6 +228,14 @@ mod cmpd_nor_console_tests;
 #[cfg(test)]
 #[path = "tests/addi_bc_console_tests.rs"]
 mod addi_bc_console_tests;
+
+#[cfg(test)]
+#[path = "tests/multi_form_reg_console_tests.rs"]
+mod multi_form_reg_console_tests;
+
+#[cfg(test)]
+#[path = "tests/multi_form_load_console_tests.rs"]
+mod multi_form_load_console_tests;
 
 #[cfg(test)]
 #[path = "tests/store_fault_tests.rs"]
