@@ -2,10 +2,8 @@
 //! `lvsr`, `lvebx`, `lvehx`, `lvewx`, `lvxl`).
 //!
 //! For the element-indexed loads (`lvebx` / `lvehx` / `lvewx`) the
-//! PEM lists unaffected lanes as architecturally "undefined";
-//! CellGov's deterministic policy is to preserve prior VRT bytes
-//! outside the written element, and the cases assert the full
-//! 16-byte VRT to lock that policy.
+//! PEM leaves the other lanes undefined. The cases assert the full
+//! 16-byte VRT the console gives: the whole aligned quadword.
 
 use super::super::{InstructionCase, MemorySnapshot};
 use super::{case_keep_memory, state_with_two_gprs};
@@ -141,48 +139,54 @@ fn lvsr_cases() -> Vec<InstructionCase> {
     cases
 }
 
+/// One element load at each offset in `labels`, into a line of distinct
+/// bytes with a distinct prior VRT. Every case expects the whole line in
+/// VRT. The `ppu_lve_lanes` console capture shows that the console fills
+/// the lanes the load does not name from the aligned quadword.
+fn element_load_cases(
+    vt: u8,
+    xo: u32,
+    labels: &[(u64, &'static str)],
+    citation: &'static str,
+) -> Vec<InstructionCase> {
+    let raw = xform(vt, 4, 5, xo);
+    let line: [u8; 16] = std::array::from_fn(|i| 0x10 + i as u8);
+    let mem = padded(0, &line, 16);
+    labels
+        .iter()
+        .map(|&(ea_offset, label)| {
+            let mut initial = state_with_two_gprs(4, BASE_ADDR, 5, ea_offset);
+            initial.vr[vt as usize] = 0xE0E1_E2E3_E4E5_E6E7_E8E9_EAEB_ECED_EEEF;
+            let mut expected = initial.clone();
+            expected.vr[vt as usize] = u128::from_be_bytes(line);
+            case_keep_memory(
+                label,
+                raw,
+                initial,
+                mem.clone(),
+                expected,
+                mem.clone(),
+                citation,
+            )
+        })
+        .collect()
+}
+
 /// `lvebx`: byte load at EA into byte position (EA & 0xF) of VRT.
-/// CellGov preserves the other 15 byte lanes (deterministic policy
-/// for the architecturally-undefined bytes).
 ///
-/// [AltiVec-PEM p:6-15 s:6.2] lvebx VRT, RA, RB: 1-byte element load.
+/// [AltiVec-PEM p:6-14 s:6.2] lvebx VRT, RA, RB: 1-byte element load.
 fn lvebx_cases() -> Vec<InstructionCase> {
-    let raw = xform(3, 4, 5, 7);
-    let mut cases = Vec::new();
-
-    // Distinctive prior VRT so "lanes preserved" is verifiable.
-    let initial_vrt: u128 = 0x0123_4567_89AB_CDEF_FEDC_BA98_7654_3210;
-    let prior_bytes = initial_vrt.to_be_bytes();
-
-    for ea_offset in [0u64, 1, 7, 15] {
-        let payload = 0xA5u8;
-        let mem = padded(ea_offset as usize, &[payload], 16);
-        let mut initial = state_with_two_gprs(4, BASE_ADDR, 5, ea_offset);
-        initial.vr[3] = initial_vrt;
-        let mut expected = initial.clone();
-        let m = (ea_offset & 0xF) as usize;
-        let mut bytes = prior_bytes;
-        bytes[m] = payload;
-        expected.vr[3] = u128::from_be_bytes(bytes);
-        let label: &'static str = match ea_offset {
-            0 => "lvebx_offset_0",
-            1 => "lvebx_offset_1",
-            7 => "lvebx_offset_7",
-            15 => "lvebx_offset_15",
-            _ => unreachable!(),
-        };
-        cases.push(case_keep_memory(
-            label,
-            raw,
-            initial,
-            mem.clone(),
-            expected,
-            mem,
-            "[AltiVec-PEM p:6-15 s:6.2] byte at EA -> VRT[8m..8m+7]; other lanes preserved per CellGov policy",
-        ));
-    }
-
-    cases
+    element_load_cases(
+        3,
+        7,
+        &[
+            (0, "lvebx_offset_0"),
+            (1, "lvebx_offset_1"),
+            (7, "lvebx_offset_7"),
+            (15, "lvebx_offset_15"),
+        ],
+        "[AltiVec-PEM p:6-14 s:6.2] byte at EA -> VRT[8m..8m+7]; the console fills the other lanes from the aligned quadword",
+    )
 }
 
 /// `lvehx`: halfword load at (EA & ~1) into halfword position
@@ -190,83 +194,34 @@ fn lvebx_cases() -> Vec<InstructionCase> {
 ///
 /// [AltiVec-PEM p:6-16 s:6.2] lvehx VRT, RA, RB: 2-byte element load, EA aligned down to halfword.
 fn lvehx_cases() -> Vec<InstructionCase> {
-    let raw = xform(4, 4, 5, 39);
-    let mut cases = Vec::new();
-
-    let initial_vrt: u128 = 0xAAAA_BBBB_CCCC_DDDD_EEEE_FFFF_0000_1111;
-    let prior_bytes = initial_vrt.to_be_bytes();
-    let payload = [0xC0u8, 0xDE];
-
-    for ea_offset in [0u64, 2, 8, 14] {
-        let mem = padded(ea_offset as usize, &payload, 16);
-        let mut initial = state_with_two_gprs(4, BASE_ADDR, 5, ea_offset);
-        initial.vr[4] = initial_vrt;
-        let mut expected = initial.clone();
-        let m = (ea_offset & 0xF) as usize;
-        let mut bytes = prior_bytes;
-        bytes[m] = payload[0];
-        bytes[m + 1] = payload[1];
-        expected.vr[4] = u128::from_be_bytes(bytes);
-        let label: &'static str = match ea_offset {
-            0 => "lvehx_offset_0",
-            2 => "lvehx_offset_2",
-            8 => "lvehx_offset_8",
-            14 => "lvehx_offset_14",
-            _ => unreachable!(),
-        };
-        cases.push(case_keep_memory(
-            label,
-            raw,
-            initial,
-            mem.clone(),
-            expected,
-            mem,
-            "[AltiVec-PEM p:6-16 s:6.2] halfword at (EA&~1) -> VRT lane (EA&0xE); other lanes preserved",
-        ));
-    }
-
-    cases
+    element_load_cases(
+        4,
+        39,
+        &[
+            (0, "lvehx_offset_0"),
+            (2, "lvehx_offset_2"),
+            (8, "lvehx_offset_8"),
+            (14, "lvehx_offset_14"),
+        ],
+        "[AltiVec-PEM p:6-16 s:6.2] halfword at (EA&~1) -> VRT lane (EA&0xE); the console fills the other lanes from the aligned quadword",
+    )
 }
 
 /// `lvewx`: word load at (EA & ~3) into word position `(EA & 0xC)` of VRT.
 ///
 /// [AltiVec-PEM p:6-17 s:6.2] lvewx VRT, RA, RB: 4-byte element load, EA aligned down to word.
 fn lvewx_cases() -> Vec<InstructionCase> {
-    let raw = xform(5, 4, 5, 71);
-    let mut cases = Vec::new();
-
-    let initial_vrt: u128 = 0x1111_2222_3333_4444_5555_6666_7777_8888;
-    let prior_bytes = initial_vrt.to_be_bytes();
-    let payload = [0xDEu8, 0xAD, 0xBE, 0xEF];
-
-    for ea_offset in [0u64, 4, 8, 12] {
-        let mem = padded(ea_offset as usize, &payload, 16);
-        let mut initial = state_with_two_gprs(4, BASE_ADDR, 5, ea_offset);
-        initial.vr[5] = initial_vrt;
-        let mut expected = initial.clone();
-        let m = (ea_offset & 0xF) as usize;
-        let mut bytes = prior_bytes;
-        bytes[m..m + 4].copy_from_slice(&payload);
-        expected.vr[5] = u128::from_be_bytes(bytes);
-        let label: &'static str = match ea_offset {
-            0 => "lvewx_offset_0",
-            4 => "lvewx_offset_4",
-            8 => "lvewx_offset_8",
-            12 => "lvewx_offset_12",
-            _ => unreachable!(),
-        };
-        cases.push(case_keep_memory(
-            label,
-            raw,
-            initial,
-            mem.clone(),
-            expected,
-            mem,
-            "[AltiVec-PEM p:6-17 s:6.2] word at (EA&~3) -> VRT lane (EA&0xC); other lanes preserved",
-        ));
-    }
-
-    cases
+    element_load_cases(
+        5,
+        71,
+        &[
+            (0, "lvewx_offset_0"),
+            (4, "lvewx_offset_4"),
+            (8, "lvewx_offset_8"),
+            (12, "lvewx_offset_12"),
+        ],
+        "[AltiVec-PEM p:6-17 s:6.2] word at (EA&~3) -> VRT lane (EA&0xC); the console fills the other lanes from the aligned quadword",
+    )
 }
 
 /// `lvxl`: identical to `lvx` -- the "Last" suffix is a cache LRU hint.

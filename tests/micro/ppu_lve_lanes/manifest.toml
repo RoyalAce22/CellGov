@@ -1,0 +1,20 @@
+[test]
+name = "ppu_lve_lanes"
+
+# A hardware probe: what lvebx, lvehx and lvewx leave in the lanes of vD
+# the load does not name, at every offset in the quadword, with vD preset
+# through a register copy and by an lvx straight before the load. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# 3088 bytes: word 0 0x4C564531 once every case ran, word 1 the case
+# count (192), two words of 0, then each run's full vD (16 bytes) in the
+# order ppu/main.c names: instruction (lvebx, lvehx, lvewx), offset 0..15,
+# variant (register, fresh), run 0..1. Line M (bytes 0x10..0x1F) is the
+# line loaded; line P (bytes 0xE0..0xEF) is the preset.
+memory_regions = [
+  { name = "result", addr = 0, size = 3088 },
+]
+
+[expect]
+outcome = "completed"

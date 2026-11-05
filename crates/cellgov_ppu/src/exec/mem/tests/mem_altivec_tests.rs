@@ -464,88 +464,60 @@ fn lvsr_sh_three_returns_companion_to_lvsl() {
     assert_eq!(s.vr[3], u128::from_be_bytes(expected));
 }
 
-#[test]
-fn lvebx_places_byte_in_be_lane_from_ea_low_nibble() {
-    // EA & 0xF = 5 -> byte lands at byte[5] of the 16-byte BE view.
+/// Runs `insn` (vt 3, EA = 0x10 + `offset`) over a line of distinct
+/// bytes at 0x10 with VR3 preset; returns VR3 and the line. The
+/// `ppu_lve_lanes` capture shows that the console leaves VR3 equal to
+/// the line.
+fn element_load(insn: PpuInstruction, offset: u64) -> (u128, u128) {
     let mut mem = vec![0u8; 0x100];
-    mem[0x15] = 0x7E;
+    let line: [u8; 16] = std::array::from_fn(|i| 0x40 + i as u8);
+    mem[0x10..0x20].copy_from_slice(&line);
     let mut s = PpuState::new();
     s.set_gpr(1, 0x10);
-    s.set_gpr(2, 0x05);
-    // Pre-seed VR with a sentinel so we can verify other lanes are
-    // preserved (spec-undefined but our implementation preserves).
+    s.set_gpr(2, offset);
     s.set_vr(3, 0xAAAA_AAAA_AAAA_AAAA_AAAA_AAAA_AAAA_AAAAu128);
     let mut effects = Vec::new();
-    exec_with_mem(
-        &PpuInstruction::Lvebx {
-            vt: 3,
-            ra: 1,
-            rb: 2,
-        },
-        &mut s,
-        0,
-        &mem,
-        &mut effects,
-    );
-    let mut expected = [0xAAu8; 16];
-    expected[5] = 0x7E;
-    assert_eq!(s.vr[3], u128::from_be_bytes(expected));
+    exec_with_mem(&insn, &mut s, 0, &mem, &mut effects);
+    (s.vr[3], u128::from_be_bytes(line))
 }
 
 #[test]
-fn lvehx_places_halfword_in_aligned_be_lane() {
-    // EA = 0x14 -> after &!1 still 0x14; lane = 0x4.
-    let mut mem = vec![0u8; 0x100];
-    mem[0x14..0x16].copy_from_slice(&[0xBE, 0xEF]);
-    let mut s = PpuState::new();
-    s.set_gpr(1, 0x10);
-    s.set_gpr(2, 0x05); // EA = 0x15 -> aligned to 0x14
-    s.set_vr(3, 0);
-    let mut effects = Vec::new();
-    exec_with_mem(
-        &PpuInstruction::Lvehx {
+fn lvebx_fills_vd_with_the_aligned_quadword() {
+    let (vd, line) = element_load(
+        PpuInstruction::Lvebx {
             vt: 3,
             ra: 1,
             rb: 2,
         },
-        &mut s,
-        0,
-        &mem,
-        &mut effects,
+        5,
     );
-    let mut expected = [0u8; 16];
-    expected[4] = 0xBE;
-    expected[5] = 0xEF;
-    assert_eq!(s.vr[3], u128::from_be_bytes(expected));
+    assert_eq!(vd, line);
 }
 
 #[test]
-fn lvewx_places_word_in_aligned_be_lane() {
-    // EA = 0x18 -> &!3 still 0x18; lane = 0x8.
-    let mut mem = vec![0u8; 0x100];
-    mem[0x18..0x1C].copy_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
-    let mut s = PpuState::new();
-    s.set_gpr(1, 0x10);
-    s.set_gpr(2, 0x09); // EA = 0x19 -> aligned 0x18
-    s.set_vr(3, 0);
-    let mut effects = Vec::new();
-    exec_with_mem(
-        &PpuInstruction::Lvewx {
+fn lvehx_fills_vd_with_the_aligned_quadword() {
+    let (vd, line) = element_load(
+        PpuInstruction::Lvehx {
             vt: 3,
             ra: 1,
             rb: 2,
         },
-        &mut s,
-        0,
-        &mem,
-        &mut effects,
+        5,
     );
-    let mut expected = [0u8; 16];
-    expected[8] = 0xDE;
-    expected[9] = 0xAD;
-    expected[10] = 0xBE;
-    expected[11] = 0xEF;
-    assert_eq!(s.vr[3], u128::from_be_bytes(expected));
+    assert_eq!(vd, line);
+}
+
+#[test]
+fn lvewx_fills_vd_with_the_aligned_quadword() {
+    let (vd, line) = element_load(
+        PpuInstruction::Lvewx {
+            vt: 3,
+            ra: 1,
+            rb: 2,
+        },
+        9,
+    );
+    assert_eq!(vd, line);
 }
 
 #[test]

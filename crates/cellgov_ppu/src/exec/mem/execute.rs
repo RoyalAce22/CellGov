@@ -235,61 +235,22 @@ pub(crate) fn execute(
             state.set_vr(vt as usize, u128::from_be_bytes(bytes));
             ExecuteVerdict::Continue
         }
-        // [AltiVec-PEM p:6-15 s:6.2] lvebx: byte load at EA into byte position (EA & 0xF) of VRT.
-        // Other byte lanes are spec-undefined; we preserve them.
-        PpuInstruction::Lvebx { vt, ra, rb } => {
-            let ea = state.ea_x_form(ra, rb);
-            let m = (ea & 0xF) as usize;
-            let byte = match load_ze(
-                &mut LoadPort::new(region_views, store_buf, effects, unit_id),
-                ea,
-                Width::B1,
-            ) {
-                Ok(v) => v as u8,
-                Err(e) => return ExecuteVerdict::MemFault(e),
+        // [AltiVec-PEM p:6-14 s:6.2] lvebx loads the byte at EA into byte EA[60:63] of VRT.
+        // [AltiVec-PEM p:6-16 s:6.2] lvehx loads the halfword at EA & ~1 into its slot of VRT.
+        // [AltiVec-PEM p:6-17 s:6.2] lvewx loads the word at EA & ~3 into its slot of VRT.
+        // The other lanes are undefined. The `ppu_lve_lanes` capture shows that the console
+        // fills them from the aligned quadword at every offset. Each element load is thus an
+        // lvx of EA & ~15.
+        PpuInstruction::Lvebx { vt, ra, rb }
+        | PpuInstruction::Lvehx { vt, ra, rb }
+        | PpuInstruction::Lvewx { vt, ra, rb } => {
+            let ea = state.ea_x_form(ra, rb) & !15u64;
+            let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
+            let val = match read_aligned_16(&mut port, ea) {
+                Ok(v) => v,
+                Err(ea) => return ExecuteVerdict::MemFault(ea),
             };
-            let mut bytes = state.vr[vt as usize].to_be_bytes();
-            bytes[m] = byte;
-            state.set_vr(vt as usize, u128::from_be_bytes(bytes));
-            ExecuteVerdict::Continue
-        }
-        // [AltiVec-PEM p:6-16 s:6.2] lvehx: halfword load at (EA & ~1) into halfword position
-        // ((EA & 0xE) / 2) of VRT; other lanes preserved (spec-undefined).
-        PpuInstruction::Lvehx { vt, ra, rb } => {
-            let ea = state.ea_x_form(ra, rb) & !1u64;
-            let m = (ea & 0xF) as usize;
-            let val = match load_ze(
-                &mut LoadPort::new(region_views, store_buf, effects, unit_id),
-                ea,
-                Width::B2,
-            ) {
-                Ok(v) => v as u16,
-                Err(e) => return ExecuteVerdict::MemFault(e),
-            };
-            let mut bytes = state.vr[vt as usize].to_be_bytes();
-            let hb = val.to_be_bytes();
-            bytes[m] = hb[0];
-            bytes[m + 1] = hb[1];
-            state.set_vr(vt as usize, u128::from_be_bytes(bytes));
-            ExecuteVerdict::Continue
-        }
-        // [AltiVec-PEM p:6-17 s:6.2] lvewx: word load at (EA & ~3) into word position
-        // ((EA & 0xC) / 4) of VRT; other lanes preserved (spec-undefined).
-        PpuInstruction::Lvewx { vt, ra, rb } => {
-            let ea = state.ea_x_form(ra, rb) & !3u64;
-            let m = (ea & 0xF) as usize;
-            let val = match load_ze(
-                &mut LoadPort::new(region_views, store_buf, effects, unit_id),
-                ea,
-                Width::B4,
-            ) {
-                Ok(v) => v as u32,
-                Err(e) => return ExecuteVerdict::MemFault(e),
-            };
-            let mut bytes = state.vr[vt as usize].to_be_bytes();
-            let wb = val.to_be_bytes();
-            bytes[m..m + 4].copy_from_slice(&wb);
-            state.set_vr(vt as usize, u128::from_be_bytes(bytes));
+            state.set_vr(vt as usize, val);
             ExecuteVerdict::Continue
         }
         // [AltiVec-PEM p:6-29 s:6.2] stvebx: byte at byte-position (EA & 0xF) of VS -> MEM(EA, 1).

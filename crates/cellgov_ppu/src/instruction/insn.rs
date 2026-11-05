@@ -1274,7 +1274,7 @@ pub enum PpuInstruction {
     },
     /// Load Vector Element Byte Indexed.
     ///
-    /// [AltiVec-PEM p:6-15 s:6.2] lvebx XO=7: single-byte element load to byte EA mod 16 of vT.
+    /// [AltiVec-PEM p:6-14 s:6.2] lvebx XO=7: single-byte element load to byte EA mod 16 of vT.
     Lvebx {
         vt: u8,
         ra: u8,

@@ -30,6 +30,8 @@ mod lmw_form;
 mod load_wrap;
 #[path = "mem_load_tests.rs"]
 mod loads;
+#[path = "mem_lve_lanes_console_tests.rs"]
+mod lve_lanes_console;
 #[path = "mem_read_intent_tests.rs"]
 mod read_intent;
 #[path = "mem_reservation_ea_tests.rs"]

@@ -208,11 +208,7 @@ fn capture() -> ConsoleCapture {
 /// Undefined components the console gives one way and CellGov another,
 /// as a vector id prefix and a component name, and what the console
 /// does.
-const KNOWN_CONTRADICTED: &[(&str, &str, &str)] = &[(
-    "lve-other-lanes/",
-    "v1.other",
-    "the console loads the whole aligned quadword into vD",
-)];
+const KNOWN_CONTRADICTED: &[(&str, &str, &str)] = &[];
 
 #[test]
 fn the_capture_agrees_with_the_documents_and_contradicts_cellgov_only_where_known() {
