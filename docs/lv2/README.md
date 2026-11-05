@@ -369,7 +369,7 @@ stays and none is preferred; the disagreement is the information.
 | --- | ---: | --- |
 | `psdevwiki` | 618 | The name cell of psdevwiki's LV2 Functions and Syscalls table, taken only where it is one plain identifier and not a stub ending in `_`; `ref` is the page. |
 | `psl1ght` | 240 | `sys_` and the lowercased rest of a `SYSCALL_` token in PSL1GHT's `lv2/syscalls.h`; `ref` is the header and the token. |
-| `cellgov` | 186 | The name field of the `lv2_syscalls!` macro; `ref` is the constant. CellGov's own vocabulary, rendered, never hand-copied. |
+| `cellgov` | 187 | The name field of the `lv2_syscalls!` macro; `ref` is the constant. CellGov's own vocabulary, rendered, never hand-copied. |
 | `non_public` | 0 | A name known only from material that cannot be cited; `ref` is `none`. |
 
 `packet` is `none` for a name that applies to the whole ordinal.
