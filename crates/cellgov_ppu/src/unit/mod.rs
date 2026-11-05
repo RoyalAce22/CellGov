@@ -48,6 +48,10 @@ mod barrier_tests;
 mod window_access_tests;
 
 #[cfg(test)]
+#[path = "tests/window_fused_pair_tests.rs"]
+mod window_fused_pair_tests;
+
+#[cfg(test)]
 #[path = "tests/fused_entry_tests.rs"]
 mod fused_entry_tests;
 
