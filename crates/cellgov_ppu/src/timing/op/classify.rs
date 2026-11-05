@@ -3,7 +3,7 @@
 use super::fixed::{add_form, branch, branches, cmp, cr_logical, divide, logical, multiply};
 use super::float::{fp59, fp63, fp_load};
 use super::fused::classify_fused;
-use super::model::{crf, fpr, gpr, unit, vr, Kind, LoadClass, Op, Target, CTR, LR, XER};
+use super::model::{crf, fpr, gpr, unit, vr, Barrier, Kind, LoadClass, Op, Target, CTR, LR, XER};
 use super::storage::{
     ea_d, ea_x, fx, int_load, load, load_algebraic, multiple, store, update, INT_STORE, VSU_MEM,
 };
@@ -683,8 +683,9 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
         I::Sc { lev } => one(Op::on(0).kind(Kind::Syscall {
             number: (lev == 0).then_some(state.gpr[11]),
         })),
-        I::Sync { .. } => one(Op::on(unit::LSU).kind(Kind::Drain)),
+        I::Sync { l: 1 } => one(Op::on(unit::LSU).kind(Kind::Barrier(Barrier::Lwsync))),
+        I::Sync { .. } => one(Op::on(unit::LSU).kind(Kind::Barrier(Barrier::Sync))),
         I::Eieio => one(Op::on(unit::LSU)),
-        I::Isync => one(Op::on(unit::LSU).kind(Kind::Refetch)),
+        I::Isync => one(Op::on(unit::LSU).kind(Kind::Barrier(Barrier::Isync))),
     }
 }

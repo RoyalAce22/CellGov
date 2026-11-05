@@ -202,6 +202,57 @@ pub const PPU_STORE_WRITE_BACK_ENTRIES: usize = 8 + 8 * 4;
 /// penalty.
 pub const PPU_BRANCH_MISS_CYCLES: u64 = 25;
 
+/// The cycles a `sync` holds the instructions after it once every older
+/// instruction completes, with the store queue empty.
+///
+/// [CBE-Handbook p:722 s:A.1.2] the IU holds a `sync` at issue until all
+/// queues and pipelines drain. The `sync` then forces older stores out of
+/// the store queues.
+///
+/// The barrier costs below come from three captures. Each capture times
+/// a `bdnz` loop of the barrier alone and of the barrier after a store to
+/// one line. The fastest run of the same loop moves between captures, so
+/// the replay of each loop through the issue model takes a cost between
+/// them.
+///
+/// | loop | `ppu_issue_fp_store_drain` | `ppu_issue_barrier_forms` | `ppu_issue_barrier_smt` |
+/// | --- | --- | --- | --- |
+/// | `sync` | 230 | 223 | 232 |
+/// | `std; sync` | 265 | 269 | 265 |
+/// | `lwsync` | 56 | 52 | 52 |
+/// | `std; lwsync` | 70 | 63 | 63 |
+/// | `isync` | 52 | | 48 |
+/// | `std; isync` | 70 | | |
+pub const PPU_SYNC_CYCLES: u64 = 229;
+
+/// The cycles a `sync` holds the instructions after it beyond
+/// [`PPU_SYNC_CYCLES`] while an older store is still in the store queue.
+pub const PPU_SYNC_STORE_CYCLES: u64 = 34;
+
+/// The cycles an `lwsync` holds the instructions after it once every
+/// older instruction completes, with the store queue empty.
+///
+/// [CBE-Handbook p:722 s:A.1.2] an `lwsync` drains and forces older stores
+/// out of the store queues as a `sync` does. Its broadcast onto the EIB
+/// does not block.
+pub const PPU_LWSYNC_CYCLES: u64 = 53;
+
+/// The cycles an `lwsync` holds the instructions after it beyond
+/// [`PPU_LWSYNC_CYCLES`] while an older store is still in the store queue.
+pub const PPU_LWSYNC_STORE_CYCLES: u64 = 11;
+
+/// The cycles an `isync` holds the instructions after it once every
+/// older instruction completes, before its refetch, with the store queue
+/// empty.
+///
+/// [CBE-Handbook p:723 s:A.1.2] the IU holds an `isync` at issue until
+/// all queues and pipelines drain, and flushes when it completes.
+pub const PPU_ISYNC_CYCLES: u64 = 17;
+
+/// The cycles an `isync` holds the instructions after it beyond
+/// [`PPU_ISYNC_CYCLES`] while an older store is still in the store queue.
+pub const PPU_ISYNC_STORE_CYCLES: u64 = 17;
+
 /// The cycles from an `sc` to the earliest issue of the instruction
 /// after it: the LV2 round trip of `sys_time_get_timebase_frequency`,
 /// the cheapest call.

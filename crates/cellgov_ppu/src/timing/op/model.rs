@@ -75,6 +75,17 @@ pub(crate) enum Target {
     Count,
 }
 
+/// A storage or context barrier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Barrier {
+    /// A `sync` with an L field other than 1, which includes `ptesync`.
+    Sync,
+    /// `lwsync`: a `sync` with L = 1.
+    Lwsync,
+    /// `isync`.
+    Isync,
+}
+
 /// What an instruction does beyond reading and writing registers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Kind {
@@ -107,8 +118,10 @@ pub(crate) enum Kind {
     },
     /// Issues once every older result is ready.
     Drain,
-    /// Drains, then refetches the instructions after it.
-    Refetch,
+    /// A `sync`, `lwsync` or `isync`: drains, then holds the instructions
+    /// after it for the barrier's cost, which is larger while a store is
+    /// still in the store queue. An `isync` then refetches.
+    Barrier(Barrier),
     /// An `mtvscr`: drains, then holds its units for
     /// `PPU_MTVSCR_HOLD_CYCLES` and the younger vector-scalar
     /// instructions for `PPU_MTVSCR_YOUNGER_VSU_CYCLES`.

@@ -19,6 +19,8 @@ mod console_ppu_fp_ops;
 mod console_ppu_fused_compare_bc;
 mod console_ppu_int_edges;
 mod console_ppu_int_loads_stores;
+mod console_ppu_issue_barrier_forms;
+mod console_ppu_issue_barrier_smt;
 mod console_ppu_issue_chain;
 mod console_ppu_issue_divide_forms;
 mod console_ppu_issue_divide_overflow;

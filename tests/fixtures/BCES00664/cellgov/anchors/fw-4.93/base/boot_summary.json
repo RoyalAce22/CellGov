@@ -3,7 +3,7 @@
     "kind": "first_rsx_write"
   },
   "outcome": "RsxWriteCheckpoint",
-  "steps": 38279,
+  "steps": 38276,
   "budget": 256,
   "host_invariant_breaks": 0,
   "witnesses": {

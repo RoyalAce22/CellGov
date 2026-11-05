@@ -6,7 +6,7 @@
 //! addresses one data line, which r29 holds.
 
 use crate::console_ppu_issue_timing::{replay, Replay, Seed, ONE_LINE};
-use cellgov_ps3_abi::hw::ppu_issue::PPU_CYCLES_PER_TB_TICK;
+use cellgov_ps3_abi::hw::ppu_issue::{PPU_CYCLES_PER_TB_TICK, PPU_LWSYNC_CYCLES, PPU_SYNC_CYCLES};
 
 const CONSOLE: &str =
     "../../tests/micro/ppu_issue_fp_store_drain/ps3/cech20-cex-493/observation.json";
@@ -140,8 +140,9 @@ fn cellgov_cycles(k: usize) -> f64 {
 const FP_STORE_EXTRA: [(usize, usize); 3] = [(6, 7), (9, 10), (18, 19)];
 
 /// The cycles an iteration the model's extra for an `stfd` over an `std`
-/// may lie from the console's: the `isync` loop's lies 2.9 over.
-const EXTRA_GAP: f64 = 4.0;
+/// may lie from the console's. The `lwsync` pair's lies 4.0 over, and its
+/// `std` loop's five runs spread from 69.5 to 95.6 cycles.
+const EXTRA_GAP: f64 = 4.5;
 
 #[test]
 fn an_fp_store_costs_an_lwsync_isync_or_sc_the_console_s_extra_within_the_gap() {
@@ -195,21 +196,54 @@ fn each_mffs_loop_and_each_mfvscr_loop_lies_within_the_band() {
 }
 
 /// The loops of a `sync`, an `lwsync` or an `isync`, alone and after
-/// each store. The console takes each of them for many more cycles than
-/// the model gives it.
-const BARRIERS: [usize; 11] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+/// each store, except the `stfs` before a `sync`.
+const BARRIERS: [usize; 10] = [0, 1, 2, 4, 5, 6, 7, 8, 9, 10];
 
-/// The test fails when the model's time for a barrier loop comes within
-/// a quarter of the console's. Then move the loop into a held set.
 #[test]
-fn each_sync_lwsync_and_isync_loop_is_a_known_difference() {
+fn each_sync_lwsync_and_isync_loop_lies_within_the_band() {
     let w = console_words();
     for k in BARRIERS {
         let (cellgov, console) = (cellgov_cycles(k), console_cycles(&w, k));
         assert!(
-            cellgov < 0.75 * console,
-            "loop {k}: CellGov {cellgov:.2} cycles an iteration now lies near the console's \
-             {console:.2}; move the loop into a held set",
+            (cellgov - console).abs() / console <= BAND,
+            "loop {k}: CellGov {cellgov:.2} cycles an iteration, the console's fastest \
+             {console:.2}",
         );
     }
+}
+
+/// The loops of a `sync` alone and of an `lwsync` alone. Each barrier
+/// starts a dispatch group, so its `bdnz` is the second instruction of
+/// that group.
+const ALONE_BARRIERS: [(usize, u64); 2] = [(0, PPU_SYNC_CYCLES), (5, PPU_LWSYNC_CYCLES)];
+
+#[test]
+fn the_bdnz_after_a_barrier_in_its_group_waits_out_the_barrier() {
+    for (k, hold) in ALONE_BARRIERS {
+        let cellgov = cellgov_cycles(k);
+        assert!(
+            cellgov >= (hold + 1) as f64,
+            "loop {k}: CellGov {cellgov:.2} cycles an iteration, under the barrier's \
+             {hold} and its bdnz",
+        );
+    }
+}
+
+/// The loop of an `stfs` before a `sync`, and of an `stfd` before one.
+const STFS_SYNC: usize = 3;
+const STFD_SYNC: usize = 2;
+
+/// An `stfs` before a `sync` costs the console about 27 cycles more than
+/// an `stfd` before one. The model drains both stores alike.
+#[test]
+fn an_stfs_before_a_sync_is_a_known_difference() {
+    let w = console_words();
+    let (stfs, stfd) = (cellgov_cycles(STFS_SYNC), cellgov_cycles(STFD_SYNC));
+    assert_eq!(stfs, stfd, "the model times the two stores alike");
+    let console = console_cycles(&w, STFS_SYNC);
+    assert!(
+        (console - stfs) / console > BAND,
+        "loop {STFS_SYNC}: CellGov {stfs:.2} cycles an iteration now lies within the band \
+         of the console's {console:.2}; move the loop into the barrier set",
+    );
 }

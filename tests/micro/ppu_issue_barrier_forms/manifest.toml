@@ -1,0 +1,21 @@
+[test]
+name = "ppu_issue_barrier_forms"
+
+# A hardware probe of what a sync of each L form costs, and whether a
+# sync, lwsync or isync after a store that takes several store-queue
+# entries (an stmw, an std across a 16-byte block, four std to four
+# blocks) waits longer than after a store that takes one, timed with
+# mftb. The console capture is the answer; ppu/main.c's header lists the
+# loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 312 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 312 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

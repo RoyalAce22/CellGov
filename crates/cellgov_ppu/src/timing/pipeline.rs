@@ -14,7 +14,7 @@
 //!   issues with the older when all of these hold:
 //!   - Figure A-1 allows the pair of units.
 //!   - The younger reads nothing the older writes.
-//!   - Neither one is unpipelined, microcoded, a drain, a refetch or an
+//!   - Neither one is unpipelined, microcoded, a drain, a barrier or an
 //!     `sc`.
 //!
 //!   An instruction issues once all of these hold:
@@ -36,7 +36,7 @@
 //! [`PPU_FETCH_AHEAD_INSTRUCTIONS`]: k::PPU_FETCH_AHEAD_INSTRUCTIONS
 
 use super::cache::{Caches, Level};
-use super::op::{is_fpr, unit, Kind, LoadClass, Op, Target, NO_REG, REGS};
+use super::op::{is_fpr, unit, Barrier, Kind, LoadClass, Op, Target, NO_REG, REGS};
 use super::predictor::Predictor;
 use cellgov_exec::PpeIssuePressure;
 use cellgov_ps3_abi::hw::ppc_isa::PPC_BO_ALWAYS;
@@ -290,7 +290,7 @@ fn issues_alone(op: &Op) -> bool {
             op.kind,
             Kind::Unpipelined(_)
                 | Kind::Syscall { .. }
-                | Kind::Refetch
+                | Kind::Barrier(_)
                 | Kind::Drain
                 | Kind::VscrWrite
         )
@@ -546,7 +546,7 @@ impl PpeTiming {
         }
         if matches!(
             op.kind,
-            Kind::Drain | Kind::Refetch | Kind::VscrWrite | Kind::Syscall { .. }
+            Kind::Drain | Kind::Barrier(_) | Kind::VscrWrite | Kind::Syscall { .. }
         ) {
             let all = c.ready.iter().chain(c.unit_free.iter()).copied().max();
             // [CBE-Handbook p:742 s:A.3.2] a drain issues once every older
@@ -773,9 +773,22 @@ impl PpeTiming {
                 self.branch(pc, t, bo, link, target, taken, next_pc);
                 return t;
             }
-            Kind::Refetch => {
-                self.end_block(t + k::PPU_BRANCH_MISS_CYCLES);
-                return t;
+            Kind::Barrier(barrier) => {
+                // [CBE-Handbook p:722 s:A.1.2] after a `sync` or `lwsync`
+                // issues, it forces older stores out of the store queue.
+                let queued = self.tables.stores.iter().any(|s| s.done > t);
+                let back = t + barrier_cycles(barrier, queued);
+                let c = &mut self.core;
+                c.floor = c.floor.max(back);
+                // The next instruction issues no earlier than `back`, so it
+                // does not pair with the barrier as the older of a group.
+                c.older = None;
+                // [CBE-Handbook p:723 s:A.1.2] the IU performs a flush when
+                // an `isync` completes.
+                if barrier == Barrier::Isync {
+                    self.end_block(back + k::PPU_BRANCH_MISS_CYCLES);
+                    return t;
+                }
             }
             // An LV2 call's round trip depends on its outcome, which the
             // runtime commits after the batch yields; the thread charges
@@ -1404,6 +1417,21 @@ fn note_pressure(c: &mut Core, op: &Op, own: u64, queued: u64, head: (u64, u64))
 /// or `RA = RT`, so `RT = RB` is valid.
 fn is_update_target(op: &Op, r: u8) -> bool {
     op.units & unit::FXU != 0 && op.addr[0] == r && op.words == 0
+}
+
+/// The cycles `barrier` holds the instructions after it once it issues,
+/// with `queued` set while an older store is still in the store queue.
+fn barrier_cycles(barrier: Barrier, queued: bool) -> u64 {
+    let (alone, store) = match barrier {
+        Barrier::Sync => (k::PPU_SYNC_CYCLES, k::PPU_SYNC_STORE_CYCLES),
+        Barrier::Lwsync => (k::PPU_LWSYNC_CYCLES, k::PPU_LWSYNC_STORE_CYCLES),
+        Barrier::Isync => (k::PPU_ISYNC_CYCLES, k::PPU_ISYNC_STORE_CYCLES),
+    };
+    if queued {
+        alone + store
+    } else {
+        alone
+    }
 }
 
 /// The cycles of an integer load's split across an L1 sector, or 0.
