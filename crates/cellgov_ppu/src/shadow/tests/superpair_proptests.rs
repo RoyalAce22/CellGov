@@ -192,8 +192,10 @@ proptest! {
         prop_assert_eq!(&verdict_pair, &verdict_halves);
         prop_assert_eq!(pair.fingerprint(), halves.fingerprint());
         prop_assert_eq!(effects_pair, effects_halves);
-        // The pair reports a fault inside its second half at its own
-        // address; the halves report it at the second slot.
+        // The executor reports a refusal inside the second half at the
+        // pair's address. The batch then runs the pair split, so the
+        // unit stops at the second slot as the halves do
+        // (`unit/tests/fused_refusal_tests.rs`).
         if matches!(verdict_pair, ExecuteVerdict::Continue | ExecuteVerdict::Branch) {
             prop_assert_eq!(pair.pc, halves.pc);
         }

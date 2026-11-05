@@ -170,8 +170,8 @@ impl PpuExecutionUnit {
             // - the second slot is not fetchable.
             // The trace and the window record the state after each
             // instruction, and a fused head has no state between its slots.
-            // A head that faulted fused also runs split, so its first
-            // instruction retires before the fault.
+            // A head whose second half refused fused also runs split, so
+            // its first instruction retires before the refusal.
             let split = match insn {
                 instruction::PpuInstruction::Consumed => true,
                 _ if insn.is_super_pair() => {
@@ -207,6 +207,13 @@ impl PpuExecutionUnit {
             let ops = &ops[..n_ops];
             self.align_clock_read_to_issue(ctx, &entry, step_pc, &insn, ops);
             let (effects_before, stores_before) = (effects.len(), self.store_buf.len());
+            // A pair that refuses runs again split, and
+            // `undo_fused_attempt` takes back its reads.
+            let reads_before = if pair {
+                ctx.memory().provisional_read_count()
+            } else {
+                0
+            };
             let fault = match exec::execute(
                 &insn,
                 &mut self.state,
@@ -249,6 +256,15 @@ impl PpuExecutionUnit {
                 ExecuteVerdict::Fault(f) => Some(FaultExit::Verdict(f)),
                 ExecuteVerdict::MemFault(e) => Some(FaultExit::Mem(e, false)),
                 ExecuteVerdict::StoreFault(e) => Some(FaultExit::Mem(e, true)),
+                ExecuteVerdict::BufferFull if pair => {
+                    // The second half found no room. Run split, so the
+                    // first half retires and the second waits at its own
+                    // address, as the unfused store does.
+                    let boundary = (effects_before, stores_before, reads_before);
+                    self.undo_fused_attempt(ctx.memory(), effects, boundary, step_pc);
+                    force_split = Some(step_pc);
+                    continue;
+                }
                 ExecuteVerdict::BufferFull => {
                     // PC stays at the failing store; retries next step.
                     // Break skips count retirements, and nothing retired,
@@ -263,16 +279,8 @@ impl PpuExecutionUnit {
             };
             if let Some(exit) = fault {
                 if pair {
-                    // A fused instruction may have applied its first half.
-                    // That half reruns alone and leaves the same state. A
-                    // first half that can write a register it reads
-                    // (`lwz rT,d(rT)`) is a load, and faults before it
-                    // writes. No other first half reads what it writes.
-                    effects.truncate(effects_before);
-                    self.store_buf.truncate(stores_before);
-                    if self.break_pc == Some(step_pc) {
-                        self.break_skip += 1;
-                    }
+                    let boundary = (effects_before, stores_before, reads_before);
+                    self.undo_fused_attempt(ctx.memory(), effects, boundary, step_pc);
                     force_split = Some(step_pc);
                     continue;
                 }
@@ -319,6 +327,33 @@ impl PpuExecutionUnit {
             if remaining == 0 || reached_window {
                 return self.budget_yield(&entry, effects, last_pc);
             }
+        }
+    }
+
+    /// Drops what a fused pair at `step_pc` staged before its second half
+    /// refused, so the pair can run again split.
+    ///
+    /// The first half may apply before the second refuses. It reruns alone
+    /// and leaves the same state. A first half that can write a register
+    /// it reads (`lwz rT,d(rT)`) is a load, and refuses before it writes.
+    /// No other first half reads what it writes.
+    ///
+    /// It takes back the provisional reads the pair logged, down to the
+    /// count `reads`, so the split run logs each of its reads once.
+    fn undo_fused_attempt(
+        &mut self,
+        mem: &cellgov_mem::GuestMemory,
+        effects: &mut Vec<Effect>,
+        (effects_len, stores_len, reads): (usize, usize, u64),
+        step_pc: u64,
+    ) {
+        effects.truncate(effects_len);
+        self.store_buf.truncate(stores_len);
+        mem.rewind_provisional_reads(reads);
+        // The split run visits this pc again, so the unit hands back a
+        // skip it spent at the top of this iteration.
+        if self.break_pc == Some(step_pc) {
+            self.break_skip += 1;
         }
     }
 

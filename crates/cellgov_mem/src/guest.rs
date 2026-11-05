@@ -395,14 +395,17 @@ pub struct GuestMemory {
     /// computation. Errors leave it untouched.
     cached_hash: Cell<Option<u64>>,
     /// Count of reads that hit a [`RegionAccess::ReservedZeroReadable`]
-    /// region. Inherited by `clone()`; reset only by constructing a new
-    /// `GuestMemory`.
+    /// region. [`Self::provisional_read_count()`] names what changes it.
     provisional_read_count: Cell<u64>,
     /// Provisional reads since the previous
     /// [`drain_provisional_reads`](Self::drain_provisional_reads),
     /// keyed `(addr, len)`. Bounded by the distinct addresses one step
     /// touches, provided the runtime drains it every step.
     provisional_reads: RefCell<BTreeMap<(u64, u32), u32>>,
+    /// The keys of `provisional_reads` in note order, so
+    /// [`Self::rewind_provisional_reads`] can take back the newest.
+    /// Every clear of the log also clears the journal.
+    provisional_journal: RefCell<Vec<(u64, u32)>>,
     /// Set while [`Self::with_reads_unlogged`] runs; a provisional read
     /// then logs nothing.
     reads_unlogged: Cell<bool>,
@@ -544,6 +547,7 @@ impl GuestMemory {
             cached_hash: Cell::new(None),
             provisional_read_count: Cell::new(0),
             provisional_reads: RefCell::new(BTreeMap::new()),
+            provisional_journal: RefCell::new(Vec::new()),
             reads_unlogged: Cell::new(false),
             unmapped_below: 0,
             code_spans: Vec::new(),
@@ -636,8 +640,10 @@ impl GuestMemory {
         Ok(())
     }
 
-    /// Reads that have hit a `ReservedZeroReadable` region. Persists across
-    /// `clone()`; only construction resets the counter.
+    /// Reads that have hit a `ReservedZeroReadable` region. The count
+    /// persists across `clone()` and a drain.
+    /// [`Self::rewind_provisional_reads`] lowers it;
+    /// construction and [`Self::reset_for_reuse`] reset it.
     #[inline]
     pub fn provisional_read_count(&self) -> u64 {
         self.provisional_read_count.get()
@@ -660,6 +666,31 @@ impl GuestMemory {
         let mut log = self.provisional_reads.borrow_mut();
         let hits = log.entry((addr, len)).or_insert(0);
         *hits = hits.saturating_add(1);
+        self.provisional_journal.borrow_mut().push((addr, len));
+    }
+
+    /// Take back the provisional reads noted since
+    /// [`Self::provisional_read_count`] was `count`, newest first.
+    ///
+    /// A unit calls this when it drops an attempt that it runs again, so
+    /// the log holds only the rerun's reads. A drain clears the journal,
+    /// so a rewind takes back only reads noted after the last drain.
+    pub fn rewind_provisional_reads(&self, count: u64) {
+        let mut journal = self.provisional_journal.borrow_mut();
+        let mut log = self.provisional_reads.borrow_mut();
+        while self.provisional_read_count.get() > count {
+            let Some(key) = journal.pop() else {
+                return;
+            };
+            if let Some(hits) = log.get_mut(&key) {
+                *hits -= 1;
+                if *hits == 0 {
+                    log.remove(&key);
+                }
+            }
+            self.provisional_read_count
+                .set(self.provisional_read_count.get() - 1);
+        }
     }
 
     /// Take the provisional reads logged since the previous drain, in
@@ -669,6 +700,7 @@ impl GuestMemory {
         if log.is_empty() {
             return Vec::new();
         }
+        self.provisional_journal.borrow_mut().clear();
         std::mem::take(&mut *log)
             .into_iter()
             .map(|((addr, len), hits)| ProvisionalRead { addr, len, hits })
@@ -888,6 +920,7 @@ impl GuestMemory {
         self.cached_hash.set(None);
         self.provisional_read_count.set(0);
         self.provisional_reads.borrow_mut().clear();
+        self.provisional_journal.borrow_mut().clear();
     }
 
     /// Force the next [`content_hash`](Self::content_hash) call to re-walk
@@ -1017,3 +1050,7 @@ mod incremental_hash_tests;
 #[cfg(test)]
 #[path = "tests/remove_region_tests.rs"]
 mod remove_region_tests;
+
+#[cfg(test)]
+#[path = "tests/provisional_rewind_tests.rs"]
+mod provisional_rewind_tests;
