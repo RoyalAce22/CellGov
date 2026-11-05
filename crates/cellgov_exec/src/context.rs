@@ -193,8 +193,7 @@ impl<'a> ExecutionContext<'a> {
         }
     }
 
-    /// Attach the runtime's current guest-tick count, replacing any
-    /// prior value.
+    /// Attach the stepping unit's own clock at the start of the step.
     #[inline]
     pub const fn with_current_tick(self, current_tick: GuestTicks) -> Self {
         Self {
@@ -465,7 +464,11 @@ impl<'a> ExecutionContext<'a> {
         self.register_writes
     }
 
-    /// Runtime's current guest-tick count at the start of this step.
+    /// The stepping unit's own clock at the start of this step.
+    ///
+    /// A PPE batch reads it to find its next grid line. Two PPE steps
+    /// that the explorer calls independent commute only while each grid
+    /// line follows its own unit's clock.
     #[inline]
     pub const fn current_tick(&self) -> GuestTicks {
         self.current_tick

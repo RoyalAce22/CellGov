@@ -40,6 +40,10 @@ mod clock_read_tests;
 mod time_base_tests;
 
 #[cfg(test)]
+#[path = "tests/sibling_lead_tests.rs"]
+mod sibling_lead_tests;
+
+#[cfg(test)]
 #[path = "tests/barrier_tests.rs"]
 mod barrier_tests;
 

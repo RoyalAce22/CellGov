@@ -15,7 +15,7 @@ fn only_the_later_of_two_ppe_threads_has_an_older_sibling() {
         })
     };
     let ids = [unit(), unit()];
-    let older = |id, runnable: &[_]| rt.ppe_siblings(id, runnable).2;
+    let older = |id, runnable: &[_]| rt.ppe_siblings(id, runnable).older;
     assert!(!older(ids[0], &ids));
     assert!(older(ids[1], &ids));
     assert!(!older(ids[1], &ids[1..]));

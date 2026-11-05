@@ -37,6 +37,19 @@ enum FaultExit {
     Mem(cellgov_mem::MemError, bool),
 }
 
+/// The spacing, in core cycles, of the grid of a PPE thread's own clock
+/// at which its batch ends while a PPE sibling is runnable.
+///
+/// In the `ppu_issue_mix_switch` capture a sibling turns from dependent
+/// `fdiv` to independent `addi` between two halves of a timed loop. The
+/// console's second half costs what it costs beside a steady `addi`
+/// sibling. A replay at one instruction a step times that half near the
+/// console. A replay at the runtime's 256-instruction step adds to it:
+/// - with no grid, 2.6 cycles an iteration, outside the console's spread;
+/// - with a grid of 1024 cycles, 0.25;
+/// - with this grid, 0.08.
+pub(super) const SIBLING_LEAD_CYCLES: u64 = 256;
+
 /// The tap a unit with none installed runs its batch loop with.
 pub(super) struct NoTap;
 
@@ -367,10 +380,36 @@ impl PpuExecutionUnit {
             if matches!(insn, instruction::PpuInstruction::Isync) {
                 synced_stores = self.store_buf.span();
             }
-            if remaining == 0 || reached_window {
+            if remaining == 0 || reached_window || self.leads_sibling(ctx, &entry) {
                 return self.budget_yield(&entry, effects, last_pc);
             }
         }
+    }
+
+    /// Whether a PPE sibling is runnable and the batch reaches a multiple
+    /// of [`SIBLING_LEAD_CYCLES`] on the thread's own clock.
+    ///
+    /// A sibling's issue pressure and its view of memory hold as of its
+    /// own clock. A thread that runs past that clock has two errors:
+    /// - it charges the sibling's old instruction mix;
+    /// - the sibling sees this thread's stores only at its next step.
+    ///
+    /// The runtime's default scheduler runs the thread with the lowest
+    /// clock, so the threads stay within about one grid step of each
+    /// other. A scheduler that prescribes the order, as the explorer's
+    /// does, can let one thread lead by more, at a cost in timing accuracy
+    /// only. The rule reads the thread's own clock and the sibling count,
+    /// and no sibling's clock. Two steps that the dependency relation calls
+    /// independent must commute [FlanaganGodefroid2005 p:3 s:2.2]. The
+    /// relation records the sibling count, and no footprint records a
+    /// clock of another thread.
+    #[inline]
+    fn leads_sibling(&self, ctx: &ExecutionContext<'_>, entry: &BatchEntry) -> bool {
+        if ctx.ppe_siblings() == 0 {
+            return false;
+        }
+        let into_line = ctx.current_tick().raw() % SIBLING_LEAD_CYCLES;
+        into_line.saturating_add(self.timing.now() - entry.cycle) >= SIBLING_LEAD_CYCLES
     }
 
     /// Drops what a fused pair at `step_pc` staged before its second half

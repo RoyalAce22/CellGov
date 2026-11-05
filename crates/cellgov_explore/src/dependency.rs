@@ -184,7 +184,12 @@ pub struct StepFootprint {
     ///
     /// A runnable sibling holds issue after each of the thread's
     /// dispatch groups, so the step's ticks depend on the other PPE
-    /// threads' status. [`StepFootprint::note_commit`] sets it.
+    /// threads' status. While one is runnable the batch also ends at a
+    /// grid line of the thread's own clock, so the count decides which
+    /// instructions the step retires. The step reads no sibling's clock.
+    /// A wake sets the thread's clock to its waker's tick, and the thread
+    /// steps no earlier than that tick. [`StepFootprint::note_commit`]
+    /// sets it.
     pub ppe_sibling_reader: Option<cellgov_event::UnitId>,
     /// The PPE threads whose runnable status this step changed: a park,
     /// a wake, a creation or a finish.

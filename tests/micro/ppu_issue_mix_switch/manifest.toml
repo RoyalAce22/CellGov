@@ -1,0 +1,21 @@
+[test]
+name = "ppu_issue_mix_switch"
+
+# A hardware probe of what a sibling that changes instruction class
+# partway through a timed loop costs the main thread: sixteen independent
+# addi timed in two halves, beside a sibling of fdiv, of addi, of fdiv
+# that turns to addi between the halves, of addi that turns to fdiv, and
+# of 8 fdiv and 256 addi in each round. The console capture is the
+# answer; ppu/main.c's header lists the phases and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 3488 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 3488 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 120000

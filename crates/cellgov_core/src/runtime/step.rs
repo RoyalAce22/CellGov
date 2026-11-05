@@ -13,6 +13,17 @@ use crate::runtime::trace_bridge::traced_effect_kind;
 use crate::runtime::trace_bridge::traced_yield_reason;
 use crate::runtime::types::{RuntimeMode, RuntimeStep, StepError};
 
+/// What a PPE thread's step reads of the other PPE threads runnable at
+/// its start.
+struct PpeSiblings {
+    count: u32,
+    /// Their largest issue pressure, field by field, with the issue
+    /// interval only from those created before the stepping thread.
+    pressure: cellgov_exec::PpeIssuePressure,
+    /// Whether one of them precedes the stepping thread in creation order.
+    older: bool,
+}
+
 impl Runtime {
     /// True when a unit is runnable, or when one is parked and a queued
     /// DMA completion or timer deadline can wake it through the time
@@ -125,8 +136,7 @@ impl Runtime {
         let mut runnable = std::mem::take(&mut self.runnable_buf);
         runnable.clear();
         runnable.extend(self.registry.runnable_ids());
-        let (ppe_siblings, ppe_sibling_pressure, ppe_older_sibling) =
-            self.ppe_siblings(unit_id, &runnable);
+        let siblings = self.ppe_siblings(unit_id, &runnable);
         let ppe_pressure = self
             .registry
             .get(unit_id)
@@ -202,9 +212,9 @@ impl Runtime {
                 .with_mfc_transfer_view(next_sequence, oldest_transfer)
                 .with_inbound_mailbox(&inbound_mailbox)
                 .with_mailbox_read_flag(&mailbox_read)
-                .with_ppe_siblings(ppe_siblings)
-                .with_ppe_sibling_pressure(ppe_sibling_pressure)
-                .with_ppe_older_sibling(ppe_older_sibling);
+                .with_ppe_siblings(siblings.count)
+                .with_ppe_sibling_pressure(siblings.pressure)
+                .with_ppe_older_sibling(siblings.older);
             let unit = self
                 .registry
                 .get_mut(unit_id)
@@ -439,10 +449,9 @@ impl Runtime {
         }
     }
 
-    /// The number of PPE threads other than `unit` in the runnable set
-    /// the step starts from, the largest issue pressure among them, and
-    /// whether one of them was created before `unit`; zero, `NONE` and
-    /// `false` when `unit` is not a PPE thread.
+    /// The PPE threads other than `unit` in the runnable set the step
+    /// starts from, as [`PpeSiblings`] counts them; none when `unit` is
+    /// not a PPE thread.
     ///
     /// [CBE-Handbook p:754 s:A.6.1] the threads take dispatch in turn, a
     /// thread every other cycle.
@@ -458,33 +467,31 @@ impl Runtime {
     /// at an LV2 priority below, equal to and above the primary's, so the
     /// order is the threads' creation order. The issue interval of the
     /// largest pressure comes only from siblings created before `unit`.
-    fn ppe_siblings(
-        &self,
-        unit: UnitId,
-        runnable: &[UnitId],
-    ) -> (u32, cellgov_exec::PpeIssuePressure, bool) {
+    fn ppe_siblings(&self, unit: UnitId, runnable: &[UnitId]) -> PpeSiblings {
         let ppe = |id: UnitId| self.registry.get(id).filter(|u| u.shares_ppe_issue());
+        let mut view = PpeSiblings {
+            count: 0,
+            pressure: cellgov_exec::PpeIssuePressure::NONE,
+            older: false,
+        };
         if ppe(unit).is_none() {
-            return (0, cellgov_exec::PpeIssuePressure::NONE, false);
+            return view;
         }
-        let mut others = 0u32;
-        let mut pressure = cellgov_exec::PpeIssuePressure::NONE;
-        let mut older = false;
         for &id in runnable.iter().filter(|&&id| id != unit) {
             let Some(sibling) = ppe(id) else {
                 continue;
             };
-            others = others.saturating_add(1);
+            view.count = view.count.saturating_add(1);
             let mut p = sibling.ppe_issue_pressure();
             // Units take ids in the order they are created.
             if id > unit {
                 p.issue_interval = 0;
             } else {
-                older = true;
+                view.older = true;
             }
-            pressure = pressure.max(p);
+            view.pressure = view.pressure.max(p);
         }
-        (others, pressure, older)
+        view
     }
 
     /// Empty every record a step and its commit publish about that step,
