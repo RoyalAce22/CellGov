@@ -31,7 +31,8 @@ const DATA_BASE: u64 = 0x1000_0000;
 /// One internal PPU execution path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PpuExecutionPath {
-    /// Executes one instruction per batch with live decode.
+    /// Executes one instruction per batch with live decode. See
+    /// [`PpuPathRun::consumed_cost`] for its cost.
     Plain,
     /// Uses store forwarding in a multi-instruction batch with live decode.
     Forwarded,
@@ -71,6 +72,12 @@ pub struct PpuPathRun {
     pub executed_pcs: Vec<u64>,
     /// Committed-memory reads in data-region order, excluding fully forwarded loads.
     pub committed_data_reads: Vec<ByteRange>,
+    /// The guest ticks the PPU unit charged, summed over the batches.
+    ///
+    /// On the plain path, a pricing run in the PPU unit at one instruction
+    /// per batch gives this cost. The value is `None` when the pricing run
+    /// has a different stop, retired count or list of executed pcs.
+    pub consumed_cost: Option<u64>,
 }
 
 #[derive(Default)]
@@ -102,6 +109,10 @@ pub struct PpuPathDivergence {
     pub retired_differs: bool,
     /// Whether the committed data-read footprints differ.
     pub data_reads_differ: bool,
+    /// Whether the charged guest ticks differ. A quickened or fused form
+    /// costs what its raw instructions cost. The check runs only when
+    /// both paths know their cost.
+    pub cost_differs: bool,
 }
 
 /// Failure to construct or observe an internal path.
@@ -282,10 +293,15 @@ pub fn first_path_divergence(runs: &[PpuPathRun]) -> Option<PpuPathDivergence> {
             let stop_differs = left.stop != right.stop;
             let retired_differs = left.retired != right.retired;
             let data_reads_differ = left.committed_data_reads != right.committed_data_reads;
+            let cost_differs = match (left.consumed_cost, right.consumed_cost) {
+                (Some(left_cost), Some(right_cost)) => left_cost != right_cost,
+                _ => false,
+            };
             if !comparison.complete_differences.is_empty()
                 || stop_differs
                 || retired_differs
                 || data_reads_differ
+                || cost_differs
             {
                 return Some(PpuPathDivergence {
                     left: left.path,
@@ -294,6 +310,7 @@ pub fn first_path_divergence(runs: &[PpuPathRun]) -> Option<PpuPathDivergence> {
                     stop_differs,
                     retired_differs,
                     data_reads_differ,
+                    cost_differs,
                 });
             }
         }
@@ -311,10 +328,48 @@ fn run_path(
     invalidated_pc: Option<u64>,
 ) -> Result<PpuPathRun, PpuPathError> {
     if path == PpuExecutionPath::Plain {
-        return run_plain(code, words, initial, initial_data);
+        let mut run = run_plain(code, words, initial, initial_data)?;
+        let priced = run_unit(path, code, shadow_code, words, initial, initial_data, None)?;
+        run.consumed_cost = plain_cost(&run, &priced);
+        return Ok(run);
     }
+    run_unit(
+        path,
+        code,
+        shadow_code,
+        words,
+        initial,
+        initial_data,
+        invalidated_pc,
+    )
+}
+
+/// The pricing run's cost, or `None` when it differs from the plain run.
+fn plain_cost(plain: &PpuPathRun, priced: &PpuPathRun) -> Option<u64> {
+    let same_instructions = priced.stop == plain.stop
+        && priced.retired == plain.retired
+        && priced.executed_pcs == plain.executed_pcs;
+    priced.consumed_cost.filter(|_| same_instructions)
+}
+
+/// Runs `path` in the PPU unit. The plain path runs one instruction per
+/// batch with no shadow, which prices the raw instructions.
+fn run_unit(
+    path: PpuExecutionPath,
+    code: &[u8],
+    shadow_code: &[u8],
+    words: usize,
+    initial: &PpuState,
+    initial_data: &[u8],
+    invalidated_pc: Option<u64>,
+) -> Result<PpuPathRun, PpuPathError> {
     let budget =
         Budget::new(u64::try_from(words).map_err(|_| PpuPathError::BudgetOverflow { words })?);
+    let batch_cap = if path == PpuExecutionPath::Plain {
+        1
+    } else {
+        budget.raw()
+    };
     let mut unit = PpuExecutionUnit::new(UNIT);
     *unit.state_mut() = initial.clone();
     let trace = Rc::new(DispatchTrace::default());
@@ -338,6 +393,7 @@ fn run_path(
     let mut committed_data_reads = Vec::new();
     let mut effects_all = Vec::new();
     let mut retired = 0;
+    let mut consumed_cost = 0u64;
     let mut result;
     loop {
         let memory = make_memory(code, &data)?;
@@ -345,7 +401,9 @@ fn run_path(
         let mut effects = Vec::new();
         let ctx = ExecutionContext::new(&memory).with_reservations(&reservations);
         let retired_before = unit.retired_instructions();
-        result = unit.run_until_yield(Budget::new(budget.raw() - retired), &ctx, &mut effects);
+        let batch = Budget::new((budget.raw() - retired).min(batch_cap));
+        result = unit.run_until_yield(batch, &ctx, &mut effects);
+        consumed_cost = consumed_cost.saturating_add(result.consumed_cost.raw());
         let batch_retired = unit.retired_instructions() - retired_before;
         retired += batch_retired;
         let observed = finish_observation(PpuObservationInput {
@@ -411,6 +469,7 @@ fn run_path(
         retired,
         executed_pcs,
         committed_data_reads,
+        consumed_cost: Some(consumed_cost),
     })
 }
 
@@ -619,6 +678,7 @@ impl PlainRun {
             retired: self.retired,
             executed_pcs: self.executed_pcs,
             committed_data_reads: self.committed_data_reads,
+            consumed_cost: None,
         }
     }
 }
@@ -743,3 +803,7 @@ fn initial_reservations(initial: &PpuState) -> ReservationTable {
 #[cfg(test)]
 #[path = "tests/ppu_paths_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/ppu_paths_plain_cost_tests.rs"]
+mod plain_cost_tests;

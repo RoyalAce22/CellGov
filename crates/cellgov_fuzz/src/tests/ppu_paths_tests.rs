@@ -402,6 +402,7 @@ fn first_path_divergence_reports_only_the_differing_dimension() {
             stop_differs: false,
             retired_differs: true,
             data_reads_differ: false,
+            cost_differs: false,
         })
     );
     let mut stop = baseline_runs();
@@ -415,6 +416,7 @@ fn first_path_divergence_reports_only_the_differing_dimension() {
             stop_differs: true,
             retired_differs: false,
             data_reads_differ: false,
+            cost_differs: false,
         })
     );
     let mut reads = baseline_runs();
@@ -430,6 +432,7 @@ fn first_path_divergence_reports_only_the_differing_dimension() {
             stop_differs: false,
             retired_differs: false,
             data_reads_differ: true,
+            cost_differs: false,
         })
     );
     let mut discard = baseline_runs();
@@ -443,6 +446,7 @@ fn first_path_divergence_reports_only_the_differing_dimension() {
             stop_differs: false,
             retired_differs: false,
             data_reads_differ: false,
+            cost_differs: false,
         })
     );
 }
