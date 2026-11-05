@@ -130,6 +130,17 @@ impl StoreBuffer {
         self.entries.is_empty()
     }
 
+    /// The lowest start and highest end of the pending stores, or `None`
+    /// when the buffer is empty.
+    pub fn span(&self) -> Option<(u64, u64)> {
+        self.entries.iter().fold(None, |acc, e| {
+            let end = e.addr + e.len as u64;
+            Some(acc.map_or((e.addr, end), |(lo, hi): (u64, u64)| {
+                (lo.min(e.addr), hi.max(end))
+            }))
+        })
+    }
+
     /// Whether the buffer is full.
     #[inline]
     pub fn is_full(&self) -> bool {
@@ -369,13 +380,10 @@ impl StoreBuffer {
 
     /// Whether any pending store overlaps `[shadow_base, shadow_end)`.
     ///
-    /// A `true` result forces an early block yield so the shadow is
-    /// re-decoded before fetch observes stale bytes. Conditional
-    /// entries are included: a successful `stwcx`/`stdcx` mutates
-    /// committed memory once its `ConditionalStore` effect commits,
-    /// so a conditional store into the text region must invalidate
-    /// the shadow exactly like a plain store. (Failed `stwcx`/`stdcx`
-    /// never reach `insert_conditional`.)
+    /// The check includes conditional entries. A successful `stwcx`/`stdcx`
+    /// changes committed memory when its `ConditionalStore` effect commits,
+    /// as a plain store does. A failed `stwcx`/`stdcx` does not reach
+    /// `insert_conditional`.
     #[inline]
     pub fn has_store_in_range(&self, shadow_base: u64, shadow_end: u64) -> bool {
         for e in &self.entries {

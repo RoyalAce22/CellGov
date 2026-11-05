@@ -1,0 +1,17 @@
+[test]
+name = "ppu_synced_code_store"
+
+# A hardware probe: a thread that stores an instruction and runs dcbst,
+# sync, icbi and isync over it then executes the new instruction. The
+# console capture is the answer; no emulator runs it.
+
+[observe]
+# 8 big-endian u32 words, as ppu/main.c lists: 32 bytes. Word 0 is the
+# done or progress marker, word 1 the step a progress record names,
+# words 2 and 3 the r3 each step's call returned.
+memory_regions = [
+  { name = "result", addr = 0, size = 32 },
+]
+
+[expect]
+outcome = "completed"

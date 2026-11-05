@@ -122,10 +122,21 @@ impl PpuExecutionUnit {
         let mut last_retired = self.state.pc;
         // A fused pair that faulted runs again split, at this pc.
         let mut force_split = None;
+        // The span of the buffered stores when the last `isync` retired.
+        let mut synced_stores: Option<(u64, u64)> = None;
 
         loop {
             let step_pc = self.state.pc;
             let forced = force_split.take() == Some(step_pc);
+
+            // [PPC-Book2 p:12 s:1.8] after `dcbst`, `sync`, `icbi`, `isync`
+            // the next fetch of a stored-to instruction location sees the
+            // new instruction. Fetch reads committed bytes, so the batch
+            // ends before it fetches a word the buffer still holds, and the
+            // next batch fetches what was stored.
+            if synced_stores.is_some_and(|span| self.fetches_buffered_store(span, step_pc)) {
+                return self.budget_yield(&entry, effects, last_retired);
+            }
 
             // Diagnostics are taken before the rollback so they carry
             // the registers at the break; the window's effects are
@@ -298,6 +309,9 @@ impl PpuExecutionUnit {
                 )
             });
             last_retired = last_pc;
+            if matches!(insn, instruction::PpuInstruction::Isync) {
+                synced_stores = self.store_buf.span();
+            }
             if remaining == 0 || reached_window {
                 return self.budget_yield(&entry, effects, last_pc);
             }
@@ -477,6 +491,16 @@ impl PpuExecutionUnit {
             fault: None,
             syscall_args: None,
         }
+    }
+
+    /// Whether the fetch at `pc` reads a word a buffered store covers.
+    ///
+    /// `span` bounds the stores, so a fetch outside it costs two compares.
+    /// The checked range is 8 bytes, both slots a fused head reads.
+    #[inline]
+    fn fetches_buffered_store(&self, (lo, hi): (u64, u64), pc: u64) -> bool {
+        let end = pc.saturating_add(8);
+        pc < hi && end > lo && self.store_buf.has_store_in_range(pc, end)
     }
 
     /// Faults at `step_pc` with `code` and the registers at that point.

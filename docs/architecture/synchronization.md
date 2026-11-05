@@ -316,7 +316,8 @@ included. A mechanism with no unit behind it exempts nobody.
 are the full contention model.
 
 Memory-barrier instructions decode as their own instructions and
-change no result. They are:
+change no result, except that a retired `isync` ends the batch before
+a fetch of a word a store still buffers. They are:
 
 - PPU: `sync`, `lwsync`, `ptesync`, `eieio`, `isync`;
 - SPU: `sync`, `sync.c` and `dsync`.

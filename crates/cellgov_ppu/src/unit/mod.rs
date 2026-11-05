@@ -64,3 +64,7 @@ mod witness_fault_prefix_tests;
 #[cfg(test)]
 #[path = "tests/store_fault_tests.rs"]
 mod store_fault_tests;
+
+#[cfg(test)]
+#[path = "tests/synced_code_store_tests.rs"]
+mod synced_code_store_tests;

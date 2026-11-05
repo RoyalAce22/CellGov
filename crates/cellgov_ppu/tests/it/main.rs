@@ -33,6 +33,7 @@ mod console_ppu_ocrf_fxm;
 mod console_ppu_quadword;
 mod console_ppu_reservation_lv2;
 mod console_ppu_sync_l3;
+mod console_ppu_synced_code_store;
 mod console_ppu_trap_immediate;
 mod console_ppu_vadd_sub_sat;
 mod console_ppu_vcmp_int_record;
