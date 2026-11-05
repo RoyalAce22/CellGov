@@ -203,6 +203,15 @@ pub(super) fn scalar(insn: &PpuInstruction) -> Option<Scalar> {
     })
 }
 
+/// The base register, displacement and width in bytes of a D-form or
+/// DS-form scalar load; `None` for every other instruction.
+pub(crate) fn d_form_load(insn: &PpuInstruction) -> Option<(u8, i16, u8)> {
+    match scalar(insn)? {
+        Scalar::Load(Ea::D(ra, imm), width, _, _) => Some((ra, imm, width.bytes())),
+        Scalar::Load(Ea::X(..), ..) | Scalar::Store(..) => None,
+    }
+}
+
 /// Whether `ea` is word-aligned, as a floating-point operand must be.
 ///
 /// [CBE-Handbook p:290 s:9.10] A floating-point load or store that is not word-aligned takes the alignment interrupt, ahead of a page-fault data storage interrupt.

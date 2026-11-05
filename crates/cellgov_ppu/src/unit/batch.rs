@@ -98,6 +98,10 @@ impl PpuExecutionUnit {
         // updates only between batches. The batch ends at the instruction
         // that reaches a window, so the next instruction sees the update.
         let window_span = ctx.memory().window_span();
+        if self.profile_mode {
+            self.load_profile
+                .note_layout(region_views.iter().map(|v| (v.base, v.bytes.len() as u64)));
+        }
 
         // The pc of the last instruction the batch retired.
         let mut last_retired = self.state.pc;
@@ -214,6 +218,11 @@ impl PpuExecutionUnit {
             } else {
                 0
             };
+            let load = if self.profile_mode {
+                self.probe_load(&insn, step_pc, region_views)
+            } else {
+                None
+            };
             let fault = match exec::execute(
                 &insn,
                 &mut self.state,
@@ -303,6 +312,12 @@ impl PpuExecutionUnit {
                     // Both halves count, so the profile sees the
                     // instructions the shadow fused.
                     self.operand_profile.record(step_pc + 4);
+                }
+                if let Some((slot, outcome)) = load {
+                    self.load_profile.record(slot, outcome);
+                }
+                if super::load_probe::has_unkeyed_load(&insn) {
+                    self.load_profile.unkeyed_fused += 1;
                 }
             }
 

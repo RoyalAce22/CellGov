@@ -133,7 +133,10 @@ pub(crate) fn bench_boot_once(
         elf_data,
         inputs.authority_id,
         inputs.control_flags1,
-        args.save_state_trace.as_deref(),
+        game::BenchOutputs {
+            state_trace: args.save_state_trace.as_deref(),
+            load_profile: args.save_load_profile.as_deref(),
+        },
         &*sink,
     );
     match result {
@@ -147,9 +150,19 @@ pub(crate) fn bench_boot_once(
 }
 
 /// Both `bench` and `bench-once` flatten [`BenchArgs`], so clap accepts
-/// `--save-state-trace` and `--run-index` on either. The run set
-/// forwards neither to its children.
+/// `--save-state-trace`, `--save-load-profile` and `--run-index` on
+/// either. The run set forwards none of them to its children.
 fn refuse_bench_once_only_flags(args: &BenchArgs) -> Result<(), CommandError> {
+    if let Some(path) = &args.save_load_profile {
+        return Err(CommandError::status(
+            exit_codes::USAGE,
+            format!(
+                "boot bench: --save-load-profile {path} names one path, and a run set takes \
+             several measurements that would each write over it. Take the profile with \
+             `boot bench-once --save-load-profile PATH`."
+            ),
+        ));
+    }
     if let Some(path) = &args.save_state_trace {
         return Err(CommandError::status(
             exit_codes::USAGE,

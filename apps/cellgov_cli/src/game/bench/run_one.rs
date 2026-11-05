@@ -26,6 +26,26 @@ pub enum BenchBootError {
         #[source]
         source: std::io::Error,
     },
+    /// The optional load-profile write failed.
+    #[error("boot bench: writing load profile to {path}: {source}")]
+    LoadProfile {
+        /// The output path the command received.
+        path: String,
+        /// The host write failure.
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+/// The files a measured boot writes besides its result line.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BenchOutputs<'a> {
+    /// Where the state trace goes. A traced run costs a state hash per
+    /// step, so no comparison reads its wall time.
+    pub state_trace: Option<&'a str>,
+    /// Where the load-path profile goes. A profiled run counts each
+    /// load, so no comparison reads its wall time either.
+    pub load_profile: Option<&'a str>,
 }
 
 /// Run one boot with the minimum step-loop bookkeeping needed to
@@ -36,15 +56,14 @@ pub enum BenchBootError {
 /// `--checkpoint pc=ADDR` override does not change the boot
 /// trajectory's init path.
 ///
-/// `trace_path` puts the runtime in `DeterminismCheck` mode, which
-/// costs a state hash per step. No comparison reads a traced run's
-/// wall time.
+/// A state trace puts the runtime in `DeterminismCheck` mode, and a
+/// load profile puts every PPU unit in profile mode.
 fn bench_boot(
     opts: BenchOptions<'_>,
     elf_data: Vec<u8>,
     authority_id: Option<u64>,
     control_flags1: Option<u32>,
-    trace_path: Option<&str>,
+    outputs: BenchOutputs<'_>,
     progress: &dyn crate::progress::ProgressSink,
 ) -> Result<BenchBootResult, BenchBootError> {
     progress.phase(crate::progress::BootPhase::Loading.code());
@@ -72,7 +91,7 @@ fn bench_boot(
             runtime_max_steps: opts.max_steps,
             budget_override: opts.budget_override,
             strict_reserved: opts.strict_reserved,
-            capture_state_trace: trace_path.is_some(),
+            capture_state_trace: outputs.state_trace.is_some(),
             guest_args: opts.guest_args,
             patch_bytes: &[],
             engine: Default::default(),
@@ -80,7 +99,7 @@ fn bench_boot(
         diagnostics: DiagnosticOptions {
             print_banner: false,
             prescan: opts.prescan,
-            profile_pairs: false,
+            profile_pairs: outputs.load_profile.is_some(),
             dump_at_pc: None,
             dump_skip: 0,
             dump_mem_boot_addrs: &[],
@@ -132,10 +151,18 @@ fn bench_boot(
 
     // After the witness block: the write is host I/O, and a reader
     // that scrapes stderr must not have to wait on a disk.
-    if let Some(path) = trace_path {
+    if let Some(path) = outputs.state_trace {
         std::fs::write(path, rt.trace().bytes()).map_err(|source| BenchBootError::StateTrace {
             path: path.to_string(),
             source,
+        })?;
+    }
+    if let Some(path) = outputs.load_profile {
+        std::fs::write(path, load_summary(&rt).to_json()).map_err(|source| {
+            BenchBootError::LoadProfile {
+                path: path.to_string(),
+                source,
+            }
         })?;
     }
 
@@ -146,6 +173,20 @@ fn bench_boot(
         budget: step_budget,
         outcome,
     })
+}
+
+/// The load profiles of every PPU unit, summed.
+fn load_summary(rt: &cellgov_core::Runtime) -> cellgov_ppu::profile::LoadSummary {
+    let mut summary = cellgov_ppu::profile::LoadSummary::default();
+    for (_, unit) in rt.registry().iter() {
+        if let Some(ppu) = unit
+            .as_any()
+            .downcast_ref::<cellgov_ppu::PpuExecutionUnit>()
+        {
+            summary.merge(&ppu.load_profile().summary());
+        }
+    }
+    summary
 }
 
 /// Report the first LV2 host invariant break of the boot as a warning.
@@ -169,7 +210,7 @@ pub fn bench_boot_one_run(
     elf_data: Vec<u8>,
     authority_id: Option<u64>,
     control_flags1: Option<u32>,
-    trace_path: Option<&str>,
+    outputs: BenchOutputs<'_>,
     progress: &dyn crate::progress::ProgressSink,
 ) -> Result<BenchBootResult, BenchBootError> {
     let r = bench_boot(
@@ -177,7 +218,7 @@ pub fn bench_boot_one_run(
         elf_data,
         authority_id,
         control_flags1,
-        trace_path,
+        outputs,
         progress,
     )?;
     println!("{}", format_bench_result(&r));

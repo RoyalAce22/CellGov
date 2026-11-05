@@ -92,6 +92,8 @@ pub struct PpuExecutionUnit {
     /// The retirements profile mode counts per address, with both
     /// halves of a fused pair.
     pub(super) operand_profile: crate::profile::OperandProfile,
+    /// The loads profile mode counts per load site.
+    pub(super) load_profile: crate::profile::LoadProfile,
     /// `Clone` shares the tap, so a cloned unit reports to the same
     /// observer. A runtime snapshot holds such a clone.
     pub(super) tap: Option<std::rc::Rc<dyn PpuTap>>,
@@ -124,6 +126,7 @@ impl PpuExecutionUnit {
             profile_pairs: std::collections::BTreeMap::new(),
             profile_prev: None,
             operand_profile: crate::profile::OperandProfile::default(),
+            load_profile: crate::profile::LoadProfile::default(),
             tap: None,
         }
     }
@@ -167,6 +170,11 @@ impl PpuExecutionUnit {
     /// Returns the retirements profile mode counted per address.
     pub fn operand_profile(&self) -> &crate::profile::OperandProfile {
         &self.operand_profile
+    }
+
+    /// Returns the loads profile mode counted per load site.
+    pub fn load_profile(&self) -> &crate::profile::LoadProfile {
+        &self.load_profile
     }
 
     /// Returns the shadow that [`Self::set_instruction_shadow`] installed.
@@ -246,6 +254,7 @@ impl PpuExecutionUnit {
             profile_pairs: _,
             profile_prev: _,
             operand_profile: _,
+            load_profile: _,
             tap: _,
         } = self;
         state.apply(unit_state);

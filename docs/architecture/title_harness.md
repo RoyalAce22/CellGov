@@ -537,7 +537,7 @@ trees.
 
 `boot bench` refuses by name the flags that describe a single child:
 
-- the trace path it writes
+- the trace and load-profile paths it writes
 - the index it reports
 
 *Why:* the two commands share one argument struct, so those flags

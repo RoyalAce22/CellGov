@@ -311,6 +311,11 @@ pub(crate) struct BenchArgs {
     /// throughput measurement.
     #[arg(long, value_name = "PATH")]
     pub save_state_trace: Option<String>,
+    /// Write the run's load-path profile here as JSON. It counts the
+    /// loads the store buffer answers and the regions each load site
+    /// reads. A profiled run is slower, so its wall time measures nothing.
+    #[arg(long, value_name = "PATH")]
+    pub save_load_profile: Option<String>,
     /// Index this measurement reports on its `BENCH_RESULT` line. A
     /// run set stamps each of its children.
     #[arg(long, value_name = "N")]

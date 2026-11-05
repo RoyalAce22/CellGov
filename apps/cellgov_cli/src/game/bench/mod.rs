@@ -20,7 +20,7 @@ mod test_fixtures;
 
 pub use cellgov_compare::bench::{AnchorVerdict, BenchGate};
 pub use options::{AnchorPlan, BenchOptions, SelectionArgs, BENCH_DEFAULT_RUNS};
-pub use run_one::bench_boot_one_run;
+pub use run_one::{bench_boot_one_run, BenchOutputs};
 pub use runs::bench_boot_runs;
 pub use throughput::{ThroughputPolicy, ThroughputVerdict, BENCH_SPREAD_CEILING_PCT};
 

@@ -232,13 +232,14 @@ fn an_observations_dir_on_a_bare_scenario_is_a_usage_error() {
     }
 }
 
-/// `--save-state-trace` and `--run-index` reach `boot bench` through
-/// the argument struct it shares with `boot bench-once`. The refusal
-/// lands before any store read.
+/// `--save-state-trace`, `--save-load-profile` and `--run-index` reach
+/// `boot bench` through the argument struct it shares with
+/// `boot bench-once`. The refusal lands before any store read.
 #[test]
 fn a_child_only_bench_flag_on_the_run_set_is_a_usage_error() {
     for extra in [
         vec!["--save-state-trace", "trace.state"],
+        vec!["--save-load-profile", "load.json"],
         vec!["--run-index", "2"],
     ] {
         let mut argv = vec!["boot", "bench", "--title", "synthetic"];
@@ -250,8 +251,8 @@ fn a_child_only_bench_flag_on_the_run_set_is_a_usage_error() {
         assert_eq!(out.status.code(), Some(2), "{argv:?}");
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
-            stderr.contains("bench-once"),
-            "{argv:?}: the refusal names the command that takes the flag:\n{stderr}"
+            stderr.contains(extra[0]) && stderr.contains("bench-once"),
+            "{argv:?}: the refusal names the flag and the command that takes it:\n{stderr}"
         );
     }
 }

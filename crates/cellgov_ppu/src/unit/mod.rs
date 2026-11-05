@@ -5,6 +5,7 @@ mod batch;
 mod exec_unit;
 mod fault;
 mod fetch;
+mod load_probe;
 mod ppu_unit;
 
 pub use ppu_unit::{PpuExecutionUnit, PpuSnapshot};
@@ -244,6 +245,10 @@ mod store_fault_tests;
 #[cfg(test)]
 #[path = "tests/operand_profile_tests.rs"]
 mod operand_profile_tests;
+
+#[cfg(test)]
+#[path = "tests/load_probe_tests.rs"]
+mod load_probe_tests;
 
 #[cfg(test)]
 #[path = "tests/interrupt_record_tests.rs"]

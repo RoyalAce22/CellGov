@@ -69,6 +69,7 @@ impl ExecutionUnit for PpuExecutionUnit {
             profile_pairs: _,
             profile_prev: _,
             operand_profile: _,
+            load_profile: _,
             tap: _,
         } = self;
         PpuSnapshot {
