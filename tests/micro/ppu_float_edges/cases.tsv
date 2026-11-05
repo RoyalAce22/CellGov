@@ -1,0 +1,121 @@
+id	asm	words	inputs	record	may_end_process
+rn/fadd/rn0	fadd f3, f1, f2	0xfc61102a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f2=0x3fd5555555555555	f3	0
+rn/fadd/rn1	fadd f3, f1, f2	0xfc61102a	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f1=0x3ff0000000000000,f2=0x3fd5555555555555	f3	0
+rn/fadd/rn2	fadd f3, f1, f2	0xfc61102a	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f1=0x3ff0000000000000,f2=0x3fd5555555555555	f3	0
+rn/fadd/rn3	fadd f3, f1, f2	0xfc61102a	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f1=0x3ff0000000000000,f2=0x3fd5555555555555	f3	0
+rn/fsub/rn0	fsub f3, f1, f2	0xfc611028	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f2=0x3fd5555555555555	f3	0
+rn/fsub/rn1	fsub f3, f1, f2	0xfc611028	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f1=0x3ff0000000000000,f2=0x3fd5555555555555	f3	0
+rn/fsub/rn2	fsub f3, f1, f2	0xfc611028	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f1=0x3ff0000000000000,f2=0x3fd5555555555555	f3	0
+rn/fsub/rn3	fsub f3, f1, f2	0xfc611028	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f1=0x3ff0000000000000,f2=0x3fd5555555555555	f3	0
+rn/fmul/rn0	fmul f3, f1, f4	0xfc610132	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f4=0x3fd5555555555555	f3	0
+rn/fmul/rn1	fmul f3, f1, f4	0xfc610132	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f1=0x3ff0000000000000,f4=0x3fd5555555555555	f3	0
+rn/fmul/rn2	fmul f3, f1, f4	0xfc610132	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f1=0x3ff0000000000000,f4=0x3fd5555555555555	f3	0
+rn/fmul/rn3	fmul f3, f1, f4	0xfc610132	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f1=0x3ff0000000000000,f4=0x3fd5555555555555	f3	0
+rn/fdiv/rn0	fdiv f3, f1, f2	0xfc611024	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f2=0x4008000000000000	f3	0
+rn/fdiv/rn1	fdiv f3, f1, f2	0xfc611024	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f1=0x3ff0000000000000,f2=0x4008000000000000	f3	0
+rn/fdiv/rn2	fdiv f3, f1, f2	0xfc611024	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f1=0x3ff0000000000000,f2=0x4008000000000000	f3	0
+rn/fdiv/rn3	fdiv f3, f1, f2	0xfc611024	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f1=0x3ff0000000000000,f2=0x4008000000000000	f3	0
+rn/fsqrt/rn0	fsqrt f3, f2	0xfc60102c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f2=0x4000000000000000	f3	0
+rn/fsqrt/rn1	fsqrt f3, f2	0xfc60102c	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f2=0x4000000000000000	f3	0
+rn/fsqrt/rn2	fsqrt f3, f2	0xfc60102c	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f2=0x4000000000000000	f3	0
+rn/fsqrt/rn3	fsqrt f3, f2	0xfc60102c	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f2=0x4000000000000000	f3	0
+rn/fmadd/rn0	fmadd f3, f1, f4, f2	0xfc61113a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f2=0x3fd5555555555555,f4=0x4008000000000000	f3	0
+rn/fmadd/rn1	fmadd f3, f1, f4, f2	0xfc61113a	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f1=0x3ff0000000000000,f2=0x3fd5555555555555,f4=0x4008000000000000	f3	0
+rn/fmadd/rn2	fmadd f3, f1, f4, f2	0xfc61113a	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f1=0x3ff0000000000000,f2=0x3fd5555555555555,f4=0x4008000000000000	f3	0
+rn/fmadd/rn3	fmadd f3, f1, f4, f2	0xfc61113a	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f1=0x3ff0000000000000,f2=0x3fd5555555555555,f4=0x4008000000000000	f3	0
+rn/fmsub/rn0	fmsub f3, f1, f4, f2	0xfc611138	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f2=0x3fd5555555555555,f4=0x4008000000000000	f3	0
+rn/fmsub/rn1	fmsub f3, f1, f4, f2	0xfc611138	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f1=0x3ff0000000000000,f2=0x3fd5555555555555,f4=0x4008000000000000	f3	0
+rn/fmsub/rn2	fmsub f3, f1, f4, f2	0xfc611138	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f1=0x3ff0000000000000,f2=0x3fd5555555555555,f4=0x4008000000000000	f3	0
+rn/fmsub/rn3	fmsub f3, f1, f4, f2	0xfc611138	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f1=0x3ff0000000000000,f2=0x3fd5555555555555,f4=0x4008000000000000	f3	0
+rn/fnmadd/rn0	fnmadd f3, f1, f4, f2	0xfc61113e	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f2=0x3fd5555555555555,f4=0x4008000000000000	f3	0
+rn/fnmadd/rn1	fnmadd f3, f1, f4, f2	0xfc61113e	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f1=0x3ff0000000000000,f2=0x3fd5555555555555,f4=0x4008000000000000	f3	0
+rn/fnmadd/rn2	fnmadd f3, f1, f4, f2	0xfc61113e	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f1=0x3ff0000000000000,f2=0x3fd5555555555555,f4=0x4008000000000000	f3	0
+rn/fnmadd/rn3	fnmadd f3, f1, f4, f2	0xfc61113e	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f1=0x3ff0000000000000,f2=0x3fd5555555555555,f4=0x4008000000000000	f3	0
+rn/fnmsub/rn0	fnmsub f3, f1, f4, f2	0xfc61113c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f2=0x3fd5555555555555,f4=0x4008000000000000	f3	0
+rn/fnmsub/rn1	fnmsub f3, f1, f4, f2	0xfc61113c	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f1=0x3ff0000000000000,f2=0x3fd5555555555555,f4=0x4008000000000000	f3	0
+rn/fnmsub/rn2	fnmsub f3, f1, f4, f2	0xfc61113c	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f1=0x3ff0000000000000,f2=0x3fd5555555555555,f4=0x4008000000000000	f3	0
+rn/fnmsub/rn3	fnmsub f3, f1, f4, f2	0xfc61113c	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f1=0x3ff0000000000000,f2=0x3fd5555555555555,f4=0x4008000000000000	f3	0
+rn/fadds/rn0	fadds f3, f1, f2	0xec61102a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f2=0x4008000000000000	f3	0
+rn/fadds/rn1	fadds f3, f1, f2	0xec61102a	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f1=0x3ff0000000000000,f2=0x4008000000000000	f3	0
+rn/fadds/rn2	fadds f3, f1, f2	0xec61102a	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f1=0x3ff0000000000000,f2=0x4008000000000000	f3	0
+rn/fadds/rn3	fadds f3, f1, f2	0xec61102a	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f1=0x3ff0000000000000,f2=0x4008000000000000	f3	0
+rn/fsubs/rn0	fsubs f3, f1, f2	0xec611028	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f2=0x4008000000000000	f3	0
+rn/fsubs/rn1	fsubs f3, f1, f2	0xec611028	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f1=0x3ff0000000000000,f2=0x4008000000000000	f3	0
+rn/fsubs/rn2	fsubs f3, f1, f2	0xec611028	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f1=0x3ff0000000000000,f2=0x4008000000000000	f3	0
+rn/fsubs/rn3	fsubs f3, f1, f2	0xec611028	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f1=0x3ff0000000000000,f2=0x4008000000000000	f3	0
+rn/fmuls/rn0	fmuls f3, f1, f4	0xec610132	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f4=0x4008000000000000	f3	0
+rn/fmuls/rn1	fmuls f3, f1, f4	0xec610132	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f1=0x3ff0000000000000,f4=0x4008000000000000	f3	0
+rn/fmuls/rn2	fmuls f3, f1, f4	0xec610132	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f1=0x3ff0000000000000,f4=0x4008000000000000	f3	0
+rn/fmuls/rn3	fmuls f3, f1, f4	0xec610132	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f1=0x3ff0000000000000,f4=0x4008000000000000	f3	0
+rn/fdivs/rn0	fdivs f3, f1, f2	0xec611024	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f2=0x4008000000000000	f3	0
+rn/fdivs/rn1	fdivs f3, f1, f2	0xec611024	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f1=0x3ff0000000000000,f2=0x4008000000000000	f3	0
+rn/fdivs/rn2	fdivs f3, f1, f2	0xec611024	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f1=0x3ff0000000000000,f2=0x4008000000000000	f3	0
+rn/fdivs/rn3	fdivs f3, f1, f2	0xec611024	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f1=0x3ff0000000000000,f2=0x4008000000000000	f3	0
+rn/fsqrts/rn0	fsqrts f3, f2	0xec60102c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f2=0x4000000000000000	f3	0
+rn/fsqrts/rn1	fsqrts f3, f2	0xec60102c	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f2=0x4000000000000000	f3	0
+rn/fsqrts/rn2	fsqrts f3, f2	0xec60102c	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f2=0x4000000000000000	f3	0
+rn/fsqrts/rn3	fsqrts f3, f2	0xec60102c	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f2=0x4000000000000000	f3	0
+rn/fmadds/rn0	fmadds f3, f1, f4, f2	0xec61113a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f2=0x4008000000000000,f4=0x3fd5555555555555	f3	0
+rn/fmadds/rn1	fmadds f3, f1, f4, f2	0xec61113a	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f1=0x3ff0000000000000,f2=0x4008000000000000,f4=0x3fd5555555555555	f3	0
+rn/fmadds/rn2	fmadds f3, f1, f4, f2	0xec61113a	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f1=0x3ff0000000000000,f2=0x4008000000000000,f4=0x3fd5555555555555	f3	0
+rn/fmadds/rn3	fmadds f3, f1, f4, f2	0xec61113a	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f1=0x3ff0000000000000,f2=0x4008000000000000,f4=0x3fd5555555555555	f3	0
+rn/frsp/rn0	frsp f3, f2	0xfc601018	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f2=0x3fd5555555555555	f3	0
+rn/frsp/rn1	frsp f3, f2	0xfc601018	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f2=0x3fd5555555555555	f3	0
+rn/frsp/rn2	frsp f3, f2	0xfc601018	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f2=0x3fd5555555555555	f3	0
+rn/frsp/rn3	frsp f3, f2	0xfc601018	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f2=0x3fd5555555555555	f3	0
+rn/fctiw/rn0	fctiw f3, f2	0xfc60101c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f2=0xc004000000000000	f3	0
+rn/fctiw/rn1	fctiw f3, f2	0xfc60101c	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f2=0xc004000000000000	f3	0
+rn/fctiw/rn2	fctiw f3, f2	0xfc60101c	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f2=0xc004000000000000	f3	0
+rn/fctiw/rn3	fctiw f3, f2	0xfc60101c	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f2=0xc004000000000000	f3	0
+rn/fctiwz/rn0	fctiwz f3, f2	0xfc60101e	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f2=0xc004000000000000	f3	0
+rn/fctiwz/rn1	fctiwz f3, f2	0xfc60101e	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f2=0xc004000000000000	f3	0
+rn/fctiwz/rn2	fctiwz f3, f2	0xfc60101e	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f2=0xc004000000000000	f3	0
+rn/fctiwz/rn3	fctiwz f3, f2	0xfc60101e	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f2=0xc004000000000000	f3	0
+rn/fctid/rn0	fctid f3, f2	0xfc60165c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f2=0xc004000000000000	f3	0
+rn/fctid/rn1	fctid f3, f2	0xfc60165c	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f2=0xc004000000000000	f3	0
+rn/fctid/rn2	fctid f3, f2	0xfc60165c	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f2=0xc004000000000000	f3	0
+rn/fctid/rn3	fctid f3, f2	0xfc60165c	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f2=0xc004000000000000	f3	0
+rn/fctidz/rn0	fctidz f3, f2	0xfc60165e	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f2=0xc004000000000000	f3	0
+rn/fctidz/rn1	fctidz f3, f2	0xfc60165e	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f2=0xc004000000000000	f3	0
+rn/fctidz/rn2	fctidz f3, f2	0xfc60165e	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f2=0xc004000000000000	f3	0
+rn/fctidz/rn3	fctidz f3, f2	0xfc60165e	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f2=0xc004000000000000	f3	0
+rn/fcfid/rn0	fcfid f3, f2	0xfc60169c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f2=0x20000000000001	f3	0
+rn/fcfid/rn1	fcfid f3, f2	0xfc60169c	cr=0x9abcdef0,xer=0x0,fpscr=0x1,f2=0x20000000000001	f3	0
+rn/fcfid/rn2	fcfid f3, f2	0xfc60169c	cr=0x9abcdef0,xer=0x0,fpscr=0x2,f2=0x20000000000001	f3	0
+rn/fcfid/rn3	fcfid f3, f2	0xfc60169c	cr=0x9abcdef0,xer=0x0,fpscr=0x3,f2=0x20000000000001	f3	0
+fprf/plus-normal	fadd f3, f1, f2	0xfc61102a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f2=0x3ff0000000000000	f3	0
+fprf/minus-normal	fadd f3, f1, f2	0xfc61102a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0xbff0000000000000,f2=0xbff0000000000000	f3	0
+fprf/plus-zero	fadd f3, f1, f2	0xfc61102a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f2=0xbff0000000000000	f3	0
+fprf/minus-zero	fadd f3, f1, f2	0xfc61102a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x8000000000000000,f2=0x8000000000000000	f3	0
+fprf/plus-infinity	fadd f3, f1, f2	0xfc61102a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x7fefffffffffffff,f2=0x7fefffffffffffff	f3	0
+fprf/minus-infinity	fadd f3, f1, f2	0xfc61102a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0xfff0000000000000,f2=0xbff0000000000000	f3	0
+fprf/quiet-nan	fadd f3, f1, f2	0xfc61102a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x7ff8000000000000,f2=0x3ff0000000000000	f3	0
+fprf/plus-denormal	fmul f3, f1, f4	0xfc610132	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x10000000000000,f4=0x3fe0000000000000	f3	0
+fprf/minus-denormal	fmul f3, f1, f4	0xfc610132	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x8010000000000000,f4=0x3fe0000000000000	f3	0
+fprf/single-denormal	fmuls f3, f1, f4	0xec610132	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3810000000000000,f4=0x3fe0000000000000	f3	0
+vx/snan	fadd f3, f1, f2	0xfc61102a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x7ff4000000000000,f2=0x3ff0000000000000	f3	0
+vx/isi	fsub f3, f1, f2	0xfc611028	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x7ff0000000000000,f2=0x7ff0000000000000	f3	0
+vx/idi	fdiv f3, f1, f2	0xfc611024	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x7ff0000000000000,f2=0x7ff0000000000000	f3	0
+vx/zdz	fdiv f3, f1, f2	0xfc611024	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x0,f2=0x0	f3	0
+vx/imz	fmul f3, f1, f4	0xfc610132	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x7ff0000000000000,f4=0x0	f3	0
+vx/sqrt	fsqrt f3, f2	0xfc60102c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f2=0xbff0000000000000	f3	0
+vx/cvi	fctiw f3, f2	0xfc60101c	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f2=0x7ff0000000000000	f3	0
+vx/vc	fcmpo cr1, f1, f2	0xfc811040	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x7ff8000000000000,f2=0x3ff0000000000000	-	0
+sticky/zx-then-clean-add	fdiv f3, f1, f5; fadd f4, f1, f1	0xfc612824,0xfc81082a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f5=0x0	f3,f4	0
+sticky/xx-then-exact-add	fadd f3, f1, f2; fadd f4, f1, f1	0xfc61102a,0xfc81082a	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f2=0x3fd5555555555555	f3,f4	0
+record/fadd-inexact	fadd. f3, f1, f2	0xfc61102b	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f2=0x3fd5555555555555	f3	0
+record/fdiv-zero-divide	fdiv. f3, f1, f2	0xfc611025	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f2=0x0	f3	0
+record/fsub-invalid	fsub. f3, f1, f2	0xfc611029	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x7ff0000000000000,f2=0x7ff0000000000000	f3	0
+record/fmul-overflow	fmul. f3, f1, f4	0xfc610133	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x7fefffffffffffff,f4=0x4000000000000000	f3	0
+record/fmadds	fmadds. f3, f1, f4, f2	0xec61113b	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3ff0000000000000,f2=0x4008000000000000,f4=0x3fd5555555555555	f3	0
+record/fctiw-invalid	fctiw. f3, f2	0xfc60101d	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f2=0x7ff8000000000000	f3	0
+record/frsp-clean	frsp. f3, f2	0xfc601019	cr=0x9abcdef0,xer=0x0,fpscr=0x80000000,f2=0x3fe0000000000000	f3	0
+mcrfs/cr2-from-field0	mcrfs cr2, cr0	0xfd000080	cr=0x9abcdef0,xer=0x0,fpscr=0x9f000000	-	0
+mcrfs/cr3-from-field1	mcrfs cr3, cr1	0xfd840080	cr=0x9abcdef0,xer=0x0,fpscr=0x9f000000	-	0
+mcrfs/cr4-from-field3	mcrfs cr4, cr3	0xfe0c0080	cr=0x9abcdef0,xer=0x0,fpscr=0x9f01f0f8	-	0
+mcrfs/cr5-from-field4	mcrfs cr5, cr4	0xfe900080	cr=0x9abcdef0,xer=0x0,fpscr=0x9f01f0f8	-	0
+stfs/2e200	stfs f1, 0(r10)	0xd02a0000	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x4c70000000000000,mem=0x0000000000000000	m0	0
+stfs/-2e200	stfs f1, 0(r10)	0xd02a0000	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0xcc70000000000000,mem=0x0000000000000000	m0	0
+stfs/dmin	stfs f1, 0(r10)	0xd02a0000	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x10000000000000,mem=0x0000000000000000	m0	0
+stfs/2e-140	stfs f1, 0(r10)	0xd02a0000	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3730000000000000,mem=0x0000000000000000	m0	0
+stfs/third	stfs f1, 0(r10)	0xd02a0000	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x3fd5555555555555,mem=0x0000000000000000	m0	0

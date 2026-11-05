@@ -1,0 +1,19 @@
+id	asm	words	inputs	record	may_end_process
+mcrfs0/from-10000000	mcrfs cr2, cr0	0xfd000080	cr=0x9abcdef0,xer=0x0,fpscr=0x10000000	-	0
+mffs-then-mcrfs0/from-10000000	mffs f3; mcrfs cr2, cr0	0xfc60048e,0xfd000080	cr=0x9abcdef0,xer=0x0,fpscr=0x10000000	f3	0
+mcrfs0/from-90000000	mcrfs cr2, cr0	0xfd000080	cr=0x9abcdef0,xer=0x0,fpscr=0x90000000	-	0
+mffs-then-mcrfs0/from-90000000	mffs f3; mcrfs cr2, cr0	0xfc60048e,0xfd000080	cr=0x9abcdef0,xer=0x0,fpscr=0x90000000	f3	0
+mcrfs0/from-9f000000	mcrfs cr2, cr0	0xfd000080	cr=0x9abcdef0,xer=0x0,fpscr=0x9f000000	-	0
+mffs-then-mcrfs0/from-9f000000	mffs f3; mcrfs cr2, cr0	0xfc60048e,0xfd000080	cr=0x9abcdef0,xer=0x0,fpscr=0x9f000000	f3	0
+mcrfs0/from-9e000000	mcrfs cr2, cr0	0xfd000080	cr=0x9abcdef0,xer=0x0,fpscr=0x9e000000	-	0
+mffs-then-mcrfs0/from-9e000000	mffs f3; mcrfs cr2, cr0	0xfc60048e,0xfd000080	cr=0x9abcdef0,xer=0x0,fpscr=0x9e000000	f3	0
+mcrfs0/from-91000000	mcrfs cr2, cr0	0xfd000080	cr=0x9abcdef0,xer=0x0,fpscr=0x91000000	-	0
+mffs-then-mcrfs0/from-91000000	mffs f3; mcrfs cr2, cr0	0xfc60048e,0xfd000080	cr=0x9abcdef0,xer=0x0,fpscr=0x91000000	f3	0
+mcrfs0/from-11000000	mcrfs cr2, cr0	0xfd000080	cr=0x9abcdef0,xer=0x0,fpscr=0x11000000	-	0
+mffs-then-mcrfs0/from-11000000	mffs f3; mcrfs cr2, cr0	0xfc60048e,0xfd000080	cr=0x9abcdef0,xer=0x0,fpscr=0x11000000	f3	0
+mtfsb1-ox-then-mcrfs0	mtfsb1 3; mcrfs cr2, cr0	0xfc60004c,0xfd000080	cr=0x9abcdef0,xer=0x0,fpscr=0x0	-	0
+mtfsb1-ox-vxsnan-then-mcrfs0	mtfsb1 3; mtfsb1 7; mcrfs cr2, cr0	0xfc60004c,0xfce0004c,0xfd000080	cr=0x9abcdef0,xer=0x0,fpscr=0x0	-	0
+overflow-then-mcrfs0	fadd f3, f1, f1; mcrfs cr2, cr0	0xfc61082a,0xfd000080	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x7fefffffffffffff	f3	0
+overflow-vxsnan-then-mcrfs0	fadd f3, f1, f1; mtfsb1 7; mcrfs cr2, cr0	0xfc61082a,0xfce0004c,0xfd000080	cr=0x9abcdef0,xer=0x0,fpscr=0x0,f1=0x7fefffffffffffff	f3	0
+mcrfs1-then-mcrfs0/from-9f000000	mcrfs cr3, cr1; mcrfs cr2, cr0	0xfd840080,0xfd000080	cr=0x9abcdef0,xer=0x0,fpscr=0x9f000000	-	0
+mcrfs0-twice/from-9f000000	mcrfs cr2, cr0; mcrfs cr3, cr0	0xfd000080,0xfd800080	cr=0x9abcdef0,xer=0x0,fpscr=0x9f000000	-	0

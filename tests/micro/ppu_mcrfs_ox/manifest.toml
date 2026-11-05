@@ -1,0 +1,18 @@
+[test]
+name = "ppu_mcrfs_ox"
+
+# A hardware probe of what mcrfs copies from FPSCR field 0 when OX is
+# set: OX reached through mtfsf, mtfsb1 or an overflowing fadd, with and
+# without VXSNAN, and with an mffs or a second mcrfs around it.
+# cases.tsv names each case. The console capture is the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (18 cases). Each run records CR, XER, the FPSCR and the
+# registers the case names.
+memory_regions = [
+  { name = "result", addr = 0, size = 2320 },
+]
+
+[expect]
+outcome = "completed"

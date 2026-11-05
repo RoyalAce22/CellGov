@@ -1,6 +1,5 @@
 //! Per-instruction differential input and its provenance tag.
 
-use cellgov_ps3_abi::hw::ppc_isa::PPE_FPSCR_UNIMPLEMENTED_BITS;
 use cellgov_ps3_abi::hw::ppu::{FPR_COUNT, GPR_COUNT, VR_COUNT};
 use cellgov_sync::ReservedLine;
 
@@ -81,8 +80,11 @@ impl PpuStateSnapshot {
 
     /// Copy this snapshot into `state`, leaving PC and TB untouched.
     ///
-    /// The copy clears [`PPE_FPSCR_UNIMPLEMENTED_BITS`] in the FPSCR, as
-    /// every FPSCR write does.
+    /// The copy writes the FPSCR as every FPSCR write does, which is how
+    /// the `mtfsf 0xFF` seed of a console probe writes it:
+    /// - VX and FEX summarize the bits they cover.
+    /// - [`PPE_FPSCR_UNIMPLEMENTED_BITS`](cellgov_ps3_abi::hw::ppc_isa::PPE_FPSCR_UNIMPLEMENTED_BITS)
+    ///   read 0.
     pub fn apply(&self, state: &mut PpuState) {
         state.set_gpr_all(self.gpr);
         state.set_fpr_all(self.fpr);
@@ -91,7 +93,7 @@ impl PpuStateSnapshot {
         state.set_lr(self.lr);
         state.set_ctr(self.ctr);
         state.set_xer(self.xer);
-        state.set_fpscr(self.fpscr & !PPE_FPSCR_UNIMPLEMENTED_BITS);
+        state.set_fpscr(crate::fpscr::with_summaries(self.fpscr));
         state.set_vrsave(self.vrsave);
         state.set_vscr(self.vscr);
         state.set_reservation(self.reservation);

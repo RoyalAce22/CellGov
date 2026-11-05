@@ -5,9 +5,11 @@
 //! render addresses with an explicit `0x` prefix and a fixed width
 //! rather than `{:#x}`, and render a chained source through `Display`,
 //! never `Debug`. A public signature returns a typed error, not a
-//! string, a unit, an integer, or a boxed trait object. The comparison
-//! and exploration crates carry no floating-point field, so their
-//! observation and result types serialize without a lossy path.
+//! string, a unit, an integer, or a boxed trait object. The float-free
+//! crates carry no `f32` / `f64` token:
+//! - The comparison and exploration crates serialize their observation
+//!   and result types without a lossy path.
+//! - The PPU computes every guest-visible float on the soft-float engine.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -17,8 +19,8 @@ use proc_macro2::TokenTree;
 /// First words a message may start with in upper case.
 const PROPER_NOUNS: &[&str] = &["Cell"];
 
-/// Crates whose sources carry no `f32` / `f64`.
-const FLOAT_FREE_CRATES: &[&str] = &["cellgov_compare", "cellgov_explore"];
+/// Crates whose shipped sources carry no `f32` / `f64` token.
+const FLOAT_FREE_CRATES: &[&str] = &["cellgov_compare", "cellgov_explore", "cellgov_ppu"];
 
 /// Floors on the populations the guard polices. A collapse below one
 /// means the parser stopped recognising the shape it checks.
@@ -572,7 +574,7 @@ fn shipped_error_types_and_signatures_follow_the_style() {
 }
 
 #[test]
-fn the_comparison_and_exploration_crates_carry_no_float() {
+fn the_float_free_crates_carry_no_float() {
     let root = workspace_root();
     let mut files = Vec::new();
     for krate in FLOAT_FREE_CRATES {
@@ -597,7 +599,8 @@ fn the_comparison_and_exploration_crates_carry_no_float() {
     }
     assert!(
         violations.is_empty(),
-        "a float reached a crate whose observation and result types are declared float-free; \
-         the JSON round trip through those types would stop being exact:\n{violations:#?}"
+        "a float reached a crate declared float-free: the comparison and exploration crates \
+         keep their JSON round trip exact, and the PPU computes every guest-visible float on \
+         the integer soft-float engine:\n{violations:#?}"
     );
 }

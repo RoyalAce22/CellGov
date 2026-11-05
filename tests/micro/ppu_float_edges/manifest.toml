@@ -1,0 +1,21 @@
+[test]
+name = "ppu_float_edges"
+
+# The acceptance probe for PPU scalar floating point: each arithmetic,
+# multiply-add, divide, square-root and conversion op in all four RN
+# modes on a rounding-sensitive operand pair; each FPRF class; each VX
+# cause; sticky exception bits held across a later clean op; the Rc=1
+# copy into CR1; mcrfs clearing the bits it copies; and stfs of doubles
+# outside the single range. cases.tsv names each case. The console
+# capture is the answer.
+
+[observe]
+# The cgov_cases.h frame: a 16-byte header, then two 64-byte runs per
+# case (120 cases). Each run records CR, XER, the FPSCR and the
+# registers or memory the case names.
+memory_regions = [
+  { name = "result", addr = 0, size = 15376 },
+]
+
+[expect]
+outcome = "completed"

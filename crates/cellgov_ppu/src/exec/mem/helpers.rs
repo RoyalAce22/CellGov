@@ -55,20 +55,32 @@ pub(super) fn read_aligned_16(
 
 #[inline]
 #[track_caller]
-/// PPC `DOUBLE(WORD)`: 32-bit single -> 64-bit double; preserves NaN
-/// payloads bit-exactly so SNaNs survive stfsx -> lfsx round-trips.
+/// PPC `DOUBLE(WORD)`: 32-bit single -> 64-bit double, by bit selection
+/// with no rounding. A NaN keeps its payload bit-exactly, so an SNaN
+/// survives an stfsx -> lfsx round trip.
 ///
 /// [PPC-Book1 p:103 s:4.6.2] DOUBLE(WORD): single-precision to double-precision conversion pseudocode (normalized / denormalized / Zero / Infinity / NaN branches).
 pub(super) fn double_word(w: u32) -> u64 {
+    let sign = u64::from(w >> 31) << 63;
     let exp = (w >> 23) & 0xFF;
-    let frac23 = w & 0x007F_FFFF;
-    if exp == 0xFF && frac23 != 0 {
-        // NaN: WORD2:31 || 0^29 fills FRT5:63; FRT1:4 inherit WORD1.
-        let sign = ((w >> 31) & 1) as u64;
-        let frac52 = (frac23 as u64) << 29;
-        return (sign << 63) | (0x7FFu64 << 52) | frac52;
+    let frac = u64::from(w & 0x007F_FFFF);
+    match (exp, frac) {
+        // Zero: keep only the sign.
+        (0, 0) => sign,
+        // Denormalized: normalize the fraction, one exponent step per
+        // shift, from the single exponent -126.
+        (0, _) => {
+            let shift = frac.leading_zeros() - (64 - 23) + 1;
+            let fraction = (frac << shift) & 0x007F_FFFF;
+            let biased = (1023 - 126 - u64::from(shift)) << 52;
+            sign | biased | fraction << 29
+        }
+        // Infinity or NaN: FRT1:4 copy WORD1, which widens the exponent
+        // to all ones, and WORD2:31 || 0^29 fills FRT5:63.
+        (0xFF, _) => sign | 0x7FF << 52 | frac << 29,
+        // Normalized: rebias the exponent and widen the fraction.
+        _ => sign | (u64::from(exp) + 1023 - 127) << 52 | frac << 29,
     }
-    (f32::from_bits(w) as f64).to_bits()
 }
 
 /// PPC `SINGLE(FRS)`: the word a single-precision store writes. A bit
@@ -100,6 +112,10 @@ pub(super) fn single_frs(d: u64) -> u32 {
 #[cfg(test)]
 #[path = "tests/single_frs_tests.rs"]
 mod single_frs_tests;
+
+#[cfg(test)]
+#[path = "tests/double_word_tests.rs"]
+mod double_word_tests;
 
 #[cfg(test)]
 #[path = "tests/single_frs_console_tests.rs"]

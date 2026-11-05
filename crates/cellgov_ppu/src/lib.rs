@@ -14,6 +14,7 @@
         clippy::dbg_macro
     )
 )]
+#![cfg_attr(not(test), forbid(clippy::float_arithmetic))]
 
 pub mod caller_census;
 pub mod decode;
