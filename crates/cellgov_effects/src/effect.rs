@@ -188,8 +188,7 @@ pub enum Effect {
     /// Emission rules:
     ///
     /// - A read the guest can observe emits the packet.
-    /// - The time-base resync a unit does each step emits nothing: it
-    ///   reaches no guest register.
+    /// - A step emits one packet, however many times it reads the clock.
     ClockRead {
         /// Reading unit.
         source: UnitId,

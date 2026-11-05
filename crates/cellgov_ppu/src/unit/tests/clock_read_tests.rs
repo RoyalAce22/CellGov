@@ -32,10 +32,6 @@ const LWZ_R6_R5: u32 = (32 << 26) | (6 << 21) | (5 << 16);
 
 const UNMAPPED_EA: u64 = 0xFFFF_0000;
 
-/// Enough ticks that the resync moves the time base off zero. A count
-/// under one time-base tick leaves `tb` where it was.
-const RESYNC_TICKS: u64 = cellgov_time::TICKS_PER_SECOND;
-
 fn memory_of(words: &[u32]) -> GuestMemory {
     let mut mem = GuestMemory::new(256);
     for (index, raw) in words.iter().enumerate() {
@@ -95,18 +91,16 @@ fn two_reads_in_one_batch_publish_one_clock_read() {
 }
 
 #[test]
-fn the_per_step_time_base_resync_is_no_clock_read() {
+fn a_step_that_reads_no_time_base_publishes_none() {
     let mem = memory_of(&[addi_inc(3), addi_inc(4)]);
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
-    let ctx = ExecutionContext::new(&mem).with_current_tick(GuestTicks::new(RESYNC_TICKS));
+    let ctx = ExecutionContext::new(&mem)
+        .with_current_tick(GuestTicks::new(cellgov_time::TICKS_PER_SECOND));
     let mut effects = Vec::new();
     unit.run_until_yield(Budget::new(2), &ctx, &mut effects);
 
-    assert_eq!(
-        unit.state().tb,
-        cellgov_time::ticks_to_tb(RESYNC_TICKS),
-        "the resync moved the time base, so the silence below is not vacuous",
-    );
+    assert_eq!(unit.state().tb, 0, "the step left the time base alone");
+    assert_eq!(unit.time_base_read(), None);
     assert_eq!(clock_reads(&effects), 0);
 }
 

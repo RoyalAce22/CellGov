@@ -1008,9 +1008,9 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
                 .index(rb)
                 .src(XER))
         }
-        I::Mftb { rt } | I::Mftbu { rt } => {
-            one(Op::on(unit::FXU).dst(gpr(rt), k::PPU_MFTB_LATENCY_CYCLES))
-        }
+        I::Mftb { rt } | I::Mftbu { rt } => one(Op::on(unit::FXU)
+            .dst(gpr(rt), k::PPU_MFTB_LATENCY_CYCLES)
+            .kind(Kind::Unpipelined(k::PPU_MFTB_ISSUE_CYCLES as u16))),
         I::Mfcr { rt } | I::Mfocrf { rt, .. } => {
             let mut op = Op::on(unit::BRU)
                 .dst(gpr(rt), k::PPU_MFCR_CYCLES)

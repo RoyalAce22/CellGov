@@ -570,21 +570,14 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
 
         // CR / SPR moves
         // [PPC-Book2 p:30 s:4.1] mftb: read 64-bit Time Base register into RT (TBR=268).
+        // [PPC-Book2 p:30 s:4.2] Reading the time base has no effect on its value.
         PpuInstruction::Mftb { rt } => {
-            // Coarse-granularity advance: the per-step resync in
-            // `PpuExecutionUnit::run_until_yield` aligns TB with the
-            // global tick counter; the +1 here keeps two adjacent
-            // mftb reads within the same step strictly increasing,
-            // so a guest using a `delta = t2 - t1` idiom never
-            // observes zero.
-            state.tb = state.tb.saturating_add(1);
             state.clock_read = true;
             state.set_gpr(rt as usize, state.tb);
             ExecuteVerdict::Continue
         }
         // [PPC-Book2 p:30 s:4.1] mftbu: read TBU (high 32 bits of Time Base) into RT[32:63] (TBR=269).
         PpuInstruction::Mftbu { rt } => {
-            state.tb = state.tb.saturating_add(1);
             state.clock_read = true;
             state.set_gpr(rt as usize, (state.tb >> 32) & 0xFFFF_FFFF);
             ExecuteVerdict::Continue

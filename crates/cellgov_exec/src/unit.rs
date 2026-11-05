@@ -351,6 +351,13 @@ pub trait ExecutionUnit {
         None
     }
 
+    /// The last time base the latest step read, or `None` when it read
+    /// none. The runtime hands the highest such value to every later
+    /// step, so one unit's read never falls below another's.
+    fn time_base_read(&self) -> Option<u64> {
+        None
+    }
+
     /// Write `bytes` into the unit's local store at `lsa`: the landing of
     /// an MFC get the unit queued, which completes between its steps.
     ///

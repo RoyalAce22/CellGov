@@ -119,6 +119,10 @@ impl ExecutionUnit for PpuExecutionUnit {
         true
     }
 
+    fn time_base_read(&self) -> Option<u64> {
+        self.state.clock_read.then_some(self.state.tb)
+    }
+
     fn ppe_issue_pressure(&self) -> cellgov_exec::PpeIssuePressure {
         self.timing.pressure()
     }

@@ -977,7 +977,7 @@ pub enum PpuInstruction {
     },
 
     // -- Special-purpose register moves --
-    /// Move-from-time-base. The model advances TB by 1 per read.
+    /// Move-from-time-base.
     ///
     /// [PPC-Book2 p:30 s:4.1 Time Base Instructions] mftb XFX-form; SPR encoding TBR=268 (TB), 269 (TBU).
     Mftb {

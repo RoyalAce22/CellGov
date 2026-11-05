@@ -123,6 +123,10 @@ pub trait RegisteredUnit: 'static {
     /// [`ExecutionUnit::local_reservation`].
     fn local_reservation(&self) -> Option<u64>;
 
+    /// The time base the last step read. See
+    /// [`ExecutionUnit::time_base_read`].
+    fn time_base_read(&self) -> Option<u64>;
+
     /// Land an MFC get's bytes in the unit's local store. See
     /// [`ExecutionUnit::land_local_store`].
     ///
@@ -348,6 +352,11 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn local_reservation(&self) -> Option<u64> {
         ExecutionUnit::local_reservation(self)
+    }
+
+    #[inline]
+    fn time_base_read(&self) -> Option<u64> {
+        ExecutionUnit::time_base_read(self)
     }
 
     #[inline]

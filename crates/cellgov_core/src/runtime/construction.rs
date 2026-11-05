@@ -103,6 +103,7 @@ impl Runtime {
             memory,
             spaces: Default::default(),
             time: GuestTicks::ZERO,
+            time_base: 0,
             epoch: Epoch::ZERO,
             budget_per_step,
             steps_taken: 0,

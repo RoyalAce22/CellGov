@@ -72,6 +72,7 @@ pub struct RuntimeSnapshot {
     pub(super) memory: GuestMemory,
     pub(super) spaces: crate::runtime::spaces::SpaceTable,
     pub(super) time: GuestTicks,
+    pub(super) time_base: u64,
     pub(super) epoch: Epoch,
     pub(super) steps_taken: usize,
     pub(super) last_scheduled_unit: Option<UnitId>,
@@ -112,6 +113,7 @@ fn snapshot_field_categories(rt: &Runtime) {
         memory: _,
         spaces: _,
         time: _,
+        time_base: _,
         epoch: _,
         steps_taken: _,
         last_scheduled_unit: _,
@@ -190,6 +192,7 @@ impl Runtime {
             memory: self.memory.clone(),
             spaces: self.spaces.clone(),
             time: self.time,
+            time_base: self.time_base,
             epoch: self.epoch,
             steps_taken: self.steps_taken,
             last_scheduled_unit: self.last_scheduled_unit,
@@ -246,6 +249,7 @@ impl Runtime {
         self.memory = snap.memory.clone();
         self.spaces = snap.spaces.clone();
         self.time = snap.time;
+        self.time_base = snap.time_base;
         self.epoch = snap.epoch;
         self.steps_taken = snap.steps_taken;
         self.last_scheduled_unit = snap.last_scheduled_unit;

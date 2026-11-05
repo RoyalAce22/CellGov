@@ -79,6 +79,9 @@ pub struct Runtime {
     /// mappings. Empty for single-process boots.
     pub(super) spaces: crate::runtime::spaces::SpaceTable,
     pub(super) time: GuestTicks,
+    /// The highest time base any unit read so far. Every later time-base
+    /// read returns no less, so the run has one time base.
+    pub(super) time_base: u64,
     pub(super) epoch: Epoch,
     pub(super) budget_per_step: Budget,
     pub(super) steps_taken: usize,

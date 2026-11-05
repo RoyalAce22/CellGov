@@ -15,25 +15,19 @@ fn mflr_mtlr_roundtrip() {
 #[test]
 fn mftbu_returns_upper_32_bits_of_tb() {
     let mut s = PpuState::new();
-    s.tb = 0xAAAA_BBBB_0000_0000 - 1; // post-increment lands at 0xAAAA_BBBB_0000_0000
+    s.tb = 0xAAAA_BBBB_FFFF_FFFF;
     exec_no_mem(&PpuInstruction::Mftbu { rt: 6 }, &mut s);
     assert_eq!(s.gpr[6], 0xAAAA_BBBB);
+    assert_eq!(s.tb, 0xAAAA_BBBB_FFFF_FFFF);
 }
 
 #[test]
-fn mftb_returns_strictly_increasing_values_within_step() {
-    // Two consecutive mftb reads in the same step must differ so a
-    // guest doing `delta = t2 - t1` never observes zero.
+fn two_reads_of_one_time_base_return_one_value() {
     let mut s = PpuState::new();
     s.tb = 100;
     exec_no_mem(&PpuInstruction::Mftb { rt: 3 }, &mut s);
-    let t1 = s.gpr[3];
     exec_no_mem(&PpuInstruction::Mftb { rt: 4 }, &mut s);
-    let t2 = s.gpr[4];
-    assert!(
-        t2 > t1,
-        "mftb must strictly increase per read: {t1} -> {t2}"
-    );
+    assert_eq!((s.gpr[3], s.gpr[4], s.tb), (100, 100, 100));
 }
 
 #[test]

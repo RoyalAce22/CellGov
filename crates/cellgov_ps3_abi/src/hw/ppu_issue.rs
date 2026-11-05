@@ -434,6 +434,14 @@ pub const PPU_MFCR_CYCLES: u64 = 27;
 /// [CBE-Handbook p:720 s:A.1.2] `mftb`: about 40.
 pub const PPU_MFTB_LATENCY_CYCLES: u64 = 46;
 
+/// The cycles a move from the time base holds the fixed-point unit: one
+/// time-base tick.
+///
+/// On the console, eight back-to-back `mftb` to eight registers read
+/// values at least one tick apart, most often one (`ppu_timebase_reads`).
+/// One read a tick keeps every value distinct.
+pub const PPU_MFTB_ISSUE_CYCLES: u64 = PPU_CYCLES_PER_TB_TICK;
+
 /// The microwords of an `lha`.
 ///
 /// The handbook gives 7. Four independent `lha` from one L1 line and

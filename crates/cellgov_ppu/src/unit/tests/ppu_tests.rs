@@ -166,7 +166,7 @@ fn unknown_syscall_yields_with_args() {
 }
 
 #[test]
-fn mftb_resyncs_to_ctx_current_tick_at_step_entry() {
+fn mftb_reads_the_time_base_at_the_step_s_tick() {
     use cellgov_time::GuestTicks;
     let mut mem = GuestMemory::new(64);
     let mftb: u32 = (31u32 << 26) | (3u32 << 21) | (12u32 << 16) | (8u32 << 11) | (371u32 << 1);
@@ -177,8 +177,7 @@ fn mftb_resyncs_to_ctx_current_tick_at_step_entry() {
     let ctx = ExecutionContext::new(&mem)
         .with_current_tick(GuestTicks::new(cellgov_time::TICKS_PER_SECOND));
     let _ = unit.run_until_yield(Budget::new(2), &ctx, &mut Vec::new());
-    // mftb advances TB by +1 after resync; expected = base + 1.
-    assert_eq!(unit.state().gpr[3], cellgov_time::CELL_PPU_TIMEBASE_HZ + 1);
+    assert_eq!(unit.state().gpr[3], cellgov_time::CELL_PPU_TIMEBASE_HZ);
 }
 
 #[test]

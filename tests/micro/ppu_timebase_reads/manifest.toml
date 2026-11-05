@@ -1,0 +1,21 @@
+[test]
+name = "ppu_timebase_reads"
+
+# A hardware probe of the time-base reads: the deltas of 64 back-to-back
+# mftb reads, mftbu / mftb / mftbu triples away from and across a carry
+# out of the low word, and a value one thread reads and publishes against
+# the other thread's next read, both ways, 1,000 times. The probe sleeps
+# until the low word is about to carry, so a run takes up to a minute.
+# ppu/main.c's header lists the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 720 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 720 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 120000

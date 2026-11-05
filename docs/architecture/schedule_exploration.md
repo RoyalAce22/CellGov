@@ -202,9 +202,11 @@ the guest can store anywhere. The step therefore emits `ClockRead` and
 conflicts with every step. The clause pairs on the read rather than on
 where the value went.
 
-The read returns the reader's own clock. Another unit's steps move it
-only through a wake, whose tick is the waker's, so the clause is wider
-than needed for a reader nothing wakes.
+The read returns the reader's own clock, or the highest time base any
+unit read before the step when that is higher. Another unit's steps
+move it through a wake, whose tick is the waker's, or through a read of
+their own, so the clause is wider than needed only for a reader that
+nothing wakes and no other unit's read precedes.
 
 An SPU step does the same when its result depends on the tick it ran
 at: a read of a running decrementer, a decrementer write, the first

@@ -178,9 +178,9 @@ pub struct PpuState {
     /// The CTRL value an `mfspr 136` returns (hash-excluded): the unit
     /// sets it from the PPE placement at the start of each batch.
     pub ctrl: u32,
-    /// Time base register.
+    /// The time base this unit last read.
     ///
-    /// [PPC-Book2 p:37 s:4] Time Base (TB) is a 64-bit register, increments periodically.
+    /// [PPC-Book2 p:29 s:4] Time Base (TB) is a 64-bit register, increments periodically.
     pub tb: u64,
     /// Per-unit half of the reservation; `stwcx`/`stdcx` succeeds only
     /// when this and [`cellgov_sync::ReservationTable`] agree.

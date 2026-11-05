@@ -16,6 +16,17 @@
 /// (`lv2_timer_time_tty`).
 pub const CELL_PPU_TIMEBASE_HZ: u64 = 79_800_000;
 
+/// The time base at guest time 0: CellGov's choice.
+///
+/// [PPC-Book2 p:29 s:4] The time base is a 64-bit count that increments
+/// periodically, at an implementation-dependent rate.
+///
+/// The reference console counts from power-on: a title's first read there
+/// held more than ten hours of ticks (`ppu_timebase_reads`). CellGov starts
+/// the count when the run starts, so a title reads the time since its own
+/// start.
+pub const PPU_TIME_BASE_ORIGIN: u64 = 0;
+
 /// Gives the effective-address offset of the PowerPC System Call interrupt vector.
 ///
 /// [PPC-Book3 p:73 s:5.5.13] A System Call interrupt resumes at effective address 0xC00.

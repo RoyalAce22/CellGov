@@ -45,6 +45,7 @@ pub struct ExecutionContext<'a> {
     ppe_siblings: u32,
     ppe_sibling_pressure: PpeIssuePressure,
     ppe_older_sibling: bool,
+    time_base: u64,
 }
 
 /// The queued MFC commands of one unit that a new command of the unit
@@ -96,6 +97,7 @@ impl<'a> ExecutionContext<'a> {
             ppe_siblings: 0,
             ppe_sibling_pressure: PpeIssuePressure::NONE,
             ppe_older_sibling: false,
+            time_base: 0,
         }
     }
 
@@ -123,6 +125,7 @@ impl<'a> ExecutionContext<'a> {
             ppe_siblings: 0,
             ppe_sibling_pressure: PpeIssuePressure::NONE,
             ppe_older_sibling: false,
+            time_base: 0,
         }
     }
 
@@ -152,6 +155,7 @@ impl<'a> ExecutionContext<'a> {
             ppe_siblings: 0,
             ppe_sibling_pressure: PpeIssuePressure::NONE,
             ppe_older_sibling: false,
+            time_base: 0,
         }
     }
 
@@ -185,6 +189,7 @@ impl<'a> ExecutionContext<'a> {
             ppe_siblings: 0,
             ppe_sibling_pressure: PpeIssuePressure::NONE,
             ppe_older_sibling: false,
+            time_base: 0,
         }
     }
 
@@ -196,6 +201,12 @@ impl<'a> ExecutionContext<'a> {
             current_tick,
             ..self
         }
+    }
+
+    /// Attach the highest time base any unit read before this step.
+    #[inline]
+    pub const fn with_time_base(self, time_base: u64) -> Self {
+        Self { time_base, ..self }
     }
 
     /// Attach the committed reservation table, replacing any prior
@@ -458,6 +469,13 @@ impl<'a> ExecutionContext<'a> {
     #[inline]
     pub const fn current_tick(&self) -> GuestTicks {
         self.current_tick
+    }
+
+    /// The highest time base any unit read before this step. A
+    /// time-base read in this step returns no less.
+    #[inline]
+    pub const fn time_base(&self) -> u64 {
+        self.time_base
     }
 
     /// Whether the runtime wants per-instruction `(pc, state_hash)`

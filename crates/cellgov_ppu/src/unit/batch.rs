@@ -7,6 +7,7 @@ use crate::{decode, exec, instruction, state};
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionStepResult, LocalDiagnostics, YieldReason};
+use cellgov_ps3_abi::hw::ppu::PPU_TIME_BASE_ORIGIN;
 use cellgov_time::{Budget, InstructionCost};
 
 /// What a batch rewinds to when a step inside it faults.
@@ -364,9 +365,13 @@ impl PpuExecutionUnit {
         }
     }
 
-    /// Applies what the runtime committed since the last batch: the
-    /// reservation clear, the time-base resync, a syscall return,
-    /// register writes, and the PPE sibling count.
+    /// Applies the runtime's committed inputs and clears the clock-read flag.
+    ///
+    /// The inputs the runtime committed since the last batch:
+    /// - the reservation clear
+    /// - a syscall return
+    /// - register writes
+    /// - the PPE sibling count
     #[inline]
     fn apply_committed_inputs(&mut self, ctx: &ExecutionContext<'_>) {
         // Cross-unit reservation clear: committed table is authoritative.
@@ -374,13 +379,6 @@ impl PpuExecutionUnit {
             self.state.set_reservation(None);
         }
 
-        // `max` preserves strict TB monotonicity when a prior step's
-        // mftb advances outran the inter-step tick delta.
-        let tb_from_tick = cellgov_time::ticks_to_tb(ctx.current_tick().raw());
-        if tb_from_tick > self.state.tb {
-            self.state.tb = tb_from_tick;
-        }
-        // The resync reaches no guest register, so it is no clock read:
         // `mftb` and `mftbu` set the flag, and each step starts clear.
         self.state.clock_read = false;
 
@@ -424,8 +422,10 @@ impl PpuExecutionUnit {
         Ok(insn)
     }
 
-    /// Gives an `mftb` / `mftbu` the time base at its issue cycle; the
-    /// read itself adds one.
+    /// Gives an `mftb` / `mftbu` the time base at its issue cycle.
+    ///
+    /// The run has one time base: a read returns no less than any read
+    /// before it, on this unit or another.
     #[inline]
     fn align_clock_read_to_issue(
         &mut self,
@@ -447,8 +447,8 @@ impl PpuExecutionUnit {
             .current_tick()
             .raw()
             .saturating_add(issue.saturating_sub(entry.cycle));
-        let tb = cellgov_time::ticks_to_tb(tick);
-        self.state.tb = self.state.tb.max(tb.saturating_sub(1));
+        let tb = PPU_TIME_BASE_ORIGIN.wrapping_add(cellgov_time::ticks_to_tb(tick));
+        self.state.tb = self.state.tb.max(tb).max(ctx.time_base());
     }
 
     /// Records one retirement at `step_pc`: the full-state window entry,

@@ -193,6 +193,7 @@ impl Runtime {
             let ctx = ctx
                 .with_reservations(unit_reservations)
                 .with_current_tick(start)
+                .with_time_base(self.time_base)
                 .with_trace_per_step(self.mode != RuntimeMode::FaultDriven)
                 .with_outstanding_dma_tags(outstanding_tags)
                 .with_list_stall_tags(self.dma_queue.stall_notify_tags(unit_id))
@@ -209,6 +210,9 @@ impl Runtime {
                 .get_mut(unit_id)
                 .expect("scheduler returned an id that is not in the registry");
             let res = unit.run_until_yield(self.budget_per_step, &ctx, &mut effects_buf);
+            if let Some(tb) = unit.time_base_read() {
+                self.time_base = self.time_base.max(tb);
+            }
             let retired = if self.mode == RuntimeMode::FaultDriven {
                 RetiredState::default()
             } else {
@@ -568,3 +572,7 @@ mod runnable_recycle_tests;
 #[cfg(test)]
 #[path = "tests/step_index_tests.rs"]
 mod step_index_tests;
+
+#[cfg(test)]
+#[path = "tests/time_base_handoff_tests.rs"]
+mod time_base_handoff_tests;
