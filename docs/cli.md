@@ -948,6 +948,7 @@ Usage: cellgov boot bench [OPTIONS] <--title <NAME>|--content-id <ID>|--title-ma
 | `--strict-reserved` | -- | Fault on a read of a reserved region instead of serving zeroes. |
 | `--guest-arg` | `VALUE` | One guest argv entry; repeat for more. Values may spell a flag. |
 | `--save-state-trace` | `PATH` | Write the run's state trace here. It records a state hash per step, which makes the run a divergence diagnostic instead of a throughput measurement. |
+| `--save-load-profile` | `PATH` | Write the run's load-path profile here as JSON. It counts the loads the store buffer answers and the regions each load site reads. A profiled run is slower, so its wall time measures nothing. |
 | `--run-index` | `N` | Index this measurement reports on its `BENCH_RESULT` line. A run set stamps each of its children. |
 | `--skip-module-start` | -- | Run no firmware module's module_start in the boot process. |
 | `--force-system-authid` | -- | Serve the system-class bdj.self program authority id instead of the one the title's SELF names. |
@@ -999,6 +1000,7 @@ Usage: cellgov boot bench-once [OPTIONS] <--title <NAME>|--content-id <ID>|--tit
 | `--strict-reserved` | -- | Fault on a read of a reserved region instead of serving zeroes. |
 | `--guest-arg` | `VALUE` | One guest argv entry; repeat for more. Values may spell a flag. |
 | `--save-state-trace` | `PATH` | Write the run's state trace here. It records a state hash per step, which makes the run a divergence diagnostic instead of a throughput measurement. |
+| `--save-load-profile` | `PATH` | Write the run's load-path profile here as JSON. It counts the loads the store buffer answers and the regions each load site reads. A profiled run is slower, so its wall time measures nothing. |
 | `--run-index` | `N` | Index this measurement reports on its `BENCH_RESULT` line. A run set stamps each of its children. |
 | `--skip-module-start` | -- | Run no firmware module's module_start in the boot process. |
 | `--force-system-authid` | -- | Serve the system-class bdj.self program authority id instead of the one the title's SELF names. |
