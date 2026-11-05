@@ -1084,11 +1084,15 @@ mod window;
 
 #[path = "guest_fetch.rs"]
 mod fetch;
-pub use fetch::FetchRefusal;
+pub use fetch::{FetchCode, FetchRefusal};
 
 #[cfg(test)]
 #[path = "tests/fetch_tests.rs"]
 mod fetch_tests;
+
+#[cfg(test)]
+#[path = "tests/fetch_region_tests.rs"]
+mod fetch_region_tests;
 
 #[cfg(test)]
 #[path = "tests/guest_tests.rs"]

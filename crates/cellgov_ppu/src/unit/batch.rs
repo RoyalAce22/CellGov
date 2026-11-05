@@ -93,7 +93,6 @@ impl PpuExecutionUnit {
             timing: (max_budget > 1).then(|| self.timing.core()),
         };
 
-        let mem = ctx.memory().as_bytes();
         let regions = RegionTable::new(ctx.memory().region_views());
         let region_views = regions.as_slice();
         // A window's bytes are another unit's state, which the runtime
@@ -114,6 +113,8 @@ impl PpuExecutionUnit {
         // The fetchable span the last fetch read: its first byte and the
         // last word that starts in it. It starts empty.
         let mut fetchable = (1, 0);
+        // The base and bytes of the region that holds `fetchable`.
+        let mut code: CodeBytes<'_> = (0, &[]);
 
         loop {
             let step_pc = self.state.pc;
@@ -148,9 +149,12 @@ impl PpuExecutionUnit {
             let fetched = if holds_word(fetchable, step_pc) {
                 Ok(())
             } else {
-                fetch_window(ctx.memory(), step_pc).map(|window| fetchable = window)
+                fetch_window(ctx.memory(), step_pc).map(|(window, bytes)| {
+                    fetchable = window;
+                    code = bytes;
+                })
             };
-            let mut insn = match fetched.and_then(|()| self.fetch_decode(step_pc, mem)) {
+            let mut insn = match fetched.and_then(|()| self.fetch_decode(step_pc, code)) {
                 Ok(insn) => insn,
                 Err(fault) => {
                     let exit = FaultExit::Verdict(fault);
@@ -196,7 +200,7 @@ impl PpuExecutionUnit {
                 _ => false,
             };
             if split {
-                insn = match decode_stored(step_pc, mem) {
+                insn = match decode_stored(step_pc, code) {
                     Ok((_, insn)) => insn,
                     Err(fault) => {
                         let exit = FaultExit::Verdict(fault);
@@ -478,7 +482,7 @@ impl PpuExecutionUnit {
     fn fetch_decode(
         &mut self,
         step_pc: u64,
-        mem: &[u8],
+        code: CodeBytes<'_>,
     ) -> Result<instruction::PpuInstruction, PpuFault> {
         if let Some(cached) = self
             .instruction_shadow
@@ -489,7 +493,7 @@ impl PpuExecutionUnit {
             return Ok(cached);
         }
         self.shadow_misses += 1;
-        let (raw, insn) = decode_stored(step_pc, mem)?;
+        let (raw, insn) = decode_stored(step_pc, code)?;
         if let Some(s) = self.instruction_shadow.as_mut() {
             let _ = s.refresh(step_pc, raw);
         }
@@ -652,39 +656,51 @@ fn holds_word((start, last): (u64, u64), pc: u64) -> bool {
     start <= pc && pc <= last
 }
 
-/// The fetchable span of `mem` that holds the word at `pc`, as its first
-/// byte and the last word that starts in it.
+/// The base guest address of a region and its bytes.
+type CodeBytes<'a> = (u64, &'a [u8]);
+
+/// The fetchable span that holds the word at `pc`, and its region.
+///
+/// The span is its first byte and the last word that starts in it.
 ///
 /// # Errors
 ///
 /// Returns `PpuInterrupt::InstructionStorage` if a byte of the word is
 /// not fetchable. The interrupt sets `no_execute` if that byte is mapped.
-fn fetch_window(mem: &cellgov_mem::GuestMemory, pc: u64) -> Result<(u64, u64), PpuFault> {
+fn fetch_window(
+    mem: &cellgov_mem::GuestMemory,
+    pc: u64,
+) -> Result<((u64, u64), CodeBytes<'_>), PpuFault> {
     use cellgov_mem::FetchRefusal;
     let refused = |r: FetchRefusal| {
         PpuFault::Interrupt(PpuInterrupt::InstructionStorage {
             no_execute: r == FetchRefusal::NoExecute,
         })
     };
-    let (start, end) = mem.fetch_span(pc).map_err(refused)?;
+    let code = mem.fetch_code(pc).map_err(refused)?;
+    let (start, end) = code.span;
     match pc.checked_add(4) {
-        Some(word_end) if word_end <= end => Ok((start, end - 4)),
+        Some(word_end) if word_end <= end => Ok(((start, end - 4), (code.base, code.bytes))),
         _ => Err(refused(
             mem.fetch_span(end).err().unwrap_or(FetchRefusal::Unmapped),
         )),
     }
 }
 
-/// The word stored at `pc` and its decode, without the shadow.
+/// The word stored at `pc` in a region, and its decode, without the shadow.
 ///
 /// # Errors
 ///
-/// - A fetch past guest memory: the instruction storage interrupt.
+/// - A fetch outside the region: the instruction storage interrupt.
 /// - A word with no decode: the illegal-instruction program interrupt.
 #[inline]
-fn decode_stored(pc: u64, mem: &[u8]) -> Result<(u32, instruction::PpuInstruction), PpuFault> {
-    let bytes = usize::try_from(pc)
-        .ok()
+fn decode_stored(
+    pc: u64,
+    (base, mem): CodeBytes<'_>,
+) -> Result<(u32, instruction::PpuInstruction), PpuFault> {
+    let bytes = pc
+        .checked_sub(base)
+        .and_then(|off| usize::try_from(off).ok())
         .and_then(|pc| mem.get(pc..pc.checked_add(4)?))
         .ok_or(PpuFault::Interrupt(PpuInterrupt::InstructionStorage {
             no_execute: false,
