@@ -15,6 +15,7 @@ mod scalar;
 mod string;
 
 pub(crate) use execute::execute;
+pub(in crate::exec) use execute::store_prechecked;
 pub(crate) use string::string_loads_into;
 
 #[cfg(test)]

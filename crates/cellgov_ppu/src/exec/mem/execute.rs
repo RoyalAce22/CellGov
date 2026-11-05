@@ -449,7 +449,7 @@ fn store_conditional(
 /// leaves part of the instruction staged; a retry would duplicate the
 /// earlier writes.
 #[inline]
-fn store_prechecked(
+pub(in crate::exec) fn store_prechecked(
     store_buf: &mut StoreBuffer,
     region_views: &[cellgov_mem::RegionView<'_>],
     count: usize,

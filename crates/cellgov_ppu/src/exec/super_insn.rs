@@ -10,6 +10,7 @@
 //! [ErtlGregg2003 p:20 s:6.3] dispatch for super-instruction arms.
 
 use crate::exec::branch::branch_condition;
+use crate::exec::mem::store_prechecked;
 use crate::exec::memory_helpers::{buffer_store, load_ze, LoadPort, Width};
 use crate::exec::ExecuteVerdict;
 use crate::instruction::PpuInstruction;
@@ -188,12 +189,12 @@ pub(crate) fn execute(
             // construction; if that constraint is ever relaxed,
             // StdStd needs an `offset2` field.
             let ea1 = state.ea_d_form(ra, offset1);
-            let v1 = buffer_store(store_buf, region_views, ea1, 8, state.gpr[rs1 as usize]);
-            if !v1.allows_writeback() {
-                return v1;
-            }
             let ea2 = ea1.wrapping_add(8);
-            buffer_store(store_buf, region_views, ea2, 8, state.gpr[rs2 as usize])
+            let stores = [
+                (ea1, 8u8, state.gpr[rs1 as usize]),
+                (ea2, 8u8, state.gpr[rs2 as usize]),
+            ];
+            store_prechecked(store_buf, region_views, 2, stores.into_iter(), "stdstd")
         }
         // [PPC-Book1 p:60 s:3.3.9 Compare Immediate] cmpi (cmpwi when L=0): signed 32-bit compare against EXTS(SI), CR field <- c || XER[SO].
         // [PPC-Book1 p:18 s:2.3.1 Condition Register] CR field bits LT/GT/EQ/SO occupy positions 0/1/2/3 within the 4-bit field.

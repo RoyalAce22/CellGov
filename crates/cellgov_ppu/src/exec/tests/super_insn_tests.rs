@@ -900,12 +900,9 @@ fn cmpw_bc_taken_with_ctr_decrement_does_decrement_ctr() {
 }
 
 #[test]
-fn stdstd_no_partial_commit_on_buffer_full() {
-    // When the buffer is one slot short of capacity, the first
-    // std lands but the second hits BufferFull. The first store
-    // is staged in the buffer (architectural; the retry path
-    // replays the whole super-insn from EA1) but no second store
-    // is staged, and the verdict is BufferFull.
+fn stdstd_refuses_the_pair_whole_when_one_slot_is_free() {
+    // The retry after the flush replays the pair from EA1, so it would
+    // stage the first store twice if the refusal left that store staged.
     use crate::exec::test_support::uid;
     let mut s = PpuState::new();
     s.set_gpr(1, 0x1000);
@@ -932,11 +929,7 @@ fn stdstd_no_partial_commit_on_buffer_full() {
         &mut effects,
         &mut store_buf,
     );
-    // First store fills the last slot, second store cannot stage.
     assert_eq!(v, ExecuteVerdict::BufferFull);
-    assert_eq!(
-        store_buf.len(),
-        64,
-        "first store staged, second hit full buffer"
-    );
+    assert_eq!(store_buf.len(), 63, "neither store staged");
+    assert!(effects.is_empty(), "no write intent for a refused pair");
 }
