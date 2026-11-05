@@ -193,13 +193,16 @@ impl PpuExecutionUnit {
             // - a break is set on the second slot,
             // - per-step tracing is on,
             // - a full-state window is set,
-            // - the second slot is not fetchable, or
+            // - the second slot is not fetchable,
             // - a Raw SPU window is mapped and the second half reads memory
-            //   after the first half accessed it.
+            //   after the first half accessed it, or
+            // - a PPE sibling is runnable.
             // The trace and the full-state window record the state after each
             // instruction, and a fused head has no state between its slots.
             // A Raw SPU window changes only between batches, and the batch
-            // ends at the first half that reaches it.
+            // ends at the first half that reaches it. Beside a sibling the
+            // batch ends at the first instruction that reaches a grid line
+            // (`leads_sibling`), and that can be the first half.
             // A head whose second half refused fused also runs split, so
             // its first instruction retires before the refusal.
             let split = match insn {
@@ -212,6 +215,7 @@ impl PpuExecutionUnit {
                         || ctx.trace_per_step()
                         || self.full_state_window.is_some()
                         || (window_span.is_some() && insn.reads_after_access())
+                        || ctx.ppe_siblings() > 0
                 }
                 _ => false,
             };

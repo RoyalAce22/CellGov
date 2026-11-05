@@ -32,11 +32,11 @@
       "class": "exact"
     },
     "ldarx": {
-      "value": 27953,
+      "value": 28459,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 69822,
+      "value": 72356,
       "class": "at-least"
     },
     "lwmutex_acquires": {
@@ -64,7 +64,7 @@
       "class": "absent"
     },
     "mutex_unlock_not_owner": {
-      "value": 104,
+      "value": 109,
       "class": "at-least"
     },
     "prx_load_hle_stubs": {
@@ -108,11 +108,11 @@
       "class": "at-least"
     },
     "stdcx": {
-      "value": 27953,
+      "value": 28459,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 69821,
+      "value": 72355,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {
@@ -164,7 +164,7 @@
       "class": "absent"
     },
     "timer_sleeps": {
-      "value": 10473,
+      "value": 10979,
       "class": "at-least"
     },
     "uart_cids_distinct": {
@@ -199,7 +199,7 @@
   "unsupported_syscalls": {
     "45": {
       "hits": 2,
-      "first_hit": 2108182252
+      "first_hit": 2108182247
     },
     "133": {
       "hits": 4,
@@ -223,7 +223,7 @@
     },
     "398": {
       "hits": 1,
-      "first_hit": 65948207235
+      "first_hit": 65948207236
     },
     "465": {
       "hits": 1,
@@ -235,15 +235,15 @@
     },
     "610": {
       "hits": 21,
-      "first_hit": 2108158243
+      "first_hit": 2108158244
     },
     "612": {
       "hits": 1,
-      "first_hit": 2108141422
+      "first_hit": 2108141412
     },
     "635": {
       "hits": 1,
-      "first_hit": 2187816802
+      "first_hit": 2187816531
     },
     "650": {
       "hits": 1,
@@ -255,7 +255,7 @@
     },
     "811": {
       "hits": 3,
-      "first_hit": 2108303126
+      "first_hit": 2108303141
     },
     "817": {
       "hits": 10,
@@ -267,11 +267,11 @@
     },
     "867": {
       "hits": 4,
-      "first_hit": 2187692555
+      "first_hit": 2187692284
     },
     "873": {
       "hits": 3,
-      "first_hit": 2108271905
+      "first_hit": 2108271920
     },
     "956": {
       "hits": 1,

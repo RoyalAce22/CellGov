@@ -44,6 +44,10 @@ mod time_base_tests;
 mod sibling_lead_tests;
 
 #[cfg(test)]
+#[path = "tests/fused_sibling_line_tests.rs"]
+mod fused_sibling_line_tests;
+
+#[cfg(test)]
 #[path = "tests/barrier_tests.rs"]
 mod barrier_tests;
 
