@@ -31,6 +31,13 @@ use super::unpack::{vupkhpx, vupkhsb, vupkhsh, vupklpx, vupklsb, vupklsh};
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::ops::{VaOp, VxOp};
 use crate::instruction::PpuInstructionKind;
+use cellgov_ps3_abi::hw::ppu::PPU_USER_MSR;
+
+// Every vector arm executes: no arm raises a vector-unavailable interrupt.
+const _: () = assert!(
+    PPU_USER_MSR.vec,
+    "the vector arms implement AltiVec available only"
+);
 use crate::state::PpuState;
 use cellgov_float::{Rounding, VmxMode};
 use cellgov_ps3_abi::hw::ppu::VSCR_NJ;

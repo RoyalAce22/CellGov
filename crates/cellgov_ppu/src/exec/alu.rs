@@ -2,11 +2,21 @@
 //! Every arm here is a pure register-to-register or register-to-CR
 //! operation; nothing in this module touches memory or emits effects.
 
+use cellgov_ps3_abi::hw::ppu::PPU_USER_MSR;
 use cellgov_ps3_abi::hw::ppu_spr::{PS3_PROCESS_SPRG3, XER_IMPLEMENTED_BITS};
 
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::PpuInstruction;
 use crate::state::{cmp_cr_field, PpuState};
+
+/// The carrying arms here and the OE arms of add, subtract-from and negate
+/// take their bit from a 64-bit sum, which is correct in 64-bit mode only.
+///
+/// [PPC-Book1 p:51 s:3.3.8] CA is the carry out of bit 0 in 64-bit mode and out of bit 32 in 32-bit mode; add and subtract OV is mode-dependent the same way.
+const _: () = assert!(
+    PPU_USER_MSR.sf,
+    "the carrying arms implement 64-bit mode only"
+);
 
 pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVerdict {
     match *insn {

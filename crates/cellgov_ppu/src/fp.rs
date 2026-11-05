@@ -18,11 +18,13 @@
 //! - `fsel` and the moves leave the FPSCR unchanged.
 //!
 //! An enabled exception sets FEX and raises no interrupt: the guest runs
-//! in Ignore Exceptions mode (`MSR[FE0:FE1]` = 0), so every arm
-//! continues. This holds for an FPSCR move that sets an exception bit and
-//! its enable bit together. The ppu_fp_enabled_results and
-//! ppu_fpscr_enabled_moves console captures run every enabled case to
-//! completion.
+//! in Ignore Exceptions mode (`MSR[FE0:FE1]` = 0, as `PPU_USER_MSR`
+//! declares), so every arm continues. This holds for an FPSCR move that
+//! sets an exception bit and its enable bit together. The
+//! ppu_fp_enabled_results and ppu_fpscr_enabled_moves console captures
+//! run every enabled case to completion. The ppu_user_msr capture runs
+//! one enabled case to completion on the main thread and on a created
+//! thread.
 // [PPC-Book1 p:95 s:4.4] in Ignore Exceptions mode the system floating-point enabled exception handler is not invoked.
 // [PPC-Book1 p:96 s:4.4] FE0 and FE1 do not change whether a result is stored or its value; the FPSCR enable bits decide both.
 // [PPC-Book1 p:89 s:4.2.2] FPSCR[RN] encoding: 0b00 selects Round to Nearest.
@@ -32,6 +34,7 @@ use cellgov_float::{
     ppc_msub, ppc_mul, ppc_nmadd, ppc_nmsub, ppc_round_to_single, ppc_sqrt, ppc_sub, PpcEnables,
     PpcInteger, PpcPrecision, PpcResult, Rounding,
 };
+use cellgov_ps3_abi::hw::ppu::PPU_USER_MSR;
 
 use crate::exec::ExecuteVerdict;
 use crate::fp_status::{
@@ -40,6 +43,12 @@ use crate::fp_status::{
 use crate::fpscr::{self, write_status, Fprf};
 use crate::instruction::ops::{Fp59Op, Fp63Op};
 use crate::state::PpuState;
+
+// Every arm executes, and none raises an enabled-exception interrupt.
+const _: () = assert!(
+    PPU_USER_MSR.fp && !PPU_USER_MSR.fe0 && !PPU_USER_MSR.fe1,
+    "the FP arms implement FP available in Ignore Exceptions mode only"
+);
 
 /// Writes an engine `result` to FRT and its status to the FPSCR.
 ///

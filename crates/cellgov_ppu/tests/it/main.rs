@@ -40,6 +40,7 @@ mod console_ppu_sync_l3;
 mod console_ppu_synced_code_store;
 mod console_ppu_timebase_reads;
 mod console_ppu_trap_immediate;
+mod console_ppu_user_msr;
 mod console_ppu_vadd_sub_sat;
 mod console_ppu_vcmp_int_record;
 mod console_ppu_vfp_addsub;

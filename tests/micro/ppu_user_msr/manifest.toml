@@ -1,0 +1,20 @@
+[test]
+name = "ppu_user_msr"
+
+# A hardware probe of the MSR a PS3 user thread runs under, read through
+# what its bits govern: the first FP and vector instructions at a
+# thread's entry, addic and add. across the 32-bit boundary, and an
+# enabled 0 / 0 fdiv, on the main thread and on one created thread.
+# ppu/main.c's header lists the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 192 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 192 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 30000

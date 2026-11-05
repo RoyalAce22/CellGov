@@ -111,6 +111,78 @@ pub const PPU_THREAD_ENTRY_VSCR: u32 = VSCR_NJ;
 /// at 0.
 pub const PPU_THREAD_ENTRY_FPR: u64 = 0;
 
+/// The MSR bits a PPU thread's own code can observe, one field per bit.
+///
+/// [PPC-Book3 p:10 s:2.2.3] The MSR defines the state of the processor.
+/// [PPC-Book3 p:23 s:3.4] `mfmsr`, which reads it, is privileged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UserMsr {
+    /// 64-bit mode.
+    ///
+    /// [PPC-Book3 p:10 s:2.2.3] SF = 1: the processor is in 64-bit mode.
+    ///
+    /// `ppu_user_msr` shows it on the main thread and on a created thread.
+    /// `addic` of 0xFFFF_FFFF + 1 leaves CA clear, and an `add.` with the
+    /// result 0x8000_0000 sets CR0 GT.
+    pub sf: bool,
+    /// Problem state.
+    ///
+    /// [PPC-Book3 p:10 s:2.2.3] PR = 1: the processor is in problem state.
+    ///
+    /// The console ends a process that runs `mfmsr` or another privileged
+    /// instruction (`ppu_may_trap_*`).
+    pub pr: bool,
+    /// Floating-point available.
+    ///
+    /// [PPC-Book3 p:10 s:2.2.3] FP = 0: the processor executes no
+    /// floating-point instruction, load, store or move.
+    ///
+    /// A thread's first FP instruction retires (`ppu_user_msr`). The
+    /// kernel can start a thread with FP off and set it at the first use.
+    /// The thread sees that only as a difference in time.
+    pub fp: bool,
+    /// AltiVec available.
+    ///
+    /// [AltiVec-PEM p:2-8 s:2.5.1] The VEC field is the AltiVec available
+    /// bit of the MSR.
+    ///
+    /// A thread's first vector instruction retires (`ppu_user_msr`), with
+    /// the same caveat as [`UserMsr::fp`].
+    pub vec: bool,
+    /// Floating-point exception mode bit 0.
+    ///
+    /// [PPC-Book3 p:11 s:2.2.3] FE0 = FE1 = 0 is Ignore Exceptions mode.
+    ///
+    /// With FPSCR VE = 1, an `fdiv` of 0 / 0 on either thread of
+    /// `ppu_user_msr` does three things:
+    ///
+    /// - It sets FEX.
+    /// - It leaves its target unchanged.
+    /// - It lets the thread continue.
+    pub fe0: bool,
+    /// Floating-point exception mode bit 1. See [`UserMsr::fe0`].
+    pub fe1: bool,
+    /// Little-endian mode.
+    ///
+    /// [PPC-Book3 p:11 s:2.2.3] LE = 0: the processor is in big-endian
+    /// mode.
+    ///
+    /// Every console capture reads a stored word big-endian.
+    pub le: bool,
+}
+
+/// The MSR a PS3 user thread runs under: 64-bit, problem state, FP and
+/// AltiVec available, Ignore Exceptions mode, big-endian.
+pub const PPU_USER_MSR: UserMsr = UserMsr {
+    sf: true,
+    pr: true,
+    fp: true,
+    vec: true,
+    fe0: false,
+    fe1: false,
+    le: false,
+};
+
 /// Highest guest address that can be backed by real storage (2^42 - 1).
 ///
 /// Not a bound on address arithmetic: a program's effective addresses

@@ -1,8 +1,8 @@
 //! PPU architectural state: the register banks and SPRs.
 
 use cellgov_ps3_abi::hw::ppu::{
-    FPR_COUNT, GPR_COUNT, PPU_THREAD_ENTRY_FPR, PPU_THREAD_ENTRY_VSCR, VR_COUNT, VSCR_DEFINED_BITS,
-    VSCR_SAT,
+    FPR_COUNT, GPR_COUNT, PPU_THREAD_ENTRY_FPR, PPU_THREAD_ENTRY_VSCR, PPU_USER_MSR, VR_COUNT,
+    VSCR_DEFINED_BITS, VSCR_SAT,
 };
 use cellgov_ps3_abi::hw::ppu_spr::PS3_PROCESS_CTRL;
 use cellgov_sync::ReservedLine;
@@ -30,6 +30,20 @@ pub(crate) fn cmp_cr_field(lt: bool, gt: bool, so: bool) -> u8 {
         nib |= 0b0001;
     }
     nib
+}
+
+/// The effective address of an address sum, in the mode [`PPU_USER_MSR`]
+/// declares.
+///
+/// [PPC-Book1 p:15 s:1.12.2] In 64-bit mode the whole 64-bit sum is the effective address; in
+/// 32-bit mode only its low 32 bits address storage.
+#[inline]
+pub(crate) const fn effective_address(sum: u64) -> u64 {
+    if PPU_USER_MSR.sf {
+        sum
+    } else {
+        sum & 0xFFFF_FFFF
+    }
 }
 
 /// The id of the FNV-1a scheme: FNV-1a over its domain tag.
@@ -565,11 +579,17 @@ impl PpuState {
         (self.xer & 0x7F) as u8
     }
 
-    /// Set CR0 LT/GT/EQ from `result as i64` plus XER's SO; 64-bit mode.
+    /// Set CR0 LT/GT/EQ from the result plus XER's SO, in the mode
+    /// [`PPU_USER_MSR`] declares.
     ///
-    /// [PPC-Book1 p:18 s:2.3.1] CR0 = c || `XER[SO]` for fixed-point Rc=1 instructions.
+    /// [PPC-Book1 p:18 s:2.3.1] CR0 = c || `XER[SO]` for fixed-point Rc=1 instructions; the
+    /// result is all 64 bits in 64-bit mode and bits 32:63 in 32-bit mode.
     pub fn set_cr0_from_result(&mut self, result: u64) {
-        let signed = result as i64;
+        let signed = if PPU_USER_MSR.sf {
+            result as i64
+        } else {
+            result as i32 as i64
+        };
         self.set_cr_field(0, cmp_cr_field(signed < 0, signed > 0, self.xer_so()));
     }
 
@@ -585,12 +605,12 @@ impl PpuState {
 
     /// D-form effective address `(ra|0) + sign_extend(imm)`.
     pub fn ea_d_form(&self, ra: u8, imm: i16) -> u64 {
-        self.ra_or_zero(ra).wrapping_add(imm as i64 as u64)
+        effective_address(self.ra_or_zero(ra).wrapping_add(imm as i64 as u64))
     }
 
     /// X-form effective address `(ra|0) + rb`.
     pub fn ea_x_form(&self, ra: u8, rb: u8) -> u64 {
-        self.ra_or_zero(ra).wrapping_add(self.gpr[rb as usize])
+        effective_address(self.ra_or_zero(ra).wrapping_add(self.gpr[rb as usize]))
     }
 
     /// The canonical fingerprint input set for this state.
@@ -746,3 +766,7 @@ mod accumulator_tests;
 #[cfg(test)]
 #[path = "tests/lane_bank_tests.rs"]
 mod lane_bank_tests;
+
+#[cfg(test)]
+#[path = "tests/user_msr_tests.rs"]
+mod user_msr_tests;

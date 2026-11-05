@@ -6,13 +6,19 @@ use crate::exec::memory_helpers::{
 };
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::PpuInstruction;
-use crate::state::PpuState;
+use crate::state::{effective_address, PpuState};
 use crate::store_buffer::StoreBuffer;
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_sync::ReservedLine;
 
-use cellgov_ps3_abi::hw::ppu::DCBZ_BLOCK_BYTES;
+use cellgov_ps3_abi::hw::ppu::{DCBZ_BLOCK_BYTES, PPU_USER_MSR};
+
+// Every load and store reads and writes memory big-endian.
+const _: () = assert!(
+    !PPU_USER_MSR.le,
+    "the memory arms implement big-endian mode only"
+);
 
 use super::helpers::{holds_reservation_for, read_aligned_16};
 use super::scalar::{load, scalar, store, Scalar};
@@ -97,7 +103,8 @@ pub(crate) fn execute(
             if string_loads_into(rt, n, ra) {
                 return ExecuteVerdict::Fault(PpuFault::illegal("lswi"));
             }
-            let base = state.ra_or_zero(ra);
+            // [PPC-Book1 p:15 s:1.12.2] In 32-bit mode only the low 32 bits of an address sum address storage.
+            let base = effective_address(state.ra_or_zero(ra));
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
             string_load(state, &mut port, rt as usize, base, n)
         }
@@ -117,7 +124,7 @@ pub(crate) fn execute(
         }
         PpuInstruction::Stswi { rs, ra, nb } => {
             let n = if nb == 0 { 32usize } else { nb as usize };
-            let base = state.ra_or_zero(ra);
+            let base = effective_address(state.ra_or_zero(ra));
             string_store(state, region_views, store_buf, rs as usize, base, n)
         }
         PpuInstruction::Stswx { rs, ra, rb } => {
