@@ -138,12 +138,20 @@ mod fused_or_rlwinm_tests;
 mod fused_std_lwz_tests;
 
 #[cfg(test)]
+#[path = "tests/fused_ld_any_tests.rs"]
+mod fused_ld_any_tests;
+
+#[cfg(test)]
 #[path = "tests/std_lwz_console_tests.rs"]
 mod std_lwz_console_tests;
 
 #[cfg(test)]
 #[path = "tests/ld_ld_console_tests.rs"]
 mod ld_ld_console_tests;
+
+#[cfg(test)]
+#[path = "tests/ld_any_console_tests.rs"]
+mod ld_any_console_tests;
 
 #[cfg(test)]
 #[path = "tests/lwz_lwz_console_tests.rs"]

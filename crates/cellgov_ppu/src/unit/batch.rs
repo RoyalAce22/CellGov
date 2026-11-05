@@ -345,8 +345,13 @@ impl PpuExecutionUnit {
     /// The first half may apply before the second refuses. It reruns alone
     /// and leaves the same state. A first half that can write a register
     /// it reads (`lwz rT,d(rT)`) is a load, and refuses before it writes.
-    /// A fused `ldu; ldu` or `lwz; lwz` writes no register until both
-    /// loads pass. No other first half reads what it writes.
+    /// These fused pairs write no register until both loads pass:
+    ///
+    /// - `ldu; ldu`
+    /// - `lwz; lwz`
+    /// - `ld; ld` outside the same-base pair
+    ///
+    /// No other first half reads what it writes.
     ///
     /// It takes back the provisional reads the pair logged, down to the
     /// count `reads`, so the split run logs each of its reads once.

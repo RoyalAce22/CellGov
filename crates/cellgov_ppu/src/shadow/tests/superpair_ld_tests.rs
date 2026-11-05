@@ -44,7 +44,7 @@ fn a_load_into_r0_from_the_zero_base_fuses() {
 }
 
 #[test]
-fn a_gap_an_overflow_or_another_base_does_not_fuse() {
+fn a_gap_an_overflow_or_another_base_fuses_as_any_ld_pair() {
     for (first, second) in [
         (ld_raw(3, 1, 0), ld_raw(4, 1, 16)),
         (ld_raw(3, 1, 32760), ld_raw(4, 1, -32768)),
@@ -53,7 +53,7 @@ fn a_gap_an_overflow_or_another_base_does_not_fuse() {
     ] {
         let shadow = build_from_words(0, &[first, second]);
         assert!(
-            matches!(shadow.get(0), Some(I::Ld { .. })),
+            matches!(shadow.get(0), Some(I::Fused(FusedPair::LdLdAny { .. }))),
             "{first:#010x} {second:#010x}"
         );
     }

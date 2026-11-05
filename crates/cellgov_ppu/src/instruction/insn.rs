@@ -1974,6 +1974,19 @@ pub enum FusedPair {
         ra: u8,
         offset: i16,
     },
+    /// `ld rT1, off1(rA1)` followed by `ld rT2, off2(rA2)`, where the pair
+    /// is not a [`FusedPair::LdLd`].
+    ///
+    /// The shadow fuses the pair only when `ra2` is 0 or not `rt1`, so EA2
+    /// does not depend on the first load's value.
+    LdLdAny {
+        rt1: u8,
+        ra1: u8,
+        off1: i16,
+        rt2: u8,
+        ra2: u8,
+        off2: i16,
+    },
 }
 
 #[cfg(test)]

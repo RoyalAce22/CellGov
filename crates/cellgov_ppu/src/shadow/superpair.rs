@@ -517,6 +517,28 @@ fn fuse(a: PpuInstruction, b: PpuInstruction) -> Option<FusedPair> {
             ra,
             offset,
         }),
+        // ld rT1, off1(rA1) + ld rT2, off2(rA2) that the LdLd arm did not
+        // take. A second base equal to a nonzero RT1 does not fuse, because
+        // EA2 then depends on the first load's value.
+        (
+            PpuInstruction::Ld {
+                rt: rt1,
+                ra: ra1,
+                imm: off1,
+            },
+            PpuInstruction::Ld {
+                rt: rt2,
+                ra: ra2,
+                imm: off2,
+            },
+        ) if ra2 == 0 || ra2 != rt1 => Some(FusedPair::LdLdAny {
+            rt1,
+            ra1,
+            off1,
+            rt2,
+            ra2,
+            off2,
+        }),
         _ => None,
     }
 }
@@ -614,3 +636,7 @@ mod or_rlwinm_tests;
 #[cfg(test)]
 #[path = "tests/superpair_std_lwz_tests.rs"]
 mod std_lwz_tests;
+
+#[cfg(test)]
+#[path = "tests/superpair_ld_any_tests.rs"]
+mod ld_any_tests;

@@ -970,6 +970,18 @@ pub(super) fn render(
                 f.write_str("; ")?;
                 mem_d(f, "lwz", 'r', rt, offset, ra)
             }
+            FusedPair::LdLdAny {
+                rt1,
+                ra1,
+                off1,
+                rt2,
+                ra2,
+                off2,
+            } => {
+                mem_d(f, "ld", 'r', rt1, off1, ra1)?;
+                f.write_str("; ")?;
+                mem_d(f, "ld", 'r', rt2, off2, ra2)
+            }
         },
         I::Consumed => op0(f, ".consumed"),
 

@@ -1529,6 +1529,17 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
                     .base(1),
                 int_load(ea_d(state, ra, offset), 4, rt).base(ra),
             ),
+            FusedPair::LdLdAny {
+                rt1,
+                ra1,
+                off1,
+                rt2,
+                ra2,
+                off2,
+            } => two(
+                int_load(ea_d(state, ra1, off1), 8, rt1).base(ra1),
+                int_load(ea_d(state, ra2, off2), 8, rt2).base(ra2),
+            ),
         },
         I::Consumed => ([none, none], 0),
         I::Dcbz { ra, rb } => one(Op::on(unit::LSU)

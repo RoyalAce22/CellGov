@@ -603,6 +603,34 @@ fn execute_pair(
                 Err(ea) => ExecuteVerdict::MemFault(ea),
             }
         }
+        // [PPC-Book1 p:39 s:3.3.2 Load Doubleword] ld (x2): RT <- MEM(EA,8); EA = (RA|0)+EXTS(DS||0b00).
+        // The fuser keeps RA2 off RT1, so both EAs come from the starting state.
+        // The pair writes neither register until both loads pass, so the split
+        // rerun of a refused pair reads the same bases.
+        FusedPair::LdLdAny {
+            rt1,
+            ra1,
+            off1,
+            rt2,
+            ra2,
+            off2,
+        } => {
+            let ea1 = state.ea_d_form(ra1, off1);
+            let ea2 = state.ea_d_form(ra2, off2);
+            let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
+            let first = match load_ze(&mut port, ea1, Width::B8) {
+                Ok(val) => val,
+                Err(ea) => return ExecuteVerdict::MemFault(ea),
+            };
+            match load_ze(&mut port, ea2, Width::B8) {
+                Ok(second) => {
+                    state.set_gpr(rt1 as usize, first);
+                    state.set_gpr(rt2 as usize, second);
+                    ExecuteVerdict::Continue
+                }
+                Err(ea) => ExecuteVerdict::MemFault(ea),
+            }
+        }
     }
 }
 
