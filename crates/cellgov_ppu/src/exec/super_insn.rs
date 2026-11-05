@@ -272,6 +272,55 @@ pub(crate) fn execute(
             );
             take_bc(state, bo, bi, target_offset)
         }
+        // [PPC-Book1 p:60 s:3.3.9] cmpi with L = 1 (cmpdi): signed compare of
+        // all 64 bits of RA against EXTS(SI); then the bc slot as above.
+        PpuInstruction::CmpdiBc {
+            bf,
+            ra,
+            imm,
+            bo,
+            bi,
+            target_offset,
+        } => {
+            cmpw(state, bf, state.gpr[ra as usize] as i64, i64::from(imm));
+            take_bc(state, bo, bi, target_offset)
+        }
+        // [PPC-Book1 p:60 s:3.3.9] cmp with L = 1 (cmpd): signed 64-bit
+        // register compare; then the bc slot as above.
+        PpuInstruction::CmpdBc {
+            bf,
+            ra,
+            rb,
+            bo,
+            bi,
+            target_offset,
+        } => {
+            cmpw(
+                state,
+                bf,
+                state.gpr[ra as usize] as i64,
+                state.gpr[rb as usize] as i64,
+            );
+            take_bc(state, bo, bi, target_offset)
+        }
+        // [PPC-Book1 p:61 s:3.3.9] cmpl with L = 0 (cmplw): unsigned compare
+        // of bits 32:63 of RA and RB; then the bc slot as above.
+        PpuInstruction::CmplwBc {
+            bf,
+            ra,
+            rb,
+            bo,
+            bi,
+            target_offset,
+        } => {
+            cmpw(
+                state,
+                bf,
+                state.gpr[ra as usize] as u32,
+                state.gpr[rb as usize] as u32,
+            );
+            take_bc(state, bo, bi, target_offset)
+        }
         PpuInstruction::Consumed => {
             // The fetch loop runs the stored word at a Consumed slot, so
             // the placeholder reaches no execution arm.
@@ -283,10 +332,11 @@ pub(crate) fn execute(
     }
 }
 
-/// Signed 32-bit compare of `a` with `b` into CR field `bf`, with SO
-/// from XER.
+/// Compare of `a` with `b` into CR field `bf`, with SO from XER.
+///
+/// `T` sets the width and signedness of the compare.
 #[inline]
-fn cmpw(state: &mut PpuState, bf: u8, a: i32, b: i32) {
+fn cmpw<T: Ord>(state: &mut PpuState, bf: u8, a: T, b: T) {
     state.set_cr_field(bf, cmp_cr_field(a < b, a > b, state.xer_so()));
 }
 

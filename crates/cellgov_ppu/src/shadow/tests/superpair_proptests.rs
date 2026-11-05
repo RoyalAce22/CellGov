@@ -112,6 +112,28 @@ fn fusable_pair() -> impl Strategy<Value = (PpuInstruction, PpuInstruction)> {
         (cr_field(), reg(), reg(), reg(), reg(), branch_offset()).prop_map(
             |(bf, ra, rb, bo, bi, off)| (PpuInstruction::Cmpw { bf, ra, rb }, bc(bo, bi, off))
         ),
+        (
+            cr_field(),
+            reg(),
+            compare_immediate(),
+            reg(),
+            reg(),
+            branch_offset()
+        )
+            .prop_map(|(bf, ra, imm, bo, bi, off)| (
+                PpuInstruction::Cmpdi { bf, ra, imm },
+                bc(bo, bi, off)
+            )),
+        (cr_field(), reg(), reg(), reg(), branch_offset()).prop_map(|(bf, ra, bo, bi, off)| (
+            PpuInstruction::CmpdZero { bf, ra },
+            bc(bo, bi, off),
+        )),
+        (cr_field(), reg(), reg(), reg(), reg(), branch_offset()).prop_map(
+            |(bf, ra, rb, bo, bi, off)| (PpuInstruction::Cmpd { bf, ra, rb }, bc(bo, bi, off))
+        ),
+        (cr_field(), reg(), reg(), reg(), reg(), branch_offset()).prop_map(
+            |(bf, ra, rb, bo, bi, off)| (PpuInstruction::Cmplw { bf, ra, rb }, bc(bo, bi, off))
+        ),
     ]
 }
 
@@ -126,7 +148,7 @@ fn word_at(mem: &[u8], ea: u64) -> Option<i32> {
 /// off-by-one in the fused compare changes the condition register. A
 /// random immediate meets a random operand too rarely for that. The
 /// compare is the second half of `lwz; cmpwi` and the first half of
-/// `cmpwi; bc` and `cmpw; bc`, so either slot may hold the changed
+/// each compare-and-`bc` pair, so either slot may hold the changed
 /// instruction.
 fn aim_compare(
     a: PpuInstruction,
@@ -164,12 +186,35 @@ fn aim_compare(
             );
             (a, b)
         }
+        (PpuInstruction::Cmpdi { bf, ra, .. }, PpuInstruction::Bc { .. }) => {
+            let seen = i16::try_from(state.gpr[ra as usize] as i64).ok();
+            match seen.map(|v| v.wrapping_add(nudge)) {
+                Some(imm) => (PpuInstruction::Cmpdi { bf, ra, imm }, b),
+                None => (a, b),
+            }
+        }
+        (PpuInstruction::Cmpd { ra, rb, .. }, PpuInstruction::Bc { .. }) => {
+            let seen = state.gpr[ra as usize] as i64;
+            state.set_gpr(rb as usize, seen.wrapping_add(i64::from(nudge)) as u64);
+            (a, b)
+        }
+        // The low word moves by `nudge` and the high word flips, so a
+        // compare that reads all 64 bits disagrees with cmplw.
+        (PpuInstruction::Cmplw { ra, rb, .. }, PpuInstruction::Bc { .. }) => {
+            let seen = state.gpr[ra as usize];
+            let low = (seen as u32).wrapping_add(nudge as i32 as u32);
+            state.set_gpr(
+                rb as usize,
+                (!seen & 0xFFFF_FFFF_0000_0000) | u64::from(low),
+            );
+            (a, b)
+        }
         _ => (a, b),
     }
 }
 
 proptest! {
-    // The compare arms are three of eleven and need an aimed
+    // Six of the fifteen arms are compares that need an aimed
     // operand to show an off-by-one. Four times the default count
     // makes one such case near certain per run.
     #![proptest_config(ProptestConfig::with_cases(1024))]

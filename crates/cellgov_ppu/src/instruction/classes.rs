@@ -24,7 +24,10 @@ impl PpuInstruction {
             | PpuInstruction::LdMtlr { .. }
             | PpuInstruction::StdStd { .. }
             | PpuInstruction::CmpwiBc { .. }
-            | PpuInstruction::CmpwBc { .. } => true,
+            | PpuInstruction::CmpwBc { .. }
+            | PpuInstruction::CmpdiBc { .. }
+            | PpuInstruction::CmpdBc { .. }
+            | PpuInstruction::CmplwBc { .. } => true,
             PpuInstruction::PpeIllegal { .. }
             | PpuInstruction::PpePrivileged { .. }
             | PpuInstruction::Lwz { .. }

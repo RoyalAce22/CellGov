@@ -764,6 +764,42 @@ pub(super) fn render(
             let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
             write!(f, "; bc {bo}, {bi}, 0x{target:x}")
         }
+        I::CmpdiBc {
+            bf,
+            ra,
+            imm,
+            bo,
+            bi,
+            target_offset,
+        } => {
+            cmp!(f, "cmpdi", bf, "r{}, {}", ra, imm)?;
+            let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
+            write!(f, "; bc {bo}, {bi}, 0x{target:x}")
+        }
+        I::CmpdBc {
+            bf,
+            ra,
+            rb,
+            bo,
+            bi,
+            target_offset,
+        } => {
+            cmp!(f, "cmpd", bf, "r{}, r{}", ra, rb)?;
+            let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
+            write!(f, "; bc {bo}, {bi}, 0x{target:x}")
+        }
+        I::CmplwBc {
+            bf,
+            ra,
+            rb,
+            bo,
+            bi,
+            target_offset,
+        } => {
+            cmp!(f, "cmplw", bf, "r{}, r{}", ra, rb)?;
+            let target = shown_target(addr.wrapping_add(4), i32::from(target_offset), false);
+            write!(f, "; bc {bo}, {bi}, 0x{target:x}")
+        }
         I::Consumed => op0(f, ".consumed"),
 
         // -- Cache / system --

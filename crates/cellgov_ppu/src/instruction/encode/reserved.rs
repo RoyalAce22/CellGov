@@ -264,6 +264,9 @@ pub fn reserved_bits(insn: &PpuInstruction) -> u32 {
         | I::StdStd { .. }
         | I::CmpwiBc { .. }
         | I::CmpwBc { .. }
+        | I::CmpdiBc { .. }
+        | I::CmpdBc { .. }
+        | I::CmplwBc { .. }
         | I::Consumed => 0,
     }
 }

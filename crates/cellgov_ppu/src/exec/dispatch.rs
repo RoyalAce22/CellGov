@@ -308,6 +308,9 @@ pub fn execute(
         | PpuInstruction::StdStd { .. }
         | PpuInstruction::CmpwiBc { .. }
         | PpuInstruction::CmpwBc { .. }
+        | PpuInstruction::CmpdiBc { .. }
+        | PpuInstruction::CmpdBc { .. }
+        | PpuInstruction::CmplwBc { .. }
         | PpuInstruction::Consumed => {
             super_insn::execute(insn, state, unit_id, region_views, effects, store_buf)
         }

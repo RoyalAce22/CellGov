@@ -721,6 +721,9 @@ pub fn encode(insn: &PpuInstruction) -> Result<u32, EncodeError> {
         | I::StdStd { .. }
         | I::CmpwiBc { .. }
         | I::CmpwBc { .. }
+        | I::CmpdiBc { .. }
+        | I::CmpdBc { .. }
+        | I::CmplwBc { .. }
         | I::Consumed => {
             return Err(EncodeError::NoStandaloneEncoding {
                 kind: PpuInstructionKind::from(*insn),

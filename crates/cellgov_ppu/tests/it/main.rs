@@ -12,6 +12,7 @@ mod console_ppu_exception_seen;
 mod console_ppu_fixed_point;
 mod console_ppu_float_edges;
 mod console_ppu_fp_ops;
+mod console_ppu_fused_compare_bc;
 mod console_ppu_int_edges;
 mod console_ppu_int_loads_stores;
 mod console_ppu_issue_chain;

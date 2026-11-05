@@ -609,6 +609,9 @@ pub(super) fn simplify(insn: &PpuInstruction, addr: u64) -> Option<Simplified> {
         | I::StdStd { .. }
         | I::CmpwiBc { .. }
         | I::CmpwBc { .. }
+        | I::CmpdiBc { .. }
+        | I::CmpdBc { .. }
+        | I::CmplwBc { .. }
         | I::Consumed
         | I::Dcbz { .. }
         | I::Dcbst { .. }

@@ -134,6 +134,9 @@ pub(super) fn form_for_word(kind: PpuInstructionKind, raw: u32) -> PpuEncodingFo
             | K::StdStd
             | K::CmpwiBc
             | K::CmpwBc
+            | K::CmpdiBc
+            | K::CmpdBc
+            | K::CmplwBc
             | K::Consumed
     ) {
         return PpuEncodingForm::Synthetic;
@@ -270,7 +273,10 @@ pub(super) fn effect_and_outcome(
         | K::BcFalse
         | K::Blr
         | K::CmpwiBc
-        | K::CmpwBc => (NO_EFFECTS, BRANCH),
+        | K::CmpwBc
+        | K::CmpdiBc
+        | K::CmpdBc
+        | K::CmplwBc => (NO_EFFECTS, BRANCH),
         K::Sc => (NO_EFFECTS, SYSCALL),
         // [CBE-Handbook p:739 s:A.2.4] The PPE does not implement these; each raises an illegal-instruction exception.
         K::Popcntb | K::Mcrxr | K::PpeIllegal => (NO_EFFECTS, FAULT),
@@ -594,6 +600,9 @@ pub(super) fn classify_kind(kind: PpuInstructionKind) {
         | PpuInstructionKind::StdStd
         | PpuInstructionKind::CmpwiBc
         | PpuInstructionKind::CmpwBc
+        | PpuInstructionKind::CmpdiBc
+        | PpuInstructionKind::CmpdBc
+        | PpuInstructionKind::CmplwBc
         | PpuInstructionKind::Consumed
         | PpuInstructionKind::Dcbz
         | PpuInstructionKind::Dcbst

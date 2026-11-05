@@ -1665,6 +1665,34 @@ pub enum PpuInstruction {
         bi: u8,
         target_offset: i16,
     },
+    /// `cmpdi crF, rA, imm` (or its quickened zero form) followed by a
+    /// non-linking relative `bc`.
+    CmpdiBc {
+        bf: u8,
+        ra: u8,
+        imm: i16,
+        bo: u8,
+        bi: u8,
+        target_offset: i16,
+    },
+    /// `cmpd crF, rA, rB` followed by a non-linking relative `bc`.
+    CmpdBc {
+        bf: u8,
+        ra: u8,
+        rb: u8,
+        bo: u8,
+        bi: u8,
+        target_offset: i16,
+    },
+    /// `cmplw crF, rA, rB` followed by a non-linking relative `bc`.
+    CmplwBc {
+        bf: u8,
+        ra: u8,
+        rb: u8,
+        bo: u8,
+        bi: u8,
+        target_offset: i16,
+    },
     /// Placeholder for a slot absorbed by a preceding superinstruction.
     /// The superinstruction retires this slot itself; a branch that
     /// reaches the slot runs the word stored there.

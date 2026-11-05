@@ -161,6 +161,78 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
             bi,
             target_offset: offset,
         }),
+        // cmpdi crF, rA, imm + bc (non-linking)
+        (
+            PpuInstruction::Cmpdi { bf, ra, imm },
+            PpuInstruction::Bc {
+                bo,
+                bi,
+                offset,
+                aa: false,
+                link: false,
+            },
+        ) => Some(PpuInstruction::CmpdiBc {
+            bf,
+            ra,
+            imm,
+            bo,
+            bi,
+            target_offset: offset,
+        }),
+        // CmpdZero + bc (quickened cmpdi-zero still fuses)
+        (
+            PpuInstruction::CmpdZero { bf, ra },
+            PpuInstruction::Bc {
+                bo,
+                bi,
+                offset,
+                aa: false,
+                link: false,
+            },
+        ) => Some(PpuInstruction::CmpdiBc {
+            bf,
+            ra,
+            imm: 0,
+            bo,
+            bi,
+            target_offset: offset,
+        }),
+        // cmpd crF, rA, rB + bc (non-linking)
+        (
+            PpuInstruction::Cmpd { bf, ra, rb },
+            PpuInstruction::Bc {
+                bo,
+                bi,
+                offset,
+                aa: false,
+                link: false,
+            },
+        ) => Some(PpuInstruction::CmpdBc {
+            bf,
+            ra,
+            rb,
+            bo,
+            bi,
+            target_offset: offset,
+        }),
+        // cmplw crF, rA, rB + bc (non-linking)
+        (
+            PpuInstruction::Cmplw { bf, ra, rb },
+            PpuInstruction::Bc {
+                bo,
+                bi,
+                offset,
+                aa: false,
+                link: false,
+            },
+        ) => Some(PpuInstruction::CmplwBc {
+            bf,
+            ra,
+            rb,
+            bo,
+            bi,
+            target_offset: offset,
+        }),
         _ => None,
     }
 }
@@ -190,3 +262,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/superpair_proptests.rs"]
 mod proptests;
+
+#[cfg(test)]
+#[path = "tests/superpair_compare_bc_tests.rs"]
+mod compare_bc_tests;

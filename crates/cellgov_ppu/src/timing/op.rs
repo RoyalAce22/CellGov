@@ -472,11 +472,13 @@ fn branches(state: &PpuState, bo: u8, bi: u8) -> bool {
     branches_on(state.cr(), state, bo, bi)
 }
 
-/// Whether the branch of a fused `cmpw[i]; bc` branches: its condition
-/// reads CR with field `bf` set from the signed compare of `a` with `b`.
+/// Whether the branch of a fused compare-and-`bc` branches.
+///
+/// The condition reads CR with field `bf` set from the compare of `a`
+/// with `b`. `T` sets the width and signedness of the compare.
 ///
 /// [PPC-Book1 p:60 s:3.3.9] the compare sets field BF to c || `XER[SO]`.
-fn fused_branches(state: &PpuState, bf: u8, (a, b): (i32, i32), bo: u8, bi: u8) -> bool {
+fn fused_branches<T: Ord>(state: &PpuState, bf: u8, (a, b): (T, T), bo: u8, bi: u8) -> bool {
     let shift = u32::from(7 - bf) * 4;
     let field = u32::from(cmp_cr_field(a < b, a > b, state.xer_so()));
     let cr = (state.cr() & !(0xF << shift)) | (field << shift);
@@ -1359,6 +1361,41 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
             bf, ra, rb, bo, bi, ..
         } => {
             let operands = (g(ra) as i32, g(rb) as i32);
+            let taken = fused_branches(state, bf, operands, bo, bi);
+            two(
+                cmp(bf, ra, Some(rb)),
+                branch(bo, bi, false, Target::Direct, taken),
+            )
+        }
+        I::CmpdiBc {
+            bf,
+            ra,
+            imm,
+            bo,
+            bi,
+            ..
+        } => {
+            let operands = (g(ra) as i64, i64::from(imm));
+            let taken = fused_branches(state, bf, operands, bo, bi);
+            two(
+                cmp(bf, ra, None),
+                branch(bo, bi, false, Target::Direct, taken),
+            )
+        }
+        I::CmpdBc {
+            bf, ra, rb, bo, bi, ..
+        } => {
+            let operands = (g(ra) as i64, g(rb) as i64);
+            let taken = fused_branches(state, bf, operands, bo, bi);
+            two(
+                cmp(bf, ra, Some(rb)),
+                branch(bo, bi, false, Target::Direct, taken),
+            )
+        }
+        I::CmplwBc {
+            bf, ra, rb, bo, bi, ..
+        } => {
+            let operands = (g(ra) as u32, g(rb) as u32);
             let taken = fused_branches(state, bf, operands, bo, bi);
             two(
                 cmp(bf, ra, Some(rb)),
