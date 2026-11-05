@@ -1,0 +1,19 @@
+[test]
+name = "ppu_issue_mffs_gap"
+
+# A hardware probe of how the distance between an mffs and an fadd, in
+# li on either side and across a taken branch, sets the wait between
+# them, timed with mftb. The console capture is the answer; ppu/main.c's
+# header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 280 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 280 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

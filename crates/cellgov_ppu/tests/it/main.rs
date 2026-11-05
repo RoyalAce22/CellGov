@@ -37,6 +37,8 @@ mod console_ppu_issue_line_cross_waits;
 mod console_ppu_issue_load_hit_store;
 mod console_ppu_issue_load_hit_store_sibling;
 mod console_ppu_issue_loop_shape;
+mod console_ppu_issue_mffs_gap;
+mod console_ppu_issue_mffs_younger;
 mod console_ppu_issue_mftb;
 mod console_ppu_issue_mfvscr_lsu_waw;
 mod console_ppu_issue_mfvscr_younger;

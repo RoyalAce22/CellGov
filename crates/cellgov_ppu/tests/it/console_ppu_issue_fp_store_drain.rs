@@ -175,8 +175,9 @@ fn each_loop_of_calls_lies_within_the_band() {
     }
 }
 
-/// The loops of an `mffs` and of an `mfvscr`, alone and after each store.
-const HELD: [usize; 6] = [11, 12, 13, 14, 15, 16];
+/// The loops of an `mffs` and of an `mfvscr`, alone and after each store,
+/// except the `stfd` before an `mffs`.
+const HELD: [usize; 5] = [11, 12, 14, 15, 16];
 
 /// The share of a loop's fastest console run the model may lie on either
 /// side of it.
@@ -247,5 +248,24 @@ fn an_stfs_before_a_sync_is_a_known_difference() {
         (console - stfs) / console > BAND,
         "loop {STFS_SYNC}: CellGov {stfs:.2} cycles an iteration now lies within the band \
          of the console's {console:.2}; move the loop into the barrier set",
+    );
+}
+
+/// The loop of an `stfd` before an `mffs`.
+const STFD_MFFS: usize = 13;
+
+/// The console times this loop at 32.00 cycles an iteration, and a second
+/// run of the probe at 34.16. The model holds the `stfd` behind the older
+/// `mffs` and gives 40. In the `ppu_issue_store_drain_distance` capture,
+/// an `stfd` 16 or 32 `li` after the older `mffs` makes the younger `mffs`
+/// wait until 42 cycles after the older one, as the model gives.
+#[test]
+fn an_stfd_just_before_an_mffs_is_a_known_difference() {
+    let w = console_words();
+    let (cellgov, console) = (cellgov_cycles(STFD_MFFS), console_cycles(&w, STFD_MFFS));
+    assert!(
+        (cellgov - console) / console > BAND,
+        "loop {STFD_MFFS}: CellGov {cellgov:.2} cycles an iteration now lies within the band \
+         of the console's {console:.2}; move the loop into the held set",
     );
 }

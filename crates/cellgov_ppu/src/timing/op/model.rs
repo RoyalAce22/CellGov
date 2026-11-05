@@ -310,6 +310,11 @@ impl Op {
         self.kind == Kind::Drain && self.writes().any(is_vr)
     }
 
+    /// Whether this one is an `mffs`, the one drain that writes an FPR.
+    pub(crate) fn is_fpscr_read(&self) -> bool {
+        self.kind == Kind::Drain && self.writes().any(is_fpr)
+    }
+
     /// Whether this one reads a register `other` writes.
     pub(crate) fn reads_any_of(&self, other: &Op) -> bool {
         other

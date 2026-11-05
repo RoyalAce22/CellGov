@@ -140,22 +140,10 @@ fn cellgov_cycles(k: usize) -> f64 {
 /// side of it.
 const BAND: f64 = 0.06;
 
-/// The loops the model holds:
-///
-/// - an `mfvscr` after each store form, at the end of the held work or
-///   with `li` between them;
-/// - an `mfvscr` after two `std`;
-/// - an `mffs` after a run of `li`, alone or with an `std` before it;
-/// - the runs of `li` after an `mfvscr` with no store.
-const HELD: [usize; 23] = [
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 21, 23, 24, 25,
-];
-
 #[test]
-fn each_held_loop_lies_within_the_band() {
+fn each_loop_lies_within_the_band() {
     let w = console_words();
-    let misses: Vec<String> = HELD
-        .into_iter()
+    let misses: Vec<String> = (0..LOOPS)
         .map(|k| (k, cellgov_cycles(k), console_cycles(&w, k)))
         .filter(|&(_, cellgov, console)| (cellgov - console).abs() / console > BAND)
         .map(|(k, cellgov, console)| {
@@ -183,40 +171,17 @@ fn an_mfvscr_waits_for_an_older_store_by_its_register_file() {
     assert!(order(&cellgov_cycles), "CellGov");
 }
 
-/// The loops the model does not hold, each with the side of the console
-/// the model lies on:
-///
-/// - an `mffs` after a run of `li`, or after a run of `li` and an `stfd`.
-///   [CBE-Handbook p:722 s:A.1.2] `mffs` stalls at VQ8 until older VSU
-///   operations complete; the model stalls it at issue.
-const DIFFERENT: [(usize, Side); 3] = [(19, Side::Under), (20, Side::Over), (22, Side::Over)];
-
-/// The side of the console's fastest run a known difference lies on.
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Side {
-    Under,
-    Over,
-}
-
-/// The test fails when the model comes within the band of the console,
-/// or crosses to the other side. Then move the loop into `HELD`.
 #[test]
-fn each_other_loop_is_a_known_difference() {
+fn an_mffs_does_not_wait_for_older_fixed_point_results() {
+    // [CBE-Handbook p:722 s:A.1.2] an `mffs` stalls at VQ8 until older
+    // vector-scalar instructions complete. Loop 20 issues 32 `li`, an
+    // `mffs` and a `bdnz`, one a cycle, with no wait for the last `li`.
     let w = console_words();
-    for (k, side) in DIFFERENT {
-        let (cellgov, console) = (cellgov_cycles(k), console_cycles(&w, k));
-        let lies = if cellgov < (1.0 - BAND) * console {
-            Some(Side::Under)
-        } else if cellgov > (1.0 + BAND) * console {
-            Some(Side::Over)
-        } else {
-            None
-        };
-        assert_eq!(
-            lies,
-            Some(side),
-            "loop {k}: CellGov {cellgov:.2} cycles an iteration, the console's fastest \
-             {console:.2}",
-        );
+    let issued = 34.0;
+    for (who, cycles) in [
+        ("the console", console_cycles(&w, 20)),
+        ("CellGov", cellgov_cycles(20)),
+    ] {
+        assert!(cycles <= issued, "{who}: {cycles:.2} cycles an iteration");
     }
 }

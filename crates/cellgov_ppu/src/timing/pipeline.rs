@@ -42,6 +42,10 @@ use cellgov_exec::PpeIssuePressure;
 use cellgov_ps3_abi::hw::ppc_isa::PPC_BO_ALWAYS;
 use cellgov_ps3_abi::hw::ppu_issue as k;
 
+#[cfg(test)]
+#[path = "tests/mffs_record_wait_tests.rs"]
+mod mffs_record_wait_tests;
+
 /// The length of the ring of latest issue cycles that the fetch-ahead
 /// bound reads.
 const AHEAD_RING: usize = 32;
@@ -111,18 +115,31 @@ pub(crate) struct Core {
     /// after it.
     vsu_queue: u64,
     /// The cycle the last floating-point store's data reaches the store
-    /// queue. A drain that uses the VSU issues no earlier.
+    /// queue. A drain that uses the VSU, other than an `mffs`, issues no
+    /// earlier.
     fp_store_data: u64,
     /// The cycle the last floating-point store completes. A drain that
     /// does not use the VSU issues no earlier.
     fp_store_done: u64,
+    /// The cycle the last floating-point store's data is ready for a
+    /// younger `mffs`.
+    fp_store_read: u64,
+    /// The cycle the last vector-scalar instruction other than a load or
+    /// store completes, its CR field included, for a younger `mffs`.
+    vsu_done: u64,
     /// The cycle the last store completes, for a younger `mfvscr`. Stores
     /// complete in order.
     store_done: u64,
-    /// The cycle the last `mfvscr` result is ready. A younger VSU op
-    /// other than a load or store runs no earlier. A younger
+    /// The cycle the last `mfvscr` or `mffs` result is ready. A younger
     /// floating-point store sends its data no earlier.
+    status_read: u64,
+    /// The cycle the last `mfvscr` result is ready. A younger VSU op other
+    /// than a load or store runs no earlier.
     vscr_read: u64,
+    /// The address of the instruction right after the last op, when that
+    /// op is an `mffs`. A VSU op other than a load or store at that address
+    /// runs no earlier than the `mffs` result.
+    fpscr_partner: Option<u64>,
     /// The earliest cycle an instruction younger than the last `mfvscr`
     /// issues at.
     vscr_hold: u64,
@@ -358,8 +375,12 @@ impl PpeTiming {
                 vsu_queue: 0,
                 fp_store_data: 0,
                 fp_store_done: 0,
+                fp_store_read: 0,
+                vsu_done: 0,
                 store_done: 0,
+                status_read: 0,
                 vscr_read: 0,
+                fpscr_partner: None,
                 vscr_hold: 0,
                 in_order_writes: 0,
                 divide_share: 0,
@@ -552,13 +573,24 @@ impl PpeTiming {
             op.kind,
             Kind::Drain | Kind::Barrier(_) | Kind::VscrWrite | Kind::Syscall { .. }
         ) {
-            let all = c.ready.iter().chain(c.unit_free.iter()).copied().max();
+            // [CBE-Handbook p:722 s:A.1.2] an `mffs` stalls at VQ8 until
+            // older vector-scalar instructions complete, so it does not wait
+            // for older fixed-point results. In the
+            // `ppu_issue_store_drain_distance` capture an `mffs` after 32
+            // `li` takes 33.00 cycles an iteration, one cycle an instruction.
+            let all = if op.is_fpscr_read() {
+                vsu_ready(c)
+            } else {
+                c.ready.iter().chain(c.unit_free.iter()).copied().max()
+            };
             // [CBE-Handbook p:742 s:A.3.2] a drain issues once every older
             // instruction completes. An op that the queue held completes a
             // cycle after it runs.
             // A queue that never held an op leaves `vsu_queue` at zero.
             let after_queue = if c.vsu_queue == 0 { 0 } else { c.vsu_queue + 1 };
-            let fp_store = if uses_vsu(op) {
+            let fp_store = if op.is_fpscr_read() {
+                c.fp_store_read
+            } else if uses_vsu(op) {
                 c.fp_store_data
             } else {
                 c.fp_store_done
@@ -630,11 +662,19 @@ impl PpeTiming {
         // A VSU op younger than an `mfvscr` runs no earlier than its
         // result. In the `ppu_issue_mfvscr_younger` capture an `mfvscr` and
         // four independent `vaddubm` take 51.48 cycles an iteration.
+        // [CBE-Handbook p:757 s:A.6.2] IS2 sends instructions to the VSU
+        // issue queue in pairs. [CBE-Handbook p:722 s:A.1.2] an `mffs`
+        // stalls at VQ8. Only the op right after an `mffs` waits for the
+        // `mffs` result. In the `ppu_issue_mffs_gap` capture an `mffs` and an
+        // `fadd` take 61.00 cycles an iteration, and 33.00 with an `li` or a
+        // `b` between them.
         // [CBE-Handbook p:756 s:A.6.2] the LSU part of a VXU or FPU load or
         // store leaves at issue, beside the VSU issue queue, so the wait
         // leaves it out; `retire` delays a floating-point store's data.
         let exec = if uses_vsu(op) && !matches!(op.kind, Kind::Load { .. } | Kind::Store { .. }) {
+            let partner = c.fpscr_partner == Some(pc);
             exec.max(c.vscr_read)
+                .max(if partner { c.status_read } else { 0 })
         } else {
             exec
         };
@@ -734,6 +774,9 @@ impl PpeTiming {
             c.vsu_queue = exec + 1;
         }
         mark_destinations(c, op, exec);
+        if let Some(done) = vsu_completion(op, exec) {
+            c.vsu_done = c.vsu_done.max(done);
+        }
         if let Kind::Unpipelined(cycles) = op.kind {
             for u in unit_slots(op.units) {
                 c.unit_free[u] = exec + u64::from(cycles);
@@ -747,19 +790,22 @@ impl PpeTiming {
         }
         // [CBE-Handbook p:720 s:A.1.2] a floating-point store goes to the
         // FPU as well as the LSU.
-        // A drain that uses the VSU waits for its data to reach the store
-        // queue, as the `ppu_issue_vscr_mem` captures show
-        // (`PPU_FP_STORE_DATA_CYCLES`). Any other drain waits for the store
-        // to complete, as the `ppu_issue_fp_store_drain` capture shows
+        // A drain that uses the VSU, other than an `mffs`, waits for its data
+        // to reach the store queue, as the `ppu_issue_vscr_mem` captures show
+        // (`PPU_FP_STORE_DATA_CYCLES`). An `mffs` waits for the data as the
+        // `ppu_issue_store_drain_distance` capture shows
+        // (`PPU_MFFS_FP_STORE_WAIT_CYCLES`). Any other drain waits for the
+        // store to complete, as the `ppu_issue_fp_store_drain` capture shows
         // (`PPU_FP_STORE_COMPLETE_CYCLES`).
         //
-        // The store sends its data no earlier than an older `mfvscr`'s
-        // result is ready. In the `ppu_issue_fp_store_drain` and
+        // The store sends its data no earlier than an older `mfvscr`'s or
+        // `mffs`'s result is ready. In the `ppu_issue_fp_store_drain` and
         // `ppu_issue_fp_store_vscr` captures a loop of a floating-point
         // store and an `mfvscr` takes 53.00 cycles an iteration, 13 more
         // than with an `std`.
         if matches!(op.kind, Kind::Store { .. }) && op.reads().any(|(r, _)| is_fpr(r)) {
-            let sent = exec.max(c.vscr_read);
+            let sent = exec.max(c.status_read);
+            c.fp_store_read = c.fp_store_read.max(sent + k::PPU_MFFS_FP_STORE_WAIT_CYCLES);
             c.fp_store_data = c.fp_store_data.max(sent + k::PPU_FP_STORE_DATA_CYCLES);
             c.fp_store_done = c.fp_store_done.max(sent + k::PPU_FP_STORE_COMPLETE_CYCLES);
         }
@@ -767,8 +813,14 @@ impl PpeTiming {
             c.store_done =
                 (last + store_wait(op)).max(c.store_done + k::PPU_MFVSCR_STORE_GAP_CYCLES);
         }
+        c.fpscr_partner = None;
+        if op.is_fpscr_read() {
+            c.status_read = exec + k::PPU_MFFS_LATENCY_CYCLES;
+            c.fpscr_partner = Some(pc.wrapping_add(4));
+        }
         if op.is_vscr_read() {
-            c.vscr_read = exec + k::PPU_MFVSCR_LATENCY_CYCLES;
+            c.status_read = exec + k::PPU_MFVSCR_LATENCY_CYCLES;
+            c.vscr_read = c.status_read;
             c.vscr_hold = t + k::PPU_MFVSCR_YOUNGER_HOLD_CYCLES;
         }
 
@@ -1067,6 +1119,47 @@ fn issues_to_vsu(op: &Op) -> bool {
 /// through the VSU issue queue.
 fn uses_vsu(op: &Op) -> bool {
     op.units & (unit::VSU1 | unit::VSU2) != 0
+}
+
+/// The cycle every older vector-scalar instruction in `c` completes.
+///
+/// It is the latest of:
+/// - the last FPR or VR result;
+/// - the last CR field a vector-scalar instruction writes;
+/// - the release of each VSU unit.
+fn vsu_ready(c: &Core) -> Option<u64> {
+    let results = (0..REGS as u8)
+        .filter(|&r| is_fpr(r) || is_vr(r))
+        .map(|r| c.ready[usize::from(r)]);
+    let units = unit_slots(unit::VSU1 | unit::VSU2).map(|u| c.unit_free[u]);
+    results
+        .chain(units)
+        .chain(std::iter::once(c.vsu_done))
+        .max()
+}
+
+/// The cycle the vector-scalar op `op`, run at `exec`, completes for a
+/// younger `mffs`.
+///
+/// Returns `None` when `op`:
+/// - is a load or store;
+/// - uses no VSU unit;
+/// - writes no register.
+fn vsu_completion(op: &Op, exec: u64) -> Option<u64> {
+    if !uses_vsu(op) || matches!(op.kind, Kind::Load { .. } | Kind::Store { .. }) {
+        return None;
+    }
+    // [CBE-Handbook p:722 s:A.1.2] an `mffs` waits for every older
+    // vector-scalar op to complete, which is later than its result. A
+    // recording op completes as many cycles later as its CR field
+    // follows its result.
+    let lats = || {
+        (op.dsts.iter())
+            .filter(|d| d.0 != NO_REG)
+            .map(|&(_, lat)| u64::from(lat))
+    };
+    let (first, last) = (lats().min()?, lats().max()?);
+    Some(exec + first.max(k::PPU_MFFS_VSU_COMPLETE_CYCLES) + (last - first))
 }
 
 /// The cycles from the last cycle the store `op` issues in to the cycle it

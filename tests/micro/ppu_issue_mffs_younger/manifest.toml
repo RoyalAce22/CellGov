@@ -1,0 +1,19 @@
+[test]
+name = "ppu_issue_mffs_younger"
+
+# A hardware probe of when the vector-scalar instructions younger than an
+# mffs run, and how long an mffs waits for an older fadd, fadd. or
+# vaddubm, timed with mftb. The console capture is the answer; ppu/main.c's
+# header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 216 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 216 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
