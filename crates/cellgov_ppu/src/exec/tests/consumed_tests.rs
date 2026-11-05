@@ -1,5 +1,6 @@
 //! A `Consumed` placeholder handed to `execute` breaks an internal
-//! invariant: debug builds stop, release builds refuse it.
+//! invariant: debug builds panic, release builds stop with an internal
+//! fault.
 
 use super::*;
 use crate::exec::test_support::exec_no_mem;
@@ -18,7 +19,7 @@ fn a_consumed_placeholder_is_refused_in_release() {
     let verdict = exec_no_mem(&PpuInstruction::Consumed, &mut s);
     assert!(matches!(
         verdict,
-        ExecuteVerdict::Fault(crate::exec::PpuFault::InvalidForm(".consumed"))
+        ExecuteVerdict::Fault(crate::exec::PpuFault::Internal(".consumed"))
     ));
     assert_eq!(s.pc, 0, "the refusal leaves the state as it was");
 }

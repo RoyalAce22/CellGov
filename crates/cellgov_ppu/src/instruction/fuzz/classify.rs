@@ -3,6 +3,7 @@
 use cellgov_effects::EffectKind;
 
 use crate::instruction::{PpuInstruction, PpuInstructionKind};
+use crate::PpuFaultClass as Class;
 
 use super::types::{
     PpuEncodingForm, PpuFuzzKind, PpuOutcomeClass, PpuSequenceClass, PpuSequenceDependency,
@@ -271,6 +272,44 @@ pub(super) fn effect_and_outcome(
         K::PpePrivileged => (NO_EFFECTS, FAULT),
         K::Tw | K::Td | K::Twi | K::Tdi | K::Vx => (NO_EFFECTS, CONTINUE_OR_FAULT),
         _ => (NO_EFFECTS, CONTINUE),
+    }
+}
+
+/// The fault classes a fault outcome of `kind` may carry.
+///
+/// A `MemoryFault` outcome is a data storage interrupt. An invalid form
+/// that faults is an illegal instruction.
+pub(super) fn fault_classes(kind: PpuInstructionKind, valid_form: bool) -> &'static [Class] {
+    use PpuInstructionKind as K;
+    const DATA: &[Class] = &[Class::DataStorage];
+    let (_, outcomes) = effect_and_outcome(kind, valid_form);
+    let memory = outcomes.contains(&PpuOutcomeClass::MemoryFault);
+    if !outcomes.contains(&PpuOutcomeClass::Fault) {
+        return if memory { DATA } else { &[] };
+    }
+    match kind {
+        K::Ldarx | K::Lwarx | K::Stdcx | K::Stwcx | K::Dcbz => {
+            &[Class::Alignment, Class::DataStorage]
+        }
+        K::PpePrivileged => &[Class::ProgramPrivileged],
+        K::Tw | K::Td | K::Twi | K::Tdi => &[Class::ProgramTrap],
+        K::Vx => &[Class::Unimplemented],
+        K::Sc => &[Class::SystemCall],
+        _ if memory => &[Class::ProgramIllegal, Class::DataStorage],
+        _ => &[Class::ProgramIllegal],
+    }
+}
+
+/// The fault classes of `instruction` given its kind's `faults`, under
+/// the same two overrides as [`instruction_outcomes`].
+pub(super) fn instruction_faults(
+    instruction: PpuInstruction,
+    faults: &'static [Class],
+) -> &'static [Class] {
+    match instruction {
+        PpuInstruction::Vx { op, rc, .. } if crate::exec::vx_executes(op, rc) => &[],
+        PpuInstruction::Sc { lev: 1 } => &[Class::SystemCall],
+        _ => faults,
     }
 }
 

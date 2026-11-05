@@ -19,3 +19,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/metamorphic_tests.rs"]
 mod metamorphic_tests;
+
+#[cfg(test)]
+#[path = "tests/fault_class_tests.rs"]
+mod fault_class_tests;

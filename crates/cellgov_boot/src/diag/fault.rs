@@ -12,6 +12,82 @@ use crate::step_loop::{block_reason_label, PcRing};
 use super::rings::{append_pc_ring_terse, append_pc_ring_with_decode};
 use super::{fetch_raw_at, longest_readable_prefix, region_label_at};
 
+/// The report line for a PPU fault of `class`: the PPE interrupt with
+/// its SRR0, SRR1 cause bits, DSISR and DAR, or the CellGov stop.
+///
+/// `raw` is the word at the fault's PC, as text.
+fn ppu_fault_line(
+    class: cellgov_ppu::PpuFaultClass,
+    code: u32,
+    diag: &cellgov_exec::LocalDiagnostics,
+    raw: &str,
+) -> String {
+    use cellgov_ppu::PpuFaultClass as C;
+    let hex = |v: Option<u64>| v.map_or_else(|| "?".to_string(), |a| format!("0x{a:08x}"));
+    let pc = hex(diag.pc);
+    let record = diag.interrupt.as_ref();
+    let srr0 = hex(record.map(|r| r.srr0));
+    let dar = hex(record.and_then(|r| r.dar));
+    let dsisr = record
+        .and_then(|r| r.dsisr)
+        .map_or_else(|| "?".to_string(), |d| format!("0x{d:08x}"));
+    let access = match diag.data_access.map(|a| a.store) {
+        Some(true) => "store",
+        Some(false) => "load",
+        None => "access",
+    };
+    // SRR1 bits `first..=last`, ISA-numbered from the most significant bit.
+    let srr1_bits = |first: u32, last: u32| {
+        let width = (last - first + 1) as usize;
+        record.map_or_else(
+            || "?".to_string(),
+            |r| {
+                format!(
+                    "0b{:0width$b}",
+                    (r.srr1 >> (63 - last)) & ((1 << width) - 1)
+                )
+            },
+        )
+    };
+    let program = |reason: &str| {
+        let bits = srr1_bits(43, 47);
+        format!("PROGRAM_INTERRUPT {reason} at SRR0={srr0} SRR1[43:47]={bits}")
+    };
+    match class {
+        C::InstructionStorage => {
+            let bits = srr1_bits(33, 36);
+            format!("INSTRUCTION_STORAGE at SRR0={srr0} SRR1[33:36]={bits}")
+        }
+        C::InstructionSegment => format!("INSTRUCTION_SEGMENT at SRR0={srr0}"),
+        C::DataStorage => {
+            format!("DATA_STORAGE {access} at SRR0={srr0} DAR={dar} DSISR={dsisr}")
+        }
+        C::DataSegment => {
+            format!("DATA_SEGMENT {access} at SRR0={srr0} DAR={dar} DSISR={dsisr}")
+        }
+        C::Alignment => format!("ALIGNMENT {access} at SRR0={srr0} DAR={dar}"),
+        C::ProgramFpEnabled => program("fp-enabled"),
+        C::ProgramIllegal => format!("{} (raw={raw})", program("illegal")),
+        C::ProgramPrivileged => format!("{} (raw={raw})", program("privileged")),
+        C::ProgramTrap => program(&format!("trap TO=0x{:02x}", code & 0xFF)),
+        C::FpUnavailable => format!("FP_UNAVAILABLE at SRR0={srr0}"),
+        C::VxuUnavailable => format!("VXU_UNAVAILABLE at SRR0={srr0}"),
+        C::SystemCall => format!(
+            "SYSTEM_CALL LEV={} (hypervisor call) at PC={pc} SRR0={srr0}",
+            code & 0xFFFF
+        ),
+        C::Unimplemented => {
+            let kind = cellgov_ppu::unimplemented_kind(code).map_or_else(
+                || format!("<unknown kind 0x{:04x}>", code & 0x0000_FFFF),
+                |kind| <&'static str>::from(kind).to_string(),
+            );
+            format!("UNIMPLEMENTED_INSN {kind} at PC={pc} (raw={raw})")
+        }
+        C::DebugBreak => format!("DEBUG_BREAK at PC={pc}"),
+        C::Internal => format!("INTERNAL_STOP at PC={pc} (raw={raw})"),
+    }
+}
+
 /// `unit` is the faulting unit; every byte the report shows is read
 /// through that unit's own address space.
 pub(crate) fn format_fault(
@@ -28,75 +104,27 @@ pub(crate) fn format_fault(
     let pc_str = pc
         .map(|a| format!("0x{a:08x}"))
         .unwrap_or_else(|| "?".to_string());
-    use cellgov_ppu::{
-        FAULT_ALIGNMENT_INTERRUPT, FAULT_DEBUG_BREAK, FAULT_DECODE_ERROR, FAULT_HYPERVISOR_CALL,
-        FAULT_ILLEGAL_INSTRUCTION, FAULT_INVALID_ADDRESS, FAULT_INVALID_FORM,
-        FAULT_PC_OUT_OF_RANGE, FAULT_PRIVILEGED_INSTRUCTION, FAULT_PROGRAM_TRAP,
-        FAULT_UNIMPLEMENTED_INSN, FAULT_UNSUPPORTED_SYSCALL,
-    };
     let ea_str = result
         .local_diagnostics
         .faulting_ea
         .map(|a| format!("0x{a:08x}"))
         .unwrap_or_else(|| "?".to_string());
+    let raw_str = match pc {
+        None => "<no-pc>".to_string(),
+        Some(a) => match fetch_raw_at(mem, a) {
+            Some(w) => format!("0x{w:08x}"),
+            None => "<unmapped>".to_string(),
+        },
+    };
     let detail = match fault {
         cellgov_effects::FaultKind::Guest(code) => {
-            let fault_type = code & 0xFFFF_0000;
-            match fault_type {
-                FAULT_PC_OUT_OF_RANGE => {
-                    format!("PC_OUT_OF_RANGE at PC={pc_str} (code=0x{code:08x})")
-                }
-                FAULT_DECODE_ERROR | FAULT_ILLEGAL_INSTRUCTION | FAULT_PRIVILEGED_INSTRUCTION => {
-                    let raw_str = match pc {
-                        None => "<no-pc>".to_string(),
-                        Some(a) => match fetch_raw_at(mem, a) {
-                            Some(w) => format!("0x{w:08x}"),
-                            None => "<unmapped>".to_string(),
-                        },
-                    };
-                    let class = match fault_type {
-                        FAULT_DECODE_ERROR => "DECODE_ERROR",
-                        FAULT_ILLEGAL_INSTRUCTION => "ILLEGAL_INSTRUCTION",
-                        _ => "PRIVILEGED_INSTRUCTION",
-                    };
-                    format!("{class} at PC={pc_str} (raw={raw_str})")
-                }
-                FAULT_INVALID_ADDRESS => {
-                    format!("INVALID_ADDRESS at PC={pc_str} (ea={ea_str})")
-                }
-                FAULT_ALIGNMENT_INTERRUPT => {
-                    format!("ALIGNMENT_INTERRUPT at PC={pc_str} (ea={ea_str})")
-                }
-                FAULT_UNSUPPORTED_SYSCALL => {
-                    let nr = code & 0x0000_FFFF;
-                    format!("UNSUPPORTED_SYSCALL (nr={nr}) at PC={pc_str}")
-                }
-                FAULT_UNIMPLEMENTED_INSN => {
-                    let kind = cellgov_ppu::unimplemented_kind(*code).map_or_else(
-                        || format!("<unknown kind 0x{:04x}>", code & 0x0000_FFFF),
-                        |kind| <&'static str>::from(kind).to_string(),
-                    );
-                    let raw_str = match pc {
-                        None => "<no-pc>".to_string(),
-                        Some(a) => match fetch_raw_at(mem, a) {
-                            Some(w) => format!("0x{w:08x}"),
-                            None => "<unmapped>".to_string(),
-                        },
-                    };
-                    format!("UNIMPLEMENTED_INSN {kind} at PC={pc_str} (raw={raw_str})")
-                }
-                FAULT_PROGRAM_TRAP => {
-                    let to = code & 0x0000_FFFF;
-                    format!("PROGRAM_TRAP (TO=0x{to:02x}) at PC={pc_str}")
-                }
-                FAULT_INVALID_FORM => format!("INVALID_FORM at PC={pc_str}"),
-                FAULT_HYPERVISOR_CALL => format!("HYPERVISOR_CALL (sc LEV=1) at PC={pc_str}"),
-                FAULT_DEBUG_BREAK => format!("DEBUG_BREAK at PC={pc_str}"),
+            match cellgov_ppu::PpuFaultClass::of_code(*code) {
+                Some(class) => ppu_fault_line(class, *code, &result.local_diagnostics, &raw_str),
                 // The SPU's classes land here: their constants are private
                 // to `cellgov_spu`, which names them. The detail half holds
                 // at most the low 16 bits of an address; `faulting_ea`
                 // holds it whole.
-                _ => {
+                None => {
                     let name = cellgov_spu::describe_guest_fault(*code)
                         .map(|name| format!(" {name}"))
                         .unwrap_or_default();
@@ -351,9 +379,5 @@ mod tests;
 mod fallback_arm_tests;
 
 #[cfg(test)]
-#[path = "tests/fault_illegal_tests.rs"]
-mod illegal_arm_tests;
-
-#[cfg(test)]
-#[path = "tests/fault_privileged_tests.rs"]
-mod privileged_arm_tests;
+#[path = "tests/fault_class_tests.rs"]
+mod class_line_tests;

@@ -1,5 +1,5 @@
 //! A branch to the last word of the 64-bit address space faults the
-//! thread with the PC-out-of-range fault. No fetch run that the unit
+//! thread with the instruction storage interrupt. No fetch run that the unit
 //! publishes wraps past the top of the address space.
 //!
 //! [PPC-Book1 p:15 s:1.12.2] instructions are four bytes and
@@ -68,7 +68,7 @@ fn assert_faults_at_the_last_word(setup: impl Fn() -> (PpuExecutionUnit, GuestMe
         );
         assert_eq!(
             result.fault,
-            Some(FaultKind::Guest(FAULT_PC_OUT_OF_RANGE)),
+            Some(FaultKind::Guest(FAULT_INSTRUCTION_STORAGE | 0x4000)),
             "{what}, budget {budget}"
         );
         assert_eq!(unit.state().pc, LAST_WORD, "{what}, budget {budget}");

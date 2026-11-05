@@ -35,7 +35,7 @@ fn a_load_string_with_an_address_register_in_range_faults_without_loading() {
         let (v, s, effects) = run(insn, n);
         assert_eq!(
             v,
-            ExecuteVerdict::Fault(PpuFault::InvalidForm(name)),
+            ExecuteVerdict::Fault(PpuFault::illegal(name)),
             "{insn:?}"
         );
         for r in 0..32 {

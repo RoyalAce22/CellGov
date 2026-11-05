@@ -600,7 +600,7 @@ fn lwarx_misaligned_ea_raises_alignment_fault() {
     );
     assert_eq!(
         result,
-        ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(0x1001))
+        ExecuteVerdict::Fault(PpuFault::alignment(0x1001, false))
     );
     assert!(s.reservation().is_none());
     assert!(effects.is_empty());
@@ -626,7 +626,7 @@ fn ldarx_misaligned_ea_raises_alignment_fault() {
     );
     assert_eq!(
         result,
-        ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(0x1004))
+        ExecuteVerdict::Fault(PpuFault::alignment(0x1004, false))
     );
     assert!(s.reservation().is_none());
     assert!(effects.is_empty());
@@ -722,7 +722,7 @@ fn stwcx_misaligned_ea_raises_alignment_fault() {
     );
     assert_eq!(
         result,
-        ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(0x1002))
+        ExecuteVerdict::Fault(PpuFault::alignment(0x1002, true))
     );
     // Fault path returns early: CR0 untouched, reservation intact,
     // no effects emitted.
@@ -817,7 +817,7 @@ fn stdcx_misaligned_ea_raises_alignment_fault() {
     );
     assert_eq!(
         result,
-        ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(0x1004))
+        ExecuteVerdict::Fault(PpuFault::alignment(0x1004, true))
     );
     assert_eq!(s.cr_field(0), 0b0000);
     assert_eq!(s.reservation().map(|l| l.addr()), Some(0x1000));

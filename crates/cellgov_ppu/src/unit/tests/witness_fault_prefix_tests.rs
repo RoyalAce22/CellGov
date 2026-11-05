@@ -7,6 +7,7 @@ use cellgov_effects::FaultKind;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit, YieldReason};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
+use cellgov_ps3_abi::hw::ppu_interrupt as irq;
 use cellgov_sync::ReservedLine;
 use cellgov_time::Budget;
 
@@ -48,7 +49,11 @@ fn run_to_store_fault(store: u32) -> (PpuExecutionUnit, Vec<(u64, u64, u64)>) {
         let r = unit.run_until_yield(Budget::new(64), &ctx, &mut effects);
         seen.push(counters(&unit));
         if r.yield_reason == YieldReason::Fault {
-            assert_eq!(r.fault, Some(FaultKind::Guest(FAULT_INVALID_ADDRESS)));
+            let dsisr = irq::DSISR_NOT_FOUND | irq::DSISR_STORE;
+            assert_eq!(
+                r.fault,
+                Some(FaultKind::Guest(FAULT_DATA_STORAGE | dsisr >> 16))
+            );
             assert_eq!(r.local_diagnostics.pc, Some(4), "the store faults");
             return (unit, seen);
         }

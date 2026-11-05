@@ -5,7 +5,8 @@ use crate::instruction::{PpuInstruction, PpuInstructionKind};
 use crate::state::PpuState;
 
 use super::classify::{
-    classify_kind, effect_and_outcome, form_for_word, fuzz_kind, instruction_outcomes,
+    classify_kind, effect_and_outcome, fault_classes, form_for_word, fuzz_kind, instruction_faults,
+    instruction_outcomes,
 };
 use super::fields::generation_operands_are_valid;
 use super::types::{
@@ -37,14 +38,15 @@ impl PpuInstruction {
     pub fn fuzz_descriptor(&self, raw: u32) -> PpuFuzzDescriptor {
         let instruction_kind = PpuInstructionKind::from(*self);
         classify_kind(instruction_kind);
-        let (effects, outcomes) =
-            effect_and_outcome(instruction_kind, generation_operands_are_valid(*self));
+        let valid_form = generation_operands_are_valid(*self);
+        let (effects, outcomes) = effect_and_outcome(instruction_kind, valid_form);
         PpuFuzzDescriptor {
             kind: fuzz_kind(*self),
             form: form_for_word(instruction_kind, raw),
             observable_state: PpuObservableState::Complete,
             effects,
             outcomes: instruction_outcomes(*self, outcomes),
+            faults: instruction_faults(*self, fault_classes(instruction_kind, valid_form)),
             relations: relations_for_instruction(*self),
         }
     }

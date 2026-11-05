@@ -36,7 +36,7 @@ fn faulted_step() -> ExecutionStepResult {
         consumed_cost: cellgov_time::InstructionCost::ZERO,
         local_diagnostics: cellgov_exec::LocalDiagnostics::empty(),
         fault: Some(cellgov_effects::FaultKind::Guest(
-            cellgov_ppu::FAULT_DECODE_ERROR,
+            cellgov_ppu::FAULT_PROGRAM | 0x0800,
         )),
         syscall_args: None,
     }

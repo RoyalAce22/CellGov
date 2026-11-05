@@ -13,7 +13,7 @@ use cellgov_exec::{
 use cellgov_mem::RegionView;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, MemError, PageSize, Region};
 use cellgov_ppu::decode::decode;
-use cellgov_ppu::exec::{execute, ExecuteVerdict};
+use cellgov_ppu::exec::{execute, ExecuteVerdict, PpuFault, PpuInterrupt};
 use cellgov_ppu::observation::{
     finish_observation, PpuArchitecturalState, PpuObservation, PpuObservationCheck,
     PpuObservationComponent, PpuObservationError, PpuObservationInput, PpuObservedOutcome,
@@ -427,7 +427,7 @@ fn run_plain(
             break;
         };
         let Ok(instruction) = decode(raw) else {
-            run.stop_on_fault(step_pc, cellgov_ppu::FAULT_DECODE_ERROR, None);
+            run.stop_on_fault(step_pc, &PpuFault::unrecognized_word());
             break;
         };
         let entry = run.state.clone();
@@ -451,21 +451,12 @@ fn run_plain(
             ExecuteVerdict::Continue => run.state.pc = run.state.pc.wrapping_add(4),
             ExecuteVerdict::Branch => {}
             ExecuteVerdict::Fault(fault) => {
-                let ea = ppu_fault_ea(fault);
-                run.stop_on_fault(step_pc, fault.guest_code(), ea);
+                run.stop_on_fault(step_pc, fault);
                 break;
             }
             ExecuteVerdict::MemFault(error) | ExecuteVerdict::StoreFault(error) => {
-                let code = cellgov_ppu::FAULT_INVALID_ADDRESS;
-                let ea = mem_fault_ea(error);
-                run.stop_on_fault(step_pc, code, ea);
-                run.stop.diagnostics.data_access = Some(cellgov_exec::DataAccessFault {
-                    store: matches!(verdict, ExecuteVerdict::StoreFault(_)),
-                    refused_by: match error {
-                        MemError::ReservedWrite { region, .. } => Some(*region),
-                        _ => None,
-                    },
-                });
+                let store = matches!(verdict, ExecuteVerdict::StoreFault(_));
+                run.stop_on_mem_fault(step_pc, error, store);
                 break;
             }
             ExecuteVerdict::Syscall { lev } => {
@@ -542,14 +533,32 @@ impl PlainRun {
 
     /// Record a guest fault at `step_pc`. Every step before it stays
     /// committed, and the step that faults leaves nothing behind.
-    fn stop_on_fault(&mut self, step_pc: u64, code: u32, ea: Option<u64>) {
-        let diagnostics = fault_diagnostics(&self.state, step_pc, ea);
+    fn stop_on_fault(&mut self, step_pc: u64, fault: &PpuFault) {
+        let mut diagnostics = fault_diagnostics(&self.state, step_pc);
+        fault.annotate(step_pc, &mut diagnostics);
         self.stop = PpuPathStop {
             reason: YieldReason::Fault,
-            fault: Some(FaultKind::Guest(code)),
+            fault: Some(FaultKind::Guest(fault.guest_code())),
             pc: Some(step_pc),
             diagnostics,
             syscall_args: None,
+        };
+    }
+
+    /// Record a memory fault at `step_pc` as the data storage interrupt
+    /// it raises, with the region that refused the access.
+    fn stop_on_mem_fault(&mut self, step_pc: u64, error: &MemError, store: bool) {
+        let fault = PpuInterrupt::data_storage(error, store).map_or(
+            PpuFault::Internal("memory fault without an address"),
+            PpuFault::Interrupt,
+        );
+        self.stop_on_fault(step_pc, &fault);
+        let Some(access) = self.stop.diagnostics.data_access.as_mut() else {
+            return;
+        };
+        access.refused_by = match error {
+            MemError::ReservedWrite { region, .. } => Some(*region),
+            _ => None,
         };
     }
 
@@ -655,47 +664,17 @@ fn forward_committed_stores(
     Ok(())
 }
 
-/// The effective address a PPU fault names, if it names one.
-fn ppu_fault_ea(fault: &cellgov_ppu::exec::PpuFault) -> Option<u64> {
-    match fault {
-        cellgov_ppu::exec::PpuFault::PcOutOfRange(addr)
-        | cellgov_ppu::exec::PpuFault::InvalidAddress(addr)
-        | cellgov_ppu::exec::PpuFault::AlignmentInterrupt(addr) => Some(*addr),
-        cellgov_ppu::exec::PpuFault::UnsupportedSyscall(_)
-        | cellgov_ppu::exec::PpuFault::UnimplementedInstruction { .. }
-        | cellgov_ppu::exec::PpuFault::ProgramTrap(_)
-        | cellgov_ppu::exec::PpuFault::InvalidForm(_)
-        | cellgov_ppu::exec::PpuFault::IllegalInstruction(_)
-        | cellgov_ppu::exec::PpuFault::PrivilegedInstruction(_)
-        | cellgov_ppu::exec::PpuFault::HypervisorCall => None,
-    }
-}
-
-/// The address a memory fault names, if it names one.
-fn mem_fault_ea(error: &MemError) -> Option<u64> {
-    match error {
-        MemError::Unmapped(context) => Some(context.addr),
-        MemError::ReservedWrite { addr, .. } | MemError::ReservedStrictRead { addr, .. } => {
-            Some(*addr)
-        }
-        MemError::LengthMismatch
-        | MemError::OverlappingRegions
-        | MemError::RegionOverflow { .. }
-        | MemError::NoSuchRegion { .. } => None,
-    }
-}
-
 fn is_read_intent(effect: &cellgov_effects::Effect) -> bool {
     matches!(effect, cellgov_effects::Effect::SharedReadIntent { .. })
 }
 
-fn fault_diagnostics(state: &PpuState, pc: u64, ea: Option<u64>) -> LocalDiagnostics {
+fn fault_diagnostics(state: &PpuState, pc: u64) -> LocalDiagnostics {
     let fields = PpuArchitecturalState::capture(state);
     LocalDiagnostics {
         pc: Some(pc),
         lr: Some(fields.lr),
         syscall_lev: None,
-        faulting_ea: ea,
+        faulting_ea: None,
         fault_regs: Some(FaultRegisterDump {
             gprs: fields.gpr,
             lr: fields.lr,
@@ -704,6 +683,7 @@ fn fault_diagnostics(state: &PpuState, pc: u64, ea: Option<u64>) -> LocalDiagnos
             cr: fields.cr,
         }),
         data_access: None,
+        interrupt: None,
     }
 }
 

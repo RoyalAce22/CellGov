@@ -226,9 +226,8 @@ fn ppu_replay_asymmetry_uses_the_strongest_changed_axis() {
     );
 
     let mut second = first.clone();
-    second.observation.outcome = PpuObservedOutcome::Execution(ExecuteVerdict::Fault(
-        cellgov_ppu::exec::PpuFault::ProgramTrap(0),
-    ));
+    second.observation.outcome =
+        PpuObservedOutcome::Execution(ExecuteVerdict::Fault(cellgov_ppu::exec::PpuFault::trap(0)));
     assert_eq!(
         ppu_step_replay_asymmetry(&first, &second),
         CrossReferenceAsymmetry::Fault
@@ -252,7 +251,7 @@ fn ppu_replay_asymmetry_uses_the_strongest_changed_axis() {
     );
 
     let mut second = first.clone();
-    second.verdict = ExecuteVerdict::Fault(cellgov_ppu::exec::PpuFault::ProgramTrap(0));
+    second.verdict = ExecuteVerdict::Fault(cellgov_ppu::exec::PpuFault::trap(0));
     second
         .observation
         .committed_effects

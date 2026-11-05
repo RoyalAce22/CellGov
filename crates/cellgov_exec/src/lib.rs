@@ -37,7 +37,9 @@ pub use context::{ExecutionContext, MfcOrderingView};
 pub use fake_isa::{FakeIsaUnit, FakeOp};
 pub use problem_state::{OutMailboxes, ProblemStateError, SignalNotifier};
 pub use stall::{ChannelStall, StallWake};
-pub use step_result::{DataAccessFault, ExecutionStepResult, FaultRegisterDump, LocalDiagnostics};
+pub use step_result::{
+    DataAccessFault, ExecutionStepResult, FaultRegisterDump, InterruptRecord, LocalDiagnostics,
+};
 pub use stop::{RestartError, StopRegisters};
 pub use unit::{ExecutionUnit, PpeIssuePressure, PpuFingerprint, SpuFingerprint, UnitStatus};
 pub use yield_reason::YieldReason;

@@ -24,7 +24,7 @@ pub(super) fn string_load(
 ) -> ExecuteVerdict {
     let mut bytes = [0u8; 128];
     let Some(bytes) = bytes.get_mut(..n) else {
-        return ExecuteVerdict::Fault(crate::exec::PpuFault::InvalidForm("string length"));
+        return ExecuteVerdict::Fault(crate::exec::PpuFault::Internal("string length"));
     };
     for (i, byte) in bytes.iter_mut().enumerate() {
         match load_ze(port, base.wrapping_add(i as u64), Width::B1) {

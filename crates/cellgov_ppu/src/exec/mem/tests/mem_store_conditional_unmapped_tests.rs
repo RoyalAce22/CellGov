@@ -66,7 +66,7 @@ fn a_misaligned_store_conditional_to_an_unmapped_ea_raises_the_alignment_fault()
         let (v, s, effects) = run(insn, ea, Some(ReservedLine::containing(0x1000)));
         assert_eq!(
             v,
-            ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(ea)),
+            ExecuteVerdict::Fault(PpuFault::alignment(ea, true)),
             "{insn:?}"
         );
         assert_eq!(s.cr_field(0), 0b0100, "{insn:?}");

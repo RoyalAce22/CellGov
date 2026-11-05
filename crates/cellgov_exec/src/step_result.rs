@@ -34,13 +34,35 @@ pub struct LocalDiagnostics {
     /// Register snapshot at fault time. PPU units populate it on every
     /// fault. SPU units and synthetic units leave it `None`.
     pub fault_regs: Option<FaultRegisterDump>,
-    /// What a PPU data storage fault records about its access. Its
-    /// `faulting_ea` is then the first byte of the access the memory
-    /// refused, which is where the DAR points.
+    /// What a PPU data storage or alignment fault records about its
+    /// access. Its `faulting_ea` is then the first byte of that access,
+    /// which is where the DAR points.
     pub data_access: Option<DataAccessFault>,
+    /// The interrupt registers a PPE interrupt sets, when the fault is
+    /// one. A CellGov stop and an SPU fault leave it `None`.
+    pub interrupt: Option<InterruptRecord>,
 }
 
-/// The access a PPU data storage fault took.
+/// What the PPE's interrupt registers hold after an interrupt that
+/// problem-state code caused.
+///
+/// SRR1 holds only the cause bits. CellGov does not model the MSR copy
+/// that the PPE also saves in SRR1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InterruptRecord {
+    /// The effective address of the interrupt vector. It names the class.
+    pub vector: u64,
+    /// SRR0: the instruction the interrupt addresses.
+    pub srr0: u64,
+    /// The SRR1 cause bits the interrupt sets.
+    pub srr1: u64,
+    /// DSISR, which the data storage and data segment interrupts set.
+    pub dsisr: Option<u32>,
+    /// DAR, which the data storage, data segment and alignment interrupts set.
+    pub dar: Option<u64>,
+}
+
+/// The access a PPU data storage or alignment fault refused.
 ///
 /// An address no region holds takes the data storage interrupt with no
 /// translation found. The console can take the data segment interrupt
@@ -53,7 +75,7 @@ pub struct DataAccessFault {
     /// The access was a store, `dcbz` or conditional store.
     pub store: bool,
     /// The label of the region that refused a store, or `None` when no
-    /// region holds the refused byte.
+    /// region holds the refused byte or the fault is an alignment one.
     pub refused_by: Option<&'static str>,
 }
 
@@ -86,6 +108,7 @@ impl LocalDiagnostics {
             faulting_ea: None,
             fault_regs: None,
             data_access: None,
+            interrupt: None,
         }
     }
 
@@ -99,6 +122,7 @@ impl LocalDiagnostics {
             faulting_ea: None,
             fault_regs: None,
             data_access: None,
+            interrupt: None,
         }
     }
 
@@ -112,6 +136,7 @@ impl LocalDiagnostics {
             faulting_ea: Some(ea),
             fault_regs: None,
             data_access: None,
+            interrupt: None,
         }
     }
 
@@ -125,6 +150,7 @@ impl LocalDiagnostics {
             faulting_ea: None,
             fault_regs: None,
             data_access: None,
+            interrupt: None,
         }
     }
 
@@ -138,6 +164,7 @@ impl LocalDiagnostics {
             faulting_ea: None,
             fault_regs: None,
             data_access: None,
+            interrupt: None,
         }
     }
 
@@ -151,6 +178,7 @@ impl LocalDiagnostics {
             faulting_ea: Some(ea),
             fault_regs: Some(regs),
             data_access: None,
+            interrupt: None,
         }
     }
 }

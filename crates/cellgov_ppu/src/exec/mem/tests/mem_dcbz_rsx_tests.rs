@@ -69,10 +69,7 @@ fn zeroed(block: u64) -> Vec<(u64, Vec<u8>)> {
 fn a_dcbz_into_the_rsx_window_takes_the_alignment_fault() {
     let target = PS3_RSX_BASE + 0x40;
     let (v, s, effects) = dcbz(target, PS3_RSX_BASE, &[0xEE; 0x200], true);
-    assert_eq!(
-        v,
-        ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(target))
-    );
+    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::alignment(target, true)));
     assert!(effects.is_empty(), "{effects:?}");
     assert_eq!(s.dcbz_executed, 0);
 }
@@ -109,7 +106,7 @@ fn a_dcbz_at_the_first_or_last_byte_of_the_rsx_window_takes_the_alignment_fault(
         let (v, s, effects) = dcbz_at_the_rsx_edges(target);
         assert_eq!(
             v,
-            ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(target)),
+            ExecuteVerdict::Fault(PpuFault::alignment(target, true)),
             "{target:#x}"
         );
         assert!(effects.is_empty(), "{effects:?}");
@@ -162,10 +159,7 @@ fn a_dcbz_at_an_rsx_address_in_a_cacheable_view_zeroes_its_block() {
 fn a_dcbz_into_a_caching_inhibited_view_outside_the_rsx_window_takes_the_alignment_fault() {
     let target = 0x0001_0040;
     let (v, s, effects) = dcbz(target, 0x0001_0000, &[0xEE; 0x200], true);
-    assert_eq!(
-        v,
-        ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(target))
-    );
+    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::alignment(target, true)));
     assert!(effects.is_empty(), "{effects:?}");
     assert_eq!(s.dcbz_executed, 0);
 }
@@ -202,10 +196,7 @@ fn a_dcbz_in_a_cacheable_view_beside_an_inhibited_one_zeroes_its_block() {
 fn a_dcbz_in_an_inhibited_view_after_a_cacheable_one_takes_the_alignment_fault() {
     let target = NEIGHBOUR_INHIBITED + 0x40;
     let (v, s, effects) = dcbz_beside(target);
-    assert_eq!(
-        v,
-        ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(target))
-    );
+    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::alignment(target, true)));
     assert!(effects.is_empty(), "{effects:?}");
     assert_eq!(s.dcbz_executed, 0);
 }

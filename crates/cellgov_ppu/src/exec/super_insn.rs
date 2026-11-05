@@ -236,7 +236,7 @@ pub(crate) fn execute(
             // The fetch loop runs the stored word at a Consumed slot, so
             // the placeholder reaches no execution arm.
             debug_assert!(false, "a Consumed placeholder reached execute");
-            ExecuteVerdict::Fault(crate::exec::PpuFault::InvalidForm(".consumed"))
+            ExecuteVerdict::Fault(crate::exec::PpuFault::Internal(".consumed"))
         }
 
         _ => unreachable!("super_insn::execute called with non-super variant"),

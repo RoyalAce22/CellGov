@@ -417,14 +417,14 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
         }
         // [CBE-Handbook p:738 s:A.2.4.1] The PPE does not implement popcntb.
         PpuInstruction::Popcntb { ra: _, rs: _ } => {
-            ExecuteVerdict::Fault(PpuFault::IllegalInstruction("popcntb"))
+            ExecuteVerdict::Fault(PpuFault::illegal("popcntb"))
         }
         // [PPC-Book1 p:64 s:3.3.10] tw: signed/unsigned 32-bit compare RA[32:63] vs RB[32:63], trap if any TO-selected condition holds.
         PpuInstruction::Tw { to, ra, rb } => {
             let a = state.gpr[ra as usize] as u32 as i32;
             let b = state.gpr[rb as usize] as u32 as i32;
             if trap_condition_matches(to, a as i64, b as i64, a as u32 as u64, b as u32 as u64) {
-                ExecuteVerdict::Fault(PpuFault::ProgramTrap(to))
+                ExecuteVerdict::Fault(PpuFault::trap(to))
             } else {
                 ExecuteVerdict::Continue
             }
@@ -434,7 +434,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let a = state.gpr[ra as usize] as i64;
             let b = state.gpr[rb as usize] as i64;
             if trap_condition_matches(to, a, b, a as u64, b as u64) {
-                ExecuteVerdict::Fault(PpuFault::ProgramTrap(to))
+                ExecuteVerdict::Fault(PpuFault::trap(to))
             } else {
                 ExecuteVerdict::Continue
             }
@@ -444,7 +444,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let a = state.gpr[ra as usize] as u32 as i32 as i64;
             let b = i64::from(imm);
             if trap_condition_matches(to, a, b, a as u64, b as u64) {
-                ExecuteVerdict::Fault(PpuFault::ProgramTrap(to))
+                ExecuteVerdict::Fault(PpuFault::trap(to))
             } else {
                 ExecuteVerdict::Continue
             }
@@ -454,23 +454,21 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let a = state.gpr[ra as usize] as i64;
             let b = i64::from(imm);
             if trap_condition_matches(to, a, b, a as u64, b as u64) {
-                ExecuteVerdict::Fault(PpuFault::ProgramTrap(to))
+                ExecuteVerdict::Fault(PpuFault::trap(to))
             } else {
                 ExecuteVerdict::Continue
             }
         }
         // [CBE-Handbook p:739 s:A.2.4.1] The PPE does not implement mcrxr.
-        PpuInstruction::Mcrxr { bf: _ } => {
-            ExecuteVerdict::Fault(PpuFault::IllegalInstruction("mcrxr"))
-        }
+        PpuInstruction::Mcrxr { bf: _ } => ExecuteVerdict::Fault(PpuFault::illegal("mcrxr")),
         PpuInstruction::PpeIllegal { raw } => match crate::instruction::ppe_illegal_mnemonic(raw) {
-            Some(mnemonic) => ExecuteVerdict::Fault(PpuFault::IllegalInstruction(mnemonic)),
-            None => ExecuteVerdict::Fault(PpuFault::InvalidForm("ppe-illegal word")),
+            Some(mnemonic) => ExecuteVerdict::Fault(PpuFault::illegal(mnemonic)),
+            None => ExecuteVerdict::Fault(PpuFault::illegal("ppe-illegal word")),
         },
         PpuInstruction::PpePrivileged { raw } => {
             match crate::instruction::ppe_privileged_mnemonic(raw) {
-                Some(mnemonic) => ExecuteVerdict::Fault(PpuFault::PrivilegedInstruction(mnemonic)),
-                None => ExecuteVerdict::Fault(PpuFault::InvalidForm("ppe-privileged word")),
+                Some(mnemonic) => ExecuteVerdict::Fault(PpuFault::privileged(mnemonic)),
+                None => ExecuteVerdict::Fault(PpuFault::privileged("ppe-privileged word")),
             }
         }
         // [PPC-Book1 p:69 s:3.3.11] extsh: sign-extend halfword RS[48:63] into RA.

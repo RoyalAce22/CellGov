@@ -98,7 +98,7 @@ fn a_store_conditional_that_faults_is_not_counted() {
         let faults = [
             (
                 0x1002u64,
-                ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(0x1002)),
+                ExecuteVerdict::Fault(PpuFault::alignment(0x1002, true)),
             ),
             (
                 0x2000,

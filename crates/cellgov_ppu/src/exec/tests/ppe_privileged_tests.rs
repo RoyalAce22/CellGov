@@ -74,7 +74,7 @@ fn every_book3_encoding_decodes_to_its_named_kind_and_refuses() {
             assert_eq!(insn, PpuInstruction::PpePrivileged { raw }, "{mnemonic}");
             assert_eq!(ppe_privileged_mnemonic(raw), Some(mnemonic));
             assert_eq!(crate::instruction::encode::encode(&insn), Ok(raw));
-            assert_refused(raw, PpuFault::PrivilegedInstruction(mnemonic));
+            assert_refused(raw, PpuFault::privileged(mnemonic));
         }
     }
 }
@@ -95,10 +95,10 @@ fn every_spr_number_decodes_by_its_class_in_both_directions() {
             let raw = spr_word(xo, spr);
             match (class, crate::decode::decode(raw)) {
                 (SprClass::Privileged, Ok(PpuInstruction::PpePrivileged { .. })) => {
-                    assert_refused(raw, PpuFault::PrivilegedInstruction(mnemonic));
+                    assert_refused(raw, PpuFault::privileged(mnemonic));
                 }
                 (SprClass::Reserved, Ok(PpuInstruction::PpeIllegal { .. })) => {
-                    assert_refused(raw, PpuFault::IllegalInstruction(mnemonic));
+                    assert_refused(raw, PpuFault::illegal(mnemonic));
                 }
                 (SprClass::User, Ok(insn)) => {
                     assert!(
@@ -127,16 +127,16 @@ fn every_spr_number_decodes_by_its_class_in_both_directions() {
 
 #[test]
 fn directed_spr_numbers_take_the_documented_refusal() {
-    assert_refused(spr_word(339, 272), PpuFault::PrivilegedInstruction("mfspr"));
-    assert_refused(spr_word(467, 310), PpuFault::PrivilegedInstruction("mtspr"));
-    assert_refused(spr_word(339, 287), PpuFault::PrivilegedInstruction("mfspr"));
+    assert_refused(spr_word(339, 272), PpuFault::privileged("mfspr"));
+    assert_refused(spr_word(467, 310), PpuFault::privileged("mtspr"));
+    assert_refused(spr_word(339, 287), PpuFault::privileged("mfspr"));
     // Each SPR here is reserved:
     // - 280: the v2.02 tables have no ASR.
     // - 282: the PPE has no EAR.
     // - 1008: no document on disk gives the number of HID0.
     for spr in [280, 282, 1008] {
-        assert_refused(spr_word(339, spr), PpuFault::IllegalInstruction("mfspr"));
-        assert_refused(spr_word(467, spr), PpuFault::IllegalInstruction("mtspr"));
+        assert_refused(spr_word(339, spr), PpuFault::illegal("mfspr"));
+        assert_refused(spr_word(467, spr), PpuFault::illegal("mtspr"));
     }
 }
 
@@ -174,10 +174,11 @@ fn a_privileged_word_disassembles_with_its_operands() {
 }
 
 #[test]
-fn the_privileged_instruction_fault_has_its_own_guest_code() {
-    let code = PpuFault::PrivilegedInstruction("mfmsr").guest_code();
-    assert_eq!(code, crate::FAULT_PRIVILEGED_INSTRUCTION);
-    assert_ne!(code, PpuFault::IllegalInstruction("x").guest_code());
-    assert_ne!(code, PpuFault::InvalidForm("x").guest_code());
-    assert!(!crate::is_decode_error(code));
+fn the_privileged_instruction_fault_is_a_program_interrupt_with_srr1_bit_45() {
+    let code = PpuFault::privileged("mfmsr").guest_code();
+    assert_eq!(code, crate::FAULT_PROGRAM | 0x0400);
+    assert_eq!(
+        crate::PpuFaultClass::of_code(code),
+        Some(crate::PpuFaultClass::ProgramPrivileged)
+    );
 }

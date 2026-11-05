@@ -43,7 +43,7 @@ pub(crate) fn execute(
         PpuInstruction::Lmw { rt, ra, imm } => {
             // [CBE-Handbook p:254 s:9.5.9] The PPE loads up to the colliding register, then takes the illegal-instruction interrupt; the fault discards the partial loads, so no load runs first.
             if ra == 0 || ra >= rt {
-                return ExecuteVerdict::Fault(PpuFault::InvalidForm("lmw"));
+                return ExecuteVerdict::Fault(PpuFault::illegal("lmw"));
             }
             // The loop loads every word before it writes a register, so
             // a fault part way writes none.
@@ -87,7 +87,7 @@ pub(crate) fn execute(
         PpuInstruction::Lswi { rt, ra, nb } => {
             let n = if nb == 0 { 32usize } else { nb as usize };
             if string_loads_into(rt, n, ra) {
-                return ExecuteVerdict::Fault(PpuFault::InvalidForm("lswi"));
+                return ExecuteVerdict::Fault(PpuFault::illegal("lswi"));
             }
             let base = state.ra_or_zero(ra);
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
@@ -97,7 +97,7 @@ pub(crate) fn execute(
             let n = state.xer_tbc() as usize;
             if rt == ra || rt == rb || string_loads_into(rt, n, ra) || string_loads_into(rt, n, rb)
             {
-                return ExecuteVerdict::Fault(PpuFault::InvalidForm("lswx"));
+                return ExecuteVerdict::Fault(PpuFault::illegal("lswx"));
             }
             let base = state.ea_x_form(ra, rb);
             let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
@@ -325,7 +325,7 @@ pub(crate) fn execute(
             }
             // [CBE-Handbook p:147 s:6.1.6.4] A dcbz to caching-inhibited storage takes an alignment interrupt.
             if caching_inhibited(region_views, ea) {
-                return ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(target));
+                return ExecuteVerdict::Fault(PpuFault::alignment(target, true));
             }
             // Capacity pre-check prevents a partial block from
             // committing on `BufferFull` mid-loop.
@@ -368,7 +368,7 @@ fn load_reserve(
     width: Width,
 ) -> ExecuteVerdict {
     if ea & u64::from(width.bytes() - 1) != 0 {
-        return ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(ea));
+        return ExecuteVerdict::Fault(PpuFault::alignment(ea, false));
     }
     let loaded = load_ze(
         &mut LoadPort::new(region_views, store_buf, effects, unit_id),
@@ -406,7 +406,7 @@ fn store_conditional(
 ) -> ExecuteVerdict {
     let size = width.bytes();
     if ea & u64::from(size - 1) != 0 {
-        return ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(ea));
+        return ExecuteVerdict::Fault(PpuFault::alignment(ea, true));
     }
     // [CBE-Handbook p:249 s:9.5.3] The PPE raises the data storage
     // interrupt whether or not the store would update storage.

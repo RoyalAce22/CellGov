@@ -118,7 +118,7 @@ fn a_load_string_with_an_address_register_in_range_ends_the_process_on_the_conso
         assert_eq!(
             cellgov,
             Err(CaseOutcome::UnexpectedVerdict(ExecuteVerdict::Fault(
-                PpuFault::InvalidForm(insn)
+                PpuFault::illegal(insn)
             ))),
             "{name}"
         );
@@ -128,43 +128,16 @@ fn a_load_string_with_an_address_register_in_range_ends_the_process_on_the_conso
 #[test]
 fn privileged_and_reserved_reads_end_the_process_on_the_console_and_refuse_in_cellgov() {
     for (name, fault) in [
-        (
-            "ppu_may_trap_mfspr272",
-            PpuFault::PrivilegedInstruction("mfspr"),
-        ),
-        (
-            "ppu_may_trap_mfspr287",
-            PpuFault::PrivilegedInstruction("mfspr"),
-        ),
-        (
-            "ppu_may_trap_mfspr1022",
-            PpuFault::PrivilegedInstruction("mfspr"),
-        ),
-        (
-            "ppu_may_trap_mfmsr",
-            PpuFault::PrivilegedInstruction("mfmsr"),
-        ),
+        ("ppu_may_trap_mfspr272", PpuFault::privileged("mfspr")),
+        ("ppu_may_trap_mfspr287", PpuFault::privileged("mfspr")),
+        ("ppu_may_trap_mfspr1022", PpuFault::privileged("mfspr")),
+        ("ppu_may_trap_mfmsr", PpuFault::privileged("mfmsr")),
         // The figures list SPR 284 (TBL) and SPR 152 (CTRL) for mtspr only.
-        (
-            "ppu_may_trap_mfspr284",
-            PpuFault::PrivilegedInstruction("mfspr"),
-        ),
-        (
-            "ppu_may_trap_mfspr152",
-            PpuFault::PrivilegedInstruction("mfspr"),
-        ),
-        (
-            "ppu_may_trap_slbmfee",
-            PpuFault::PrivilegedInstruction("slbmfee"),
-        ),
-        (
-            "ppu_may_trap_slbmfev",
-            PpuFault::PrivilegedInstruction("slbmfev"),
-        ),
-        (
-            "ppu_may_trap_mfspr280",
-            PpuFault::IllegalInstruction("mfspr"),
-        ),
+        ("ppu_may_trap_mfspr284", PpuFault::privileged("mfspr")),
+        ("ppu_may_trap_mfspr152", PpuFault::privileged("mfspr")),
+        ("ppu_may_trap_slbmfee", PpuFault::privileged("slbmfee")),
+        ("ppu_may_trap_slbmfev", PpuFault::privileged("slbmfev")),
+        ("ppu_may_trap_mfspr280", PpuFault::illegal("mfspr")),
     ] {
         let (cellgov, console, _) = probe(name);
         assert!(

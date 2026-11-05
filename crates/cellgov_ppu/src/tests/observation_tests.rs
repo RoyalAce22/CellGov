@@ -61,7 +61,7 @@ fn fault_discards_state_memory_effects_and_reservations_as_one_batch() {
         memory_base: BASE,
         initial_memory: &[0; 16],
         outcome: PpuObservedOutcome::Execution(ExecuteVerdict::Fault(
-            crate::exec::PpuFault::AlignmentInterrupt(BASE),
+            crate::exec::PpuFault::alignment(BASE, false),
         )),
         effects,
         stores: StoreBuffer::new(),

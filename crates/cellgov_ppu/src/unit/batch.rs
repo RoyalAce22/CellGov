@@ -1,12 +1,9 @@
 //! One batch: the fetch-decode-execute loop and its yields.
 
 use super::ppu_unit::PpuExecutionUnit;
-use crate::exec::{ExecuteVerdict, PpuFault};
+use crate::exec::{ExecuteVerdict, PpuFault, PpuInterrupt};
 use crate::tap::PpuTap;
-use crate::{
-    decode, exec, instruction, state, FAULT_DEBUG_BREAK, FAULT_DECODE_ERROR, FAULT_INVALID_ADDRESS,
-    FAULT_PC_OUT_OF_RANGE,
-};
+use crate::{decode, exec, instruction, state};
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionStepResult, LocalDiagnostics, YieldReason};
@@ -31,9 +28,7 @@ pub(super) struct BatchEntry {
 
 /// How an instruction faulted.
 enum FaultExit {
-    /// A fetch or decode fault, as its fault code.
-    Code(u32),
-    /// A fault the instruction reported.
+    /// A fault the fetch, the decode or the instruction reported.
     Verdict(PpuFault),
     /// A memory fault the instruction reported, and whether its access
     /// was a store.
@@ -150,15 +145,15 @@ impl PpuExecutionUnit {
                     return self.budget_yield(&entry, effects, last_retired);
                 } else {
                     self.break_pc = None;
-                    return self.fault_at(&entry, effects, step_pc, FAULT_DEBUG_BREAK);
+                    return self.fault_yield(&entry, effects, step_pc, &PpuFault::DebugBreak);
                 }
             }
 
             let boundary = (effects.len(), self.store_buf.len());
             let mut insn = match self.fetch_decode(step_pc, mem) {
                 Ok(insn) => insn,
-                Err(code) => {
-                    let exit = FaultExit::Code(code);
+                Err(fault) => {
+                    let exit = FaultExit::Verdict(fault);
                     return self.end_at_fault(
                         &entry,
                         effects,
@@ -196,8 +191,8 @@ impl PpuExecutionUnit {
             if split {
                 insn = match decode_stored(step_pc, mem) {
                     Ok((_, insn)) => insn,
-                    Err(code) => {
-                        let exit = FaultExit::Code(code);
+                    Err(fault) => {
+                        let exit = FaultExit::Verdict(fault);
                         return self.end_at_fault(
                             &entry,
                             effects,
@@ -354,8 +349,7 @@ impl PpuExecutionUnit {
             return self.budget_yield(entry, effects, last_retired);
         }
         match exit {
-            FaultExit::Code(code) => self.fault_at(entry, effects, step_pc, code),
-            FaultExit::Verdict(f) => self.fault_verdict_yield(entry, effects, step_pc, f),
+            FaultExit::Verdict(f) => self.fault_yield(entry, effects, step_pc, &f),
             FaultExit::Mem(e, store) => self.mem_fault_yield(entry, effects, step_pc, e, store),
         }
     }
@@ -397,13 +391,13 @@ impl PpuExecutionUnit {
     }
 
     /// The instruction at `step_pc`: the shadow's copy, or a fresh decode
-    /// that refreshes the shadow. `Err` is the fault code.
+    /// that refreshes the shadow.
     #[inline]
     fn fetch_decode(
         &mut self,
         step_pc: u64,
         mem: &[u8],
-    ) -> Result<instruction::PpuInstruction, u32> {
+    ) -> Result<instruction::PpuInstruction, PpuFault> {
         if let Some(cached) = self
             .instruction_shadow
             .as_ref()
@@ -507,45 +501,8 @@ impl PpuExecutionUnit {
         pc < hi && end > lo && self.store_buf.has_store_in_range(pc, end)
     }
 
-    /// Faults at `step_pc` with `code` and the registers at that point.
-    #[inline]
-    fn fault_at(
-        &mut self,
-        entry: &BatchEntry,
-        effects: &mut Vec<Effect>,
-        step_pc: u64,
-        code: u32,
-    ) -> ExecutionStepResult {
-        let diag = self.fault_diag(step_pc);
-        self.fault_yield(entry, effects, diag, code)
-    }
-
-    /// Yields the fault an instruction reported.
-    #[inline]
-    fn fault_verdict_yield(
-        &mut self,
-        entry: &BatchEntry,
-        effects: &mut Vec<Effect>,
-        step_pc: u64,
-        f: PpuFault,
-    ) -> ExecutionStepResult {
-        // Diag captured before rollback so registers
-        // reflect the fault site. Address-bearing variants
-        // route the address through `faulting_ea` to keep
-        // the low 16 bits free for the category-prefix
-        // contract with cellgov_core.
-        let diag = match f {
-            PpuFault::InvalidAddress(a) => self.fault_diag_ea(step_pc, a),
-            PpuFault::PcOutOfRange(a) => self.fault_diag_ea(step_pc, a),
-            PpuFault::AlignmentInterrupt(a) => self.fault_diag_ea(step_pc, a),
-            _ => self.fault_diag(step_pc),
-        };
-        // Mask guards against upper-bit collision with the category prefix.
-        let code = f.guest_code();
-        self.fault_yield(entry, effects, diag, code)
-    }
-
-    /// Yields the memory fault an instruction reported, then counts it.
+    /// Yields the data storage interrupt for the memory fault an
+    /// instruction reported, then counts it.
     #[inline]
     fn mem_fault_yield(
         &mut self,
@@ -555,18 +512,23 @@ impl PpuExecutionUnit {
         e: cellgov_mem::MemError,
         store: bool,
     ) -> ExecutionStepResult {
-        let (ea, refused_by, unmapped) = match &e {
-            cellgov_mem::MemError::Unmapped(ctx) => (ctx.addr, None, true),
-            cellgov_mem::MemError::ReservedWrite { addr, region } => (*addr, Some(*region), false),
-            // A load or store refusal is one of the two above.
-            _ => {
+        let (refused_by, unmapped) = match &e {
+            cellgov_mem::MemError::Unmapped(_) => (None, true),
+            cellgov_mem::MemError::ReservedWrite { region, .. } => (Some(*region), false),
+            _ => (None, false),
+        };
+        let fault = match PpuInterrupt::data_storage(&e, store) {
+            Some(interrupt) => PpuFault::Interrupt(interrupt),
+            None => {
+                // A load or store refusal is `Unmapped` or `ReservedWrite`.
                 debug_assert!(false, "a memory fault carrying {e:?}");
-                (0, None, false)
+                PpuFault::Internal("memory fault without an address")
             }
         };
-        let mut diag = self.fault_diag_ea(step_pc, ea);
-        diag.data_access = Some(cellgov_exec::DataAccessFault { store, refused_by });
-        let result = self.fault_yield(entry, effects, diag, FAULT_INVALID_ADDRESS);
+        let mut result = self.fault_yield(entry, effects, step_pc, &fault);
+        if let Some(access) = result.local_diagnostics.data_access.as_mut() {
+            access.refused_by = refused_by;
+        }
         // Incremented after the rollback: the counters are
         // hash-excluded instruments, and restoring the entry
         // snapshot must not erase the record of this fault.
@@ -599,16 +561,20 @@ fn ctrl_for_placement(siblings: u32, older_sibling: bool) -> u32 {
     }
 }
 
-/// The word stored at `pc` and its decode, without the shadow. `Err` is
-/// the fault code.
+/// The word stored at `pc` and its decode, without the shadow.
+///
+/// # Errors
+///
+/// - A fetch past guest memory: the instruction storage interrupt.
+/// - A word with no decode: the illegal-instruction program interrupt.
 #[inline]
-fn decode_stored(pc: u64, mem: &[u8]) -> Result<(u32, instruction::PpuInstruction), u32> {
+fn decode_stored(pc: u64, mem: &[u8]) -> Result<(u32, instruction::PpuInstruction), PpuFault> {
     let bytes = usize::try_from(pc)
         .ok()
         .and_then(|pc| mem.get(pc..pc.checked_add(4)?))
-        .ok_or(FAULT_PC_OUT_OF_RANGE)?;
+        .ok_or(PpuFault::Interrupt(PpuInterrupt::InstructionStorage))?;
     let raw = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-    let insn = decode::decode(raw).map_err(|_| FAULT_DECODE_ERROR)?;
+    let insn = decode::decode(raw).map_err(|_| PpuFault::unrecognized_word())?;
     Ok((raw, insn))
 }
 

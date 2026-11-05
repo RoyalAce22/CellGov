@@ -1,6 +1,7 @@
 //! `run_module_start`: drive a PRX's module_start to completion or
-//! fault on the title's `Runtime`. A decode-error at PC=0 with LR=0
-//! at fault time is the clean-return sentinel.
+//! fault on the title's `Runtime`. An illegal-instruction program
+//! interrupt at PC=0 with LR=0 at fault time is the clean-return
+//! sentinel.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
@@ -29,8 +30,8 @@ pub const PER_MODULE_STEP_BUDGET: usize = 1_000_000;
 pub enum ModuleStartOutcome {
     /// PRX has no `module_start` OPD; nothing was run.
     Skipped,
-    /// `module_start` returned via the LR=0 decode-error sentinel after
-    /// `steps` `rt.step()` calls.
+    /// `module_start` returned via the LR=0 sentinel after `steps`
+    /// `rt.step()` calls.
     Completed {
         /// `rt.step()` calls the module took to return.
         steps: usize,
@@ -414,8 +415,9 @@ fn spawn_module_start_unit(
     ms_state.set_gpr(11, env.tls.kernel_context_opd());
     ms_state.set_gpr(12, env.tls.kernel_context_opd());
     ms_state.set_gpr(13, env.tls.thread_pointer());
-    // LR=0 sentinel: blr from module_start jumps to PC=0, where the
-    // all-zero word fails to decode and the fault signals a return.
+    // LR=0 sentinel: blr from module_start jumps to PC=0. The all-zero
+    // word there takes the illegal-instruction program interrupt, and
+    // that fault signals a return.
     ms_state.set_lr(0);
     seed_tls_thread_id(rt, env)?;
 
@@ -622,7 +624,9 @@ fn classify_ms_fault(
         .as_ref()
         .map(|r| r.lr)
         .unwrap_or(u64::MAX);
-    if fault_pc == 0 && lr_at_fault == 0 && guest_code.is_some_and(cellgov_ppu::is_decode_error) {
+    let illegal = guest_code.and_then(cellgov_ppu::PpuFaultClass::of_code)
+        == Some(cellgov_ppu::PpuFaultClass::ProgramIllegal);
+    if fault_pc == 0 && lr_at_fault == 0 && illegal {
         return FaultDisposition::Returned;
     }
     let fault_text = fault_report(rt, env, ms_unit_id, &step.result, fault, stats);
@@ -892,3 +896,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/module_start_override_tests.rs"]
 mod override_tests;
+
+#[cfg(test)]
+#[path = "tests/module_start_return_tests.rs"]
+mod return_tests;

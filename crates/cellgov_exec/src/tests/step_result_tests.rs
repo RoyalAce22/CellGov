@@ -166,6 +166,7 @@ fn clone_preserves_heavy_fields() {
             faulting_ea: None,
             fault_regs: Some(regs),
             data_access: None,
+            interrupt: None,
         },
         fault: None,
         syscall_args: Some(args),

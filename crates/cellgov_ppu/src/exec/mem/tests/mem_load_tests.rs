@@ -281,7 +281,7 @@ fn lwzu_with_ra_zero_faults_as_an_invalid_form() {
         &[0xAAu8; 0x100],
         &mut effects,
     );
-    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::InvalidForm("lwzu")));
+    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::illegal("lwzu")));
     assert_eq!(*s.gpr.as_array(), before);
     assert!(effects.is_empty());
 }
@@ -303,7 +303,7 @@ fn lwzu_with_ra_eq_rt_faults_as_an_invalid_form() {
         &[0xAAu8; 0x100],
         &mut effects,
     );
-    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::InvalidForm("lwzu")));
+    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::illegal("lwzu")));
     assert_eq!(*s.gpr.as_array(), before);
     assert!(effects.is_empty());
 }
@@ -511,7 +511,7 @@ fn lhau_with_ra_zero_faults_as_an_invalid_form() {
         &[0xAAu8; 0x100],
         &mut effects,
     );
-    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::InvalidForm("lhau")));
+    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::illegal("lhau")));
     assert_eq!(*s.gpr.as_array(), before);
     assert!(effects.is_empty());
 }

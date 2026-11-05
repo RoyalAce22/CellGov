@@ -248,7 +248,10 @@ impl InstructionCase<'_> {
             PpuOutcomeClass::from_verdict(&run.baseline.verdict),
             run.descriptor.outcomes,
         );
-        if run.descriptor.outcomes.contains(&outcome) {
+        if run.descriptor.outcomes.contains(&outcome)
+            && fault_class(&run.baseline.verdict)
+                .is_none_or(|class| run.descriptor.faults.contains(&class))
+        {
             return Ok(CrossReferenceAsymmetry::None);
         }
         record(
@@ -504,6 +507,21 @@ fn run_metamorphic_checks(
     Ok(strongest)
 }
 
+/// The class of the fault `verdict` reports, or `None` when it reports
+/// none. A memory fault is a data storage interrupt.
+fn fault_class(verdict: &ExecuteVerdict) -> Option<cellgov_ppu::PpuFaultClass> {
+    match verdict {
+        ExecuteVerdict::Fault(fault) => Some(fault.class()),
+        ExecuteVerdict::MemFault(_) | ExecuteVerdict::StoreFault(_) => {
+            Some(cellgov_ppu::PpuFaultClass::DataStorage)
+        }
+        ExecuteVerdict::Continue
+        | ExecuteVerdict::Branch
+        | ExecuteVerdict::Syscall { .. }
+        | ExecuteVerdict::BufferFull => None,
+    }
+}
+
 fn relation_check(relation: PpuMetamorphicRelation) -> CheckIdentity {
     match relation {
         PpuMetamorphicRelation::Deterministic => CheckIdentity::DeterministicReplay,
@@ -609,3 +627,7 @@ mod metamorphic_component_tests;
 #[cfg(test)]
 #[path = "tests/reservation_ea_tests.rs"]
 mod reservation_ea_tests;
+
+#[cfg(test)]
+#[path = "tests/legal_fault_class_tests.rs"]
+mod legal_fault_class_tests;

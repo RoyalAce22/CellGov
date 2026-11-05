@@ -9,9 +9,9 @@ use cellgov_ppu::exec::{ExecuteVerdict, PpuFault};
 #[test]
 fn lq_and_stq_end_the_process_on_the_console_and_refuse_in_cellgov() {
     for (name, fault) in [
-        ("ppu_may_trap_lq", PpuFault::PrivilegedInstruction("lq")),
-        ("ppu_may_trap_lq_rt_ra", PpuFault::IllegalInstruction("lq")),
-        ("ppu_may_trap_stq", PpuFault::PrivilegedInstruction("stq")),
+        ("ppu_may_trap_lq", PpuFault::privileged("lq")),
+        ("ppu_may_trap_lq_rt_ra", PpuFault::illegal("lq")),
+        ("ppu_may_trap_stq", PpuFault::privileged("stq")),
     ] {
         let cases = table(name);
         assert_eq!(cases.len(), 1, "{name}: one case");

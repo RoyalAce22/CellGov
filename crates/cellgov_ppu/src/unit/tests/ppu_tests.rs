@@ -262,7 +262,10 @@ fn pc_out_of_range_faults() {
     let result = unit.run_until_yield(Budget::new(10), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::Fault);
     assert_eq!(unit.status(), UnitStatus::Faulted);
-    assert_eq!(result.fault, Some(FaultKind::Guest(FAULT_PC_OUT_OF_RANGE)));
+    assert_eq!(
+        result.fault,
+        Some(FaultKind::Guest(FAULT_INSTRUCTION_STORAGE | 0x4000))
+    );
 }
 
 #[test]
@@ -277,7 +280,10 @@ fn load_out_of_range_faults() {
     let result = unit.run_until_yield(Budget::new(10), &ctx, &mut Vec::new());
     assert_eq!(result.yield_reason, YieldReason::Fault);
     assert_eq!(unit.status(), UnitStatus::Faulted);
-    assert_eq!(result.fault, Some(FaultKind::Guest(FAULT_INVALID_ADDRESS)));
+    assert_eq!(
+        result.fault,
+        Some(FaultKind::Guest(FAULT_DATA_STORAGE | 0x4000))
+    );
 }
 
 #[test]
@@ -326,8 +332,8 @@ fn run_reservation_alignment_witness(
     assert_eq!(unit.status(), UnitStatus::Faulted);
     assert_eq!(
         result.fault,
-        Some(FaultKind::Guest(FAULT_ALIGNMENT_INTERRUPT)),
-        "misaligned reservation EA must fault with FAULT_ALIGNMENT_INTERRUPT"
+        Some(FaultKind::Guest(FAULT_ALIGNMENT)),
+        "misaligned reservation EA must fault with FAULT_ALIGNMENT"
     );
     assert_eq!(
         unit.state().gpr[3],
@@ -1731,33 +1737,10 @@ fn sc_one_stops_the_thread_with_the_hypervisor_call_fault() {
     let result = unit.run_until_yield(Budget::new(10), &ctx, &mut effects);
 
     assert_eq!(result.yield_reason, YieldReason::Fault);
-    assert_eq!(result.fault, Some(FaultKind::Guest(FAULT_HYPERVISOR_CALL)));
+    assert_eq!(result.fault, Some(FaultKind::Guest(FAULT_SYSTEM_CALL | 1)));
     assert_eq!(result.local_diagnostics.pc, Some(0));
     assert_eq!(result.local_diagnostics.syscall_lev, None);
     assert_eq!(unit.state().gpr[3], 0x1234, "no value comes back in r3");
-}
-
-mod fault_class_tests {
-    use crate::*;
-
-    #[test]
-    fn is_decode_error_pinpoints_the_decode_class() {
-        assert!(is_decode_error(FAULT_DECODE_ERROR));
-        assert!(is_decode_error(FAULT_DECODE_ERROR | 0xABCD));
-        for other in [
-            FAULT_PC_OUT_OF_RANGE,
-            FAULT_INVALID_ADDRESS,
-            FAULT_UNSUPPORTED_SYSCALL,
-            FAULT_DEBUG_BREAK,
-            FAULT_UNIMPLEMENTED_INSN,
-            FAULT_PROGRAM_TRAP,
-            FAULT_ALIGNMENT_INTERRUPT,
-            FAULT_INVALID_FORM,
-            FAULT_ILLEGAL_INSTRUCTION,
-        ] {
-            assert!(!is_decode_error(other), "spurious match for {other:#x}");
-        }
-    }
 }
 
 #[test]

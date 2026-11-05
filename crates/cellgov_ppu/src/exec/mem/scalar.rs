@@ -226,7 +226,7 @@ pub(super) fn load(
             Dest::Fpr(_) => ra == 0,
         };
         if invalid {
-            return ExecuteVerdict::Fault(PpuFault::InvalidForm(insn));
+            return ExecuteVerdict::Fault(PpuFault::illegal(insn));
         }
     }
     let addr = ea.resolve(state);
@@ -272,7 +272,7 @@ pub(super) fn store(
     if let Update::Ra(insn) = update {
         // [PPC-Book1 p:40 s:3.3.3] Store with update: invalid form when RA=0.
         if ea.ra() == 0 {
-            return ExecuteVerdict::Fault(PpuFault::InvalidForm(insn));
+            return ExecuteVerdict::Fault(PpuFault::illegal(insn));
         }
     }
     let addr = ea.resolve(state);

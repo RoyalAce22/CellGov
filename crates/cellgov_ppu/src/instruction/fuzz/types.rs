@@ -201,6 +201,9 @@ pub struct PpuFuzzDescriptor {
     pub effects: &'static [EffectKind],
     /// Result classes accepted from execution.
     pub outcomes: &'static [PpuOutcomeClass],
+    /// The fault classes a `Fault` or `MemoryFault` outcome may carry.
+    /// Empty when no outcome is a fault.
+    pub faults: &'static [crate::PpuFaultClass],
     /// Relations that apply to this instruction.
     pub relations: &'static [PpuMetamorphicRelation],
 }

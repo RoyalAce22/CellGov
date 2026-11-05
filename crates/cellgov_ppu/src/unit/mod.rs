@@ -82,6 +82,10 @@ mod witness_fault_prefix_tests;
 mod store_fault_tests;
 
 #[cfg(test)]
+#[path = "tests/interrupt_record_tests.rs"]
+mod interrupt_record_tests;
+
+#[cfg(test)]
 #[path = "tests/synced_code_store_tests.rs"]
 mod synced_code_store_tests;
 

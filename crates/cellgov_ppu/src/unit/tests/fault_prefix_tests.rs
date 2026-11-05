@@ -146,7 +146,7 @@ fn the_next_batch_faults_with_nothing_retired_ahead_of_it() {
     assert_eq!(run.batches, 2);
     assert_eq!(
         run.fault.fault,
-        Some(FaultKind::Guest(FAULT_INVALID_ADDRESS))
+        Some(FaultKind::Guest(FAULT_DATA_STORAGE | 0x4000))
     );
     assert_eq!(run.fault.local_diagnostics.pc, Some(20));
     assert_eq!(run.fault.local_diagnostics.faulting_ea, Some(UNMAPPED_EA));
@@ -224,7 +224,7 @@ fn a_fetch_past_the_text_after_retired_instructions_commits_them_first() {
 
     assert_eq!(
         run.fault.fault,
-        Some(FaultKind::Guest(FAULT_PC_OUT_OF_RANGE))
+        Some(FaultKind::Guest(FAULT_INSTRUCTION_STORAGE | 0x4000))
     );
     assert_eq!(run.fault.local_diagnostics.pc, Some(8));
     assert_eq!(run.unit.state().gpr[3], 1);
@@ -257,7 +257,7 @@ fn a_skipped_break_on_a_faulting_instruction_is_spent_once() {
     assert_eq!(run.batches, 2);
     assert_eq!(
         run.fault.fault,
-        Some(FaultKind::Guest(FAULT_INVALID_ADDRESS))
+        Some(FaultKind::Guest(FAULT_DATA_STORAGE | 0x4000))
     );
     assert_eq!(run.unit.state().pc, 20);
 }
@@ -326,7 +326,7 @@ fn a_fused_pair_whose_load_faults_faults_at_its_first_slot() {
     assert_eq!(run.batches, 2);
     assert_eq!(
         run.fault.fault,
-        Some(FaultKind::Guest(FAULT_INVALID_ADDRESS))
+        Some(FaultKind::Guest(FAULT_DATA_STORAGE | 0x4000))
     );
     assert_eq!(run.fault.local_diagnostics.pc, Some(4), "the load faults");
     assert_eq!(run.unit.state().pc, 4);
@@ -368,7 +368,7 @@ fn a_load_multiple_that_faults_part_way_publishes_none_of_its_reads() {
     let mut effects = Vec::new();
     let r = unit.run_until_yield(Budget::new(64), &ctx, &mut effects);
     assert_eq!(r.yield_reason, YieldReason::Fault);
-    assert_eq!(r.fault, Some(FaultKind::Guest(FAULT_INVALID_ADDRESS)));
+    assert_eq!(r.fault, Some(FaultKind::Guest(FAULT_DATA_STORAGE | 0x4000)));
     assert_eq!(r.local_diagnostics.pc, Some(4));
     assert_eq!(unit.state().gpr[30], 0, "lmw wrote no register");
     assert!(effects.is_empty(), "{effects:?}");

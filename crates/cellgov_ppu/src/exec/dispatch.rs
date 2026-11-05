@@ -306,8 +306,10 @@ pub fn execute(
         }
 
         // [PPC-Book1 p:26 s:2.4.2] sc surfaces LEV to the system; service dispatch is runtime-defined.
-        // LEV = 1 invokes the hypervisor; see `PpuFault::HypervisorCall`.
-        PpuInstruction::Sc { lev: 1 } => ExecuteVerdict::Fault(super::PpuFault::HypervisorCall),
+        // LEV = 1 invokes the hypervisor; see `PpuInterrupt::SystemCall`.
+        PpuInstruction::Sc { lev: 1 } => ExecuteVerdict::Fault(super::PpuFault::Interrupt(
+            super::PpuInterrupt::SystemCall { lev: 1 },
+        )),
         PpuInstruction::Sc { lev } => ExecuteVerdict::Syscall { lev },
 
         // One unit's accesses run in program order and each step's

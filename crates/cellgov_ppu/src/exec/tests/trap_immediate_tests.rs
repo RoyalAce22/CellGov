@@ -19,7 +19,9 @@ fn traps(insn: &PpuInstruction, a: u64, b: u64) -> bool {
     s.set_gpr(4, b);
     match exec_no_mem(insn, &mut s) {
         ExecuteVerdict::Continue => false,
-        ExecuteVerdict::Fault(PpuFault::ProgramTrap(to)) => {
+        ExecuteVerdict::Fault(PpuFault::Interrupt(crate::exec::PpuInterrupt::Program(
+            crate::exec::ProgramCause::Trap { to },
+        ))) => {
             let want = match *insn {
                 PpuInstruction::Twi { to, .. }
                 | PpuInstruction::Tdi { to, .. }

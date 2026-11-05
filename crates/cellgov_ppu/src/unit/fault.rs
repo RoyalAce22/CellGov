@@ -3,6 +3,7 @@
 
 use super::batch::BatchEntry;
 use super::ppu_unit::PpuExecutionUnit;
+use crate::exec::PpuFault;
 use cellgov_effects::{Effect, FaultKind};
 use cellgov_exec::{
     ExecutionStepResult, FaultRegisterDump, LocalDiagnostics, UnitStatus, YieldReason,
@@ -20,26 +21,20 @@ impl PpuExecutionUnit {
         }
     }
 
-    pub(super) fn fault_diag(&self, pc: u64) -> LocalDiagnostics {
-        LocalDiagnostics {
+    /// The diagnostics of `fault` at `pc`, with the registers at that
+    /// point and, for a PPE interrupt, the interrupt registers.
+    pub(super) fn fault_diag(&self, pc: u64, fault: &PpuFault) -> LocalDiagnostics {
+        let mut diag = LocalDiagnostics {
             pc: Some(pc),
             lr: Some(self.state.lr()),
             syscall_lev: None,
             faulting_ea: None,
             fault_regs: Some(self.capture_regs()),
             data_access: None,
-        }
-    }
-
-    pub(super) fn fault_diag_ea(&self, pc: u64, ea: u64) -> LocalDiagnostics {
-        LocalDiagnostics {
-            pc: Some(pc),
-            lr: Some(self.state.lr()),
-            syscall_lev: None,
-            faulting_ea: Some(ea),
-            fault_regs: Some(self.capture_regs()),
-            data_access: None,
-        }
+            interrupt: None,
+        };
+        fault.annotate(pc, &mut diag);
+        diag
     }
 
     /// Fault-discards-all: restore the batch-entry state, drop staged
@@ -69,23 +64,24 @@ impl PpuExecutionUnit {
         self.status = UnitStatus::Faulted;
     }
 
-    /// Roll the batch back and yield a guest fault carrying `code`.
+    /// Roll the batch back and yield `fault` at `pc`.
     ///
-    /// `diag` is a parameter because the rollback erases the fault
-    /// site's registers; the caller captures it first.
+    /// It takes the diagnostics before the rollback, which erases the
+    /// fault site's registers.
     pub(super) fn fault_yield(
         &mut self,
         entry: &BatchEntry,
         effects: &mut Vec<Effect>,
-        diag: LocalDiagnostics,
-        code: u32,
+        pc: u64,
+        fault: &PpuFault,
     ) -> ExecutionStepResult {
+        let diag = self.fault_diag(pc, fault);
         self.discard_batch(entry, effects);
         ExecutionStepResult {
             yield_reason: YieldReason::Fault,
             consumed_cost: InstructionCost::ZERO,
             local_diagnostics: diag,
-            fault: Some(FaultKind::Guest(code)),
+            fault: Some(FaultKind::Guest(fault.guest_code())),
             syscall_args: None,
         }
     }

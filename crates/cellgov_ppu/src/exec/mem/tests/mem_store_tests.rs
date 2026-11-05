@@ -245,7 +245,7 @@ fn stwu_with_ra_zero_faults_as_an_invalid_form() {
         &[0u8; 0x100],
         &mut effects,
     );
-    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::InvalidForm("stwu")));
+    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::illegal("stwu")));
     assert_eq!(*s.gpr.as_array(), before);
     assert!(effects.is_empty(), "nothing is staged: {effects:?}");
 }

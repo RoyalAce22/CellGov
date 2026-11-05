@@ -28,7 +28,7 @@ fn lmw_with_ra_in_the_load_range_or_zero_faults_without_loading() {
         let (v, s, effects) = lmw(rt, ra);
         assert_eq!(
             v,
-            ExecuteVerdict::Fault(PpuFault::InvalidForm("lmw")),
+            ExecuteVerdict::Fault(PpuFault::illegal("lmw")),
             "rt={rt} ra={ra}"
         );
         for r in 1..32 {

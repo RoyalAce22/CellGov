@@ -47,7 +47,7 @@ fn lfsux_with_ra_zero_faults_as_an_invalid_form() {
         &[0x3Fu8; 0x100],
         &mut effects,
     );
-    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::InvalidForm("lfsux")));
+    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::illegal("lfsux")));
     assert_eq!((*s.gpr.as_array(), *s.fpr.as_array()), (gpr, fpr));
     assert!(effects.is_empty());
 }

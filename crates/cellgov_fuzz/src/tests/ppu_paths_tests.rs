@@ -268,7 +268,7 @@ fn plain_path_decode_fault_keeps_the_retired_prefix_and_names_the_word() {
     assert_eq!(plain.stop.reason, YieldReason::Fault);
     assert_eq!(
         plain.stop.fault,
-        Some(FaultKind::Guest(cellgov_ppu::FAULT_DECODE_ERROR))
+        Some(FaultKind::Guest(cellgov_ppu::FAULT_PROGRAM | 0x0800))
     );
     assert_eq!(plain.stop.pc, Some(4));
     assert_eq!(plain.executed_pcs, [0]);
@@ -290,7 +290,7 @@ fn plain_path_decode_fault_keeps_the_retired_prefix_and_names_the_word() {
 }
 
 #[test]
-fn unmapped_load_reports_the_invalid_address_fault_code_on_every_path() {
+fn unmapped_load_reports_the_data_storage_fault_code_on_every_path() {
     let mut state = PpuState::new();
     state.set_gpr(6, 0x2000_0000);
     let runs = run_all_paths(&[li(3, 7), lwz(4, 6, 0)], &state, &[0; 64]).expect("runs");
@@ -299,7 +299,7 @@ fn unmapped_load_reports_the_invalid_address_fault_code_on_every_path() {
         assert_eq!(run.stop.reason, YieldReason::Fault, "{:?}", run.path);
         assert_eq!(
             run.stop.fault,
-            Some(FaultKind::Guest(cellgov_ppu::FAULT_INVALID_ADDRESS)),
+            Some(FaultKind::Guest(cellgov_ppu::FAULT_DATA_STORAGE | 0x4000)),
             "{:?}",
             run.path
         );

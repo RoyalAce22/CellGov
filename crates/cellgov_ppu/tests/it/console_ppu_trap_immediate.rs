@@ -46,7 +46,7 @@ fn a_trap_immediate_whose_condition_holds_ends_the_process_on_the_console_and_tr
         assert_eq!(
             cellgov,
             Err(CaseOutcome::UnexpectedVerdict(ExecuteVerdict::Fault(
-                PpuFault::ProgramTrap(to)
+                PpuFault::trap(to)
             ))),
             "{probe}"
         );

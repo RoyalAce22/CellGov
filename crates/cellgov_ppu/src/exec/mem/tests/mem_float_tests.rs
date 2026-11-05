@@ -765,7 +765,7 @@ fn lfsu_with_ra_zero_faults_as_an_invalid_form() {
         &[0x3Fu8; 0x100],
         &mut effects,
     );
-    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::InvalidForm("lfsu")));
+    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::illegal("lfsu")));
     assert_eq!((*s.gpr.as_array(), *s.fpr.as_array()), (gpr, fpr));
     assert!(effects.is_empty());
 }
@@ -787,7 +787,7 @@ fn lfdu_with_ra_zero_faults_as_an_invalid_form() {
         &[0x3Fu8; 0x100],
         &mut effects,
     );
-    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::InvalidForm("lfdu")));
+    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::illegal("lfdu")));
     assert_eq!((*s.gpr.as_array(), *s.fpr.as_array()), (gpr, fpr));
     assert!(effects.is_empty());
 }

@@ -119,7 +119,7 @@ fn every_ppe_unimplemented_encoding_faults_and_changes_nothing() {
         let verdict = execute(&insn, &mut state, uid(), &views, &mut effects, &mut stores);
         assert_eq!(
             verdict,
-            ExecuteVerdict::Fault(PpuFault::IllegalInstruction(mnemonic)),
+            ExecuteVerdict::Fault(PpuFault::illegal(mnemonic)),
             "0x{raw:08x}"
         );
         assert_eq!(
@@ -142,10 +142,7 @@ fn mcrxr_leaves_cr_and_xer_as_they_were_for_every_status_nibble() {
             state.set_cr(0x8765_4321);
             let verdict =
                 crate::exec::test_support::exec_no_mem(&PpuInstruction::Mcrxr { bf }, &mut state);
-            assert_eq!(
-                verdict,
-                ExecuteVerdict::Fault(PpuFault::IllegalInstruction("mcrxr"))
-            );
+            assert_eq!(verdict, ExecuteVerdict::Fault(PpuFault::illegal("mcrxr")));
             assert_eq!(state.xer(), (nibble << 28) | 0x7F);
             assert_eq!(state.cr(), 0x8765_4321);
         }
@@ -179,17 +176,11 @@ fn a_ppe_unimplemented_word_disassembles_with_its_operands() {
 }
 
 #[test]
-fn the_illegal_instruction_fault_has_its_own_guest_code() {
-    let code = PpuFault::IllegalInstruction("mcrxr").guest_code();
-    assert_eq!(code, crate::FAULT_ILLEGAL_INSTRUCTION);
-    assert_ne!(
-        code,
-        PpuFault::UnimplementedInstruction {
-            kind: crate::instruction::PpuInstructionKind::Vx,
-            mnemonic: "vx",
-        }
-        .guest_code()
+fn the_illegal_instruction_fault_is_a_program_interrupt_with_srr1_bit_44() {
+    let code = PpuFault::illegal("mcrxr").guest_code();
+    assert_eq!(code, crate::FAULT_PROGRAM | 0x0800);
+    assert_eq!(
+        crate::PpuFaultClass::of_code(code),
+        Some(crate::PpuFaultClass::ProgramIllegal)
     );
-    assert_ne!(code, PpuFault::InvalidForm("x").guest_code());
-    assert!(!crate::is_decode_error(code));
 }

@@ -59,18 +59,6 @@ fn an_unnamed_fault_without_an_address_names_none() {
 }
 
 #[test]
-fn an_alignment_interrupt_names_itself_and_its_address() {
-    let out = render(
-        LocalDiagnostics::with_pc_ea(0x10, 0x2_0003),
-        cellgov_ppu::FAULT_ALIGNMENT_INTERRUPT,
-    );
-    assert!(
-        out.contains("ALIGNMENT_INTERRUPT at PC=0x00000010 (ea=0x00020003)"),
-        "got {out}"
-    );
-}
-
-#[test]
 fn an_spu_fault_class_is_named_by_the_spu_crate() {
     let out = render(
         LocalDiagnostics::with_pc_ea(0x4, 0x3_FF00),

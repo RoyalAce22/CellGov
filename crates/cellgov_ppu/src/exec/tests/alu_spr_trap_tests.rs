@@ -66,7 +66,7 @@ fn tw_equal_with_to_equal_bit_traps() {
         },
         &mut s,
     );
-    assert!(matches!(v, ExecuteVerdict::Fault(PpuFault::ProgramTrap(4))));
+    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::trap(4)));
 }
 
 #[test]
@@ -96,10 +96,7 @@ fn tw_compares_low_32_bits_only() {
         },
         &mut s,
     );
-    assert!(matches!(
-        v,
-        ExecuteVerdict::Fault(PpuFault::ProgramTrap(31))
-    ));
+    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::trap(31)));
 }
 
 #[test]
@@ -118,10 +115,7 @@ fn td_unsigned_greater_traps_when_high_bits_differ() {
         },
         &mut s,
     );
-    assert!(matches!(
-        v,
-        ExecuteVerdict::Fault(PpuFault::ProgramTrap(17))
-    ));
+    assert_eq!(v, ExecuteVerdict::Fault(PpuFault::trap(17)));
 }
 
 #[test]

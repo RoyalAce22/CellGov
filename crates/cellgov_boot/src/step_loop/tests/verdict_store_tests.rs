@@ -13,12 +13,15 @@ fn store_fault(addr: u64, refused_by: Option<&'static str>) -> ExecutionStepResu
         store: true,
         refused_by,
     });
+    // The DSISR store bit, plus the protection bit for a refusing region
+    // or the no-translation bit for an unmapped address.
+    let detail = if refused_by.is_some() { 0x0A00 } else { 0x4200 };
     ExecutionStepResult {
         yield_reason: cellgov_exec::YieldReason::Fault,
         consumed_cost: cellgov_time::InstructionCost::ZERO,
         local_diagnostics: diag,
         fault: Some(cellgov_effects::FaultKind::Guest(
-            cellgov_ppu::FAULT_DECODE_ERROR,
+            cellgov_ppu::FAULT_DATA_STORAGE | detail,
         )),
         syscall_args: None,
     }
