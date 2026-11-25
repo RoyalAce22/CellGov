@@ -25,6 +25,9 @@ mod position;
 #[path = "from_entry_threads_tests.rs"]
 mod threads;
 
+#[path = "from_entry_start_msr_tests.rs"]
+mod start_msr;
+
 /// A firmware for which CellGov serves the repository values of the
 /// psdevwiki dump.
 const FW: &str = "1.50";

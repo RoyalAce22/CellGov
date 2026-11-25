@@ -226,6 +226,9 @@ pub enum KernelRunError {
 /// - thread 0 at the ELF's entry;
 /// - thread 1 at its system reset vector, [`VECTOR_SYSTEM_RESET_THREAD1`].
 ///
+/// The MSR of thread 0 is the start MSR that lv1 gives the logical PPE
+/// of a partition [OFW-4.93 lv1 a:0x2E0EA0].
+///
 /// Each thread reads its own thread in CTRL CT, and both enabled threads
 /// in TE. While lv1 holds the other thread paused, TE holds only the
 /// reader's own thread.
