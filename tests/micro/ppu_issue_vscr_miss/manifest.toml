@@ -1,0 +1,21 @@
+[test]
+name = "ppu_issue_vscr_miss"
+
+# A hardware probe of whether an mtvscr that holds an FP or VMX load in
+# the VSU issue queue also delays the load's cache miss: a pointer chase
+# through FP or vector registers over a shuffled 8 MB ring and over one
+# line, each with and without an mtvscr before the load, timed with mftb.
+# The console capture is the answer; ppu/main.c's header lists the loops
+# and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 192 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 192 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

@@ -334,7 +334,7 @@ fn a_touch_through_an_alias_in_the_other_l1_set_moves_the_line_there() {
 
 /// [CBE-Handbook p:138 s:6.1.3.10] A line found at the other congruence class is invalidated, and the data from the L2 is placed at the congruence class of the effective address.
 #[test]
-fn a_second_touch_through_the_other_l1_set_arrives_no_earlier_than_the_first() {
+fn a_second_touch_through_the_other_l1_set_arrives_when_the_first_does() {
     let twin = [(dcbt(), ALIAS_LOW_EA), (dcbt(), ALIAS_TWIN_EA)];
     let other = [(dcbt(), ALIAS_LOW_EA), (dcbt(), ALIAS_HIGH_EA)];
     let (_, same_set) = load_and_use_issue(ADJACENT_RA, &twin, ALIAS_TWIN_EA);

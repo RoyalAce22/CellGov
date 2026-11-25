@@ -2,6 +2,8 @@
 //! model, and what the timing model's caches hold after them.
 //!
 //! [CBE-Handbook p:134 s:6.1.2.2] The CIU sends an access to the NCU or to the L2 by the page's I bit.
+//!
+//! [CBE-Handbook p:135 s:6.1.3.1] The L1 data cache does not allocate on a write.
 
 use super::RegionTable;
 use crate::instruction::encode::encode;

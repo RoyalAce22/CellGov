@@ -64,8 +64,9 @@ fn a_misaligned_store_from_a_no_access_page_with_c_1_into_an_uncached_inhibited_
 
 /// [PPC-Book3 p:45 s:4.10.1] With key 1, PP 11 permits reads only.
 /// [CBE-Handbook p:290 s:9.10] A store's alignment interrupt in caching-inhibited storage precedes the page-protection data storage interrupt when C is 1.
+/// [PPC-Book3 p:70 s:5.5.8] An alignment interrupt sets DAR to the EA.
 #[test]
-fn a_misaligned_store_from_a_no_access_page_with_c_1_into_a_read_only_inhibited_page_with_c_0_takes_one_interrupt_whether_a_load_cached_that_page_or_not(
+fn a_misaligned_store_from_a_no_access_page_with_c_1_into_a_read_only_inhibited_page_with_c_0_takes_the_alignment_interrupt_whether_a_load_cached_that_page_or_not(
 ) {
     let lbz = |rt: u32, d: u16, ra: u32| (34 << 26) | (rt << 21) | (ra << 16) | u32::from(d);
     let next = NEXT_RA | PTE_I | 0b11;
@@ -103,6 +104,7 @@ fn a_misaligned_store_from_a_no_access_page_with_c_1_into_a_read_only_inhibited_
 
 /// [CBE-Handbook p:290 s:9.10] A store's alignment interrupt in caching-inhibited storage follows the page-protection data storage interrupt when C is 0.
 /// [PPC-Book3 p:67 s:5.5.3] A data storage interrupt sets DSISR bit 4 when storage protection refuses the access, and bit 6 for a store.
+/// [PPC-Book3 p:67 s:5.5.3] DAR holds the EA of a byte in the first aligned doubleword that the access attempted in the page that caused the interrupt.
 #[test]
 fn a_misaligned_store_from_a_no_access_page_with_c_0_into_an_uncached_inhibited_page_takes_the_page_protection_interrupt(
 ) {
@@ -116,6 +118,7 @@ fn a_misaligned_store_from_a_no_access_page_with_c_0_into_an_uncached_inhibited_
 
 /// [CBE-Handbook p:253 s:9.5.8] The PPE takes the alignment interrupt for a load or store whose operand is unaligned and in caching-inhibited storage.
 /// [PPC-Book3 p:67 s:5.5.3] A data storage interrupt sets DSISR bit 4 when storage protection refuses the access, and bit 6 for a store.
+/// [PPC-Book3 p:67 s:5.5.3] DAR holds the EA of a byte in the first aligned doubleword that the access attempted in the page that caused the interrupt.
 #[test]
 fn a_misaligned_store_from_a_no_access_page_with_c_1_into_a_cacheable_page_takes_the_page_protection_interrupt_and_keeps_no_next_page_r(
 ) {

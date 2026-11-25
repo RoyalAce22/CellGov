@@ -112,7 +112,7 @@ fn run(fused: bool, budget: u64) -> Stop {
 }
 
 #[test]
-fn a_std_pair_whose_second_doubleword_straddles_the_region_end_commits_the_first() {
+fn a_std_pair_straddling_the_region_end_commits_the_first_doubleword_as_its_halves_do() {
     let slot = shadow::PredecodedShadow::build(0, &code_bytes()).get(4);
     assert!(
         matches!(

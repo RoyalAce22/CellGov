@@ -172,19 +172,18 @@ fn commit(mem: &mut GuestMemory, effects: &[Effect]) {
     }
 }
 
-/// The bytes of the one-byte write intents to byte `byte` of the entry
-/// of page `index`, in order.
+/// The bytes that the write intents starting at byte `byte` of the entry
+/// of page `index` write to that byte, in order.
 fn entry_byte_writes(effects: &[Effect], index: u64, byte: usize) -> Vec<u8> {
     let at = entry(index) + byte as u64;
     effects
         .iter()
         .filter_map(|e| match e {
             Effect::SharedWriteIntent { range, bytes, .. } if range.start().raw() == at => {
-                Some(bytes.bytes().to_vec())
+                bytes.bytes().first().copied()
             }
             _ => None,
         })
-        .flatten()
         .collect()
 }
 

@@ -174,6 +174,50 @@ fn a_load_that_hits_the_l1_holds_no_set() {
     assert_eq!(caches.reload_free(LINE_A), free);
 }
 
+/// Caches after `line_a_pushed_out_while_on_its_way` and a later touch
+/// of `LINE_C`, and the cycle `LINE_A`'s real line arrives. `LINE_C`
+/// arrives after it, so the record of arrivals still names `LINE_A`'s
+/// cycle at that cycle.
+fn line_a_arriving() -> (Caches, u64) {
+    let mut caches = line_a_pushed_out_while_on_its_way();
+    let arrives = caches.arrival(12, at(LINE_A));
+    caches.touch(12, LINE_C, Some(LINE_C));
+    assert!(caches.arrival(12, at(LINE_C)) > arrives);
+    (caches, arrives)
+}
+
+#[test]
+fn a_load_in_the_cycle_its_line_arrives_misses_to_the_l2_when_its_set_frees() {
+    let (mut caches, arrives) = line_a_arriving();
+    let free = caches.reload_free(LINE_A);
+    assert!(free > arrives);
+    assert_eq!(
+        caches.load_queued(arrives, at(LINE_A), false),
+        (Level::L2, free)
+    );
+}
+
+#[test]
+fn a_touch_in_the_cycle_its_line_arrives_waits_for_its_set_and_holds_it() {
+    let (mut caches, arrives) = line_a_arriving();
+    let free = caches.reload_free(LINE_A);
+    let turn = caches.touch(arrives, LINE_A, Some(LINE_A));
+    assert_eq!(
+        caches.reload_free(LINE_A),
+        turn.max(free) + k::PPU_L2_LOAD_USE_CYCLES + k::PPU_LOAD_MISS_ENTRY_REUSE_CYCLES
+    );
+}
+
+#[test]
+fn a_load_of_a_touched_line_whose_set_sent_the_request_at_its_turn_waits_for_no_set() {
+    let mut caches = Caches::new();
+    caches.touch(10, LINE_A, Some(LINE_A));
+    let turn = caches.touch(11, LINE_C, Some(LINE_C));
+    assert!(turn > 12);
+    assert_eq!(caches.reload_free(LINE_C), freed_after_memory(turn));
+    assert_eq!(caches.load_queued(12, at(LINE_C), false), (Level::L1, 0));
+}
+
 #[test]
 fn a_load_that_misses_a_line_still_on_its_way_holds_no_set() {
     let mut caches = line_a_pushed_out_while_on_its_way();

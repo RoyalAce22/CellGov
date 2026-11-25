@@ -56,8 +56,8 @@ fn run_sth(page: u64, next: u64) -> (cellgov_exec::InterruptRecord, Vec<Effect>,
 fn a_misaligned_store_from_a_refusing_page_with_c_1_into_a_refusing_inhibited_page_with_c_0_takes_the_alignment_interrupt_with_no_access_or_read_only(
 ) {
     for (first, page) in FIRST_PAGES {
-        let (read_only, _, _) = run_sth(page, READ_ONLY_INHIBITED_NEXT);
-        let (no_access, effects, mem) = run_sth(page, NO_ACCESS_INHIBITED_NEXT);
+        let (read_only, read_only_effects, read_only_mem) = run_sth(page, READ_ONLY_INHIBITED_NEXT);
+        let (no_access, no_access_effects, no_access_mem) = run_sth(page, NO_ACCESS_INHIBITED_NEXT);
         assert_eq!(
             read_only.vector,
             irq::VECTOR_ALIGNMENT,
@@ -70,15 +70,31 @@ fn a_misaligned_store_from_a_refusing_page_with_c_1_into_a_refusing_inhibited_pa
         );
         assert_eq!(read_only.dar, Some(CROSSING_EA), "{first}: read-only DAR");
         assert_eq!(no_access.dar, Some(CROSSING_EA), "{first}: no access DAR");
-        for index in [PAGE, NEXT] {
-            assert_eq!(
-                r_writes(&effects, index),
-                Vec::<u8>::new(),
-                "{first}: page {index} R"
-            );
+        let runs = [
+            (
+                "read-only",
+                READ_ONLY_INHIBITED_NEXT,
+                &read_only_effects,
+                &read_only_mem,
+            ),
+            (
+                "no access",
+                NO_ACCESS_INHIBITED_NEXT,
+                &no_access_effects,
+                &no_access_mem,
+            ),
+        ];
+        for (next_name, next, effects, mem) in runs {
+            for index in [PAGE, NEXT] {
+                assert_eq!(
+                    r_writes(effects, index),
+                    Vec::<u8>::new(),
+                    "{first}, {next_name}: page {index} R"
+                );
+            }
+            assert_r_byte_unchanged(mem, PAGE, page);
+            assert_r_byte_unchanged(mem, NEXT, next);
         }
-        assert_r_byte_unchanged(&mem, PAGE, page);
-        assert_r_byte_unchanged(&mem, NEXT, NO_ACCESS_INHIBITED_NEXT);
     }
 }
 

@@ -122,6 +122,7 @@ fn a_misaligned_inhibited_store_after_a_load_of_its_read_only_cacheable_next_pag
 }
 
 /// [CBE-Handbook p:290 s:9.10] A store's alignment interrupt in caching-inhibited storage follows the page-protection data storage interrupt when C is 0, and precedes it when C is 1.
+/// [PPC-Book3 p:67 s:5.5.3] A data storage interrupt sets DAR to a byte in the first aligned doubleword that the store attempted in the page that caused it.
 #[test]
 fn a_misaligned_inhibited_store_into_a_read_only_cacheable_page_takes_one_interrupt_whether_a_load_cached_that_page_or_not(
 ) {

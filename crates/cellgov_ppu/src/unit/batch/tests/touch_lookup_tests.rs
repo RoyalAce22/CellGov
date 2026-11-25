@@ -202,6 +202,22 @@ fn a_touch_of_a_caching_inhibited_page_is_cancelled() {
     assert_eq!(reference_writes(&effects, PAGE), r_set(d1));
 }
 
+/// [CBE-Handbook p:145 s:6.1.6.2] A touch of a caching-inhibited page is cancelled and does not reload the cache.
+///
+/// No storage holds the page's real address, so no region view marks the
+/// touch caching-inhibited, and only the table lookup can cancel it.
+#[test]
+fn a_touch_of_a_caching_inhibited_page_that_no_storage_holds_is_cancelled() {
+    const UNBACKED_RA: u64 = 0x10_0000;
+    let d1 = read_write(UNBACKED_RA) | PTE_I;
+    let mem = memory(&[dcbt_r7()], &[(PAGE, d1)]);
+    let mut unit = kernel_unit(TOUCH_EA);
+    let (r, effects) = run(&mut unit, &mem, 1);
+    assert_retired_without_interrupt(&unit, &r);
+    assert_no_reload(&unit, TOUCH_EA, UNBACKED_RA + 0x80);
+    assert_eq!(reference_writes(&effects, PAGE), r_set(d1));
+}
+
 /// [CBE-Handbook p:145 s:6.1.6.2] A touch of a guarded page is cancelled and does not reload the cache.
 /// [CBE-Handbook p:90 s:4.2.6.7] Table 4-4: the PPE implements each cacheable WIMG setting as 0010, so a cacheable access is nonguarded.
 #[test]

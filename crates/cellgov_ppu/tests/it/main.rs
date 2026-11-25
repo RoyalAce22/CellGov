@@ -105,6 +105,7 @@ mod console_ppu_issue_vscr_fdiv;
 mod console_ppu_issue_vscr_lhs;
 mod console_ppu_issue_vscr_mem;
 mod console_ppu_issue_vscr_mem_forms;
+mod console_ppu_issue_vscr_miss;
 mod console_ppu_issue_vscr_queue;
 mod console_ppu_issue_vscr_queue_depth;
 mod console_ppu_issue_vscr_smt;

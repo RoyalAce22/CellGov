@@ -16,7 +16,7 @@
 //! pass about 76 cycles longer (loop 8 against loop 7), and CellGov's
 //! pass 1 cycle longer.
 
-use crate::console_ppu_issue_timing::{replay, Replay, Seed};
+use crate::console_ppu_issue_timing::{replay, replay_beside_for, Replay, Seed, Sibling};
 use cellgov_ps3_abi::hw::ppu_issue::PPU_CYCLES_PER_TB_TICK;
 
 const CONSOLE: &str =
@@ -129,14 +129,30 @@ fn body(k: usize) -> Vec<u32> {
     }
 }
 
-/// CellGov's cycles an iteration for loop `k`.
-pub(crate) fn cellgov_cycles(k: usize) -> f64 {
-    let r = Replay {
+/// Loop `k`'s replay.
+fn loop_replay(k: usize) -> Replay {
+    Replay {
         loop_index: k,
         words: looped(&body(k)),
         seeds: SEEDS,
-    };
-    replay(&r, 0).expect("the loop replays")
+    }
+}
+
+/// CellGov's cycles an iteration for loop `k`.
+pub(crate) fn cellgov_cycles(k: usize) -> f64 {
+    replay(&loop_replay(k), 0).expect("the loop replays")
+}
+
+/// No sibling: the loop replays alone.
+const ALONE: Sibling = Sibling {
+    words: &[],
+    seeds: &[],
+};
+
+/// CellGov's cycles an iteration for loop `k`, timed over `iterations`
+/// after as many that warm the loop.
+pub(crate) fn cellgov_cycles_for(k: usize, iterations: u64) -> f64 {
+    replay_beside_for(&loop_replay(k), 0, &ALONE, iterations).expect("the loop replays")
 }
 
 /// The loop that loads B0 only after B4's reload returns.

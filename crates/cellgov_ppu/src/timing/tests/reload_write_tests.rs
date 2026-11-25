@@ -72,8 +72,9 @@ fn requests_in_last_pass(passes: u64) -> u64 {
     sent
 }
 
-/// In the `ppu_issue_touch_reload` capture, loop 3 takes 643 cycles a
-/// load, about what 5 touch reloads in the load's set cost.
+/// In the `ppu_issue_touch_reload` capture, loop 3 costs a load about
+/// what 5 touch reloads in the load's set cost. The integration test
+/// `console_ppu_issue_touch_revisit` checks the cycles against it.
 #[test]
 fn eight_touches_that_revisit_the_same_lines_of_one_l1_set_send_five_requests() {
     for passes in 2..=4 {
@@ -97,6 +98,25 @@ fn victim_after(others: u64) -> Level {
 fn a_reload_past_the_tables_size_writes_the_first_returning_line_at_once() {
     assert_eq!(victim_after(LINE_CYCLES as u64 - 1), Level::L1);
     assert_eq!(victim_after(LINE_CYCLES as u64), Level::L2);
+}
+
+/// The oldest reload is the touch of a fifth line in line 0's full set,
+/// from memory. The next is a touch of an L2-held line in another set,
+/// which returns first. The table then overflows by one.
+#[test]
+fn a_full_reload_table_writes_the_reload_that_returns_first_not_the_oldest() {
+    let (mut caches, t) = full_set();
+    let from_l2 = LINE_A + k::PPU_CACHE_LINE_BYTES;
+    caches.store(t, at(from_l2));
+    caches.touch(t, in_set(4), Some(in_set(4)));
+    caches.touch(t + 1, from_l2, Some(from_l2));
+    assert!(caches.arrival(t + 1, at(from_l2)) < caches.arrival(t + 1, at(in_set(4))));
+    for j in 2..=LINE_CYCLES as u64 {
+        let line = LINE_A + j * k::PPU_CACHE_LINE_BYTES;
+        caches.touch(t + j, line, Some(line));
+    }
+    let load = t + LINE_CYCLES as u64 + 1;
+    assert_eq!(caches.load_queued(load, at(in_set(0)), false).0, Level::L1);
 }
 
 /// [CBE-Handbook p:138 s:6.1.3.10] The copy at the other congruence class is invalidated, and then the data comes in from the L2.

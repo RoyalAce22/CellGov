@@ -60,6 +60,9 @@ mod kernel_share_tests;
 mod divide_window_tests;
 
 #[cfg(test)]
+#[path = "tests/fenced_access_clock_tests.rs"]
+mod fenced_access_clock_tests;
+#[cfg(test)]
 #[path = "tests/inhibited_access_tests.rs"]
 mod inhibited_access_tests;
 #[cfg(test)]
@@ -1099,7 +1102,7 @@ impl PpeTiming {
                 class,
                 tail,
                 inhibited,
-            } => self.load(exec, op, Operand { ea, ra, len, tail }, class, inhibited),
+            } => self.load(t, exec, op, Operand { ea, ra, len, tail }, class, inhibited),
             Kind::Store {
                 ea,
                 ra,
@@ -1109,7 +1112,7 @@ impl PpeTiming {
                 ..
             } => {
                 let at = Operand { ea, ra, len, tail };
-                queue_store(&mut self.tables, exec, op, at, inhibited);
+                queue_store(&mut self.tables, t, exec, op, at, inhibited);
             }
             Kind::ZeroLine { ra, .. } => self.tables.caches.zero(t, ra),
             Kind::Touch { ea, ra } => {
@@ -1303,7 +1306,18 @@ impl PpeTiming {
     ///
     /// [CBE-Handbook p:134 s:6.1.2.2] The CIU sends an access to the NCU or to the L2 by the page's I bit.
     /// [CBE-Handbook p:208 s:8.4.1.1] A caching-inhibited load is an EIB operation of the instruction's own length.
-    fn load(&mut self, t: u64, op: &Op, at: Operand, class: LoadClass, inhibited: bool) {
+    ///
+    /// The load reads the caches at its issue cycle `t`. Its targets are
+    /// ready no earlier than the latency of the level it found its line
+    /// in after `exec`, the cycle the VSU issue queue lets the op go.
+    ///
+    /// [CBE-Handbook p:757 s:A.6.2] A VXU or FPU load goes to the LSU for the L1 at issue, and its data waits in a load target buffer until the VSU issue queue issues the load.
+    ///
+    /// The `ppu_issue_vscr_miss` capture shows that a miss does not hide
+    /// the queue's wait. An `mtvscr` before an `lfd` or `lvx` in a pointer
+    /// chase adds 55 to 58 cycles an iteration when each load misses the
+    /// L2, and 59 to 60 when each load hits the L1.
+    fn load(&mut self, t: u64, exec: u64, op: &Op, at: Operand, class: LoadClass, inhibited: bool) {
         let tables = &mut *self.tables;
         let (level, queued) = if inhibited {
             (Level::Memory, 0)
@@ -1415,6 +1429,12 @@ impl PpeTiming {
         let (data, addr) = match forwarded {
             Some(f) => (data.max(f), addr.max(f)),
             None => (data, addr),
+        };
+        let (data, addr) = if exec > t {
+            let queued_data = exec + micro + miss_lat.unwrap_or(hit_lat);
+            (data.max(queued_data), addr.max(queued_data))
+        } else {
+            (data, addr)
         };
         for r in targets {
             c.ready[r as usize] = data;

@@ -6,7 +6,7 @@
 //! for the line adds the trip to the loop; a barrier that does not wait
 //! hides the trip under the chain.
 
-use crate::console_ppu_issue_timing::{replay, Replay, Seed};
+use crate::console_ppu_issue_timing::{replay_beside_for, Replay, Seed, Sibling};
 use cellgov_ps3_abi::hw::ppu_issue::{PPU_CYCLES_PER_TB_TICK, PPU_STORE_MISS_FETCH_CYCLES};
 
 const CONSOLE: &str =
@@ -80,9 +80,23 @@ fn console() -> Vec<f64> {
         .collect()
 }
 
+/// No sibling: each loop replays alone.
+const ALONE: Sibling = Sibling {
+    words: &[],
+    seeds: &[],
+};
+
+/// Iterations each replay times, after as many that warm it. The
+/// `ppu_issue_store_miss_eieio` loops of the same shape give the same
+/// cycles at 8 as at 512, and 512 takes the test past its time budget.
+const LOOPS: u64 = 8;
+
 fn cellgov() -> Vec<f64> {
     (0..CASES.len())
-        .map(|c| replay(&case(c), 0).unwrap_or_else(|| panic!("case {c} faults")))
+        .map(|c| {
+            replay_beside_for(&case(c), 0, &ALONE, LOOPS)
+                .unwrap_or_else(|| panic!("case {c} faults"))
+        })
         .collect()
 }
 
@@ -100,7 +114,7 @@ fn only_a_sync_after_a_store_miss_waits_for_the_line() {
         for (name, c) in [("lwsync", 0), ("isync", 2)] {
             let other = wait(&cycles, c);
             assert!(
-                sync - other > fetch / 2.0,
+                sync - other > fetch / 2.0 && other < fetch / 2.0,
                 "{who}: a store miss adds {sync:.0} cycles to a sync and {other:.0} to an {name}",
             );
         }

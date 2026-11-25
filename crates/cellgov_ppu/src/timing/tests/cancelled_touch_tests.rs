@@ -21,7 +21,7 @@ fn a_cancelled_touch_fills_no_line_and_records_no_arrival() {
 #[test]
 fn a_cancelled_touch_sends_no_request_ahead_of_the_next_touch() {
     let mut after_cancel = Caches::new();
-    after_cancel.touch(10, LINE_A, None);
+    assert_eq!(after_cancel.touch(10, LINE_A, None), 10);
     assert_eq!(after_cancel.touch_free(), 0);
     after_cancel.touch(10, LINE_B, Some(LINE_B));
     let mut alone = Caches::new();

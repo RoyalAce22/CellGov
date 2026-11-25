@@ -9,8 +9,13 @@
 //! about one touch interval to the pass, beyond the wait.
 
 use crate::console_ppu_issue_reload_return::{
-    cellgov_cycles, console_cycles, console_words, OTHER_TOUCHES,
+    cellgov_cycles_for, console_cycles, console_words, OTHER_TOUCHES,
 };
+
+/// Iterations each replay times, after as many that warm it. Every
+/// touch misses the L2, so the loop repeats the same pass each
+/// iteration; 512 iterations take the test past its time budget.
+const ITERATIONS: u64 = 128;
 
 /// The largest share of the cycles that one touch adds to the console's
 /// pass that the model may differ by.
@@ -20,9 +25,9 @@ const PER_TOUCH_GAP: f64 = 0.10;
 fn each_touch_of_a_memory_line_adds_its_turn_to_the_pass_within_ten_percent_of_the_console() {
     let w = console_words();
     assert_eq!(OTHER_TOUCHES[0], 0, "loop 0 has no other touch");
-    let (cellgov_none, console_none) = (cellgov_cycles(0), console_cycles(&w, 0));
+    let (cellgov_none, console_none) = (cellgov_cycles_for(0, ITERATIONS), console_cycles(&w, 0));
     for (k, &n) in OTHER_TOUCHES.iter().enumerate().skip(1) {
-        let cellgov = (cellgov_cycles(k) - cellgov_none) / n as f64;
+        let cellgov = (cellgov_cycles_for(k, ITERATIONS) - cellgov_none) / n as f64;
         let console = (console_cycles(&w, k) - console_none) / n as f64;
         assert!(
             (console - cellgov).abs() / console <= PER_TOUCH_GAP,

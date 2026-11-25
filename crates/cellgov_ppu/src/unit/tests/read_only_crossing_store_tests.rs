@@ -161,6 +161,21 @@ fn a_misaligned_store_from_a_read_only_page_with_c_1_into_a_cacheable_page_takes
     assert_r_byte_unchanged(&mem, NEXT, next);
 }
 
+/// [PPC-Book3 p:45 s:4.10.1] PP 11 permits reads only, for either key.
+/// [PPC-Book3 p:67 s:5.5.3] A data storage interrupt sets DSISR bit 4 when storage protection refuses the access, and bit 6 for a store.
+#[test]
+fn a_misaligned_store_from_a_read_only_page_with_c_1_into_a_read_only_cacheable_page_takes_the_page_protection_interrupt_and_keeps_no_next_page_r(
+) {
+    let next = NEXT_RA | 0b11;
+    let (interrupt, effects, mem) =
+        run_to_interrupt_over(&[sth(4, 0xFFF, 5)], read_only_cacheable(true), next);
+    assert_eq!(interrupt.vector, irq::VECTOR_DATA_STORAGE);
+    assert_eq!(interrupt.dsisr, Some(DSISR_PROTECTION | DSISR_STORE));
+    assert_eq!(interrupt.dar, Some(CROSSING_EA));
+    assert_eq!(r_writes(&effects, NEXT), Vec::<u8>::new(), "page 5 R");
+    assert_r_byte_unchanged(&mem, NEXT, next);
+}
+
 /// [CBE-Handbook p:90 s:4.2.6.8] Footnote 4: a misaligned caching-inhibited store is speculative, so its table lookup is not performed when it takes the alignment interrupt.
 /// [CBE-Handbook p:290 s:9.10] A store's alignment interrupt in caching-inhibited storage precedes the page-protection data storage interrupt when C is 1.
 #[test]

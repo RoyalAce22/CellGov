@@ -194,7 +194,7 @@ fn fill_lines_held_after_touch(touched: u64, touch: u32) -> [bool; 4] {
 }
 
 #[test]
-fn a_touch_of_caching_inhibited_storage_drops_no_line_of_a_full_set_as_on_the_console() {
+fn a_touch_of_inhibited_or_unmapped_storage_drops_no_line_of_a_full_set_as_on_the_console() {
     let w = be_u64(&console_payload("ppu_touch_inhibited"));
     assert_eq!(w.len(), 20);
     assert_eq!((w[0], w[1]), (INHIBITED_DONE, 0), "every case ran");

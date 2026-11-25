@@ -140,7 +140,7 @@ fn wait(cycles: &[f64], c: usize) -> f64 {
 }
 
 #[test]
-fn an_eieio_after_a_store_miss_does_not_wait_for_the_line() {
+fn a_sync_after_a_store_miss_waits_for_the_line_and_an_eieio_does_not() {
     let fetch = PPU_STORE_MISS_FETCH_CYCLES as f64;
     for (who, cycles) in [("console", console()), ("CellGov", cellgov())] {
         let (eieio, sync) = (wait(&cycles, 0), wait(&cycles, 6));

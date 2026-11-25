@@ -80,7 +80,8 @@ fn line_0_after_a_stalled_touch(stalled: u64) -> Level {
         caches.load_queued(t, at(in_set(i)), false);
         t += SETTLED;
     }
-    caches.touch(t, in_set(4), Some(in_set(4)));
+    let fifth = in_set(k::PPU_L1D_WAYS as u64);
+    caches.touch(t, fifth, Some(fifth));
     caches.stretch_touches(t, stalled);
     caches.load_queued(t + SETTLED, at(in_set(0)), false).0
 }
@@ -89,4 +90,44 @@ fn line_0_after_a_stalled_touch(stalled: u64) -> Level {
 fn a_stall_delays_the_cycle_a_reload_writes_its_line() {
     assert_eq!(line_0_after_a_stalled_touch(0), Level::L2);
     assert_eq!(line_0_after_a_stalled_touch(SETTLED), Level::L1);
+}
+
+/// Caches that hold `LINE_A`'s full L1 set after a touch of a fifth line
+/// in the set, and the cycle the touch's reload writes over line 0.
+fn fifth_line_touched() -> (Caches, u64) {
+    let mut caches = Caches::new();
+    let mut t = 0;
+    for i in 0..k::PPU_L1D_WAYS as u64 {
+        caches.load_queued(t, at(in_set(i)), false);
+        t += SETTLED;
+    }
+    let fifth = in_set(k::PPU_L1D_WAYS as u64);
+    caches.touch(t, fifth, Some(fifth));
+    let writes = caches.arrival(t, at(fifth));
+    assert!(writes > t);
+    (caches, writes)
+}
+
+#[test]
+fn a_stall_that_begins_the_cycle_a_reload_writes_leaves_that_write_on_time() {
+    let (mut caches, writes) = fifth_line_touched();
+    caches.stretch_touches(writes, SETTLED);
+    assert_eq!(
+        caches.load_queued(writes, at(in_set(0)), false).0,
+        Level::L2
+    );
+}
+
+#[test]
+fn a_one_cycle_stall_delays_a_reload_write_by_one_cycle() {
+    let (mut caches, writes) = fifth_line_touched();
+    caches.stretch_touches(writes - 1, 1);
+    assert_eq!(
+        caches.load_queued(writes, at(in_set(0)), false).0,
+        Level::L1
+    );
+    assert_eq!(
+        caches.load_queued(writes + 1, at(in_set(0)), false).0,
+        Level::L2
+    );
 }

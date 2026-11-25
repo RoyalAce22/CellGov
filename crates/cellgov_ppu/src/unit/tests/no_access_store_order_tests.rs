@@ -74,6 +74,7 @@ fn a_misaligned_inhibited_store_into_a_page_with_no_access_and_c_1_takes_the_ali
 
 /// [CBE-Handbook p:290 s:9.10] A store's alignment interrupt in caching-inhibited storage follows the page-protection data storage interrupt when C is 0.
 /// [PPC-Book3 p:67 s:5.5.3] A data storage interrupt sets DSISR bit 4 when storage protection refuses the access, and bit 6 for a store.
+/// [PPC-Book3 p:67 s:5.5.3] DAR holds the EA of a byte in the first aligned doubleword that the access attempted in the page that caused the interrupt.
 #[test]
 fn a_misaligned_inhibited_store_into_a_page_with_no_access_and_c_0_takes_the_page_protection_interrupt(
 ) {
@@ -103,6 +104,7 @@ fn a_misaligned_store_inside_an_inhibited_page_with_no_access_and_c_1_takes_the_
 
 /// [CBE-Handbook p:253 s:9.5.8] The PPE takes the alignment interrupt for a load or store whose operand is unaligned and in caching-inhibited storage.
 /// [PPC-Book3 p:67 s:5.5.3] A data storage interrupt sets DSISR bit 4 when storage protection refuses the access, and bit 6 for a store.
+/// [PPC-Book3 p:67 s:5.5.3] DAR holds the EA of a byte in the first aligned doubleword that the access attempted in the page that caused the interrupt.
 #[test]
 fn an_aligned_store_into_an_inhibited_page_with_no_access_and_c_1_takes_the_page_protection_interrupt(
 ) {
@@ -118,8 +120,9 @@ fn an_aligned_store_into_an_inhibited_page_with_no_access_and_c_1_takes_the_page
 
 /// [CBE-Handbook p:290 s:9.10] A store's alignment interrupt in caching-inhibited storage precedes the page-protection data storage interrupt when C is 1.
 /// [CBE-Handbook p:90 s:4.2.6.8] Footnote 4: a misaligned caching-inhibited store is speculative, so its table lookup is not performed when it takes the alignment interrupt.
+/// [PPC-Book3 p:70 s:5.5.8] An alignment interrupt sets DAR to the EA.
 #[test]
-fn a_misaligned_store_from_an_inhibited_page_with_no_access_into_a_second_one_with_c_1_takes_the_alignment_interrupt(
+fn a_misaligned_store_from_an_inhibited_page_with_no_access_into_a_cacheable_page_with_no_access_and_c_1_takes_the_alignment_interrupt_and_keeps_no_r(
 ) {
     let page = no_access(PAGE_RA, PTE_I | PTE_C);
     let next = no_access(NEXT_RA, PTE_C);

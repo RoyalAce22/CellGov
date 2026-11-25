@@ -60,12 +60,14 @@ fn the_console_host_name_is_masked_where_it_stands_alone() {
     transcript.request("GET /cpursx.ps3");
     transcript.decision("status page unanswered: resolve PS3:80: no such host");
     transcript.decision("ps3-lab and lab.ps3.example are other hosts");
+    transcript.decision("ps3.lab is another host; the console is ps3.");
     assert_eq!(
         transcript.lines(),
         [
             "#0001 > GET /cpursx.ps3",
             "#0002 = status page unanswered: resolve <host>:80: no such host",
             "#0003 = ps3-lab and lab.ps3.example are other hosts",
+            "#0004 = ps3.lab is another host; the console is <host>.",
         ]
     );
 }

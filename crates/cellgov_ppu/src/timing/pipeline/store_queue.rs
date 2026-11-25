@@ -112,8 +112,7 @@ pub(super) fn queue_room(tables: &Tables, t: u64, ea: u64, len: u8) -> u64 {
     t.max(slot).max(written)
 }
 
-/// Puts a store of the bytes of `operand`, issued at `t`, into the store
-/// queue.
+/// Puts a store of the bytes of `operand` into the store queue.
 ///
 /// The caches store the line of each byte at that byte's real address,
 /// which the tail gives for the bytes on the next page. The store queue's
@@ -140,9 +139,13 @@ pub(super) fn queue_room(tables: &Tables, t: u64, ea: u64, len: u8) -> u64 {
 ///
 /// A store to a line the L2 does not hold completes when the L2 has that
 /// line from memory, [`PPU_STORE_MISS_FETCH_CYCLES`] after the store's
-/// last issue cycle. The entries keep their drain times.
+/// last cycle from `t`. The entries keep their drain times. The request
+/// takes its data to the L2, so the fetch counts from `t` as the entries
+/// do.
 ///
 /// [`PPU_STORE_MISS_FETCH_CYCLES`]: k::PPU_STORE_MISS_FETCH_CYCLES
+///
+/// [CBE-Handbook p:144 s:6.1.5.7] A CIU store queue request goes to the L2 as its address and then its data, and the L2 store queue gives it to a read-and-claim machine.
 ///
 /// When `inhibited` is true, the store changes no cache tag and fetches
 /// no line. A `sync` waits for the store's own EIB operation, but the
@@ -151,9 +154,22 @@ pub(super) fn queue_room(tables: &Tables, t: u64, ea: u64, len: u8) -> u64 {
 /// [CBE-Handbook p:134 s:6.1.2.2] The CIU sends an access to the NCU or to the L2 by the page's I bit.
 /// [CBE-Handbook p:208 s:8.4.1.1] A caching-inhibited store is an EIB operation of the instruction's own length, and only a cacheable L2 miss reads a 128-byte line.
 /// [CBE-Handbook p:795 s:C.3.5] A `sync` at the bottom of the store queue waits for the BIU's `st_done` signal.
+///
+/// The store changes the cache tags at its issue cycle `issue`. Its
+/// entries take their cycles from `t`, the cycle the VSU issue queue lets
+/// the op go.
+///
+/// [CBE-Handbook p:756 s:A.6.2] Figure A-3 sends the LSU part of a VXU or FPU store from IU issue, beside the VSU issue queue.
 #[inline]
-pub(super) fn queue_store(tables: &mut Tables, t: u64, op: &Op, operand: Operand, inhibited: bool) {
-    if !inhibited && tables.caches.store(t, operand) == Level::Memory {
+pub(super) fn queue_store(
+    tables: &mut Tables,
+    issue: u64,
+    t: u64,
+    op: &Op,
+    operand: Operand,
+    inhibited: bool,
+) {
+    if !inhibited && tables.caches.store(issue, operand) == Level::Memory {
         let last = t + u64::from(op.span.saturating_sub(1));
         tables.line_fetched = tables
             .line_fetched

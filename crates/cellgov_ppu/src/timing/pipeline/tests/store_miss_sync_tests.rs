@@ -1,4 +1,10 @@
 //! A barrier after a store to a line the L2 does not hold.
+//!
+//! [CBE-Handbook p:795 s:C.3.5] a `sync` or an `lwsync` at the bottom of the store queue waits for the L2's `sync_done` signal.
+//!
+//! The `ppu_issue_store_miss_barriers` capture shows that a store miss
+//! adds the line's trip from memory to a `sync` after the store, and
+//! nothing to an `lwsync` or an `isync`.
 
 use super::super::pressure::stretch_pending;
 use crate::instruction::PpuInstruction as I;
@@ -85,6 +91,26 @@ fn a_sync_after_a_store_to_a_line_the_l2_holds_waits_for_no_fetch() {
     assert_eq!(
         cycles[4] - cycles[3],
         k::PPU_SYNC_CYCLES + k::PPU_SYNC_STORE_CYCLES
+    );
+}
+
+#[test]
+fn a_microcoded_store_miss_has_its_line_fetch_cycles_after_its_last_issue_cycle() {
+    let stmw = I::Stmw {
+        rs: 24,
+        ra: 11,
+        imm: 0,
+    };
+    let (ops, n) = classify(&stmw, &state());
+    assert_eq!(n, 1);
+    let span = u64::from(ops[0].span);
+    assert!(span > 2, "the stmw issues over {span} cycles");
+    let mut timing = PpeTiming::new();
+    let cycles = retire(&mut timing, &[stmw]);
+    assert_eq!(cycles.len(), 1);
+    assert_eq!(
+        timing.tables.line_fetched,
+        cycles[0] + span - 1 + k::PPU_STORE_MISS_FETCH_CYCLES
     );
 }
 

@@ -154,6 +154,8 @@ fn run_ended_batch(
 /// [CBE-Handbook p:90 s:4.2.6.8] Each table lookup but that of a misaligned caching-inhibited store is nonspeculative, so it sets R whatever interrupt the access takes.
 /// [CBE-Handbook p:90 s:4.2.6.8] The MMU does not update C when the store takes a storage exception.
 /// [PPC-Book3 p:26 s:4.2.1] A storage exception is one that causes, among others, an Alignment interrupt.
+/// [CBE-Handbook p:253 s:9.5.8] A dcbz in caching-inhibited storage takes the alignment interrupt.
+/// [CBE-Handbook p:253 s:9.5.8] An stmw, stswi, stswx, stwcx. or stdcx. operand in caching-inhibited storage takes the alignment interrupt, aligned or not.
 #[test]
 fn an_aligned_inhibited_store_whose_batch_ends_ahead_of_it_publishes_its_r_write_and_no_c_write() {
     // Page 6 maps page 4's real page, caching-inhibited with R and C set.
@@ -192,6 +194,7 @@ fn an_aligned_inhibited_store_whose_batch_ends_ahead_of_it_publishes_its_r_write
 
 /// [CBE-Handbook p:90 s:4.2.6.8] Each table lookup but that of a misaligned caching-inhibited store is nonspeculative, so it sets R whatever interrupt the access takes.
 /// [CBE-Handbook p:90 s:4.2.6.8] The MMU does not update C when the store takes a storage exception.
+/// [PPC-Book3 p:26 s:4.2.1] A storage exception is one that causes, among others, an Alignment interrupt.
 /// [CBE-Handbook p:253 s:9.5.8] An stmw, stswi, stswx, stwcx. or stdcx. operand in caching-inhibited storage takes the alignment interrupt, aligned or not.
 #[test]
 fn an_aligned_inhibited_store_whose_batch_ends_at_its_second_page_publishes_r_writes_and_no_c_write(

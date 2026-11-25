@@ -150,6 +150,7 @@ fn a_word_aligned_lfd_inside_an_inhibited_page_with_no_access_takes_the_alignmen
 
 /// [CBE-Handbook p:253 s:9.5.8] The PPE takes the alignment interrupt for a load or store whose operand is unaligned and in caching-inhibited storage.
 /// [PPC-Book3 p:67 s:5.5.3] A data storage interrupt sets DSISR bit 4 when storage protection refuses the access, and bit 6 for a store.
+/// [PPC-Book3 p:67 s:5.5.3] DAR holds the EA of a byte in the first aligned doubleword that the access attempted in the page that caused the interrupt.
 #[test]
 fn an_aligned_load_inside_an_inhibited_page_with_no_access_takes_the_page_protection_interrupt() {
     let (interrupt, _) = run_load(
@@ -164,6 +165,7 @@ fn an_aligned_load_inside_an_inhibited_page_with_no_access_takes_the_page_protec
 
 /// [CBE-Handbook p:253 s:9.5.8] The PPE takes the alignment interrupt for a load or store whose operand is unaligned and in caching-inhibited storage.
 /// [PPC-Book3 p:67 s:5.5.3] A data storage interrupt sets DSISR bit 4 when storage protection refuses the access, and bit 6 for a store.
+/// [PPC-Book3 p:67 s:5.5.3] DAR holds the EA of a byte in the first aligned doubleword that the access attempted in the page that caused the interrupt.
 #[test]
 fn a_misaligned_load_into_a_cacheable_page_with_no_access_takes_the_page_protection_interrupt() {
     let cases = [(lhz(4, 1, 9), NEXT_EA + 1), (lhz(4, 0xFFF, 5), CROSSING_EA)];
@@ -177,6 +179,23 @@ fn a_misaligned_load_into_a_cacheable_page_with_no_access_takes_the_page_protect
         assert_eq!(interrupt.dsisr, Some(DSISR_PROTECTION), "{insn:#x}");
         assert_eq!(interrupt.dar, Some(dar), "{insn:#x}");
     }
+}
+
+/// [CBE-Handbook p:90 s:4.2.6.8] Each table lookup but that of a misaligned caching-inhibited store is nonspeculative, so it sets R whatever interrupt the access takes.
+/// [PPC-Book3 p:67 s:5.5.3] A data storage interrupt sets DSISR bit 4 when storage protection refuses the access.
+/// [PPC-Book3 p:67 s:5.5.3] DAR holds the EA of a byte in the first aligned doubleword that the access attempted in the page that caused the interrupt.
+#[test]
+fn a_misaligned_load_from_a_cacheable_page_with_no_access_into_a_readable_cacheable_page_takes_the_page_protection_interrupt_and_sets_r_on_both(
+) {
+    let (interrupt, effects) = run_load(
+        &[lhz(4, 0xFFF, 5)],
+        no_access(PAGE_RA, PTE_C),
+        NEXT_RA | 0b10,
+    );
+    assert_eq!(interrupt.vector, irq::VECTOR_DATA_STORAGE);
+    assert_eq!(interrupt.dsisr, Some(DSISR_PROTECTION));
+    assert_eq!(interrupt.dar, Some(CROSSING_EA));
+    assert_r_set_on_both_pages(&effects);
 }
 
 /// [CBE-Handbook p:290 s:9.10] A fixed-point load's alignment interrupt in caching-inhibited storage precedes the page-protection data storage interrupt, with no condition on C.
@@ -195,6 +214,7 @@ fn a_misaligned_load_from_an_unbacked_inhibited_page_into_a_page_with_no_access_
 
 /// [CBE-Handbook p:290 s:9.10] A load's page-fault data storage interrupt precedes its alignment interrupt in caching-inhibited storage, which precedes the page-protection data storage interrupt.
 /// [PPC-Book3 p:67 s:5.5.3] A data storage interrupt sets DSISR bit 1 when the translation is not found in either group.
+/// [PPC-Book3 p:67 s:5.5.3] DAR holds the EA of a byte in the first aligned doubleword that the access attempted in the page that caused the interrupt.
 #[test]
 fn a_misaligned_load_from_an_inhibited_page_with_no_access_into_a_page_with_no_entry_takes_the_page_fault(
 ) {
@@ -209,4 +229,5 @@ fn a_misaligned_load_from_an_inhibited_page_with_no_access_into_a_page_with_no_e
         .expect("the load takes an interrupt");
     assert_eq!(interrupt.vector, irq::VECTOR_DATA_STORAGE);
     assert_eq!(interrupt.dsisr, Some(irq::DSISR_NOT_FOUND));
+    assert_eq!(interrupt.dar, Some(NEXT_EA));
 }

@@ -1,6 +1,11 @@
 //! A load of a line that a touch still brings waits for the reloads that
 //! later touches queue in its L1 set, until the set's reloads wait for
 //! [`k::PPU_L1_SET_TOUCH_LIMIT`] touches.
+//!
+//! The evidence is the `ppu_issue_touch_queue` capture, which the doc of
+//! [`k::PPU_L1_SET_TOUCH_LIMIT`] describes. No document or capture shows
+//! whether a touch that hits the L1 ends the wait; the last test pins
+//! the choice that `L1::behind` describes.
 
 use super::{Caches, Level, Operand};
 use cellgov_ps3_abi::hw::ppu_issue as k;
