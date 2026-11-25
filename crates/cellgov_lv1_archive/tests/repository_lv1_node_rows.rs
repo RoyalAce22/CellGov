@@ -30,6 +30,20 @@ fn capture_rows(capture: &str, name: &str, header: &str) -> Vec<Vec<String>> {
         .collect()
 }
 
+/// The node rows of `capture`: the rows of its `node.tsv`, and then the
+/// rows of its `unread_node.tsv` when the capture has one.
+///
+/// A capture's files stay as the capture wrote them. So a node that a
+/// later boot came to read can keep its row in `unread_node.tsv`.
+fn node_rows(capture: &str) -> Vec<Vec<String>> {
+    const HEADER: &str = "fw\tlpar\tn1\tn2\tn3\tn4\taddress\treads\tagree\tv1\tv2";
+    let mut rows = capture_rows(capture, "node.tsv", HEADER);
+    if workspace_file(capture).join("unread_node.tsv").is_file() {
+        rows.extend(capture_rows(capture, "unread_node.tsv", HEADER));
+    }
+    rows
+}
+
 fn hex(cell: &str) -> u64 {
     let digits = cell
         .strip_prefix("0x")
@@ -46,13 +60,9 @@ fn every_lv1_node_row_is_the_node_its_capture_read_twice_alike() {
             NodeSource::PsdevwikiDump { .. } | NodeSource::ConsoleCapture { .. } => None,
         })
         .collect();
-    assert_eq!(rows.len(), 30);
+    assert_eq!(rows.len(), 35);
     for (node, capture, address) in rows {
-        let captured = capture_rows(
-            capture,
-            "node.tsv",
-            "fw\tlpar\tn1\tn2\tn3\tn4\taddress\treads\tagree\tv1\tv2",
-        );
+        let captured = node_rows(capture);
         let key = [node.key.n1, node.key.n2, node.key.n3, node.key.n4];
         let matching: Vec<&Vec<String>> = captured
             .iter()

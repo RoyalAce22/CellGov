@@ -4,12 +4,12 @@ use crate::lv1::partition::LPAR_ID_PME;
 /// The header of the capture's `node.tsv` and `unread_node.tsv`.
 const HEADER: &str = "fw\tlpar\tn1\tn2\tn3\tn4\taddress\treads\tagree\tv1\tv2";
 
-/// The data rows of the capture's `node.tsv`, each split into its cells.
-fn captured_nodes() -> Vec<Vec<String>> {
+/// The data rows of the capture file `name`, each split into its cells.
+fn captured_nodes(name: &str) -> Vec<Vec<String>> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join(BUS_CAPTURE)
-        .join("node.tsv");
+        .join(name);
     let name = path.display().to_string();
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
     let mut lines = text.lines();
@@ -65,12 +65,39 @@ fn the_served_bus_0_type_key_is_the_words_the_4_93_kernel_builds() {
 
 #[test]
 fn every_4_93_bus_node_answers_the_values_of_the_lv1_capture_and_cites_it() {
-    let rows = captured_nodes();
+    let rows = captured_nodes("node.tsv");
+    let unread = captured_nodes("unread_node.tsv");
     let served: Vec<&RepositoryNode> = NODES
         .iter()
         .filter(|node| node.source.citation() == BUS_CAPTURE)
         .collect();
-    assert_eq!(served.len(), rows.len(), "one served node per captured row");
+    assert!(served.len() >= rows.len(), "a served node per node.tsv row");
+    for node in &served {
+        let key = [node.key.n1, node.key.n2, node.key.n3, node.key.n4];
+        let matching: Vec<&Vec<String>> = rows
+            .iter()
+            .chain(&unread)
+            .filter(|row| [hex(&row[2]), hex(&row[3]), hex(&row[4]), hex(&row[5])] == key)
+            .collect();
+        assert_eq!(matching.len(), 1, "one captured row for {}", node.key);
+        let row = matching[0];
+        assert_eq!(node.v1, hex(&row[9]), "v1 of {}", node.key);
+        assert_eq!(
+            node.v2,
+            SecondValue::Given(hex(&row[10])),
+            "v2 of {}",
+            node.key
+        );
+        assert_eq!(
+            node.source,
+            NodeSource::Lv1NodeCapture {
+                capture: BUS_CAPTURE,
+                address: hex(&row[6]),
+            },
+            "{}",
+            node.key
+        );
+    }
     assert!(!rows.is_empty());
     for row in &rows {
         assert_eq!(row[0], "4.93", "the captured firmware: {row:?}");
@@ -110,7 +137,6 @@ fn bus_1_is_the_first_4_93_bus_of_type_4() {
     };
     assert_eq!(type_of(0), 3);
     assert_eq!(type_of(1), 4);
-    assert!(lookup(&bus_type(2), "4.93").is_none());
 }
 
 #[test]

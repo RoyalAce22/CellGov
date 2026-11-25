@@ -40,7 +40,7 @@ const DUMP_FW: &str = "1.50";
 
 #[test]
 fn the_nodes_ascend_by_key_and_then_by_firmware() {
-    assert_eq!(NODES.len(), 41);
+    assert_eq!(NODES.len(), 46);
     for pair in NODES.windows(2) {
         assert!(
             (pair[0].key, pair[0].firmware) < (pair[1].key, pair[1].firmware),
@@ -151,7 +151,7 @@ fn every_node_cites_the_3_41_game_os_dump_by_its_alias_or_a_4_93_capture() {
             }
         }
     }
-    assert_eq!((dump, capture, lv1_capture), (4, 7, 30));
+    assert_eq!((dump, capture, lv1_capture), (4, 7, 35));
 }
 
 #[test]

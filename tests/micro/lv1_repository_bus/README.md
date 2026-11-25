@@ -2,7 +2,8 @@
 
 A read-only capture of lpar 1's bus nodes in lv1's repository, on the
 reference console at firmware 4.93. The 4.93 kernel reads these nodes at
-boot, in its search for the system bus and then in its device loop.
+boot: in its search for the system bus, in its device loop and in its
+search for the storage bus.
 CellGov's hypervisor answers those reads from this capture, through
 `cellgov_ps3_abi::lv1::repository`.
 
@@ -83,6 +84,15 @@ wrapper, which sets r3 = 1 and makes hypercall 91
    then `bus.<n>.dev.<m>.reg.0.type`. When that read fails, it reads
    `bus.<n>.dev.<m>.intr.0`, and keeps v2 when v1 is 5
    [OFW-4.93 lv2_kernel a:0x8000000000093364-0x80000000000933ac].
+10. The storage bus search reads `bus.<n>.id` and then `bus.<n>.type`
+    for n = 0 to 9. It stops at the first bus of type 5, and a failed
+    read sends it on to the next bus
+    [OFW-4.93 lv2_kernel a:0x80000000002871e4-0x8000000000287228]. It
+    keeps v1 of the id of the bus that it finds
+    [OFW-4.93 lv2_kernel a:0x8000000000287254-0x800000000028725c]. Its id
+    accessor drops v2: it gives a slot of its own frame for v2 and frees
+    the frame without a load of that slot
+    [OFW-4.93 lv2_kernel a:0x80000000000962f8-0x800000000009631c].
 
 The accessor of the `intr` read builds its key from the `bus` and `dev`
 words and the word `intr` with an index, and returns v1 and v2
@@ -210,6 +220,12 @@ bus 1 moved from `unread_node.tsv` to `node.tsv` when the
 4.93 boot came to read them. Their values are those of the one walk on
 2026-11-14.
 
+The 4.93 boot's storage bus search also reads `bus.0.id`, `bus.2.id`,
+`bus.2.type`, `bus.3.id` and `bus.3.type`. Their rows stay in
+`unread_node.tsv`, because the capture files keep the rows as the walk
+wrote them. CellGov's hypervisor answers these five reads from those
+rows.
+
 ## The values
 
 - `bus.0.type` holds 3, so the bus search goes on to bus 1.
@@ -237,6 +253,10 @@ bus 1 moved from `unread_node.tsv` to `node.tsv` when the
 - `bus.1.dev.3.type` holds 6, so the device loop runs the handler of
   type 6 for device 3. `bus.1.dev.3.id` holds 3, and
   `bus.1.dev.3.intr.0` holds v1 = 5 and v2 = 0x2F.
+- `bus.0.id` holds 0, `bus.2.id` holds 2 and `bus.3.id` holds 3.
+  `bus.2.type` holds 1 and `bus.3.type` holds 2. So no bus of 0 to 3 has
+  type 5, and the storage bus search goes on to bus 4. This capture
+  keeps no value of bus 4.
 
 The other served values are 0 in v2. lv1 answers each read with r3 = 0
 and the node's two values.

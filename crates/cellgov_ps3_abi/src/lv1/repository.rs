@@ -395,11 +395,22 @@ pub const NODES: &[RepositoryNode] = &[
         CAPTURE_FIRMWARE,
         captured(0xb0),
     ),
-    // `bus.<n>.type` for n = 0, 1: the bus type. The kernel's bus search
+    // `bus.<n>.id` for n = 0, 2, 3: the bus id. The storage bus search
+    // reads `bus.<n>.id` and then `bus.<n>.type` for n = 0 to 9. It stops
+    // at the first bus of type 5
+    // [OFW-4.93 lv2_kernel a:0x80000000002871e4-0x8000000000287228]. It
+    // keeps v1 of the id
+    // [OFW-4.93 lv2_kernel a:0x8000000000287254-0x800000000028725c]. Its
+    // accessor drops v2: it gives a slot of its own frame for v2 and frees
+    // the frame without a load of that slot
+    // [OFW-4.93 lv2_kernel a:0x80000000000962f8-0x800000000009631c].
+    bus_node(0, [field(b"id", 0), 0, 0], 0, 0, 0x0068_9f78),
+    // `bus.<n>.type` for n = 0 to 3: the bus type. The kernel's bus search
     // reads it for n = 0 to 3 and stops at the first bus of type 4
     // [OFW-4.93 lv2_kernel a:0x80000000002777f8-0x8000000000277830]. Its
     // caller asks for type 4 [OFW-4.93 lv2_kernel a:0x8000000000277910].
-    // Bus 1 is the first bus of type 4 on the reference console.
+    // Bus 1 is the first bus of type 4 on the reference console. The
+    // storage bus search also reads it; see `bus.<n>.id` above.
     bus_node(0, [field(b"type", 0), 0, 0], 3, 0, 0x0068_9ff8),
     // `bus.1.dev.<n>.id`: the device id. The handler of a device of type 3
     // reads it and gives it to the device object with the bus id
@@ -582,6 +593,14 @@ pub const NODES: &[RepositoryNode] = &[
     bus_node(1, [field(b"num_dev", 0), 0, 0], 4, 0, 0x0068_adf8),
     // `bus.1.type`; see `bus.<n>.type` above.
     bus_node(1, [field(b"type", 0), 0, 0], 4, 0, 0x0068_ad78),
+    // `bus.2.id`; see `bus.<n>.id` above.
+    bus_node(2, [field(b"id", 0), 0, 0], 2, 0, 0x0068_ae78),
+    // `bus.2.type`; see `bus.<n>.type` above.
+    bus_node(2, [field(b"type", 0), 0, 0], 1, 0, 0x0068_aef8),
+    // `bus.3.id`; see `bus.<n>.id` above.
+    bus_node(3, [field(b"id", 0), 0, 0], 3, 0, 0x0068_aff8),
+    // `bus.3.type`; see `bus.<n>.type` above.
+    bus_node(3, [field(b"type", 0), 0, 0], 2, 0, 0x0068_b078),
     // `plat.id`: the platform id, 8 bytes of text. The kernel keeps it at
     // offset 0xa8 of its boot record [OFW-4.93 lv2_kernel a:0x800000000000CD08].
     node(
@@ -910,6 +929,10 @@ mod update_status_tests;
 #[cfg(test)]
 #[path = "tests/repository_bus_tests.rs"]
 mod bus_tests;
+
+#[cfg(test)]
+#[path = "tests/repository_storage_bus_tests.rs"]
+mod storage_bus_tests;
 
 #[cfg(test)]
 #[path = "tests/repository_bus_device_tests.rs"]
