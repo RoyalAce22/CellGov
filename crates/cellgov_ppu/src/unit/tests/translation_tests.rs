@@ -548,25 +548,34 @@ fn a_load_from_the_last_page_of_the_effective_space_reads_its_real_page() {
     assert!(ranges(&effects).0.contains(&(TOP_RA, 4)));
 }
 
+/// [PPC-Book1 p:15 s:1.12.2] In 64-bit mode the effective address arithmetic wraps from 2^64 - 1 to 0.
+/// [PPC-Book3 p:68 s:5.5.4] A store with a byte whose EA has no segment takes the data segment interrupt, with DAR at a byte of the first doubleword accessed in that segment.
 #[test]
-fn a_store_that_wraps_the_effective_space_stops_as_unmodelled_and_does_not_run_again() {
+fn a_store_that_wraps_into_a_segment_no_slb_entry_maps_takes_the_data_segment_interrupt_and_stores_nothing(
+) {
     // stw r4, 0xFFE(r5) with r5 the last page: the word's last two bytes
-    // wrap past the end of the space, which CellGov does not model.
+    // wrap to EA 0, whose segment no SLB entry maps.
     let mut mem = memory(&[stw(4, 0xFFE, 5)]);
     let mut unit = kernel_unit(MSR_SF | MSR_IR | MSR_DR);
     map_top_page(&mut unit, &mut mem);
     unit.state_mut().set_gpr(5, TOP_PAGE);
     let (r, effects) = run(&mut unit, &mem, 1);
-    assert_eq!(r.yield_reason, YieldReason::Fault);
+    assert_eq!(r.yield_reason, YieldReason::InterruptBoundary);
+    let record = r.local_diagnostics.interrupt.expect("an interrupt");
     assert_eq!(
-        r.fault,
-        Some(cellgov_effects::FaultKind::Guest(FAULT_UNMODELLED))
+        (record.vector, record.srr0),
+        (irq::VECTOR_DATA_SEGMENT, SEGMENT)
+    );
+    assert!(
+        record.dar.is_some_and(|dar| dar < 8),
+        "DAR {:x?}",
+        record.dar
     );
     assert_eq!(
-        r.local_diagnostics.interrupt, None,
-        "no interrupt the PPE takes"
+        stores(&effects),
+        Vec::<Write>::new(),
+        "the store does not publish"
     );
-    assert!(ranges(&effects).1.is_empty(), "the store does not publish");
 }
 
 /// `lbz rt,d(ra)`.
@@ -574,16 +583,24 @@ fn lbz(rt: u32, d: u16, ra: u32) -> u32 {
     (34 << 26) | (rt << 21) | (ra << 16) | u32::from(d)
 }
 
+/// [PPC-Book1 p:15 s:1.12.2] In 64-bit mode the whole 64-bit result is the effective address, up to the maximum address 2^64 - 1.
 #[test]
-fn a_load_of_the_last_byte_of_the_effective_space_stops_as_unmodelled() {
-    // lbz r4, 0xFFF(r5) with r5 the last page: EA 2^64 - 1, whose page
-    // translates, but which no view can hold.
+fn a_load_of_the_last_byte_of_the_effective_space_reads_its_real_byte() {
+    // lbz r4, 0xFFF(r5) with r5 the last page: EA 2^64 - 1.
     let mut mem = memory(&[lbz(4, 0xFFF, 5)]);
     let mut unit = kernel_unit(MSR_SF | MSR_IR | MSR_DR | MSR_ME);
     map_top_page(&mut unit, &mut mem);
+    put(&mut mem, TOP_RA + 0xFFF, &[0xC3]);
     unit.state_mut().set_gpr(5, TOP_PAGE);
-    let (r, _) = run(&mut unit, &mem, 1);
-    assert_eq!(stop(&r), (Some(FAULT_UNMODELLED), None));
+    let (r, effects) = run(&mut unit, &mem, 1);
+    assert_eq!(
+        r.yield_reason,
+        YieldReason::BudgetExhausted,
+        "{:?}",
+        r.local_diagnostics
+    );
+    assert_eq!(unit.state().gpr[4], 0xC3);
+    assert!(ranges(&effects).0.contains(&(TOP_RA + 0xFFF, 1)));
 }
 
 /// `isync`.

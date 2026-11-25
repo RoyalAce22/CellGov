@@ -199,7 +199,7 @@ impl PpuExecutionUnit {
                 continue;
             }
 
-            let last_pc = self.retire_step(ctx, effects, &attempt, ops, translating, load);
+            let last_pc = self.retire_step(ctx, &attempt, ops, load);
             if let Some(srr0) = self.traced(&attempt.insn, step_pc, msr_before) {
                 return self.trace_yield(&entry, effects, step_pc, srr0);
             }

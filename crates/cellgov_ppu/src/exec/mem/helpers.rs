@@ -33,7 +33,8 @@ pub(super) fn swap_low_bytes(val: u64, width: Width) -> u64 {
 ///
 /// # Errors
 ///
-/// Returns an `Unmapped` `MemError` when no region view covers the line.
+/// Returns an `Unmapped` `MemError` at the first byte of the line that no
+/// region view holds.
 pub(super) fn read_aligned_16(
     port: &mut LoadPort<'_, '_>,
     aligned: u64,
@@ -43,11 +44,7 @@ pub(super) fn read_aligned_16(
     }
     let mut bytes = [0u8; 16];
     if !port.read_committed(aligned, &mut bytes) {
-        return Err(cellgov_mem::MemError::Unmapped(cellgov_mem::FaultContext {
-            addr: aligned,
-            nearest_below: None,
-            nearest_above: None,
-        }));
+        return Err(port.refusal(aligned, 16));
     }
     port.overlay(aligned, &mut bytes);
     Ok(u128::from_be_bytes(bytes))

@@ -14,7 +14,7 @@ use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, MemError, RegionView};
 use cellgov_ps3_abi::hw::ppu_mmu::{PTEG_BYTES, SMALL_PAGE_LOG2};
 use cellgov_ps3_abi::hw::ppu_supervisor::MSR_ME;
 
-use super::batch::{fetch_window, CodeBytes, FaultExit};
+use super::batch::{fetch_window, CodeBytes, FaultExit, MissStep};
 use super::ppu_unit::PpuExecutionUnit;
 use crate::exec::{ExecuteVerdict, PpuFault, PpuInterrupt};
 use crate::instruction::PpuInstruction;
@@ -114,20 +114,13 @@ fn push_views<'m>(t: &Translation, mem: &'m GuestMemory, out: &mut Vec<RegionVie
     let t_end = t.ra.saturating_add(t.len);
     for view in mem.region_views() {
         let view_end = view.base + view.bytes.len() as u64;
-        let (lo, mut hi) = (t.ra.max(view.base), t_end.min(view_end));
+        let (lo, hi) = (t.ra.max(view.base), t_end.min(view_end));
         if lo >= hi {
             continue;
         }
+        // A piece of the last page of the effective space ends at 2^64; the
+        // load and store paths never form a view's end.
         let base = t.ea + (lo - t.ra);
-        // The load and store paths take a view's end as its base plus its
-        // length in u64, so a piece of the last page of the effective
-        // space gives up its last byte.
-        if base.checked_add(hi - lo).is_none() {
-            hi -= 1;
-            if lo >= hi {
-                continue;
-            }
-        }
         let (from, to) = ((lo - view.base) as usize, (hi - view.base) as usize);
         out.push(RegionView {
             base,
@@ -150,14 +143,15 @@ fn push_views<'m>(t: &Translation, mem: &'m GuestMemory, out: &mut Vec<RegionVie
 /// the small page that holds `ea`, with `t`'s attributes.
 fn stand_in(t: &Translation, ea: u64) -> RegionView<'static> {
     let page = ea & !((1u64 << SMALL_PAGE_LOG2) - 1);
-    let lo = page.max(t.ea);
-    let hi = page
-        .saturating_add(STAND_IN.len() as u64)
-        .min(t.ea.saturating_add(t.len));
+    // The bounds are offsets into `t`, so a translation that ends at 2^64
+    // keeps its last byte. A translation starts on a small page, so `page`
+    // lies in it.
+    let from = page.max(t.ea) - t.ea;
+    let to = (from + STAND_IN.len() as u64).min(t.len);
     RegionView {
-        base: lo,
-        real: t.ra + (lo - t.ea),
-        bytes: &STAND_IN[..(hi - lo) as usize],
+        base: t.ea + from,
+        real: t.ra + from,
+        bytes: &STAND_IN[..(to - from) as usize],
         provisional: None,
         write_refused_by: (!t.writable).then_some(PAGE_PROTECTION),
         caching_inhibited: t.inhibited,
@@ -166,9 +160,10 @@ fn stand_in(t: &Translation, ea: u64) -> RegionView<'static> {
 }
 
 /// The first byte of the page after `t`, when `verdict` refuses the
-/// access there as a byte no view holds.
+/// access there as a byte no view holds. The page after the last page of
+/// the effective space is the page at 0.
 fn unheld_after(verdict: &ExecuteVerdict, t: &Translation) -> Option<u64> {
-    let next = t.ea.checked_add(t.len)?;
+    let next = t.ea.wrapping_add(t.len);
     match verdict {
         ExecuteVerdict::MemFault(MemError::Unmapped(miss))
         | ExecuteVerdict::StoreFault(MemError::Unmapped(miss))
@@ -214,11 +209,13 @@ impl PpuExecutionUnit {
             .is_some_and(|sup| !self.translations.made_under(sup))
     }
 
-    /// The stop for `insn`'s access at `ea` that no view of `views`
-    /// holds although its translation succeeded.
+    /// What `insn`'s access at `ea` does when its translation succeeds and
+    /// no view of `views` holds it.
     ///
-    /// - The last byte of the effective space: no view can end at 2^64,
-    ///   so CellGov does not model an access there.
+    /// The batch ends ahead of the access when a buffered store reaches a
+    /// byte that the search of the next page writes
+    /// ([`RefillStop::AfterStores`]). Otherwise the access stops:
+    ///
     /// - An access the PPE refuses before it performs it: that interrupt.
     ///   An access the PPE never performs reaches no storage. The
     ///   refusals are:
@@ -234,18 +231,13 @@ impl PpuExecutionUnit {
     /// [CBE-Handbook p:253 s:9.5.8] The alignment interrupt is taken when the data access cannot be performed in caching-inhibited storage.
     /// [CBE-Handbook p:290 s:9.10] The data segment interrupt and the page-fault data storage interrupt outrank the alignment interrupt of caching-inhibited storage.
     pub(super) fn unbacked_access(
-        &self,
+        &mut self,
         insn: &PpuInstruction,
         mem: &GuestMemory,
         views: &[RegionView<'_>],
         ea: u64,
         access: Access,
-    ) -> FaultExit {
-        if ea == u64::MAX {
-            return FaultExit::Verdict(PpuFault::Unmodelled(
-                "an access to the last byte of the effective address space",
-            ));
-        }
+    ) -> MissStep {
         // A store [`Self::refill_for`] refused keeps only its page's load
         // translation.
         let held = self
@@ -258,8 +250,8 @@ impl PpuExecutionUnit {
         // caching-inhibited one takes the alignment interrupt, as it does
         // where storage holds this page.
         if let Some(t) = held {
-            if let Some(refusal) = self.unperformed_refusal(insn, mem, views, &t, ea, access) {
-                return refusal;
+            if let Some(step) = self.unperformed_refusal(insn, mem, views, &t, ea, access) {
+                return step;
             }
         }
         let inhibited = held.is_some_and(|t| t.inhibited);
@@ -267,55 +259,56 @@ impl PpuExecutionUnit {
             .state
             .supervisor()
             .is_some_and(|sup| sup.msr & MSR_ME != 0);
-        FaultExit::Verdict(if access == Access::Load && inhibited && checks {
-            PpuFault::Interrupt(PpuInterrupt::MachineCheck)
-        } else {
-            PpuFault::Checkstop
-        })
+        MissStep::Stop(FaultExit::Verdict(
+            if access == Access::Load && inhibited && checks {
+                PpuFault::Interrupt(PpuInterrupt::MachineCheck)
+            } else {
+                PpuFault::Checkstop
+            },
+        ))
     }
 
-    /// The interrupt `insn` takes before it performs its access at `ea`,
-    /// whose translation `t` reaches no storage, or `None` when the PPE
-    /// would perform the access.
+    /// The stop of the interrupt that `insn` takes before it performs its
+    /// access at `ea`, or `None` when the PPE performs the access.
     ///
-    /// The instruction runs on a copy of the thread, against `views`
-    /// and zero bytes in place of the page's missing storage. Each
-    /// instruction thus applies its own caching-inhibited rule and its
-    /// own order of the two refusals. An operand that runs out of `t` into
-    /// the next page meets that page's translation, which the run does
-    /// not keep. When `t` or that page is caching-inhibited, the
-    /// instruction runs again against that page's storage too. Nothing of
-    /// either run is kept.
+    /// `t` is the access's translation, which reaches no storage. The
+    /// instruction runs on a copy of the thread, against `views` and zero
+    /// bytes in place of the page's missing storage. Each instruction thus
+    /// applies its own caching-inhibited rule and its own order of the two
+    /// refusals. An operand that runs out of `t` into the next page meets
+    /// that page's translation. When `t` or that page is caching-inhibited,
+    /// the instruction runs again against that page's storage too. The
+    /// unit keeps nothing of either run of the instruction.
+    ///
+    /// The cache keeps no translation of the next page. The unit keeps the
+    /// R write of that page's search and the groups the search read, as
+    /// [`Self::refill_for`] keeps them. A store that takes the alignment
+    /// interrupt keeps neither. The batch ends ahead of the access when a
+    /// buffered store reaches a byte that the search writes.
+    ///
+    /// [PPC-Book3 p:43 s:4.9] The pieces of an operand that crosses a page boundary are separate accesses for R and C.
     fn unperformed_refusal(
-        &self,
+        &mut self,
         insn: &PpuInstruction,
         mem: &GuestMemory,
         views: &[RegionView<'_>],
         t: &Translation,
         ea: u64,
         access: Access,
-    ) -> Option<FaultExit> {
+    ) -> Option<MissStep> {
         let mut probe_views = views.to_vec();
         probe_views.push(stand_in(t, ea));
         let mut verdict = self.probe(insn, mem, &probe_views);
+        let before_search = (self.table_writes.len(), self.table_reads.len());
         if let Some(next) = unheld_after(&verdict, t) {
-            let searched = self.probe_table(mem, next, access).or_else(|refused| {
-                // A store the next page refuses keeps that page's load
-                // translation where [`Self::refill_for`] keeps it, and
-                // meets the page's protection on a read-only view.
-                if access != Access::Store {
-                    return Err(refused);
-                }
-                match self.probe_table(mem, next, Access::Load) {
-                    Ok(n) if n.inhibited && n.changed => Ok(n),
-                    _ => Err(refused),
-                }
-            });
-            let next_t = match searched {
+            let next_t = match self.probe_for(mem, next, access) {
+                Err(RefillStop::AfterStores) => return Some(MissStep::EndBatch),
                 // The PPE refuses an operand in a caching-inhibited page
                 // before it performs it, so the operand meets the next
                 // page first.
-                Err(refused) if t.inhibited => return Some(FaultExit::Verdict(refused)),
+                Err(RefillStop::Fault(refused)) if t.inhibited => {
+                    return Some(MissStep::Stop(FaultExit::Verdict(refused)));
+                }
                 // An operand that runs from a cacheable page into a
                 // caching-inhibited one takes the alignment interrupt, as
                 // `buffer_store` gives it where storage holds both pages.
@@ -328,10 +321,15 @@ impl PpuExecutionUnit {
         }
         match verdict {
             ExecuteVerdict::Fault(f @ PpuFault::Interrupt(PpuInterrupt::Alignment { .. })) => {
-                Some(FaultExit::Verdict(f))
+                // [CBE-Handbook p:90 s:4.2.6.8] Footnote 4: a misaligned caching-inhibited store takes the alignment interrupt before the table lookup, so the lookup writes no R or C.
+                if access == Access::Store {
+                    self.table_writes.truncate(before_search.0);
+                    self.table_reads.truncate(before_search.1);
+                }
+                Some(MissStep::Stop(FaultExit::Verdict(f)))
             }
             ExecuteVerdict::StoreFault(e @ cellgov_mem::MemError::ReservedWrite { .. }) => {
-                Some(FaultExit::Mem(e, true))
+                Some(MissStep::Stop(FaultExit::Mem(e, true)))
             }
             _ => None,
         }
@@ -428,24 +426,6 @@ impl PpuExecutionUnit {
         })
     }
 
-    /// The translation of `ea` for `access` that a table search gives.
-    /// The unit keeps nothing of it.
-    ///
-    /// # Errors
-    ///
-    /// Returns one of these:
-    /// - the storage or segment interrupt that translation gives;
-    /// - the unmodelled stop that translation gives;
-    /// - the checkstop of a group no storage holds.
-    fn probe_table(
-        &self,
-        mem: &GuestMemory,
-        ea: u64,
-        access: Access,
-    ) -> Result<Translation, PpuFault> {
-        self.search_table(mem, ea, access)?.result
-    }
-
     /// Translate `ea` for `access` and keep the translation, and the
     /// page table entry groups the search read.
     ///
@@ -486,9 +466,37 @@ impl PpuExecutionUnit {
 
     /// [`Self::refill`], with the C write of a permitted store when
     /// `change` is set.
+    fn refill_writing(
+        &mut self,
+        mem: &GuestMemory,
+        ea: u64,
+        access: Access,
+        change: bool,
+    ) -> Result<Translation, RefillStop> {
+        let t = self.search_keeping_writes(mem, ea, access, change)?;
+        self.translations.insert(access, t);
+        Ok(t)
+    }
+
+    /// The translation of `ea` for `access` that a table search gives.
+    /// The cache does not keep it.
+    ///
+    /// The unit keeps these parts of the search for the block:
+    /// - the R write of the entry the search matched, also when the
+    ///   access takes an interrupt;
+    /// - the C write, when `change` is set and the search gives a
+    ///   translation;
+    /// - the groups the search read, when it kept a write or gave a
+    ///   translation.
+    ///
+    /// When `change` is set, the translation has C set.
     ///
     /// [CBE-Handbook p:90 s:4.2.6.8] A table lookup that matches an entry with R = 0 sets R regardless of any storage interrupt, and a store's lookup sets C = 0 to 1 unless the access takes a storage exception.
-    fn refill_writing(
+    ///
+    /// # Errors
+    ///
+    /// Returns the refusals of [`Self::refill`].
+    fn search_keeping_writes(
         &mut self,
         mem: &GuestMemory,
         ea: u64,
@@ -513,7 +521,6 @@ impl PpuExecutionUnit {
         }
         let mut t = search.result.map_err(RefillStop::Fault)?;
         t.changed |= change;
-        self.translations.insert(access, t);
         Ok(t)
     }
 
@@ -621,9 +628,48 @@ impl PpuExecutionUnit {
         ea: u64,
         access: Access,
     ) -> Result<Translation, RefillStop> {
-        match self.refill(mem, ea, access) {
+        self.search_for(mem, ea, access, true)
+    }
+
+    /// The translation of `ea` for `access` that [`Self::refill_for`]
+    /// gives. The cache keeps no translation. The unit keeps the R writes
+    /// of the searches and the groups they read, as a refill keeps them.
+    ///
+    /// # Errors
+    ///
+    /// Returns the refusals of [`Self::refill`].
+    fn probe_for(
+        &mut self,
+        mem: &GuestMemory,
+        ea: u64,
+        access: Access,
+    ) -> Result<Translation, RefillStop> {
+        self.search_for(mem, ea, access, false)
+    }
+
+    /// [`Self::refill_for`], where the cache keeps a translation that a
+    /// search gives only when `cache` is set.
+    ///
+    /// # Errors
+    ///
+    /// Returns the refusals of [`Self::refill`].
+    fn search_for(
+        &mut self,
+        mem: &GuestMemory,
+        ea: u64,
+        access: Access,
+        cache: bool,
+    ) -> Result<Translation, RefillStop> {
+        let search = |unit: &mut Self, access| {
+            let t = unit.search_keeping_writes(mem, ea, access, false)?;
+            if cache {
+                unit.translations.insert(access, t);
+            }
+            Ok(t)
+        };
+        match search(self, access) {
             Err(RefillStop::Fault(refused)) if access == Access::Store => {
-                match self.refill(mem, ea, Access::Load) {
+                match search(self, Access::Load) {
                     Ok(t) if t.inhibited && t.changed => Ok(t),
                     Err(RefillStop::AfterStores) => Err(RefillStop::AfterStores),
                     _ => Err(RefillStop::Fault(refused)),
@@ -666,15 +712,18 @@ impl PpuExecutionUnit {
     /// [CBE-Handbook p:138 s:6.1.3.10] A DCache line held under one alias is invalidated and reloaded on an access through the other, so both aliases see one copy of the data.
     pub(super) fn buffered_store_aliased(&self, from: usize) -> bool {
         self.store_buf.stores_from(from).any(|(ea, len)| {
-            let end = ea + u64::from(len);
-            let mut at = ea;
-            while let Some(t) = self.translations.lookup(Access::Store, at) {
-                let n = (end - at).min(t.len - (at - t.ea));
+            let len = u64::from(len);
+            // A buffered store ends at 2^64 at most, so `ea + done` does not
+            // overflow. Each pass adds at least one to `done`.
+            let mut done = 0;
+            while let Some(t) = self.translations.lookup(Access::Store, ea + done) {
+                let at = ea + done;
+                let n = (len - done).min(t.len - (at - t.ea));
                 if self.translations.aliases(t.ea, t.ra + (at - t.ea), n) {
                     return true;
                 }
-                at += n;
-                if at >= end {
+                done += n;
+                if done >= len {
                     break;
                 }
             }
@@ -724,8 +773,7 @@ impl PpuExecutionUnit {
             return Err(not_found);
         }
         // The next instruction address after the last word of the
-        // effective space wraps to 0. CellGov does not model that, as it
-        // does not model a data access to the last byte.
+        // effective space wraps to 0. CellGov does not model that.
         if pc > LAST_RUNNABLE_WORD {
             return Err(PpuFault::Unmodelled(
                 "a fetch of the last word of the effective address space",
@@ -793,112 +841,67 @@ impl PpuExecutionUnit {
             .map(|(ra, _, n)| (ra, n as u8))
     }
 
-    /// The real pieces of `[ea, ea + len)` on the side of `access`: each
-    /// piece's real address, its offset into the range, and its length.
-    ///
-    /// Every byte the block reached is in a cached translation. A byte
-    /// with none keeps its effective address.
+    /// The real pieces of the `len` bytes at `ea` on the side of
+    /// `access`, as [`real_pieces`] gives them.
     fn real_pieces(&self, access: Access, ea: u64, len: u64) -> Vec<(u64, u64, u64)> {
-        let mut out = Vec::with_capacity(1);
-        let mut done = 0;
-        while done < len {
-            let at = ea + done;
-            let Some(t) = self.translations.lookup(access, at) else {
-                debug_assert!(false, "an effect at 0x{at:x} that no translation holds");
-                out.push((at, done, len - done));
-                break;
-            };
-            let n = (len - done).min(t.len - (at - t.ea));
-            out.push((t.ra + (at - t.ea), done, n));
-            done += n;
-        }
-        out
+        real_pieces(&self.translations, access, ea, len)
     }
 
-    /// The effect `e` at real addresses, as one effect per real piece.
-    ///
-    /// A load's read intent translates on the data side, and a fetch's
-    /// read intent on the fetch side.
-    fn real_effect(&self, e: Effect, reads: Access, out: &mut Vec<Effect>) {
-        let range_at = |ra: u64, n: u64| {
-            ByteRange::new(GuestAddr::new(ra), n)
-                .expect("a translated piece lies inside the 62-bit real space")
-        };
-        match e {
-            Effect::SharedReadIntent { range, source } => {
-                for (ra, _, n) in self.real_pieces(reads, range.start().raw(), range.length()) {
-                    out.push(Effect::SharedReadIntent {
-                        range: range_at(ra, n),
-                        source,
-                    });
-                }
-            }
-            Effect::SharedWriteIntent {
-                range,
-                bytes,
-                source,
-                source_time,
-            } => {
-                for (ra, off, n) in
-                    self.real_pieces(Access::Store, range.start().raw(), range.length())
-                {
-                    let piece = &bytes.bytes()[off as usize..(off + n) as usize];
-                    out.push(Effect::SharedWriteIntent {
-                        range: range_at(ra, n),
-                        bytes: WritePayload::from_slice(piece),
-                        source,
-                        source_time,
-                    });
-                }
-            }
-            // An aligned conditional store lies in one page.
-            Effect::ConditionalStore {
-                range,
-                bytes,
-                source,
-                source_time,
-            } => {
-                let pieces = self.real_pieces(Access::Store, range.start().raw(), range.length());
-                debug_assert_eq!(pieces.len(), 1, "a conditional store across pages");
-                out.push(Effect::ConditionalStore {
-                    range: range_at(pieces[0].0, range.length()),
-                    bytes,
+    /// Publish the block's buffered stores at real addresses, one effect
+    /// per real piece of each store.
+    pub(super) fn flush_real_stores(&mut self, effects: &mut Vec<Effect>) {
+        let translations = &self.translations;
+        self.store_buf.flush_pieces(effects, self.id, |ea, len| {
+            real_pieces(translations, Access::Store, ea, u64::from(len))
+        });
+    }
+
+    /// Move the read intents of the text runs in `effects[from..]` from
+    /// effective to real addresses, one read intent per real piece.
+    pub(super) fn real_fetches(&self, effects: &mut Vec<Effect>, from: usize) {
+        let tail: Vec<Effect> = effects.drain(from..).collect();
+        for e in tail {
+            let Effect::SharedReadIntent { range, source } = e else {
+                effects.push(e);
+                continue;
+            };
+            // A translated piece ends below 2^43: the translation masks its
+            // RA to `PPE_PTE_RPN` or to the 42 bits of a real address. An
+            // untranslated piece is a suffix of `range`.
+            for (ra, _, n) in self.real_pieces(Access::Fetch, range.start().raw(), range.length()) {
+                effects.push(Effect::SharedReadIntent {
+                    range: ByteRange::new(GuestAddr::new(ra), n)
+                        .expect("a translated piece lies inside the 62-bit real space"),
                     source,
-                    source_time,
                 });
             }
-            // A reservation names its real line already: the load takes it
-            // from the view it read.
-            other => out.push(other),
         }
     }
+}
 
-    /// Move the guest addresses of `effects[from..]` from effective to
-    /// real, with read intents on the side of `reads`.
-    pub(super) fn real_effects(&self, effects: &mut Vec<Effect>, from: usize, reads: Access) {
-        let tail: Vec<Effect> = effects.drain(from..).collect();
-        for e in tail {
-            self.real_effect(e, reads, effects);
-        }
-    }
-
-    /// Move the stores a flush put in `effects` from effective to real
-    /// addresses, and leave every other effect as it is.
-    ///
-    /// The flush puts the stores up to a conditional store at the effect
-    /// slot of that conditional store. That slot is ahead of the read
-    /// intents of the instructions after it, which are real already.
-    pub(super) fn real_stores(&self, effects: &mut Vec<Effect>) {
-        let Some(from) = effects.iter().position(is_store) else {
-            return;
+/// The real pieces of the `len` bytes at `ea` on the side of `access`:
+/// each piece's real address, its offset into the range, and its length.
+///
+/// The range ends at 2^64 at most. Every byte the block reached is in a
+/// cached translation. A byte with none keeps its effective address.
+fn real_pieces(
+    translations: &crate::mmu::TranslationCache,
+    access: Access,
+    ea: u64,
+    len: u64,
+) -> Vec<(u64, u64, u64)> {
+    let mut out = Vec::with_capacity(1);
+    let mut done = 0;
+    while done < len {
+        let at = ea + done;
+        let Some(t) = translations.lookup(access, at) else {
+            debug_assert!(false, "an effect at 0x{at:x} that no translation holds");
+            out.push((at, done, len - done));
+            break;
         };
-        let tail: Vec<Effect> = effects.drain(from..).collect();
-        for e in tail {
-            if is_store(&e) {
-                self.real_effect(e, Access::Store, effects);
-            } else {
-                effects.push(e);
-            }
-        }
+        let n = (len - done).min(t.len - (at - t.ea));
+        out.push((t.ra + (at - t.ea), done, n));
+        done += n;
     }
+    out
 }

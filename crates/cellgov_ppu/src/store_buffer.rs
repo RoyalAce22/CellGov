@@ -59,9 +59,11 @@ pub enum StoreRefusal {
     /// The buffer holds its capacity of entries.
     #[error("store buffer is full")]
     Full,
-    /// `addr + len` overflows `u64`: the store's last byte is the last
-    /// byte of the address space or lies beyond it. [`ByteRange`]
-    /// shares this limit.
+    /// The store runs past the address space.
+    ///
+    /// [`StoreBuffer::insert`] and [`StoreBuffer::insert_conditional`]
+    /// also refuse a store whose last byte is the last byte of the
+    /// address space, because no [`ByteRange`] holds that byte.
     #[error("store at 0x{addr:016x} of {len} bytes wraps the address space")]
     AddressWraps {
         /// First byte of the store.
@@ -71,26 +73,67 @@ pub enum StoreRefusal {
     },
 }
 
+/// The pieces of a buffered store at the addresses its effects carry:
+/// each piece's address, its offset into the store, and its length.
+pub(crate) type StorePieces = Vec<(u64, u64, u64)>;
+
 impl StoreEntry {
-    fn effect(&self, source: UnitId) -> Effect {
-        let bytes = &self.value.to_be_bytes();
-        let offset = 16 - self.len as usize;
-        let payload = WritePayload::from_slice(&bytes[offset..]);
-        // `stage` refuses any (addr, len) whose end wraps, so every
-        // entry is a valid range.
-        let range = ByteRange::new(GuestAddr::new(self.addr), self.len as u64)
-            .expect("store buffer entry violates addr+len invariant; insert refuses it");
+    /// The last byte the entry writes.
+    ///
+    /// An entry ends at 2^64 at most, so the last byte is an address. A
+    /// zero-width entry, which only a release build can stage, ends one
+    /// byte below its start. At address 0 that wraps to 2^64 - 1, so
+    /// [`StoreBuffer::forward`] and [`StoreBuffer::overlay_range`] skip a
+    /// zero-width entry by its width.
+    fn last(&self) -> u64 {
+        self.addr.wrapping_add(u64::from(self.len)).wrapping_sub(1)
+    }
+
+    /// Push the entry's effects onto `out`, one for each piece `pieces`
+    /// gives.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a piece ends past 2^64 - 1. A thread that does not
+    /// translate stages no entry that ends at 2^64, and a real piece lies
+    /// below 2^62.
+    fn push_effects(
+        &self,
+        source: UnitId,
+        pieces: &impl Fn(u64, u8) -> StorePieces,
+        out: &mut Vec<Effect>,
+    ) {
+        let bytes = &self.value.to_be_bytes()[16 - self.len as usize..];
+        let range = |at: u64, n: u64| {
+            ByteRange::new(GuestAddr::new(at), n)
+                .expect("an effect's store piece ends below 2^64; only a translating thread stages an entry that ends at 2^64")
+        };
+        let parts = pieces(self.addr, self.len);
         if self.emit_at.is_some() {
-            Effect::ConditionalStore {
-                range,
-                bytes: payload,
+            // An aligned conditional store lies in one page.
+            debug_assert_eq!(parts.len(), 1, "a conditional store across pages");
+            out.push(Effect::ConditionalStore {
+                range: range(parts[0].0, u64::from(self.len)),
+                bytes: WritePayload::from_slice(bytes),
                 source,
                 source_time: GuestTicks::ZERO,
-            }
-        } else {
-            Effect::shared_write(range, payload, source, GuestTicks::ZERO)
+            });
+            return;
+        }
+        for (at, off, n) in parts {
+            out.push(Effect::shared_write(
+                range(at, n),
+                WritePayload::from_slice(&bytes[off as usize..(off + n) as usize]),
+                source,
+                GuestTicks::ZERO,
+            ));
         }
     }
+}
+
+/// The one piece of a store at its own address.
+fn same_address(addr: u64, len: u8) -> StorePieces {
+    vec![(addr, 0, u64::from(len))]
 }
 
 /// Fixed-capacity (64-entry) store-forwarding buffer.
@@ -132,9 +175,13 @@ impl StoreBuffer {
 
     /// The lowest start and highest end of the pending stores, or `None`
     /// when the buffer is empty.
+    ///
+    /// The end of an entry that ends at 2^64 saturates to 2^64 - 1. Only
+    /// a translating thread stages such an entry, and the batch loop
+    /// compares no translating thread's span with an address.
     pub fn span(&self) -> Option<(u64, u64)> {
         self.entries.iter().fold(None, |acc, e| {
-            let end = e.addr + e.len as u64;
+            let end = e.addr.saturating_add(u64::from(e.len));
             Some(acc.map_or((e.addr, end), |(lo, hi): (u64, u64)| {
                 (lo.min(e.addr), hi.max(end))
             }))
@@ -208,7 +255,8 @@ impl StoreBuffer {
     ///
     /// # Errors
     ///
-    /// - [`StoreRefusal::AddressWraps`]: `addr + len` overflows `u64`.
+    /// - [`StoreRefusal::AddressWraps`]: `addr + len` overflows `u64`, so
+    ///   the store reaches the last byte of the address space.
     /// - [`StoreRefusal::Full`]: the buffer holds its capacity. The
     ///   caller flushes (yields the block), then retries.
     ///
@@ -217,7 +265,8 @@ impl StoreBuffer {
     /// Panics in a debug build if `len` is outside `1..=16`.
     #[inline]
     pub fn insert(&mut self, addr: u64, len: u8, value: u128) -> Result<(), StoreRefusal> {
-        self.stage(addr, len, value, None)
+        Self::refuse_end_at_top(addr, len)?;
+        self.stage_effective(addr, len, value, None)
     }
 
     /// Insert a successful `stwcx` / `stdcx`, forwarded to later loads
@@ -241,11 +290,38 @@ impl StoreBuffer {
         value: u128,
         emit_at: usize,
     ) -> Result<(), StoreRefusal> {
-        self.stage(addr, len, value, Some(emit_at))
+        Self::refuse_end_at_top(addr, len)?;
+        self.stage_effective(addr, len, value, Some(emit_at))
     }
 
+    /// Refuse a store whose last byte is the last byte of the address
+    /// space or lies past it: [`Self::flush`] gives it no [`ByteRange`].
     #[inline]
-    fn stage(
+    fn refuse_end_at_top(addr: u64, len: u8) -> Result<(), StoreRefusal> {
+        match addr.checked_add(u64::from(len)) {
+            Some(_) => Ok(()),
+            None => Err(StoreRefusal::AddressWraps { addr, len }),
+        }
+    }
+
+    /// Insert a pending store at an effective address; a `Some` `emit_at`
+    /// makes it a conditional store at that effect slot.
+    ///
+    /// The store may end at 2^64, because a translating thread's views
+    /// hold the last byte of the effective space. The caller publishes
+    /// such an entry through [`Self::flush_pieces`], which moves it to
+    /// real addresses. [`Self::flush`] panics on it.
+    ///
+    /// # Errors
+    ///
+    /// - [`StoreRefusal::AddressWraps`]: the store runs past 2^64 - 1.
+    /// - [`StoreRefusal::Full`]: the buffer holds its capacity.
+    ///
+    /// # Panics
+    ///
+    /// Panics as [`Self::insert`] does.
+    #[inline]
+    pub(crate) fn stage_effective(
         &mut self,
         addr: u64,
         len: u8,
@@ -257,7 +333,7 @@ impl StoreBuffer {
             "store width out of range: len={len} (architectural stores are 1..=16 bytes; \
              value: u128 carries at most 16 bytes)"
         );
-        if addr.checked_add(len as u64).is_none() {
+        if addr.checked_add(u64::from(len).saturating_sub(1)).is_none() {
             return Err(StoreRefusal::AddressWraps { addr, len });
         }
         if self.entries.len() >= CAPACITY {
@@ -281,20 +357,20 @@ impl StoreBuffer {
     /// - the most recent touching store covers only part of the load,
     ///   even if an older store covers all of it: the later store
     ///   replaced some of the older store's bytes;
-    /// - the load's own range wraps the address space.
+    /// - the load runs past the last byte of the address space, so no
+    ///   entry holds it whole.
     ///
     /// # Performance
     /// O(n) reverse scan over up to 64 entries per load.
     #[inline]
     pub fn forward(&self, addr: u64, len: u8) -> Option<u128> {
-        let load_end = addr.checked_add(len as u64)?;
+        let load_last = addr.checked_add(u64::from(len).checked_sub(1)?)?;
         for i in (0..self.entries.len()).rev() {
             let e = &self.entries[i];
-            let store_end = e.addr + e.len as u64;
-            if e.addr >= load_end || store_end <= addr {
+            if e.len == 0 || e.addr > load_last || e.last() < addr {
                 continue;
             }
-            if e.addr > addr || store_end < load_end {
+            if e.addr > addr || e.last() < load_last {
                 return None;
             }
             let all = e.value.to_be_bytes();
@@ -325,8 +401,28 @@ impl StoreBuffer {
     /// the vector and this buffer together, or truncates both back to
     /// the same instruction boundary.
     pub fn flush(&mut self, effects: &mut Vec<Effect>, source: UnitId) {
+        self.flush_pieces(effects, source, same_address);
+    }
+
+    /// [`Self::flush`], with each store's effects at the addresses that
+    /// `pieces` gives for its address and length, one effect per piece.
+    ///
+    /// A translating thread passes the real pieces of each store, so no
+    /// effect carries an effective address.
+    ///
+    /// # Panics
+    ///
+    /// Panics as [`Self::flush`] does, and if a piece ends past
+    /// 2^64 - 1.
+    pub(crate) fn flush_pieces(
+        &mut self,
+        effects: &mut Vec<Effect>,
+        source: UnitId,
+        pieces: impl Fn(u64, u8) -> StorePieces,
+    ) {
         let mut next = 0usize;
         let mut inserted = 0usize;
+        let mut group = Vec::new();
         for i in 0..self.entries.len() {
             let Some(at) = self.entries[i].emit_at else {
                 continue;
@@ -339,18 +435,25 @@ impl StoreBuffer {
                  execute and flush",
                 effects.len()
             );
-            let group = self.entries[next..=i].iter().map(|e| e.effect(source));
+            group.clear();
+            for e in &self.entries[next..=i] {
+                e.push_effects(source, &pieces, &mut group);
+            }
+            // `emit_at` counts the effects ahead of the slot before this
+            // flush, so each slot moves by the effects inserted ahead of it.
+            inserted += group.len();
             if pos == effects.len() {
-                effects.extend(group);
+                effects.append(&mut group);
             } else {
                 let tail = effects.split_off(pos);
-                effects.extend(group);
+                effects.append(&mut group);
                 effects.extend(tail);
             }
-            inserted += i + 1 - next;
             next = i + 1;
         }
-        effects.extend(self.entries[next..].iter().map(|e| e.effect(source)));
+        for e in &self.entries[next..] {
+            e.push_effects(source, &pieces, effects);
+        }
         self.entries.clear();
     }
 
@@ -371,22 +474,32 @@ impl StoreBuffer {
     /// the only intra-step record of those bytes, and a vector load
     /// that overlaps must observe them.
     pub fn overlay_range(&self, base: u64, output: &mut [u8]) {
-        // The window stops at the end of the address space; no entry
-        // ends beyond it.
-        let base_end = base.saturating_add(output.len() as u64);
+        // The window wraps from 2^64 - 1 to 0, as the load that reads it
+        // does: it is one or two spans, each at its offset into `output`.
+        let len = output.len() as u64;
+        let last = base.wrapping_add(len.wrapping_sub(1));
+        let spans = match len {
+            0 => [None, None],
+            _ if last >= base => [Some((base, last, 0)), None],
+            _ => [
+                Some((base, u64::MAX, 0)),
+                Some((0, last, 0u64.wrapping_sub(base))),
+            ],
+        };
         for e in &self.entries {
-            let entry_end = e.addr + e.len as u64;
-            let overlap_start = e.addr.max(base);
-            let overlap_end = entry_end.min(base_end);
-            if overlap_start >= overlap_end {
-                continue;
+            for (first, span_last, at) in spans.into_iter().flatten() {
+                let overlap_first = e.addr.max(first);
+                let overlap_last = e.last().min(span_last);
+                if e.len == 0 || overlap_first > overlap_last {
+                    continue;
+                }
+                let all = e.value.to_be_bytes();
+                let store_off = 16 - e.len as usize;
+                let in_entry = store_off + (overlap_first - e.addr) as usize;
+                let in_output = (at + (overlap_first - first)) as usize;
+                let n = (overlap_last - overlap_first) as usize + 1;
+                output[in_output..in_output + n].copy_from_slice(&all[in_entry..in_entry + n]);
             }
-            let all = e.value.to_be_bytes();
-            let store_off = 16 - e.len as usize;
-            let in_entry = store_off + (overlap_start - e.addr) as usize;
-            let in_output = (overlap_start - base) as usize;
-            let n = (overlap_end - overlap_start) as usize;
-            output[in_output..in_output + n].copy_from_slice(&all[in_entry..in_entry + n]);
         }
     }
 
@@ -398,13 +511,9 @@ impl StoreBuffer {
     /// `insert_conditional`.
     #[inline]
     pub fn has_store_in_range(&self, shadow_base: u64, shadow_end: u64) -> bool {
-        for e in &self.entries {
-            let store_end = e.addr + e.len as u64;
-            if e.addr < shadow_end && store_end > shadow_base {
-                return true;
-            }
-        }
-        false
+        self.entries
+            .iter()
+            .any(|e| e.addr < shadow_end && e.last() >= shadow_base)
     }
 }
 
@@ -419,3 +528,7 @@ mod refusal_tests;
 #[cfg(test)]
 #[path = "tests/store_buffer_proptests.rs"]
 mod proptests;
+
+#[cfg(test)]
+#[path = "tests/store_buffer_top_tests.rs"]
+mod top_tests;

@@ -7,7 +7,6 @@
 use super::clock::ctrl_for_placement;
 use super::exit::Attempt;
 use super::run::{BatchEntry, Cursor};
-use crate::mmu::Access;
 use crate::profile::LoadOutcome;
 use crate::unit::ppu_unit::PpuExecutionUnit;
 use crate::{instruction, state};
@@ -22,16 +21,11 @@ impl PpuExecutionUnit {
     pub(super) fn retire_step(
         &mut self,
         ctx: &ExecutionContext<'_>,
-        effects: &mut Vec<Effect>,
         attempt: &Attempt,
         ops: &[crate::timing::Op],
-        translating: bool,
         load: Option<(Option<u64>, LoadOutcome)>,
     ) -> u64 {
         let step_pc = attempt.step_pc;
-        if translating {
-            self.real_effects(effects, attempt.effects_before, Access::Load);
-        }
 
         // The unit publishes a fetch once its instruction retires, so
         // a block that ends at a fault names no text it did not run.

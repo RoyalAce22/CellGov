@@ -1,12 +1,12 @@
-//! The `ppu_lazy_unit_switch` and `ppu_lazy_unit_switch_vrsave` console
-//! captures against the unavailable interrupts of a thread with
-//! supervisor registers.
+//! Checks the unavailable interrupts of a thread with supervisor registers
+//! against the `ppu_lazy_unit_switch` and `ppu_lazy_unit_switch_vrsave`
+//! console captures.
 //!
-//! On the console, a thread's first floating-point add and first vector
-//! add after the kernel switches it out cost an interrupt, and the same
-//! add run again at once does not. The kernel resumes the thread with
-//! MSR\[FP\] and MSR\[VXU\] clear, so the real LV2 kernel's threads take
-//! the floating-point and VXU unavailable interrupts.
+//! On the console, the first floating-point add and the first vector add
+//! after a thread switch each cost an interrupt. The same add, run again at
+//! once, costs none. The kernel resumes a thread with MSR\[FP\] and
+//! MSR\[VXU\] clear, so the threads of the real LV2 kernel take the
+//! floating-point and VXU unavailable interrupts.
 
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit, YieldReason};
@@ -17,19 +17,22 @@ use cellgov_ps3_abi::hw::ppu_interrupt::{VECTOR_FP_UNAVAILABLE, VECTOR_VXU_UNAVA
 use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_FP, MSR_ME, MSR_RI, MSR_SF, MSR_VXU};
 use cellgov_time::Budget;
 
-/// Time-base ticks that an instruction which takes an interrupt costs
-/// over one which takes none: about 400 processor cycles, more than any
-/// integer or warm instruction of either capture.
+/// The time-base steps that an interrupt adds to the cost of an instruction.
+///
+/// This is about 400 processor cycles, more than any integer or warm
+/// instruction of either capture costs.
 const INTERRUPT_TICKS: u32 = 10;
 
 /// The real address of the first timed word.
 const CODE: u64 = 0x2_0000;
 
-/// `add r10,r10,r10`, `fadd f0,f0,f0` and `vaddubm v1,v2,v3`: the three
-/// forms the `ppu_lazy_unit_switch` probe times. The probe's compiler
-/// picks the add and fadd registers.
+/// `add r10,r10,r10`, one of the three forms the `ppu_lazy_unit_switch`
+/// probe times. The compiler of the probe picks the registers of this add
+/// and of `FADD`.
 const ADD: u32 = 0x7D4A_5214;
+/// `fadd f0,f0,f0`, which the probe times.
 const FADD: u32 = 0xFC00_002A;
+/// `vaddubm v1,v2,v3`, which the probe times.
 const VADDUBM: u32 = 0x1022_1800;
 
 /// The payload words of the capture of `probe`, after its frame header.
@@ -53,10 +56,10 @@ fn payload(probe: &str, bytes: usize) -> Vec<u32> {
 /// The six deltas of each `ppu_lazy_unit_switch` round: integer,
 /// floating-point and vector, each first and then warm.
 fn lazy_rounds() -> Vec<[u32; 6]> {
-    /// Word 2 once every helper thread ran.
+    /// The value of word 2 after every helper thread ran.
     const HELPER_DONE: u32 = 0x600D;
-    /// The first word of each section's rounds, and the word holding its
-    /// round count.
+    /// The first word of the rounds of each section, and the word that
+    /// holds its round count.
     const SECTIONS: [(usize, usize); 2] = [(8, 3), (200, 4)];
     let w = payload("ppu_lazy_unit_switch", 1184);
     assert_eq!(w[2], HELPER_DONE, "every helper ran");
@@ -68,8 +71,10 @@ fn lazy_rounds() -> Vec<[u32; 6]> {
     rounds
 }
 
-/// Where a thread whose MSR has `units` set stops after `words`, run one
-/// instruction each, and the vector and SRR0 of the interrupt it took.
+/// Runs `words` one instruction per batch on a thread with `units` set in its MSR.
+///
+/// Returns the PC where the thread stops, and the vector and SRR0 of the
+/// interrupt it takes, if any.
 fn run(words: &[u32], units: u64) -> (u64, Option<(u64, u64)>) {
     let mut mem = GuestMemory::new(0x4_0000);
     let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_be_bytes()).collect();
@@ -80,8 +85,9 @@ fn run(words: &[u32], units: u64) -> (u64, Option<(u64, u64)>) {
     unit.state_mut()
         .set_supervisor(Some(SupervisorState::new(MSR_SF | MSR_ME | MSR_RI | units)));
     unit.state_mut().pc = CODE;
-    // One instruction per batch: an interrupt that follows a retired
-    // instruction is taken at the start of the next batch.
+    // The loop runs one instruction per batch. The thread takes an
+    // interrupt that follows a retired instruction at the start of the
+    // next batch.
     for _ in words {
         let r = unit.run_until_yield(
             Budget::new(1),
@@ -119,7 +125,7 @@ fn a_first_fp_or_vector_add_after_a_switch_costs_an_interrupt_and_cellgov_takes_
         (VECTOR_VXU_UNAVAILABLE, Some((VECTOR_VXU_UNAVAILABLE, CODE))),
         "vaddubm"
     );
-    // Warm use: the handler turned the unit on.
+    // Warm use: the handler enabled the unit.
     for word in [ADD, FADD, VADDUBM] {
         assert_eq!(
             run(&[word], MSR_FP | MSR_VXU),
@@ -144,8 +150,8 @@ fn dst_dss_and_the_vrsave_moves_run_with_the_vector_unit_off_as_on_the_console()
     assert_eq!(w[2] as usize, CANDIDATES.len());
     let rounds = w[3] as usize;
     assert!(rounds > 0);
-    // Whether each candidate ran with the unit off and left it off: it
-    // costs no interrupt, and the vaddubm after it does.
+    // A candidate is true when it runs with the unit off and leaves the
+    // unit off: it costs no interrupt, and the vaddubm after it costs one.
     let console: [bool; 5] = std::array::from_fn(|c| {
         (0..rounds).all(|r| {
             let d = &w[8 + 4 * (rounds * c + r)..][..4];

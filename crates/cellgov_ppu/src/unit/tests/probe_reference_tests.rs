@@ -1,7 +1,10 @@
-//! An access that runs out of a caching-inhibited page no storage holds
-//! into the next page: the search of the next page writes R to the entry
-//! it matches, whichever interrupt the access takes.
+//! An access that runs from a caching-inhibited page with no storage
+//! into the next page. The table lookup for the next page writes R to the
+//! entry it matches, except when a store takes the alignment interrupt.
+//! An access that runs from a cacheable page with no storage checkstops
+//! first.
 
+use crate::fault_codes::FAULT_CHECKSTOP;
 use crate::mmu::Partition;
 use crate::supervisor::{SlbEntry, SupervisorState};
 use crate::*;
@@ -16,19 +19,19 @@ use cellgov_time::Budget;
 
 /// The page table: 2^11 groups from 256 KB to the end of the memory.
 const HTAB: u64 = 0x4_0000;
-/// The segment the SLB maps: EA 0xC000_0000, VSID 0x123.
+/// The segment that the SLB maps, and its VSID.
 const SEGMENT: u64 = 0xC000_0000;
 const VSID: u64 = 0x123;
-/// Page 0 holds the code, at real 0x3000.
+/// The real address of page 0, which holds the code.
 const CODE_RA: u64 = 0x3000;
 /// Page 4, where each operand starts, is caching-inhibited at a real
 /// address past the 512 KB the memory holds.
 const START_EA: u64 = SEGMENT + 0x4000;
 const UNBACKED_RA: u64 = 0x9_0000;
-/// Page 5, where each operand ends, is at real 0x7000.
+/// Page 5, where each operand ends, and its real address.
 const NEXT: u64 = 5;
 const NEXT_RA: u64 = 0x7000;
-/// Bytes in a page table entry group.
+/// Bytes in a group of page table entries.
 const GROUP: u64 = 128;
 
 fn lwz(rt: u32, d: u16, ra: u32) -> u32 {
@@ -153,7 +156,7 @@ fn interrupt(r: &ExecutionStepResult) -> Option<(u64, Option<u32>)> {
 }
 
 /// Byte 14 of the entry for page 5 with low bits `bits`, after the
-/// search writes R.
+/// table lookup writes R.
 ///
 /// [PPC-Book3 p:2 s:1.3.2] When the processor writes a table field, no other defined field changes.
 fn next_r_byte(bits: u64) -> u8 {
@@ -197,30 +200,76 @@ fn a_store_the_next_page_refuses_writes_that_entrys_r_and_publishes_the_group_it
     }
 }
 
-/// [CBE-Handbook p:90 s:4.2.6.8] A table lookup that matches an entry with R = 0 sets R.
+/// [CBE-Handbook p:253 s:9.5.8] A cacheable load or store that crosses a virtual page boundary takes no alignment interrupt; the PPE sends it to microcode.
+/// [PPC-Book3 p:66 s:5.5.2] An access to nonexistent storage may enter the checkstop state.
+#[test]
+fn an_unaligned_access_out_of_an_unbacked_cacheable_page_checkstops_where_the_next_page_refuses() {
+    // Page 4 is cacheable here. Page 5 refuses each operand: read-only
+    // for the sth, unmapped for the lwz.
+    let cases = [(sth(4, 0xFFF, 5), Some(0b11)), (lwz(4, 0xFFE, 5), None)];
+    for (insn, next) in cases {
+        let mut mem = memory(&[insn], next);
+        map_page(&mut mem, 4, UNBACKED_RA | 0b10);
+        let mut unit = kernel_unit();
+        let (r, _) = run(&mut unit, &mem, 1);
+        assert_eq!(
+            r.fault,
+            Some(cellgov_effects::FaultKind::Guest(FAULT_CHECKSTOP)),
+            "insn {insn:#x}"
+        );
+        assert_eq!(interrupt(&r), None, "insn {insn:#x}");
+    }
+}
+
+/// [CBE-Handbook p:90 s:4.2.6.8] A load's table lookup is nonspeculative, so a lookup that matches an entry with R = 0 sets R.
 /// [CBE-Handbook p:253 s:9.5.8] The alignment interrupt is taken when the data access cannot be performed in caching-inhibited storage.
 #[test]
-fn an_unaligned_access_into_a_next_page_that_translates_writes_that_entrys_r_once() {
-    // (instruction, page 5's low bits). In the last case the store's
-    // search refuses it, and the store meets the page's load translation.
-    let cases = [
-        (lwz(4, 0xFFE, 5), 0b10),
-        (sth(4, 0xFFF, 5), 0b10),
-        (sth(4, 0xFFF, 5), 0b11 | PTE_I | PTE_C),
-    ];
-    for (insn, bits) in cases {
-        let mem = memory(&[insn], Some(bits));
+fn an_unaligned_load_into_a_next_page_that_translates_writes_that_entrys_r_once() {
+    let bits = 0b10;
+    let mem = memory(&[lwz(4, 0xFFE, 5)], Some(bits));
+    let mut unit = kernel_unit();
+    let (r, effects) = run(&mut unit, &mem, 1);
+    assert_eq!(
+        interrupt(&r).map(|(vector, _)| vector),
+        Some(irq::VECTOR_ALIGNMENT)
+    );
+    assert_eq!(
+        entry_byte_writes(&effects, NEXT, PTE_R_BYTE),
+        vec![next_r_byte(bits)]
+    );
+}
+
+/// [CBE-Handbook p:90 s:4.2.6.8] Footnote 4: a misaligned caching-inhibited store takes the alignment interrupt before the table lookup, so the lookup writes no R or C.
+/// [CBE-Handbook p:253 s:9.5.8] The alignment interrupt is taken when the data access cannot be performed in caching-inhibited storage.
+#[test]
+fn an_unaligned_store_into_a_next_page_that_translates_writes_no_r_or_c_and_reads_no_group() {
+    // Each case is page 5's low bits. In the second case the store's
+    // table lookup refuses it, and the store meets the page's load
+    // translation.
+    let cases = [0b10, 0b11 | PTE_I | PTE_C];
+    for bits in cases {
+        let mem = memory(&[sth(4, 0xFFF, 5)], Some(bits));
         let mut unit = kernel_unit();
         let (r, effects) = run(&mut unit, &mem, 1);
         assert_eq!(
             interrupt(&r).map(|(vector, _)| vector),
             Some(irq::VECTOR_ALIGNMENT),
-            "insn {insn:#x} page 5 {bits:#x}"
+            "page 5 {bits:#x}"
         );
         assert_eq!(
             entry_byte_writes(&effects, NEXT, PTE_R_BYTE),
-            vec![next_r_byte(bits)],
-            "insn {insn:#x} page 5 {bits:#x}"
+            Vec::<u8>::new(),
+            "page 5 {bits:#x}"
+        );
+        assert_eq!(
+            entry_byte_writes(&effects, NEXT, PTE_C_BYTE),
+            Vec::<u8>::new(),
+            "page 5 {bits:#x}"
+        );
+        assert!(
+            !table_reads(&effects).contains(&(entry(NEXT), GROUP)),
+            "page 5 {bits:#x}: {:x?}",
+            table_reads(&effects)
         );
     }
 }

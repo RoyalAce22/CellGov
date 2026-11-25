@@ -13,9 +13,10 @@ use super::*;
 use crate::exec::{PpuFault, PpuInterrupt};
 use crate::supervisor::{SlbEntry, SupervisorState};
 
-/// A hypervisor-state thread with MSR `msr` and a real mode limit of
-/// 256 MB, so an EA with bit 0 = 0 below the limit is one that offset
-/// real mode would translate.
+/// A 64-bit hypervisor-state thread with the extra MSR bits `msr`.
+///
+/// Its real mode limit is 256 MB, so offset real mode would translate
+/// an EA below the limit with bit 0 = 0.
 fn thread(msr: u64) -> SupervisorState {
     let mut s = SupervisorState::new(MSR_SF | MSR_HV | msr);
     s.partition = Partition::new(0, 1 << 28, 0, Partition::INITIAL.lb()).expect("partition");
@@ -24,8 +25,8 @@ fn thread(msr: u64) -> SupervisorState {
 
 #[test]
 fn every_real_mode_access_with_hv_set_stops_unmodelled_for_either_ea_bit_0() {
-    // The SLB maps both segments to VSID 0x123, and every group holds an
-    // entry for page 1 of that VSID with PP 10: virtual mode would
+    // The SLB maps both segments to VSID 0x123. Every group holds an
+    // entry for page 1 of that VSID with PP 10. So virtual mode would
     // translate each access below, read a group and give its entry.
     let mut s = thread(0);
     for (i, ea) in [0u64, 0x8000_0000_0000_0000].into_iter().enumerate() {

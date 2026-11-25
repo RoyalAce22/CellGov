@@ -24,14 +24,8 @@ impl PpuExecutionUnit {
         let outcome = if self.store_buf.forward(ea, size).is_some() {
             LoadOutcome::Forwarded
         } else {
-            // No view holds an access that runs past the top of the
-            // address space. The load's own containment check agrees.
-            let end = ea.checked_add(u64::from(size));
-            views
-                .iter()
-                .position(|v| {
-                    ea >= v.base && end.is_some_and(|e| e - v.base <= v.bytes.len() as u64)
-                })
+            // The probe uses the one-view containment check of the load.
+            crate::exec::view_holding_all(views, ea, u64::from(size))
                 .map_or(LoadOutcome::Unheld, LoadOutcome::Region)
         };
         let slot = self

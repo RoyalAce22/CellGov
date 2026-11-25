@@ -12,7 +12,7 @@ const VADDUBM: u32 = 0x1022_1800;
 /// [CBE-Handbook p:258 s:9.5.15] Table 9-17: the VXU unavailable interrupt sets SRR0 to the instruction the processor would execute next, and clears SRR1 bits 33:36 and 42:47.
 #[test]
 fn an_unavailable_unit_vectors_with_srr0_at_the_instruction() {
-    // Each case turns its own unit off and the other unit on.
+    // Each case disables its own unit and enables the other unit.
     for (insn, msr, vector) in [
         (
             FADD,
@@ -23,7 +23,7 @@ fn an_unavailable_unit_vectors_with_srr0_at_the_instruction() {
     ] {
         let mem = memory(&[insn]);
         let mut unit = kernel_unit(msr);
-        // Non-zero sources, so a result written to f1 or v1 shows.
+        // The sources are non-zero, so a result written to f1 or v1 shows.
         for k in [2, 3] {
             unit.state_mut().set_fpr(k, 1.0f64.to_bits());
             unit.state_mut()

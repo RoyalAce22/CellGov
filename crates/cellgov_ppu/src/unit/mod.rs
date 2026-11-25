@@ -44,6 +44,10 @@ mod clock_read_tests;
 mod translation_tests;
 
 #[cfg(test)]
+#[path = "tests/effective_wrap_tests.rs"]
+mod effective_wrap_tests;
+
+#[cfg(test)]
 #[path = "tests/translated_fetch_run_tests.rs"]
 mod translated_fetch_run_tests;
 

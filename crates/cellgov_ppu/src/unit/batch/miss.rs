@@ -12,7 +12,7 @@ use crate::unit::translation::{RefillStop, CHANGE_UNSET};
 use cellgov_effects::Effect;
 
 /// What a translating thread does after an access missed every view.
-pub(super) enum MissStep {
+pub(in crate::unit) enum MissStep {
     /// The instruction stops with this fault.
     Stop(FaultExit),
     /// The batch ends before the instruction, which the next batch runs
@@ -81,13 +81,15 @@ impl PpuExecutionUnit {
         // A translating thread's access that no view holds is a miss:
         // the unit translates the address, and the instruction runs
         // again against the new views. A translation that refuses
-        // the access is the instruction's interrupt. A fault at an
-        // address the cache translates already is no miss. The views
-        // hold each piece of storage the cached translations reach. So
-        // a held address refuses as unmapped only for an access that
-        // wraps the effective space. An address no view holds then has
-        // no storage at its real address. A hit and a miss of the
-        // cache then give one stop.
+        // the access is the instruction's interrupt.
+        //
+        // A fault at an address the cache translates already is no miss.
+        // The views hold each piece of storage the cached translations
+        // reach. A refusal names the first byte no view holds. So an
+        // address that the cache translates and no view holds has no
+        // storage at its real address. A hit and a miss of the cache then
+        // give one stop.
+        //
         // A store to a writable page whose entry has C = 0 is no fault
         // either: the unit writes C and the store runs again.
         let (true, FaultExit::Mem(refused, store)) = (translating, &exit) else {
@@ -131,9 +133,10 @@ impl PpuExecutionUnit {
     /// What a translating thread's access at `ea` that no view held does
     /// next: translate it and run again, end the batch, or stop.
     ///
-    /// A miss truncates the attempt's effects and buffered stores to
-    /// `attempt` and refills the cache. A rerun finds `regions` rebuilt
-    /// from the new translations.
+    /// The step truncates `effects` and the buffered stores to their
+    /// lengths at the start of the attempt. It then refills the cache
+    /// when the cache holds no translation of `ea`. A rerun finds
+    /// `regions` rebuilt from the new translations.
     #[inline]
     fn translation_miss<'m>(
         &mut self,
@@ -144,29 +147,21 @@ impl PpuExecutionUnit {
         (effects_before, stores_before): (usize, usize),
         (ea, access): (u64, Access),
     ) -> MissStep {
+        effects.truncate(effects_before);
+        self.store_buf.truncate(stores_before);
         let refilled = if self.translations.lookup(access, ea).is_some() {
             None
         } else {
-            effects.truncate(effects_before);
-            self.store_buf.truncate(stores_before);
             Some(self.refill_for(mem, ea, access))
         };
         let t = match refilled {
-            // A held address refuses as unmapped only when the access
-            // wraps past the end of the effective space.
             None if views_hold(regions.as_slice(), ea) => {
-                return MissStep::Stop(FaultExit::Verdict(PpuFault::Unmodelled(
-                    "an access that wraps the effective address space",
+                return MissStep::Stop(FaultExit::Verdict(PpuFault::Internal(
+                    "an access refused as unmapped at a byte a view holds",
                 )));
             }
             None => {
-                return MissStep::Stop(self.unbacked_access(
-                    insn,
-                    mem,
-                    regions.as_slice(),
-                    ea,
-                    access,
-                ));
+                return self.unbacked_access(insn, mem, regions.as_slice(), ea, access);
             }
             Some(Err(RefillStop::Fault(refused))) => {
                 return MissStep::Stop(FaultExit::Verdict(refused));
@@ -182,7 +177,7 @@ impl PpuExecutionUnit {
             return MissStep::Rerun;
         }
         // The access translates to a real address no storage holds.
-        MissStep::Stop(self.unbacked_access(insn, mem, regions.as_slice(), ea, access))
+        self.unbacked_access(insn, mem, regions.as_slice(), ea, access)
     }
 
     /// What a store that met a [`CHANGE_UNSET`] view at `ea` does next:

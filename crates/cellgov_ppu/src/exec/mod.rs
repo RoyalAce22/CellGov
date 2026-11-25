@@ -46,9 +46,18 @@ mod cache_block_tests;
 #[path = "tests/cache_block_console_tests.rs"]
 mod cache_block_console_tests;
 
+#[cfg(test)]
+#[path = "tests/top_byte_tests.rs"]
+mod top_byte_tests;
+
+#[cfg(test)]
+#[path = "tests/inhibited_span_tests.rs"]
+mod inhibited_span_tests;
+
 pub use dispatch::execute;
 pub use fault::{PpuFault, PpuInterrupt, ProgramCause};
 pub(crate) use mem::d_form_load;
 pub(crate) use mem::string_loads_into;
+pub(crate) use memory_helpers::view_holding_all;
 pub(crate) use vec::vx_executes;
 pub use verdict::ExecuteVerdict;

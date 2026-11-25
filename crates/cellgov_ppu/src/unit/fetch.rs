@@ -30,10 +30,11 @@ impl PpuExecutionUnit {
     /// addresses.
     pub(super) fn close_block(&mut self, effects: &mut Vec<Effect>) {
         let translates = self.translates();
-        self.store_buf.flush(effects, self.id);
         if translates {
-            self.real_stores(effects);
+            self.flush_real_stores(effects);
             self.publish_table_writes(effects);
+        } else {
+            self.store_buf.flush(effects, self.id);
         }
         if self.fetch_end != NO_FETCH_RUN {
             self.fetch_runs.push((self.fetch_start, self.fetch_end));
@@ -50,7 +51,7 @@ impl PpuExecutionUnit {
             });
         }
         if translates {
-            self.real_effects(effects, fetches_from, Access::Fetch);
+            self.real_fetches(effects, fetches_from);
             self.publish_table_reads(effects);
         }
         if self.state.clock_read {

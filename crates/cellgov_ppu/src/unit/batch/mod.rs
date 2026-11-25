@@ -10,6 +10,7 @@ mod run;
 
 pub(super) use decode::{fetch_window, CodeBytes};
 pub(super) use exit::FaultExit;
+pub(super) use miss::MissStep;
 pub(super) use run::{BatchEntry, NoTap};
 
 #[cfg(test)]
