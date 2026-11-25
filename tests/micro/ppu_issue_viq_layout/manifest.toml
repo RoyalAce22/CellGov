@@ -1,0 +1,21 @@
+[test]
+name = "ppu_issue_viq_layout"
+
+# A hardware probe of whether a sibling with no divides presses on a
+# timed loop through its round's layout or through the divides' absence:
+# sixteen independent addi timed beside a sibling whose round starts with
+# no op, one fdiv, nop padding or addi padding, then 256 independent addi.
+# The console capture is the answer; ppu/main.c's header lists the phases
+# and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 4088 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 4088 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 120000

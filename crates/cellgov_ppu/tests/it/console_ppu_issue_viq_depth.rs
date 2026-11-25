@@ -237,8 +237,8 @@ pub(crate) fn replay(n: usize, k: usize, iterations: u64) -> f64 {
     }
     let s = state(&rt);
     assert_eq!(s.pc, spin, "{n} divides: the loop ran to its end");
-    // A sibling that stopped would leave the loop alone, which the gap test
-    // beside no divides would still pass.
+    // A sibling that stopped would leave the loop alone, and the replay
+    // would time a loop with no sibling.
     let count = ByteRange::new(GuestAddr::new(COUNT), 8).expect("range");
     let rounds = rt.memory().read(count).expect("the round count");
     let rounds = u64::from_be_bytes(rounds[..].try_into().expect("8 bytes"));
@@ -377,10 +377,13 @@ fn on_the_console_the_loop_slows_only_past_seven_divides_a_round() {
 }
 
 /// The share of the console's value the model may lie from it.
-const BAND: f64 = 0.05;
+pub(crate) const BAND: f64 = 0.05;
 
 #[test]
 fn beside_a_sibling_of_one_to_sixteen_divides_a_round_the_model_times_the_loop_near_the_console() {
+    // This capture's run beside no divides did not repeat: two later runs
+    // time that loop at the one-divide rate. The `ppu_issue_viq_layout`
+    // capture holds the model to it.
     let w = console_words();
     let iterations = iterations(&w);
     for &n in DIVIDES.iter().filter(|&&n| n > 0) {
@@ -391,19 +394,4 @@ fn beside_a_sibling_of_one_to_sixteen_divides_a_round_the_model_times_the_loop_n
             "{n} divides: CellGov {cellgov:.2} cycles an iteration, the console {console:.2}"
         );
     }
-}
-
-#[test]
-fn beside_a_sibling_of_no_divides_the_model_times_the_loop_short_of_the_console() {
-    // An accepted gap. On the console the sibling without a divide costs
-    // the loop about a quarter more than the sibling with one to seven,
-    // though it runs the same `addi`. The model times both as a sibling
-    // whose divides stall nothing.
-    let w = console_words();
-    let console = console_median(&w, 0);
-    let cellgov = replay(0, 0, iterations(&w));
-    assert!(
-        console > 1.15 * cellgov && console > 1.15 * console_median(&w, 1),
-        "no divides: CellGov {cellgov:.2} cycles an iteration, the console {console:.2}"
-    );
 }
