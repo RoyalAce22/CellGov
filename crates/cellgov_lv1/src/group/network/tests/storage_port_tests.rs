@@ -263,10 +263,10 @@ fn a_call_while_a_port_holds_the_slot_gets_busy() {
 }
 
 #[test]
-fn a_device_from_0_to_6_an_irq_outlet_or_an_unknown_id_is_a_refusal() {
+fn a_device_outside_the_storage_bus_table_an_irq_outlet_or_an_unknown_id_is_a_refusal() {
     let held = Held::boot();
     let cases = [
-        (request(0, KERNEL_PORT, 0), STORAGE_DEVICE.what),
+        (request(5, KERNEL_PORT, 0), STORAGE_DEVICE.what),
         (request(6, KERNEL_PORT, 0), STORAGE_DEVICE.what),
         (request(u64::MAX, OUTLET_ID, 0), OUTLET.what),
         (request(u64::MAX, UNKNOWN, 0), UNKNOWN_ID.what),

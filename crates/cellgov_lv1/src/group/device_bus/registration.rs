@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use cellgov_mem::lanes;
+use cellgov_mem::lanes::{self, LaneValue, ObjectLanes};
 use cellgov_mem::scheme::{HashedSurface, Stamp};
 
 use super::close;
@@ -54,6 +54,11 @@ pub(crate) const GROUP: Group = Group {
             source: Some(STORAGE_DEVICE_OPEN_SOURCE),
             stamp: Stamp::Pending,
         },
+        HashedSurface {
+            name: "the event receive ports that lv1 connected to the storage devices",
+            source: Some(STORAGE_DEVICE_PORT_SOURCE),
+            stamp: Stamp::Pending,
+        },
     ],
 };
 
@@ -81,6 +86,32 @@ pub(crate) const STORAGE_BUS_PORT_SOURCE: u8 = 180;
 /// storage device, keyed by its index in device order.
 pub(crate) const STORAGE_DEVICE_OPEN_SOURCE: u8 = 181;
 
+/// The lane source of the event receive ports that lv1 connected to the
+/// storage devices: one object for each connected device, keyed by its
+/// index in device order.
+pub(crate) const STORAGE_DEVICE_PORT_SOURCE: u8 = 182;
+
+/// The event receive port that lv1 connected to the partition's slot of
+/// one storage device.
+///
+/// lv1 keeps the port at +16 of the slot's handle in the device object
+/// [OFW-4.93 lv1 a:0x25554C-0x255570] [OFW-4.93 lv1 a:0x2BEDD4].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StorageDevicePort {
+    /// The device id on the storage bus, from r4.
+    pub device: u64,
+    /// The port id, from r5.
+    pub port: u64,
+}
+
+/// Fields 1 and 2: the device id and the port id.
+impl LaneValue for StorageDevicePort {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, self.device);
+        lanes.lane(2, 0, self.port);
+    }
+}
+
 /// The device bus group's state.
 ///
 /// The state holds these values:
@@ -89,7 +120,8 @@ pub(crate) const STORAGE_DEVICE_OPEN_SOURCE: u8 = 181;
 /// - each mapping that lv1 made in those regions;
 /// - the storage bus open that the partition holds;
 /// - the event receive port that lv1 connected to the storage bus;
-/// - each storage device open that the partition holds.
+/// - each storage device open that the partition holds;
+/// - the event receive port that lv1 connected to each storage device.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeviceBusState {
     open: BTreeSet<OpenDevice>,
@@ -98,9 +130,21 @@ pub struct DeviceBusState {
     storage_bus: Option<StorageBusOpen>,
     storage_bus_port: Option<u64>,
     storage_devices: BTreeMap<u64, StorageDeviceOpen>,
+    storage_device_ports: BTreeMap<u64, StorageDevicePort>,
 }
 
 impl DeviceBusState {
+    /// The port that lv1 connected to the partition's slot of storage
+    /// device `device`, if any.
+    pub fn storage_device_port(&self, device: u64) -> Option<StorageDevicePort> {
+        self.storage_device_ports.get(&device).copied()
+    }
+
+    /// Each port that lv1 connected to a storage device, in device order.
+    pub fn storage_device_ports(&self) -> impl Iterator<Item = StorageDevicePort> + '_ {
+        self.storage_device_ports.values().copied()
+    }
+
     /// The partition's open of storage device `device`, if any.
     pub fn storage_device_open(&self, device: u64) -> Option<StorageDeviceOpen> {
         self.storage_devices.get(&device).copied()
@@ -176,6 +220,9 @@ impl DeviceBusState {
             DeviceBusChange::StorageDeviceOpened(open) => {
                 self.storage_devices.insert(open.device, open);
             }
+            DeviceBusChange::StorageDevicePortConnected(port) => {
+                self.storage_device_ports.insert(port.device, port);
+            }
             DeviceBusChange::Closed(device) => {
                 self.open.remove(&device);
                 self.mappings
@@ -211,10 +258,16 @@ impl DeviceBusState {
         let storage_bus_port = self.storage_bus_port.map_or(storage_bus, |id| {
             storage_bus.wrapping_add(lanes::value_term(STORAGE_BUS_PORT_SOURCE, 0, &id))
         });
-        (0u64..)
-            .zip(self.storage_device_opens())
-            .fold(storage_bus_port, |sum, (index, open)| {
+        let storage_devices = (0u64..).zip(self.storage_device_opens()).fold(
+            storage_bus_port,
+            |sum, (index, open)| {
                 sum.wrapping_add(lanes::value_term(STORAGE_DEVICE_OPEN_SOURCE, index, &open))
+            },
+        );
+        (0u64..)
+            .zip(self.storage_device_ports())
+            .fold(storage_devices, |sum, (index, port)| {
+                sum.wrapping_add(lanes::value_term(STORAGE_DEVICE_PORT_SOURCE, index, &port))
             })
     }
 }
@@ -235,6 +288,9 @@ pub enum DeviceBusChange {
     StorageBusPortConnected(u64),
     /// The call opened this storage device.
     StorageDeviceOpened(StorageDeviceOpen),
+    /// The call connected this event receive port to the partition's slot
+    /// of a storage device.
+    StorageDevicePortConnected(StorageDevicePort),
     /// The call closed this device. lv1 removed each DMA mapping of the
     /// device and then freed each DMA region of the device.
     Closed(OpenDevice),
@@ -269,3 +325,7 @@ mod storage_bus_port_hash_tests;
 #[cfg(test)]
 #[path = "tests/storage_device_open_hash_tests.rs"]
 mod storage_device_open_hash_tests;
+
+#[cfg(test)]
+#[path = "tests/storage_device_port_hash_tests.rs"]
+mod storage_device_port_hash_tests;

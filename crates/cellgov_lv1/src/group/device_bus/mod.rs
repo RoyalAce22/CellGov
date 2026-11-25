@@ -24,4 +24,4 @@ pub use dma_map::DmaMapping;
 pub use dma_region::DmaRegion;
 pub use open::{OpenDevice, StorageBusOpen, StorageDeviceOpen};
 pub(crate) use registration::GROUP;
-pub use registration::{DeviceBusChange, DeviceBusState};
+pub use registration::{DeviceBusChange, DeviceBusState, StorageDevicePort};

@@ -9,8 +9,8 @@
 //! - `net_set_interrupt_mask`, whose mask the state holds.
 //!
 //! `connect_interrupt_event_receive_port` also connects a port to the
-//! storage bus object, device -1 of bus 4. The device bus state holds
-//! that port.
+//! storage bus object, device -1 of bus 4, and to each device of the
+//! firmware's storage bus table. The device bus state holds those ports.
 //!
 //! The device bus group's `close_device` of the network device carries
 //! [`NetworkChange::TornDown`], and its `open_device` carries

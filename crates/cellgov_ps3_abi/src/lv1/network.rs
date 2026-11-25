@@ -320,6 +320,62 @@
 //! [`STORAGE_PORT_CAPTURE`]: super::event_port::STORAGE_PORT_CAPTURE
 //! [`STORAGE_BUS_OPEN_CAPTURE`]: super::device_bus::STORAGE_BUS_OPEN_CAPTURE
 //!
+//! # A storage device's interrupt port
+//!
+//! For a device id up to 6, the access check takes the device object D
+//! at +3816 + 8 x id of the storage bus object
+//! [OFW-4.93 lv1 a:0x2364E8-0x236500]. A null D gets
+//! [`STORAGE_PORT_NO_DEVICE_R3`] [OFW-4.93 lv1 a:0x236504-0x236508]. The
+//! check then calls the method at +48 of D's method table with the
+//! caller's partition [OFW-4.93 lv1 a:0x23650C-0x236530].
+//!
+//! The capture [`STORAGE_DEVICE_OPEN_CAPTURE`] reads the method table of
+//! each of the five devices of the 4.93 bus table; see the storage device
+//! section of [`super::device_bus`]. The entry at +48 of each table holds
+//! the descriptor 0x338778, the method of the storage bus object:
+//! - device 0, table 0x35E518 [OFW-4.93 lv1 a:0x35E548-0x35E54C];
+//! - device 1, table 0x35E6E8 [OFW-4.93 lv1 a:0x35E718-0x35E71C];
+//! - device 2, table 0x35E370 [OFW-4.93 lv1 a:0x35E3A0-0x35E3A4];
+//! - device 3, table 0x35E1C8 [OFW-4.93 lv1 a:0x35E1F8-0x35E1FC];
+//! - device 4, table 0x35DFF8 [OFW-4.93 lv1 a:0x35E028-0x35E02C].
+//!
+//! The method returns 1 when a used slot of D holds the caller's
+//! partition [OFW-4.93 lv1 a:0x25477C-0x2547FC]. `open_device` of the
+//! device writes that slot; see [`super::device_bus`]. So a partition
+//! that did not open the device gets [`STORAGE_PORT_NOT_OPEN_R3`].
+//!
+//! After the device lookup and the r6 check, the connect function gives D
+//! and r5 to the storage connect [OFW-4.93 lv1 a:0x23699C-0x2369BC]. The
+//! storage connect does the steps of the storage bus section on D:
+//! - It holds the lock at D + 2536 [OFW-4.93 lv1 a:0x255280-0x2552A4].
+//! - It checks the port as for the storage bus.
+//! - It takes D's slot that holds the caller's partition
+//!   [OFW-4.93 lv1 a:0x2554F0-0x25551C] [OFW-4.93 lv1 a:0x2555F8-0x255608].
+//! - It returns -9 while the slot's handle at D + 2568 + 64 x slot holds a
+//!   port with a reference [OFW-4.93 lv1 a:0x255520-0x255548].
+//! - It links the port at +16 of that handle
+//!   [OFW-4.93 lv1 a:0x25554C-0x255570] [OFW-4.93 lv1 a:0x2BEDD4].
+//!
+//! So a storage device gets the answers of the storage bus, in the same
+//! order, for D's slot of the caller's partition.
+//!
+//! The 4.93 kernel's device object makes an interrupt object with the
+//! type 2, the interrupt id 0, its bus id and its device id
+//! [OFW-4.93 lv2_kernel a:0x80000000000AC154-0x80000000000AC164]. The
+//! object keeps them at +16, +24, +80 and +88
+//! [OFW-4.93 lv2_kernel a:0x8000000000096334-0x8000000000096350]. The port
+//! setup sends the call with the bus id in r3, the device id in r4, the
+//! port id in r5 and the interrupt id in r6
+//! [OFW-4.93 lv2_kernel a:0x80000000000964B8-0x80000000000964CC].
+//!
+//! The capture [`STORAGE_DEVICE_PORT_CAPTURE`] shows a port in the game OS
+//! slot of each of the five devices after the boot. Each port's id is the
+//! id that `construct_event_receive_port` gave the kernel's call for that
+//! device. So each of the five calls passed each check.
+//!
+//! [`STORAGE_DEVICE_OPEN_CAPTURE`]: super::device_bus::STORAGE_DEVICE_OPEN_CAPTURE
+//! [`STORAGE_DEVICE_PORT_CAPTURE`]: super::event_port::STORAGE_DEVICE_PORT_CAPTURE
+//!
 //! # `net_control`
 //!
 //! The handler [OFW-4.93 lv1 a:0x307D2C] keeps r3 to r8
@@ -512,6 +568,8 @@ use super::status::{
     zero_extended, LV1_DUPLICATE_ENTRY, LV1_ILLEGAL_PARAMETER_VALUE, LV1_NOT_IMPLEMENTED,
     LV1_NO_ENTRY, LV1_WRONG_STATE,
 };
+use super::storage::STORAGE_DEVICE_ID_MAX;
+use super::storage_registration::registration;
 
 /// The handler of hypercall 191 in one firmware's lv1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -708,6 +766,18 @@ pub const STORAGE_PORT_BUSY_R3: u64 = 0x0000_0008_FFFF_FFF7;
 ///
 /// [`NETWORK_PORT_CAPTURE`]: super::event_port::NETWORK_PORT_CAPTURE
 pub const STORAGE_PORT_ID_LIMIT: u64 = 64;
+
+/// Whether CellGov read the path of a storage device's interrupt port for
+/// device `device` of bus 4 at the firmware version `firmware`.
+///
+/// These devices are the devices of the bus table of [`registration`] at
+/// `firmware`. The capture
+/// [`super::device_bus::STORAGE_DEVICE_OPEN_CAPTURE`] reads the method
+/// table of each 4.93 device.
+pub fn storage_device_port_read(firmware: &str, device: u64) -> bool {
+    device <= STORAGE_DEVICE_ID_MAX
+        && registration(firmware).is_some_and(|table| table.device(device).is_some())
+}
 
 /// The handler of hypercall 194 in one firmware's lv1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1094,6 +1164,10 @@ mod interrupt_mask_tests;
 #[cfg(test)]
 #[path = "tests/network_interrupt_port_tests.rs"]
 mod interrupt_port_tests;
+
+#[cfg(test)]
+#[path = "tests/network_storage_device_port_tests.rs"]
+mod storage_device_port_tests;
 
 #[cfg(test)]
 #[path = "tests/network_control_tests.rs"]
