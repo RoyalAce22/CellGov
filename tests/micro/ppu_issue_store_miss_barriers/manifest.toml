@@ -1,0 +1,22 @@
+[test]
+name = "ppu_issue_store_miss_barriers"
+
+# A hardware probe: whether an lwsync, an isync or a sync after a stw to
+# a flushed line holds the instructions after it until the line arrives
+# from memory, measured against the same loop with another line flushed.
+# A chain of dependent addi after each barrier outlasts the line's trip,
+# so a barrier that does not wait hides the trip under the chain. The
+# console capture is the answer; ppu/main.c's header lists the cases and
+# the payload layout.
+
+[observe]
+# 18 big-endian u32 words (72 bytes), as ppu/main.c lists: REPS, ITER,
+# CHAIN, X's low word, the smallest and the largest time base ticks a
+# run of each of the six cases, whether the stored word held after the
+# runs, and the end mark.
+memory_regions = [
+  { name = "result", addr = 0, size = 72 },
+]
+
+[expect]
+outcome = "completed"

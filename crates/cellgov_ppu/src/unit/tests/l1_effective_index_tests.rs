@@ -231,10 +231,12 @@ fn reload_gap(next_ra: u64, before: &[(I, u64)], last: u64) -> u64 {
 }
 
 /// The gap of an `ld` of the first [`SET_0_EA`] page to its use, after
-/// loads of the four [`SET_0_EA`] pages and of `fifth`.
+/// loads of the four [`SET_0_EA`] pages and of `fifth`, and a [`DRAIN`]
+/// chain that lets the reload of `fifth` write its line.
 fn set_0_reload_gap(fifth: u64) -> u64 {
     let mut before: Vec<(I, u64)> = SET_0_EA.iter().map(|&ea| (warm(), ea)).collect();
     before.push((warm(), fifth));
+    before.extend(std::iter::repeat_n((add_to_r9(), 0), DRAIN));
     reload_gap(ADJACENT_RA, &before, SET_0_EA[0])
 }
 
@@ -278,8 +280,16 @@ fn a_load_through_an_alias_in_the_other_l1_set_reloads_the_line_from_the_l2() {
 /// [CBE-Handbook p:138 s:6.1.3.10] A line found at the other congruence class is invalidated, and the data from the L2 is placed at the congruence class of the effective address.
 #[test]
 fn a_load_through_the_first_alias_after_one_through_the_other_l1_set_reloads_from_the_l2() {
-    let stay = [(warm(), ALIAS_LOW_EA), (warm(), ALIAS_TWIN_EA)];
-    let moved = [(warm(), ALIAS_LOW_EA), (warm(), ALIAS_HIGH_EA)];
+    // The chain lets the second load's reload write its line.
+    let drain = std::iter::repeat_n((add_to_r9(), 0), DRAIN);
+    let stay: Vec<_> = [(warm(), ALIAS_LOW_EA), (warm(), ALIAS_TWIN_EA)]
+        .into_iter()
+        .chain(drain.clone())
+        .collect();
+    let moved: Vec<_> = [(warm(), ALIAS_LOW_EA), (warm(), ALIAS_HIGH_EA)]
+        .into_iter()
+        .chain(drain)
+        .collect();
     let stayed = reload_gap(ADJACENT_RA, &stay, ALIAS_LOW_EA);
     let back = reload_gap(ADJACENT_RA, &moved, ALIAS_LOW_EA);
     assert!(

@@ -8,23 +8,18 @@
 //! - loop 2: loop 1 with a second touch of the line before the load;
 //! - loop 3: the eight touches and the load, with no touch of the line.
 //!
-//! The eight touches push the first touch's copy out of the L1 while the
-//! line is still on its way from memory. The second touch then hits the
-//! L2 tag the first touch filled, and its line arrives no earlier than
-//! the first touch brings it.
+//! The probe means the eight touches to push the first touch's copy out
+//! of the L1 while the line is still on its way from memory. In CellGov,
+//! the eight touches wait for the first touch's reload, which writes its
+//! line first. The second touch finds the line on its way and sends no
+//! request, so the line arrives when the first touch brings it.
 //!
-//! The tests do not assert loops 1 and 3:
-//! - Loop 3: each touch reload holds the L1 set (the
-//!   `ppu_issue_touch_set_pressure` capture). All eight touched lines miss
-//!   CellGov's L1 on each pass, so CellGov gives about 830 cycles. The
-//!   console's 643 matches about five misses. The touched lines are the
-//!   same eight on each pass, and how many of them the console's L1 keeps
-//!   is not known.
-//! - Loop 1: the console's load waits for the eight touches and gets no
-//!   help from the touch of its line. CellGov's load waits for that touch
-//!   alone. In the `ppu_issue_touch_set_pressure` capture, a load after a
-//!   touch of its line waits for 3 or 4 later touches in its set, and
-//!   not for 7 or 8. The rule that decides between the two is not known.
+//! The tests do not assert loop 1. The console's load waits for the
+//! eight touches and gets no help from the touch of its line. CellGov's
+//! load waits for that touch alone. In the `ppu_issue_touch_set_pressure`
+//! capture, a load after a touch of its line waits for 3 or 4 later
+//! touches in its set, and not for 7 or 8. The rule that decides between
+//! the two is not known.
 
 use crate::console_ppu_issue_timing::{replay, Replay, Seed};
 use cellgov_ps3_abi::hw::ppu_issue::PPU_CYCLES_PER_TB_TICK;
@@ -63,7 +58,7 @@ const SEEDS: &[Seed] = &[
 ];
 
 /// The console's payload as big-endian words.
-fn console_words() -> Vec<u64> {
+pub(crate) fn console_words() -> Vec<u64> {
     let observation = cellgov_compare::baseline::load(std::path::Path::new(CONSOLE))
         .unwrap_or_else(|e| panic!("{CONSOLE}: {e}"));
     let p = &observation.memory_regions[0].data;
@@ -78,7 +73,7 @@ fn console_words() -> Vec<u64> {
 }
 
 /// Loop `k`'s fastest run, in core cycles a load.
-fn console_cycles(words: &[u64], k: usize) -> f64 {
+pub(crate) fn console_cycles(words: &[u64], k: usize) -> f64 {
     (words[2 * k] * PPU_CYCLES_PER_TB_TICK) as f64 / (1u64 << ITERATIONS_LOG2) as f64
 }
 
@@ -110,7 +105,7 @@ fn body(k: usize) -> Vec<u32> {
 }
 
 /// CellGov's cycles a load for loop `k`.
-fn cellgov_cycles(k: usize) -> f64 {
+pub(crate) fn cellgov_cycles(k: usize) -> f64 {
     let r = Replay {
         loop_index: k,
         words: looped(&body(k)),
@@ -126,9 +121,9 @@ fn cellgov_cycles(k: usize) -> f64 {
 const RETOUCH_GAP: f64 = 0.05;
 
 /// The gap of the touch loop alone, a chase in line order through memory.
-const IN_ORDER_CHASE_GAP: f64 = 0.10;
+pub(crate) const IN_ORDER_CHASE_GAP: f64 = 0.10;
 
-fn assert_within(k: usize, cellgov: f64, console: f64, gap: f64) {
+pub(crate) fn assert_within(k: usize, cellgov: f64, console: f64, gap: f64) {
     assert!(
         (console - cellgov).abs() / console <= gap,
         "loop {k}: CellGov {cellgov:.2} cycles a load, the console's fastest {console:.2}, \

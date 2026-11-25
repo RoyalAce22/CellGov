@@ -259,6 +259,21 @@ pub const PPU_ISYNC_CYCLES: u64 = 17;
 /// [`PPU_ISYNC_CYCLES`] while an older store is still in the store queue.
 pub const PPU_ISYNC_STORE_CYCLES: u64 = 17;
 
+/// The cycles from the last issue cycle of a store to a line the L2 does
+/// not hold to the cycle the L2 has that line from memory.
+///
+/// [CBE-Handbook p:140 s:6.1.5] the L2's read-and-claim queues take its
+/// reloads and its store misses.
+///
+/// [CBE-Handbook p:208 s:8.4.1.1] a store that misses the L2 makes the
+/// PPE read the line from memory on the EIB, as a load that misses does.
+///
+/// CellGov takes the cycles a load's trip to memory adds to its trip to
+/// the L2. In the `ppu_issue_page_cross_store` capture, a `sync` after a
+/// `stw` to a flushed line takes 312 cycles an iteration more than after
+/// a `stw` to a line the L2 holds.
+pub const PPU_STORE_MISS_FETCH_CYCLES: u64 = PPU_MEMORY_LOAD_USE_CYCLES - PPU_L2_LOAD_USE_CYCLES;
+
 /// The cycles from an `sc` to the earliest issue of the instruction
 /// after it: the LV2 round trip of `sys_time_get_timebase_frequency`,
 /// the cheapest call.

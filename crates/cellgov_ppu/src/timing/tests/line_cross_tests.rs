@@ -67,7 +67,7 @@ fn a_load_into_a_touched_second_line_waits_for_the_touch() {
 #[test]
 fn a_store_into_the_second_line_allocates_it_in_the_l2() {
     let mut caches = Caches::new();
-    caches.store(Operand::untranslated(ACROSS, 8));
+    caches.store(0, Operand::untranslated(ACROSS, 8));
     // With `skip_l1`, the load looks up the L2 alone.
     assert_eq!(
         caches.load(Operand::untranslated(LINE_B, 8), true),

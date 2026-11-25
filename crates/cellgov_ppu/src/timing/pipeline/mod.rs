@@ -42,7 +42,7 @@ use cellgov_exec::PpeIssuePressure;
 use cellgov_ps3_abi::hw::ppc_isa::PPC_BO_ALWAYS;
 use cellgov_ps3_abi::hw::ppu_issue as k;
 use pressure::{divides, note_divide, note_pressure, sibling_stall, stretch_pending, weigh_over};
-use store_queue::{bytes_in, queue_room, queue_store};
+use store_queue::{barrier_start, bytes_in, queue_room, queue_store};
 
 mod pressure;
 mod store_queue;
@@ -349,6 +349,9 @@ struct Tables {
     slots: [u64; k::PPU_STORE_QUEUE_ENTRIES],
     /// The ring index of the oldest slot, which the next new entry takes.
     next_slot: usize,
+    /// The latest cycle the L2 has from memory a line that a store found
+    /// missing, or 0.
+    line_fetched: u64,
 }
 
 /// The issue model of one PPU thread.
@@ -517,6 +520,7 @@ impl PpeTiming {
                 next_store: 0,
                 slots: [0; k::PPU_STORE_QUEUE_ENTRIES],
                 next_slot: 0,
+                line_fetched: 0,
             }),
             hold: 0,
             shared_stall: PpeIssuePressure::NONE,
@@ -1097,7 +1101,7 @@ impl PpeTiming {
             } => {
                 queue_store(&mut self.tables, exec, op, Operand { ea, ra, len, tail });
             }
-            Kind::ZeroLine { ra, .. } => self.tables.caches.zero(ra),
+            Kind::ZeroLine { ra, .. } => self.tables.caches.zero(t, ra),
             Kind::Touch { ea, ra } => self.tables.caches.touch(t, ea, ra),
             Kind::Flush { ra, .. } => self.tables.caches.flush(t, ra),
             Kind::StoreBack { ra, .. } => self.tables.caches.store_back(t, ra),
@@ -1114,7 +1118,8 @@ impl PpeTiming {
                 // [CBE-Handbook p:722 s:A.1.2] after a `sync` or `lwsync`
                 // issues, it forces older stores out of the store queue.
                 let queued = self.tables.stores.iter().any(|s| s.done > t);
-                let back = t + barrier_cycles(barrier, queued);
+                let back =
+                    barrier_start(&self.tables, t, barrier) + barrier_cycles(barrier, queued);
                 let c = &mut self.core;
                 c.floor = c.floor.max(back);
                 // The next instruction issues no earlier than `back`, so it

@@ -24,15 +24,19 @@ fn at(ea: u64) -> Operand {
     Operand::untranslated(ea, 8)
 }
 
-/// Caches after a touch of `LINE_A` at cycle 10 and touches of the four
-/// lines after it in its L1 set, which push it out of the L1.
+/// An effective address of `LINE_A`'s real line in the other congruence
+/// class of its L1 set.
+const LINE_A_OTHER_CLASS: u64 = LINE_A + SET_STRIDE / 2;
+
+/// Caches after a touch of `LINE_A` at cycle 10 and a touch at cycle 11
+/// of its real line through `LINE_A_OTHER_CLASS`, which takes the line
+/// out of `LINE_A`'s L1 set.
+///
+/// [CBE-Handbook p:138 s:6.1.3.10] A line found at the other congruence class is invalidated, and the data from the L2 is placed at the congruence class of the effective address.
 fn line_a_pushed_out_while_on_its_way() -> Caches {
     let mut caches = Caches::new();
     caches.touch(10, LINE_A, Some(LINE_A));
-    for i in 1..=k::PPU_L1D_WAYS as u64 {
-        let line = LINE_A + i * SET_STRIDE;
-        caches.touch(11, line, Some(line));
-    }
+    caches.touch(11, LINE_A_OTHER_CLASS, Some(LINE_A));
     assert_eq!(caches.holds(LINE_A, LINE_A), (false, true));
     caches
 }

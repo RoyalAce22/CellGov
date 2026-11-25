@@ -2,8 +2,34 @@
 //! for, and the bytes each entry keeps until it writes them into the
 //! cache.
 
-use super::{Op, Operand, Queued, Tables, PENDING_ENTRIES};
+use super::{Barrier, Level, Op, Operand, Queued, Tables, PENDING_ENTRIES};
 use cellgov_ps3_abi::hw::ppu_issue as k;
+
+#[cfg(test)]
+#[path = "tests/store_miss_sync_tests.rs"]
+mod store_miss_sync_tests;
+
+/// The cycle from which `barrier`, issued at `t`, holds the instructions
+/// after it.
+///
+/// A `sync` holds them from the cycle the L2 has each line that an older
+/// store found missing. An `lwsync` or an `isync` holds them from `t`.
+///
+/// [CBE-Handbook p:795 s:C.3.5] a `sync` or an `lwsync` at the bottom of
+/// the store queue waits for the L2's `sync_done` signal.
+///
+/// [CBE-Handbook p:144 s:6.1.5.7] a store that the L2 store queue gives
+/// to a read-and-claim state machine is complete when that machine
+/// completes it.
+///
+/// In the `ppu_issue_store_miss_barriers` capture, a store miss adds
+/// about 325 cycles to a `sync` and none to an `lwsync`.
+pub(super) fn barrier_start(tables: &Tables, t: u64, barrier: Barrier) -> u64 {
+    match barrier {
+        Barrier::Sync => t.max(tables.line_fetched),
+        Barrier::Lwsync | Barrier::Isync => t,
+    }
+}
 
 /// The 16-byte block that holds `ea`.
 fn block_of(ea: u64) -> u64 {
@@ -111,9 +137,20 @@ pub(super) fn queue_room(tables: &Tables, t: u64, ea: u64, len: u8) -> u64 {
 ///
 /// [`PPU_STORE_SLOT_DRAIN_CYCLES`]: k::PPU_STORE_SLOT_DRAIN_CYCLES
 /// [`PPU_STORE_DRAIN_CYCLES`]: k::PPU_STORE_DRAIN_CYCLES
+///
+/// A store to a line the L2 does not hold completes when the L2 has that
+/// line from memory, [`PPU_STORE_MISS_FETCH_CYCLES`] after the store's
+/// last issue cycle. The entries keep their drain times.
+///
+/// [`PPU_STORE_MISS_FETCH_CYCLES`]: k::PPU_STORE_MISS_FETCH_CYCLES
 #[inline]
 pub(super) fn queue_store(tables: &mut Tables, t: u64, op: &Op, operand: Operand) {
-    tables.caches.store(operand);
+    if tables.caches.store(t, operand) == Level::Memory {
+        let last = t + u64::from(op.span.saturating_sub(1));
+        tables.line_fetched = tables
+            .line_fetched
+            .max(last + k::PPU_STORE_MISS_FETCH_CYCLES);
+    }
     let Operand { ra, len, .. } = operand;
     // [CBE-Handbook p:134 s:6.1.2.2] the CIU store queue holds
     // 16-byte entries. [CBE-Handbook p:144 s:6.1.5.7] the L2

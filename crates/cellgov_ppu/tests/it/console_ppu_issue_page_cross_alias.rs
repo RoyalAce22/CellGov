@@ -297,9 +297,14 @@ fn cellgov(probe: &Probe) -> Vec<f64> {
 const BAND: f64 = 0.20;
 
 /// The cases the model holds within [`BAND`] of the console, by probe.
+///
+/// In `ppu_issue_page_cross_alias` case 5 and `ppu_issue_page_cross_store`
+/// cases 0, 2 and 4, a store finds its line missing from the L2. The
+/// next `sync` then waits for the line's fetch from memory. The wait is
+/// the same for a crossing `std` and a plain `stw`.
 const HELD: [(&Probe, &[usize]); 3] = [
-    (&ALIAS, &[0, 1, 3, 4, 6]),
-    (&STORE, &[3, 5]),
+    (&ALIAS, &[0, 1, 3, 4, 5, 6]),
+    (&STORE, &[0, 2, 3, 4, 5]),
     (&WAITS, &[0, 1, 2, 3]),
 ];
 
@@ -309,14 +314,11 @@ const HELD: [(&Probe, &[usize]); 3] = [
 /// - `ppu_issue_page_cross_alias` case 2: a `dcbf` of a line the caches
 ///   do not hold, then `sync`, costs the console about 110 cycles more
 ///   than the `sync` alone (case 4). The model charges nothing for it.
-/// - `ppu_issue_page_cross_alias` case 5 and `ppu_issue_page_cross_store`
-///   cases 0, 1, 2 and 4: a store to a line the L2 does not hold makes
-///   the next `sync` wait about 300 cycles on the console. The wait is
-///   the same for a crossing `std` and a plain `stw`. In the model, the
-///   store puts the line in the L2 at once, so the `sync` does not wait.
-///   `ppu_issue_page_cross_store` case 1 also flushes a line the caches
-///   do not hold.
-const DIFFERENT: [(&Probe, &[usize]); 2] = [(&ALIAS, &[2, 5]), (&STORE, &[0, 1, 2, 4])];
+/// - `ppu_issue_page_cross_store` case 1: the same `dcbf` of a line the
+///   caches do not hold comes before a crossing `std` to lines the L2
+///   holds. The console takes 52 cycles an iteration more than for a
+///   plain `stw` there (case 3). The model gives the two the same cycles.
+const DIFFERENT: [(&Probe, &[usize]); 2] = [(&ALIAS, &[2]), (&STORE, &[1])];
 
 #[test]
 fn each_held_case_comes_within_the_band_of_the_console() {

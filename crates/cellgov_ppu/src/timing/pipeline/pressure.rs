@@ -138,6 +138,7 @@ pub(super) fn weigh_over(share: u32, w: u64, counts: bool, window: u64) -> u32 {
 /// - each result and each outstanding load miss;
 /// - each unit's release;
 /// - each queued store's write into the cache;
+/// - the cycle the L2 has a line that a store found missing;
 /// - each touched line's arrival;
 /// - the cycle a touched line's L1 set let its request go;
 /// - each L1 set's next free reload.
@@ -186,7 +187,8 @@ pub(super) fn stretch_pending(c: &mut Core, tables: &mut Tables, began: u64, sta
         .chain(c.addr_ready.iter_mut())
         .chain(c.miss.iter_mut())
         .chain(c.unit_free.iter_mut())
-        .chain(tables.stores.iter_mut().map(|s| &mut s.done));
+        .chain(tables.stores.iter_mut().map(|s| &mut s.done))
+        .chain(std::iter::once(&mut tables.line_fetched));
     for r in pending {
         if *r > began {
             *r += stalled;

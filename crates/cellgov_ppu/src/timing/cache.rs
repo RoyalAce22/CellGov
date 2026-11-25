@@ -17,6 +17,12 @@ mod cancelled_touch_tests;
 #[cfg(test)]
 #[path = "tests/reload_queue_tests.rs"]
 mod reload_queue_tests;
+#[cfg(test)]
+#[path = "tests/reload_write_tests.rs"]
+mod reload_write_tests;
+#[cfg(test)]
+#[path = "tests/store_miss_tests.rs"]
+mod store_miss_tests;
 
 /// Where a load found its line. A later variant is farther from the core.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -233,9 +239,38 @@ const PAGE_LINES: usize = (1 << SMALL_PAGE_LOG2) / k::PPU_CACHE_LINE_BYTES as us
 /// at most one copy of a real line.
 ///
 /// [CBE-Handbook p:137 s:6.1.3.10] Data that two effective addresses alias can be in any of four ways at each of two congruence classes.
+///
+/// A reload writes its line when its data returns. Until then, the line
+/// counts as present, and the line that it will evict stays.
+///
+/// [CBE-Handbook p:137 s:6.1.3.7] The DCache tag array is updated after the reload is written to the DCache.
+///
+/// In the `ppu_issue_touch_reload` capture, 8 touches visit the same 8
+/// lines of one L1 set on each pass. Their checks of the L1 come before
+/// their reloads return, so 3 of the 8 lines stay from the pass before.
+/// The console takes 643 cycles a load, about what 5 touch reloads cost.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct L1 {
     tags: Tags<{ k::PPU_L1D_SETS }, { k::PPU_L1D_WAYS }>,
+    /// The reloads that have not written their line, oldest first.
+    reloads: [Reload; LINE_CYCLES],
+    /// How many entries of `reloads` are in use.
+    pending: usize,
+}
+
+/// A reload on its way to the L1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Reload {
+    line: Line,
+    /// The cycle the reload writes its line.
+    at: u64,
+}
+
+impl Reload {
+    const EMPTY: Self = Self {
+        line: Line { index: 0, real: 0 },
+        at: 0,
+    };
 }
 
 impl L1 {
@@ -246,7 +281,11 @@ impl L1 {
                 "a page offset's line bits pick the low bits of a set"
             )
         };
-        Self { tags: Tags::new() }
+        Self {
+            tags: Tags::new(),
+            reloads: [Reload::EMPTY; LINE_CYCLES],
+            pending: 0,
+        }
     }
 
     /// The set that the effective line of `line` picks.
@@ -263,10 +302,70 @@ impl L1 {
             .find_map(|set| self.tags.way_of(set, real).map(|way| (set, way)))
     }
 
-    /// Whether the set of `line`'s effective line holds its real line; a
-    /// hit updates the tree. A copy in another set is no hit.
-    fn lookup(&mut self, line: Line) -> bool {
-        self.tags.lookup_in(Self::set_of(line), line.real)
+    /// Writes each reload that returns by cycle `t`. An earlier return
+    /// writes first, and the older of two reloads that return together
+    /// writes first.
+    fn settle(&mut self, t: u64) {
+        while let Some(i) = self.first_back(t) {
+            let line = self.take(i).line;
+            self.write(line);
+        }
+    }
+
+    /// The index of the reload that returns first by cycle `t`.
+    fn first_back(&self, t: u64) -> Option<usize> {
+        self.reloads[..self.pending]
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.at <= t)
+            .min_by_key(|(_, r)| r.at)
+            .map(|(i, _)| i)
+    }
+
+    /// Removes reload `i` and keeps the others in age order.
+    fn take(&mut self, i: usize) -> Reload {
+        let r = self.reloads[i];
+        self.reloads.copy_within(i + 1..self.pending, i);
+        self.pending -= 1;
+        r
+    }
+
+    /// Whether a reload brings `line`'s real line to the set of its
+    /// effective line.
+    fn reloading(&self, line: Line) -> bool {
+        let set = Self::set_of(line);
+        self.reloads[..self.pending]
+            .iter()
+            .any(|r| r.line.real == line.real && Self::set_of(r.line) == set)
+    }
+
+    /// Whether the set of `line`'s effective line holds its real line at
+    /// cycle `t`, or a reload brings it there. A hit in the set updates
+    /// the tree. A copy in another set is no hit.
+    fn lookup(&mut self, t: u64, line: Line) -> bool {
+        self.settle(t);
+        self.tags.lookup_in(Self::set_of(line), line.real) || self.reloading(line)
+    }
+
+    /// Queues at cycle `t` a reload of `line` that writes the line at
+    /// cycle `at`.
+    ///
+    /// When the table of reloads is full, the reload that returns first
+    /// writes its line at once.
+    fn fill(&mut self, t: u64, line: Line, at: u64) {
+        self.settle(t);
+        self.forget(line.real);
+        if at <= t {
+            self.write(line);
+            return;
+        }
+        if self.pending == LINE_CYCLES {
+            let first = self.first_back(u64::MAX).unwrap_or(0);
+            let early = self.take(first).line;
+            self.write(early);
+        }
+        self.reloads[self.pending] = Reload { line, at };
+        self.pending += 1;
     }
 
     /// Place `line` in the set of its effective line.
@@ -274,24 +373,59 @@ impl L1 {
     /// The L1 first drops the copy of its real line that another set holds.
     ///
     /// [CBE-Handbook p:138 s:6.1.3.10] A line found at the other congruence class is invalidated, and the data from the L2 is placed at the congruence class of the effective address.
-    fn fill(&mut self, line: Line) {
-        self.invalidate(line.real);
+    fn write(&mut self, line: Line) {
+        self.drop_tag(line.real);
         self.tags.fill_in(Self::set_of(line), line.real);
     }
 
     /// Drop real line `real` from the set that holds it.
-    fn invalidate(&mut self, real: u64) {
+    fn drop_tag(&mut self, real: u64) {
         if let Some((set, way)) = self.find(real) {
             self.tags.drop_way(set, way);
         }
     }
 
-    /// Drop the copy of `line`'s real line that a set other than its
-    /// effective line's set holds.
-    fn drop_alias(&mut self, line: Line) {
-        if let Some((set, way)) = self.find(line.real) {
-            if set != Self::set_of(line) {
-                self.tags.drop_way(set, way);
+    /// Drop each reload of real line `real` that has not written it.
+    fn forget(&mut self, real: u64) {
+        while let Some(i) = self.reloads[..self.pending]
+            .iter()
+            .position(|r| r.line.real == real)
+        {
+            self.take(i);
+        }
+    }
+
+    /// Drop real line `real` at cycle `t`, from the set that holds it and
+    /// from each reload that brings it.
+    fn invalidate(&mut self, t: u64, real: u64) {
+        self.settle(t);
+        self.drop_tag(real);
+        self.forget(real);
+    }
+
+    /// Drop at cycle `t` the copy of `line`'s real line that a set other
+    /// than its effective line's set holds, or that a reload brings.
+    fn drop_alias(&mut self, t: u64, line: Line) {
+        self.settle(t);
+        let set = Self::set_of(line);
+        if let Some((held, way)) = self.find(line.real) {
+            if held != set {
+                self.tags.drop_way(held, way);
+            }
+        }
+        while let Some(i) = self.reloads[..self.pending]
+            .iter()
+            .position(|r| r.line.real == line.real && Self::set_of(r.line) != set)
+        {
+            self.take(i);
+        }
+    }
+
+    /// Delays by `stalled` each reload that writes later than `began`.
+    fn stretch(&mut self, began: u64, stalled: u64) {
+        for r in &mut self.reloads[..self.pending] {
+            if r.at > began {
+                r.at += stalled;
             }
         }
     }
@@ -465,17 +599,17 @@ impl Caches {
         (Line::of(at.ea, at.ra), Line::of(last_ea, last_ra))
     }
 
-    /// Allocate real line `real` in the L2, and drop from the L1 the line
-    /// that the L2 evicts.
+    /// Allocate real line `real` in the L2 at cycle `t`, and drop from
+    /// the L1 the line that the L2 evicts.
     ///
     /// [CBE-Handbook p:140 s:6.1.5.1] The L2 includes all of the L1 data cache contents.
     ///
     /// The documents do not say how the L2 finds the L1 set of the line
     /// it evicts. The inclusion fixes the result: the line leaves the set
-    /// that holds it.
-    fn fill_l2(&mut self, real: u64) {
+    /// that holds it, and no reload brings it to the L1.
+    fn fill_l2(&mut self, t: u64, real: u64) {
         if let Some(evicted) = self.l2.fill(real) {
-            self.l1.invalidate(evicted);
+            self.l1.invalidate(t, evicted);
         }
     }
 
@@ -512,14 +646,19 @@ impl Caches {
     /// - an L1 hit waits for no set;
     /// - an L1 miss, or a load that skips the L1, waits for the reloads
     ///   that its L1 set holds, and then holds the set as a touch does.
+    ///
+    /// A load that misses the L1 writes its line there when its reload
+    /// returns. A load of a line that a touch still brings returns with
+    /// that touch.
     fn load_line(&mut self, t: u64, line: Line, skip_l1: bool) -> (Level, u64) {
-        let in_flight = !skip_l1 && self.touched.after(t, line.real) > t;
+        let arrival = self.touched.after(t, line.real);
+        let in_flight = !skip_l1 && arrival > t;
         let held = if in_flight {
             self.held.after(t, line.real)
         } else {
             0
         };
-        if !skip_l1 && self.l1.lookup(line) {
+        if !skip_l1 && self.l1.lookup(t, line) {
             return (Level::L1, held);
         }
         let set = L1::set_of(line);
@@ -531,38 +670,49 @@ impl Caches {
         let level = if self.l2.lookup(line.real) {
             Level::L2
         } else {
-            self.fill_l2(line.real);
+            self.fill_l2(t, line.real);
             // [CBE-Handbook p:146 s:6.1.6.3] the L2 ends a prefetch when a
             // demand load of the same address is ahead of it.
             self.touched.forget(line.real);
             self.held.forget(line.real);
             Level::Memory
         };
-        if !in_flight {
+        let back = if in_flight {
+            arrival
+        } else {
             let trip = match level {
                 Level::Memory => k::PPU_MEMORY_LOAD_USE_CYCLES,
                 Level::L1 | Level::L2 => k::PPU_L2_LOAD_USE_CYCLES,
             };
-            self.reload_free[set] = t.max(queued) + trip + k::PPU_LOAD_MISS_ENTRY_REUSE_CYCLES;
-        }
+            let back = t.max(queued) + trip;
+            self.reload_free[set] = back + k::PPU_LOAD_MISS_ENTRY_REUSE_CYCLES;
+            back
+        };
         if !skip_l1 {
-            self.l1.fill(line);
+            self.l1.fill(t, line, back);
         }
         (level, queued)
     }
 
-    /// A store of the bytes of `at`: the L1 keeps its copy of each line
-    /// current, and the L2 allocates each line it misses.
-    pub(crate) fn store(&mut self, at: Operand) {
+    /// A store at cycle `t` of the bytes of `at`: the L1 keeps its copy
+    /// of each line current, and the L2 allocates each line it misses.
+    ///
+    /// The result is [`Level::Memory`] when the L2 did not hold a line of
+    /// the bytes, and [`Level::L2`] otherwise. The tags take each line at
+    /// once, so a later load finds it in the L2.
+    pub(crate) fn store(&mut self, t: u64, at: Operand) -> Level {
         let (first, last) = Self::lines(at);
-        self.store_line(first);
-        if last != first {
-            self.store_line(last);
+        let level = self.store_line(t, first);
+        if last == first {
+            level
+        } else {
+            level.max(self.store_line(t, last))
         }
     }
 
-    /// A store to `line`. The L1 drops a copy of the line in the set of
-    /// another effective line, and places no line.
+    /// A store to `line` at cycle `t`, and where the L2 found the line.
+    /// The L1 drops a copy of the line in the set of another effective
+    /// line, and places no line.
     ///
     /// [CBE-Handbook p:135 s:6.1.3.1] The L1 data cache does not allocate on a write.
     ///
@@ -570,26 +720,30 @@ impl Caches {
     /// [CBE-Handbook p:138 s:6.1.3.10] invalidates the copy in the other
     /// congruence class on an access. CellGov applies that rule to a store,
     /// without the reload.
-    fn store_line(&mut self, line: Line) {
-        self.l1.drop_alias(line);
-        if !self.l2.lookup(line.real) {
-            self.fill_l2(line.real);
-        }
+    fn store_line(&mut self, t: u64, line: Line) -> Level {
+        self.l1.drop_alias(t, line);
+        let level = if self.l2.lookup(line.real) {
+            Level::L2
+        } else {
+            self.fill_l2(t, line.real);
+            Level::Memory
+        };
         self.l2.modify(line.real);
+        level
     }
 
-    /// `dcbz`: drop the line at real address `ra` from the L1 and allocate
-    /// it in the L2.
+    /// `dcbz` at cycle `t`: drop the line at real address `ra` from the
+    /// L1 and allocate it in the L2.
     ///
     /// [CBE-Handbook p:723 s:A.1.2] `dcbz` invalidates the L1 line on its
     /// way to the L2; allocation and zeroing occur at the L2.
     ///
     /// [CBE-Handbook p:147 s:6.1.6.4] When the line that `dcbz` addresses is present in the L1, the L1 invalidates it before the operation goes to the L2.
-    pub(crate) fn zero(&mut self, ra: u64) {
+    pub(crate) fn zero(&mut self, t: u64, ra: u64) {
         let line = Self::line(ra);
-        self.l1.invalidate(line);
+        self.l1.invalidate(t, line);
         if !self.l2.lookup(line) {
-            self.fill_l2(line);
+            self.fill_l2(t, line);
         }
         self.l2.modify(line);
     }
@@ -616,19 +770,24 @@ impl Caches {
     /// The touch's request waits for the reloads that the L1 set of `ea`
     /// holds, and its own reload then holds that set. A touch of a line
     /// that an earlier touch still brings waits for no set and holds none.
+    ///
+    /// The touch checks the L1 when it runs. Its reload writes the line
+    /// into the L1 when the line arrives, and then updates the tree.
+    ///
+    /// [CBE-Handbook p:145 s:6.1.6.2] A touch that reloads a cache line updates the replacement information of the cache.
     pub(crate) fn touch(&mut self, t: u64, ea: u64, ra: Option<u64>) {
         let Some(ra) = ra else {
             return;
         };
         let line = Line::of(ea, ra);
-        if self.l1.lookup(line) {
+        if self.l1.lookup(t, line) {
             return;
         }
         let slot = t.max(self.touch_free);
         let (interval, trip) = if self.l2.lookup(line.real) {
             (k::PPU_TOUCH_L2_INTERVAL_CYCLES, k::PPU_L2_LOAD_USE_CYCLES)
         } else {
-            self.fill_l2(line.real);
+            self.fill_l2(t, line.real);
             (k::PPU_TOUCH_INTERVAL_CYCLES, k::PPU_MEMORY_LOAD_USE_CYCLES)
         };
         self.touch_free = slot + interval;
@@ -646,7 +805,7 @@ impl Caches {
         };
         // [CBE-Handbook p:138 s:6.1.3.10] A copy in the other congruence class is reloaded from the L2, so it arrives no earlier than an earlier touch brings the line there.
         let arrival = (sent + trip).max(earlier);
-        self.l1.fill(line);
+        self.l1.fill(t, line, arrival);
         self.touched.record(t, line.real, arrival);
     }
 
@@ -679,10 +838,12 @@ impl Caches {
     /// Delays by `stalled` each cycle later than `began` of:
     /// - a touched line's arrival;
     /// - the cycle a touched line's L1 set let its request go;
-    /// - an L1 set's next free reload.
+    /// - an L1 set's next free reload;
+    /// - the cycle a reload writes its line into the L1.
     pub(crate) fn stretch_touches(&mut self, began: u64, stalled: u64) {
         self.touched.stretch(began, stalled);
         self.held.stretch(began, stalled);
+        self.l1.stretch(began, stalled);
         for free in &mut self.reload_free {
             if *free > began {
                 *free += stalled;
@@ -702,7 +863,7 @@ impl Caches {
         } else {
             k::PPU_DCBF_LINE_BUSY_CYCLES
         };
-        self.l1.invalidate(line);
+        self.l1.invalidate(t, line);
         self.l2.invalidate(line);
         self.touched.forget(line);
         self.held.forget(line);
@@ -728,12 +889,15 @@ impl Caches {
 
 #[cfg(test)]
 impl Caches {
-    /// Whether the L1 set of `ea`'s line holds the real line of `ra`, and
-    /// whether the L2 holds that real line. The query moves no tree.
+    /// Whether the L1 set of `ea`'s line holds the real line of `ra`
+    /// after each reload writes its line, and whether the L2 holds that
+    /// real line. The query moves no tree.
     pub(crate) fn holds(&self, ea: u64, ra: u64) -> (bool, bool) {
         let line = Line::of(ea, ra);
-        let l1 = self.l1.tags.way_of(L1::set_of(line), line.real).is_some();
-        (l1, self.l2.find(line.real).is_some())
+        let mut l1 = self.l1.clone();
+        l1.settle(u64::MAX);
+        let held = l1.tags.way_of(L1::set_of(line), line.real).is_some();
+        (held, self.l2.find(line.real).is_some())
     }
 
     /// The first cycle the next touch can send its request.
