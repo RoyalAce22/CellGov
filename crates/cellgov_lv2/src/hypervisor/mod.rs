@@ -5,11 +5,12 @@
 //! - the [`HypercallRequest`];
 //! - the firmware version the [`Hypervisor`] answers for;
 //! - the partition's memory regions the [`Hypervisor`] holds;
-//! - the partition's virtual address spaces the [`Hypervisor`] holds.
+//! - the partition's virtual address spaces the [`Hypervisor`] holds;
+//! - the caller's real address space, which holds the page table.
 //!
 //! It returns a [`HypercallDisposition`]:
 //! - an answer, which the runtime applies as effects: r3, the outputs
-//!   from r4, and memory writes;
+//!   from r4, memory writes, and the page table registers of the caller;
 //! - a typed refusal, which stops the run.
 //!
 //! No handler writes guest state. An answer can carry a new memory
@@ -29,16 +30,20 @@ mod console;
 mod cost;
 mod handlers;
 mod memory;
+mod page_table;
 mod repository;
 mod request;
 mod state;
 mod vector;
 
 pub use address_space::{AddressSpace, AddressSpaceChange, AddressSpaceState};
-pub use answer::{ConsoleWrite, HypercallAnswer, HypercallDisposition, HypercallRefusal};
+pub use answer::{
+    ConsoleWrite, HypercallAnswer, HypercallDisposition, HypercallRefusal, PageTableLoad,
+};
 pub use cost::cost;
 pub use handlers::{answer, answers, ANSWERED};
 pub use memory::{MemoryRegion, MemoryState};
+pub use page_table::{page_table_storage, PAGE_TABLE_STORAGE_BASE, PAGE_TABLE_STORAGE_BYTES};
 pub use repository::RepositoryRead;
 pub use request::HypercallRequest;
 pub use state::{HypercallWitness, Hypervisor};

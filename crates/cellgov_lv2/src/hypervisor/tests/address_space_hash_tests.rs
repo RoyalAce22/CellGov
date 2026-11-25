@@ -7,6 +7,7 @@ fn boot_space() -> AddressSpace {
         htab_size_exp: 18,
         page_size_count: 2,
         page_shifts: 0x1014_0000_0000_0000,
+        mapping: None,
     }
 }
 

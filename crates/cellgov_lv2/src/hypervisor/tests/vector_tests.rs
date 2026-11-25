@@ -2,6 +2,7 @@
 //! state.
 
 use cellgov_event::UnitId;
+use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::lv1::call::READ_REPOSITORY_NODE;
 use cellgov_ps3_abi::lv1::dispatch::{PROBLEM_STATE_DENIED_R3, UNKNOWN_HYPERCALL_R3};
 use cellgov_ps3_abi::lv1::table::{
@@ -36,6 +37,7 @@ fn answered(r3: u64, outputs: Vec<u64>) -> HypercallDisposition {
         console: None,
         region: None,
         address_space: None,
+        page_table: None,
     })
 }
 
@@ -74,7 +76,8 @@ fn a_number_past_the_table_reaches_the_null_backend_where_no_image_gives_the_cou
                 &r,
                 firmware,
                 &MemoryState::default(),
-                &AddressSpaceState::default()
+                &AddressSpaceState::default(),
+                &GuestMemory::new(0)
             ),
             unmodelled(&r),
             "{firmware:?}"
@@ -92,7 +95,8 @@ fn every_problem_state_call_below_256_answers_no_privilege_at_4_93() {
                 &r,
                 Some("4.93"),
                 &MemoryState::default(),
-                &AddressSpaceState::default()
+                &AddressSpaceState::default(),
+                &GuestMemory::new(0)
             ),
             answered(PROBLEM_STATE_DENIED_R3, vec![0; 7]),
             "number {number}"
@@ -137,8 +141,8 @@ fn an_invalid_entry_answers_the_invalid_function_with_r4_to_r10_cleared_at_4_93(
 
 #[test]
 fn a_number_lv1_implements_and_cellgov_does_not_model_stops_the_run() {
-    let r = request(1, false);
-    assert_eq!(table_entry("4.93", 1), Some(TableEntry::Handler(0x2ED1C0)));
+    let r = request(3, false);
+    assert_eq!(table_entry("4.93", 3), Some(TableEntry::Handler(0x2ECDE8)));
     assert_eq!(null_backend(&r, Some("4.93")), unmodelled(&r));
 }
 
@@ -152,7 +156,7 @@ fn an_entry_invalid_at_4_93_stops_the_run_at_another_firmware() {
 
 #[test]
 fn every_answered_number_has_a_handler_in_the_live_4_93_table() {
-    assert_eq!(ANSWERED.len(), 8);
+    assert_eq!(ANSWERED.len(), 11);
     for &number in ANSWERED {
         assert!(
             matches!(table_entry("4.93", number), Some(TableEntry::Handler(_))),

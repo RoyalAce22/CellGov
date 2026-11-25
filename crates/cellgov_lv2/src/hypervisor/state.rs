@@ -5,10 +5,11 @@
 
 use std::collections::BTreeMap;
 
+use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::lv1::call::READ_REPOSITORY_NODE;
 use cellgov_time::GuestTicks;
 
-use super::address_space::AddressSpaceState;
+use super::address_space::{AddressSpaceChange, AddressSpaceState};
 use super::answer::{HypercallDisposition, HypercallRefusal};
 use super::handlers::{answer, answers};
 use super::memory::MemoryState;
@@ -64,22 +65,34 @@ impl Hypervisor {
         self.firmware.as_deref()
     }
 
-    /// The disposition of `request`, after the state and the records note
-    /// it:
+    /// The disposition of `request` from a caller with no real storage,
+    /// as [`Self::dispatch_with`] gives it. Each page table call refuses.
+    pub fn dispatch(&mut self, request: &HypercallRequest) -> HypercallDisposition {
+        self.dispatch_with(request, &GuestMemory::new(0))
+    }
+
+    /// The disposition of `request` from a caller whose real address
+    /// space is `storage`, after the state and the records note it:
     /// - a created memory region joins the partition's regions;
-    /// - a change to the address spaces applies;
+    /// - a change to the address spaces applies, and a page table
+    ///   mapping moves the region counter past the value it took;
     /// - a console write appends its bytes to the TTY sink;
     /// - a repository read that reaches its handler appends its record,
     ///   answered or refused;
     /// - a number with no handler counts toward its witness, whether
     ///   lv1's answer or a refusal disposes of it;
     /// - the first refusal is kept.
-    pub fn dispatch(&mut self, request: &HypercallRequest) -> HypercallDisposition {
+    pub fn dispatch_with(
+        &mut self,
+        request: &HypercallRequest,
+        storage: &GuestMemory,
+    ) -> HypercallDisposition {
         let disposition = answer(
             request,
             self.firmware.as_deref(),
             &self.memory,
             &self.address_spaces,
+            storage,
         );
         // A read that lv1's vector answers or refuses never reaches the
         // node table, so it is no repository read.
@@ -104,6 +117,9 @@ impl Hypervisor {
                     self.memory.create(region);
                 }
                 if let Some(change) = answer.address_space {
+                    if let AddressSpaceChange::Mapped { counter, .. } = change {
+                        self.memory.take_counter(counter);
+                    }
                     self.address_spaces.apply(change);
                 }
                 if let Some(write) = &answer.console {

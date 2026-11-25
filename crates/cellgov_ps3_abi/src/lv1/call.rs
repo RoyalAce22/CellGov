@@ -80,6 +80,18 @@ pub fn lookup(number: u64) -> Option<&'static Lv1Call> {
 /// gives the same registers.
 pub const ALLOCATE_MEMORY: u64 = 0;
 
+/// `write_htab_entry`: write one entry of an address space's page table.
+///
+/// The inputs:
+/// - r3 is the vas id, or 0 for the caller's address space.
+/// - r4 is the entry index.
+/// - r5 is doubleword 0 of the entry.
+/// - r6 is doubleword 1, with the page's logical partition address.
+///
+/// There is no output. The 4.93 lv1 handler reads the inputs in this
+/// form; see [`super::page_table`].
+pub const WRITE_HTAB_ENTRY: u64 = 1;
+
 /// `construct_virtual_address_space`: create a virtual address space
 /// with its own hashed page table.
 ///
@@ -108,6 +120,25 @@ pub const GET_LOGICAL_PARTITION_ID: u64 = 74;
 /// `read_repository_node`: the partition id in r3 and the key in r4 to
 /// r7. On success, r4 and r5 hold the node's two values.
 pub const READ_REPOSITORY_NODE: u64 = 91;
+
+/// `read_htab_entries`: read four entries of an address space's page
+/// table.
+///
+/// The inputs are the vas id in r3, or 0 for the caller's address space,
+/// and the index of the first entry in r4. On success, r4 to r7 hold
+/// doubleword 0 of each entry, and r8 holds the low halfword of
+/// doubleword 1 of each entry. The 4.93 lv1 handler reads the inputs and
+/// writes the outputs in this form; see [`super::page_table`].
+pub const READ_HTAB_ENTRIES: u64 = 95;
+
+/// `map_htab`: map an address space's page table into the partition's
+/// logical address space.
+///
+/// The input is the vas id in r3, or 0 for the caller's address space.
+/// On success, r4 holds the mapping's logical partition address. The
+/// 4.93 lv1 worker reads the input and writes the output in this form;
+/// see [`super::page_table::MAP_HTAB_RESOURCE_SHORTAGE_R3`].
+pub const MAP_HTAB: u64 = 122;
 
 /// `lv1_comm_dev_logical_console_construct`, by the name psdevwiki
 /// gives 105 [PS3DEVWIKI-HV-SYSCALLS s:HV_Syscalls]. The headers call it

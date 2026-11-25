@@ -7,7 +7,7 @@
 use cellgov_core::{Runtime, RuntimeMode, StepError};
 use cellgov_effects::FaultKind;
 use cellgov_event::UnitId;
-use cellgov_lv2::hypervisor::{HypercallRefusal, RepositoryRead};
+use cellgov_lv2::hypervisor::{page_table_storage, HypercallRefusal, RepositoryRead};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, MemError, PageSize, Region};
 use cellgov_ppu::loader::checked_pt_loads;
 use cellgov_ppu::supervisor::SupervisorState;
@@ -186,8 +186,11 @@ fn drive(rt: &mut Runtime, kernel: UnitId) -> KernelRunStop {
     }
 }
 
-/// One region at real address 0, [`KERNEL_SPAN_LIMIT`] bytes long, that
-/// holds each segment of the kernel ELF `elf` at its real address.
+/// The real address space of a kernel run:
+/// - one region at real address 0, [`KERNEL_SPAN_LIMIT`] bytes long,
+///   that holds each segment of the kernel ELF `elf` at its real
+///   address;
+/// - the storage of CellGov's hypervisor for its page table.
 ///
 /// The caller has mapped `elf` with `map_kernel`, which checks the
 /// segments and bounds their span by [`KERNEL_SPAN_LIMIT`]. That span
@@ -195,12 +198,10 @@ fn drive(rt: &mut Runtime, kernel: UnitId) -> KernelRunStop {
 /// at or below [`SPIN_WORD`].
 fn real_mode_image(elf: &[u8]) -> Result<GuestMemory, KernelRunError> {
     let segments = checked_pt_loads(elf).map_err(|source| KernelMapError::Elf { source })?;
-    let mut mem = GuestMemory::from_regions(vec![Region::new(
-        0,
-        KERNEL_SPAN_LIMIT as usize,
-        "lv2 real",
-        PageSize::Page64K,
-    )])
+    let mut mem = GuestMemory::from_regions(vec![
+        Region::new(0, KERNEL_SPAN_LIMIT as usize, "lv2 real", PageSize::Page64K),
+        page_table_storage(),
+    ])
     .map_err(|source| KernelRunError::RealMode { source })?;
     for s in segments.iter().filter(|s| s.memsz != 0) {
         // [PPC-Book3 p:29 s:4.2.6] Real addressing ignores EA bit 1, and EA bit 0 picks the mechanism that forms the real address.

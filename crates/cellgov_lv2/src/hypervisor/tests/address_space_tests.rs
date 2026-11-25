@@ -48,6 +48,7 @@ fn boot_space() -> AddressSpace {
         htab_size_exp: 18,
         page_size_count: 2,
         page_shifts: 0x1014_0000_0000_0000,
+        mapping: None,
     }
 }
 
@@ -55,6 +56,11 @@ fn constructed() -> AddressSpaceState {
     let mut spaces = AddressSpaceState::default();
     spaces.apply(AddressSpaceChange::Constructed(boot_space()));
     spaces
+}
+
+/// A real address space that holds the page table storage.
+fn storage() -> GuestMemory {
+    GuestMemory::from_regions(vec![page_table::page_table_storage()]).expect("storage")
 }
 
 fn lv1_answer(r3: u64) -> HypercallDisposition {
@@ -149,29 +155,37 @@ fn selecting_the_constructed_address_space_answers_with_outputs_cleared() {
         &select_request(CAPTURED_VAS_ID),
         Some("4.93"),
         &constructed(),
+        &storage(),
     );
     let mut expected = HypercallAnswer::lv1_status(0, vec![0; 7]);
     expected.address_space = Some(AddressSpaceChange::Selected(CAPTURED_VAS_ID));
+    expected.page_table = Some(page_table::load(&boot_space()));
     assert_eq!(d, HypercallDisposition::Answered(expected));
 }
 
 #[test]
 fn selecting_an_address_space_the_hypervisor_did_not_construct_refuses() {
     for vas_id in [0, 1, 3, u64::MAX] {
-        let d = select(&select_request(vas_id), Some("4.93"), &constructed());
+        let d = select(
+            &select_request(vas_id),
+            Some("4.93"),
+            &constructed(),
+            &storage(),
+        );
         assert!(refused(&d), "vas id {vas_id}: {d:?}");
     }
     let d = select(
         &select_request(CAPTURED_VAS_ID),
         Some("4.93"),
         &AddressSpaceState::default(),
+        &storage(),
     );
     assert!(refused(&d), "{d:?}");
 }
 
 #[test]
 fn selecting_vas_id_zero_refuses_as_the_partition_default_address_space() {
-    let d = select(&select_request(0), Some("4.93"), &constructed());
+    let d = select(&select_request(0), Some("4.93"), &constructed(), &storage());
     assert!(
         matches!(
             d,
@@ -187,7 +201,12 @@ fn selecting_vas_id_zero_refuses_as_the_partition_default_address_space() {
 #[test]
 fn a_selection_refuses_where_no_lv1_read_gives_the_handler() {
     for firmware in [None, Some("4.92")] {
-        let d = select(&select_request(CAPTURED_VAS_ID), firmware, &constructed());
+        let d = select(
+            &select_request(CAPTURED_VAS_ID),
+            firmware,
+            &constructed(),
+            &storage(),
+        );
         assert!(refused(&d), "{firmware:?}: {d:?}");
     }
 }
@@ -203,7 +222,7 @@ fn the_hypervisor_keeps_the_constructed_address_space_and_its_selection() {
     assert_eq!(hv.address_spaces().spaces(), &[boot_space()]);
     assert_eq!(hv.address_spaces().selected(), None);
     assert!(matches!(
-        hv.dispatch(&select_request(CAPTURED_VAS_ID)),
+        hv.dispatch_with(&select_request(CAPTURED_VAS_ID), &storage()),
         HypercallDisposition::Answered(_)
     ));
     assert_eq!(hv.address_spaces().selected(), Some(CAPTURED_VAS_ID));

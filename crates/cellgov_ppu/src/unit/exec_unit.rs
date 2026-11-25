@@ -2,6 +2,7 @@
 
 use super::batch::NoTap;
 use super::ppu_unit::{PpuExecutionUnit, PpuSnapshot};
+use crate::mmu::Partition;
 use crate::observation::PpuArchitecturalState;
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
@@ -138,6 +139,21 @@ impl ExecutionUnit for PpuExecutionUnit {
         self.state.supervisor().is_some_and(|s| s.problem_state())
     }
 
+    fn load_page_table(&mut self, sdr1: u64, lb: u8) -> bool {
+        self.state
+            .update_supervisor(|s| {
+                let p = &s.partition;
+                match Partition::new(sdr1, p.rm_limit(), p.rm_offset(), lb) {
+                    Ok(partition) => {
+                        s.partition = partition;
+                        true
+                    }
+                    Err(_) => false,
+                }
+            })
+            .unwrap_or(false)
+    }
+
     fn time_base_read(&self) -> Option<u64> {
         self.state.clock_read.then_some(self.state.tb)
     }
@@ -160,3 +176,7 @@ impl ExecutionUnit for PpuExecutionUnit {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "tests/load_page_table_tests.rs"]
+mod load_page_table_tests;

@@ -6,6 +6,7 @@
 //! - the repository's key encoding
 //! - the logical partition addresses of memory regions
 //! - the checks and outputs of the virtual address space calls
+//! - the checks and outputs of the page table calls
 //! - the statuses of a refused storage write
 //!
 //! A hypercall is `sc` with LEV = 1 from supervisor state. r11 holds
@@ -16,6 +17,7 @@ pub mod address_space;
 pub mod call;
 pub mod dispatch;
 pub mod memory;
+pub mod page_table;
 pub mod partition;
 pub mod repository;
 pub mod status;

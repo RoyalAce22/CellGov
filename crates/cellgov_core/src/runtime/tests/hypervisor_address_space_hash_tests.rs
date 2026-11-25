@@ -1,5 +1,5 @@
 use cellgov_event::UnitId;
-use cellgov_lv2::hypervisor::{HypercallDisposition, HypercallRequest};
+use cellgov_lv2::hypervisor::{page_table_storage, HypercallDisposition, HypercallRequest};
 use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::lv1::call::{CONSTRUCT_VIRTUAL_ADDRESS_SPACE, SELECT_VIRTUAL_ADDRESS_SPACE};
 use cellgov_time::{Budget, GuestTicks};
@@ -16,7 +16,8 @@ fn fresh() -> Runtime {
 }
 
 /// Makes hypercall `number` with r3 to r5 `inputs` through `rt`'s
-/// hypervisor and checks that it is answered.
+/// hypervisor, over the page table storage, and checks that it is
+/// answered.
 fn call(rt: &mut Runtime, number: u64, inputs: [u64; 3]) {
     let mut all = [0; 8];
     all[..3].copy_from_slice(&inputs);
@@ -30,7 +31,8 @@ fn call(rt: &mut Runtime, number: u64, inputs: [u64; 3]) {
         problem_state: false,
         tick: GuestTicks::ZERO,
     };
-    let disposition = rt.hypervisor.dispatch(&request);
+    let storage = GuestMemory::from_regions(vec![page_table_storage()]).expect("storage");
+    let disposition = rt.hypervisor.dispatch_with(&request, &storage);
     assert!(
         matches!(disposition, HypercallDisposition::Answered(_)),
         "{disposition:?}"

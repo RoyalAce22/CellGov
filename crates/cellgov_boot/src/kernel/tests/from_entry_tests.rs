@@ -13,6 +13,9 @@ mod firmware;
 #[path = "from_entry_reader_tests.rs"]
 mod reader;
 
+#[path = "from_entry_page_table_tests.rs"]
+mod page_table;
+
 /// A firmware the psdevwiki dump's repository values are served to.
 const FW: &str = "1.50";
 

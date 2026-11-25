@@ -94,6 +94,10 @@ pub trait RegisteredUnit: 'static {
     /// [`ExecutionUnit::in_problem_state`].
     fn in_problem_state(&self) -> bool;
 
+    /// Give the thread a page table and large page sizes. See
+    /// [`ExecutionUnit::load_page_table`].
+    fn load_page_table(&mut self, sdr1: u64, lb: u8) -> bool;
+
     /// The PPE thread's issue pressure. See
     /// [`ExecutionUnit::ppe_issue_pressure`].
     fn ppe_issue_pressure(&self) -> cellgov_exec::PpeIssuePressure;
@@ -329,6 +333,11 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn in_problem_state(&self) -> bool {
         ExecutionUnit::in_problem_state(self)
+    }
+
+    #[inline]
+    fn load_page_table(&mut self, sdr1: u64, lb: u8) -> bool {
+        ExecutionUnit::load_page_table(self, sdr1, lb)
     }
 
     #[inline]

@@ -47,6 +47,19 @@ pub struct HypercallAnswer {
     /// The change to the virtual address spaces, which the hypervisor
     /// applies.
     pub address_space: Option<AddressSpaceChange>,
+    /// The page table and large page sizes that the calling thread
+    /// loads, which the runtime gives the thread.
+    pub page_table: Option<PageTableLoad>,
+}
+
+/// The translation registers that lv1 loads on the calling thread when
+/// it selects an address space.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PageTableLoad {
+    /// SDR1: the page table's real address and size.
+    pub sdr1: u64,
+    /// HID6\[LB\] as a 4-bit value, LB bit 0 most significant.
+    pub lb: u8,
 }
 
 impl HypercallAnswer {
@@ -65,6 +78,7 @@ impl HypercallAnswer {
             console: None,
             region: None,
             address_space: None,
+            page_table: None,
         }
     }
 }

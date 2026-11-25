@@ -375,6 +375,18 @@ pub trait ExecutionUnit {
         false
     }
 
+    /// Gives the thread the page table that `sdr1` names and the large
+    /// page sizes that `lb` selects, as the hypervisor loads them, and
+    /// returns whether the thread took them.
+    ///
+    /// `lb` is HID6\[LB\] as a 4-bit value, LB bit 0 most significant.
+    /// The thread keeps its real mode limit and offset. A thread refuses
+    /// values that name no page table or a reserved page size. A unit
+    /// with no translation registers takes nothing.
+    fn load_page_table(&mut self, _sdr1: u64, _lb: u8) -> bool {
+        false
+    }
+
     /// What this PPE thread's recent stalls at the issue point the PPE's
     /// threads share add to each instruction of another one.
     ///

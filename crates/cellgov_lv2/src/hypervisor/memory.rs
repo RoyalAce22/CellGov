@@ -73,8 +73,14 @@ impl MemoryState {
 
     /// Keeps `region` and moves the counter past the value it took.
     pub(super) fn create(&mut self, region: MemoryRegion) {
-        self.next_counter = Some(region.counter.saturating_add(1));
+        self.take_counter(region.counter);
         self.regions.push(region);
+    }
+
+    /// Moves the counter past `counter`, the value that a region or a
+    /// page table mapping took.
+    pub(super) fn take_counter(&mut self, counter: u64) {
+        self.next_counter = Some(counter.saturating_add(1));
     }
 
     /// The sync-state terms of the regions and the counter.
@@ -107,21 +113,31 @@ impl MemoryState {
 /// Linux `ps3_mm_init` asks lv1 for this amount for its one high
 /// region. It is `None` when no repository source gives either value.
 fn partition_pool(firmware: &str) -> Option<u64> {
-    let node = |n1: u64, n2: u64, n3: u64, n4: u64| {
-        let key = RepositoryKey {
-            lpar: LPAR_ID_GAME_OS,
-            n1,
-            n2,
-            n3,
-            n4,
-        };
-        lookup(&key, firmware).map(|node| node.v1)
-    };
     let bi = first_field(b"bi", 0);
-    let total = node(bi, field(b"rgntotal", 0), 0, 0)?;
-    let pu = node(bi, field(b"pu", 0), 0, 0)?;
-    let rm_size = node(bi, field(b"pu", 0), pu, field(b"rm_size", 0))?;
-    total.checked_sub(rm_size)
+    let total = game_os_node(bi, field(b"rgntotal", 0), 0, 0, firmware)?;
+    total.checked_sub(real_mode_size(firmware)?)
+}
+
+/// The first value of the GameOS partition's repository node with the
+/// key words `n1` to `n4` at the firmware version `firmware`.
+fn game_os_node(n1: u64, n2: u64, n3: u64, n4: u64, firmware: &str) -> Option<u64> {
+    let key = RepositoryKey {
+        lpar: LPAR_ID_GAME_OS,
+        n1,
+        n2,
+        n3,
+        n4,
+    };
+    lookup(&key, firmware).map(|node| node.v1)
+}
+
+/// The size of the GameOS partition's real mode region at the firmware
+/// version `firmware`: `bi.pu.rm_size`, or `None` when no repository
+/// source gives it.
+pub(super) fn real_mode_size(firmware: &str) -> Option<u64> {
+    let bi = first_field(b"bi", 0);
+    let pu = game_os_node(bi, field(b"pu", 0), 0, 0, firmware)?;
+    game_os_node(bi, field(b"pu", 0), pu, field(b"rm_size", 0), firmware)
 }
 
 fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDisposition {

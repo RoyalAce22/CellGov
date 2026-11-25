@@ -2,9 +2,11 @@
 //! 1 of a thread with supervisor registers, in either processor state,
 //! and the runtime applies the answer.
 //!
-//! The answer reaches the guest in two parts:
+//! The hypervisor reads the page table in the caller's address space.
+//! The answer reaches the guest in three parts:
 //! - its memory writes land at dispatch time through
 //!   [`Runtime::host_write`];
+//! - a page table load reaches the caller at dispatch time;
 //! - the caller's next step gets the status in r3 and the outputs from
 //!   r4 onward as committed inputs, as with an LV2 call's return. The
 //!   thread then steps past `sc`.
@@ -16,7 +18,7 @@ use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::ExecutionStepResult;
 use cellgov_lv2::hypervisor::{
-    cost, HypercallAnswer, HypercallDisposition, HypercallRefusal, HypercallRequest,
+    cost, HypercallAnswer, HypercallDisposition, HypercallRefusal, HypercallRequest, PageTableLoad,
 };
 use cellgov_ps3_abi::lv1::call::{LOGICAL_CONSOLE_SEND_MAX, MAX_OUTPUTS};
 use cellgov_trace::{HostWriter, TraceRecord, TracedHypercallDisposition, CONSOLE_RECORD_BYTES};
@@ -58,7 +60,10 @@ impl Runtime {
                 .is_some_and(|u| u.in_problem_state()),
             tick: self.time,
         };
-        let disposition = self.hypervisor.dispatch(&request);
+        let space = self.spaces.space_of(source);
+        let storage =
+            crate::runtime::spaces::resolve_space_memory(&self.memory, &self.spaces, space);
+        let disposition = self.hypervisor.dispatch_with(&request, storage);
         if self.mode != RuntimeMode::FaultDriven {
             self.trace.record(&TraceRecord::HypercallEntered {
                 unit: source,
@@ -90,6 +95,9 @@ impl Runtime {
             });
         }
         self.apply_hypervisor_writes(unit, &answer.effects);
+        if let Some(load) = answer.page_table {
+            self.load_page_table(unit, load);
+        }
         debug_assert!(
             answer.outputs.len() <= usize::from(MAX_OUTPUTS),
             "hypercall {} answered {} outputs",
@@ -113,6 +121,32 @@ impl Runtime {
             });
         }
         self.registry.set_syscall_return(unit, status);
+    }
+
+    /// Gives `unit` the page table and large page sizes of `load`, as
+    /// lv1 loads them on the calling thread.
+    ///
+    /// The hypervisor loads only values that name its page table storage,
+    /// which a thread with supervisor registers takes. A unit with none,
+    /// whose `sc` with LEV = 1 also reaches the hypervisor, refuses them:
+    /// the runtime then logs an invariant break, and the hypervisor's
+    /// selection and the caller's r3 stand.
+    ///
+    /// # Panics
+    ///
+    /// Panics in a debug build where the unit refuses the values.
+    fn load_page_table(&mut self, unit: UnitId, load: PageTableLoad) {
+        let loaded = self
+            .registry
+            .get_mut(unit)
+            .is_some_and(|u| u.load_page_table(load.sdr1, load.lb));
+        if !loaded {
+            debug_assert!(false, "{unit:?} refused the page table load {load:?}");
+            self.lv2_host.log_invariant_break(
+                "dispatch.hypervisor_page_table_refused",
+                format_args!("{unit:?} refused the page table load {load:?}"),
+            );
+        }
     }
 
     /// Lands the memory writes of a hypercall answer for `unit`, all or
