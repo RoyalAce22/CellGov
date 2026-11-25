@@ -26,6 +26,9 @@ mod reload_write_tests;
 #[cfg(test)]
 #[path = "tests/store_miss_tests.rs"]
 mod store_miss_tests;
+#[cfg(test)]
+#[path = "tests/touch_queue_tests.rs"]
+mod touch_queue_tests;
 
 /// Where a load found its line. A later variant is farther from the core.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -289,6 +292,11 @@ struct Reload {
     at: u64,
     /// The way of its set that the reload writes.
     way: usize,
+    /// The touches that wait for this reload: 0 for a load's reload, and
+    /// 1 for a touch's reload, plus 1 for each later touch of its line.
+    touches: usize,
+    /// Whether a later touch of its set found its line in the L1.
+    hit: bool,
 }
 
 impl Reload {
@@ -296,6 +304,8 @@ impl Reload {
         line: Line { index: 0, real: 0 },
         at: 0,
         way: 0,
+        touches: 0,
+        hit: false,
     };
 }
 
@@ -359,10 +369,7 @@ impl L1 {
     /// Whether a reload brings `line`'s real line to the set of its
     /// effective line.
     fn reloading(&self, line: Line) -> bool {
-        let set = Self::set_of(line);
-        self.reloads[..self.pending]
-            .iter()
-            .any(|r| r.line.real == line.real && Self::set_of(r.line) == set)
+        self.reload_of(line).is_some()
     }
 
     /// Whether the set of `line`'s effective line holds its real line at
@@ -373,15 +380,79 @@ impl L1 {
         self.tags.lookup_in(Self::set_of(line), line.real) || self.reloading(line)
     }
 
+    /// The reload that brings `line`'s real line to the set of its
+    /// effective line, as an index into `reloads`.
+    fn reload_of(&self, line: Line) -> Option<usize> {
+        let set = Self::set_of(line);
+        self.reloads[..self.pending]
+            .iter()
+            .position(|r| r.line.real == line.real && Self::set_of(r.line) == set)
+    }
+
+    /// Records a touch of `line` that sends no request because its set
+    /// holds the line or a reload brings it:
+    /// - a reload that brings the line gets one more touch;
+    /// - otherwise, each reload of the set records that a touch hit.
+    fn touch_present(&mut self, line: Line) {
+        match self.reload_of(line) {
+            Some(i) => self.reloads[i].touches += 1,
+            None => {
+                let set = Self::set_of(line);
+                for r in &mut self.reloads[..self.pending] {
+                    if Self::set_of(r.line) == set {
+                        r.hit = true;
+                    }
+                }
+            }
+        }
+    }
+
+    /// The cycle that the last reload queued in `line`'s set after the
+    /// reload of `line` writes its line.
+    ///
+    /// The result is `None` in each of these cases:
+    /// - no reload brings `line`, or no reload of its set comes after;
+    /// - the reloads of its set wait for [`k::PPU_L1_SET_TOUCH_LIMIT`]
+    ///   touches or more;
+    /// - a later touch of its set found its line in the L1.
+    ///
+    /// The `ppu_issue_touch_queue` capture counts touches that miss the
+    /// L1. It does not show whether a touch that hits the L1 counts. In
+    /// the `ppu_issue_touch_reload` capture, 8 touches of the same lines
+    /// on each pass, some of which hit, fit neither answer:
+    /// - a touch of the load's line, the 8 touches, and the load wait for
+    ///   the later reloads;
+    /// - a second touch of the load's line before the load ends the wait.
+    fn behind(&self, line: Line) -> Option<u64> {
+        let first = self.reload_of(line)?;
+        if self.reloads[first].hit {
+            return None;
+        }
+        let set = Self::set_of(line);
+        let in_set = || {
+            self.reloads[..self.pending]
+                .iter()
+                .filter(move |r| Self::set_of(r.line) == set)
+        };
+        if in_set().map(|r| r.touches).sum::<usize>() >= k::PPU_L1_SET_TOUCH_LIMIT {
+            return None;
+        }
+        self.reloads[first + 1..self.pending]
+            .iter()
+            .filter(|r| Self::set_of(r.line) == set)
+            .map(|r| r.at)
+            .max()
+    }
+
     /// Queues at cycle `t` a reload of `line` that writes the line at
-    /// cycle `at`. The copy of its real line that another set holds goes
-    /// at once.
+    /// cycle `at`, and that `touches` touches wait for. The copy of its
+    /// real line that another set holds goes at once.
     ///
     /// [CBE-Handbook p:138 s:6.1.3.10] The copy at the other congruence class is invalidated, and then the data comes in from the L2.
     ///
     /// When the table of reloads is full, the reload that returns first
     /// writes its line at once.
-    fn fill(&mut self, t: u64, line: Line, at: u64) {
+    fn fill(&mut self, t: u64, line: Line, at: u64, touches: usize) {
         self.drop_alias(t, line);
         self.forget(line.real);
         if at <= t {
@@ -394,7 +465,13 @@ impl L1 {
             self.write_reload(early);
         }
         let way = self.claim_way(Self::set_of(line));
-        self.reloads[self.pending] = Reload { line, at, way };
+        self.reloads[self.pending] = Reload {
+            line,
+            at,
+            way,
+            touches,
+            hit: false,
+        };
         self.pending += 1;
     }
 
@@ -494,8 +571,10 @@ impl L1 {
 /// How many lines a [`LineCycles`] remembers.
 ///
 /// In the `ppu_issue_touch_forms` capture, a chase sends two touches to
-/// memory for each load and loses none of them. The model has at most 17
-/// touches outstanding there. The PPE's limit is not known; CellGov uses 32.
+/// memory for each load and loses none of them. In the
+/// `ppu_issue_reload_return` capture, no touch of 33 in a pass is lost.
+/// The thread waits for each touch's turn, so a reload from memory is on
+/// its way for about 7 turns. CellGov keeps 32.
 const LINE_CYCLES: usize = 32;
 
 /// The most recent lines with an operation still under way, each with the
@@ -702,7 +781,9 @@ impl Caches {
     ///
     /// The first of these that applies gives the cycle:
     /// - a load of a line that a touch still brings starts no earlier
-    ///   than that touch's request;
+    ///   than that touch's request, and no earlier than the last reload
+    ///   queued in its L1 set after the touch's reload writes its line,
+    ///   except in the cases that [`L1::behind`] lists;
     /// - an L1 hit waits for no set;
     /// - an L1 miss, or a load that skips the L1, waits for the reloads
     ///   that its L1 set holds, and then holds the set as a touch does.
@@ -719,7 +800,12 @@ impl Caches {
             0
         };
         if !skip_l1 && self.l1.lookup(t, line) {
-            return (Level::L1, held);
+            let behind = if in_flight {
+                self.l1.behind(line).unwrap_or(0)
+            } else {
+                0
+            };
+            return (Level::L1, held.max(behind));
         }
         let set = L1::set_of(line);
         let queued = if in_flight {
@@ -749,7 +835,7 @@ impl Caches {
             back
         };
         if !skip_l1 {
-            self.l1.fill(t, line, back);
+            self.l1.fill(t, line, back, 0);
         }
         (level, queued)
     }
@@ -830,19 +916,26 @@ impl Caches {
     /// The touch's request waits for the reloads that the L1 set of `ea`
     /// holds, and its own reload then holds that set. A touch of a line
     /// that an earlier touch still brings waits for no set and holds none.
+    /// A touch of a line that a reload brings to the set of `ea` sends no
+    /// request, and waits for that reload.
     ///
     /// The touch checks the L1 when it runs. Its reload takes a way of the
     /// set at once, and writes the line into that way when the line
     /// arrives.
     ///
     /// [CBE-Handbook p:145 s:6.1.6.2] A touch that reloads a cache line updates the replacement information of the cache.
-    pub(crate) fn touch(&mut self, t: u64, ea: u64, ra: Option<u64>) {
+    ///
+    /// The result is the cycle of the touch's turn to send its request:
+    /// the first cycle at or after `t` that the touch before it lets go.
+    /// The result is `t` for a touch that sends no request.
+    pub(crate) fn touch(&mut self, t: u64, ea: u64, ra: Option<u64>) -> u64 {
         let Some(ra) = ra else {
-            return;
+            return t;
         };
         let line = Line::of(ea, ra);
         if self.l1.lookup(t, line) {
-            return;
+            self.l1.touch_present(line);
+            return t;
         }
         let slot = t.max(self.touch_free);
         let (interval, trip) = if self.l2.lookup(line.real) {
@@ -866,8 +959,9 @@ impl Caches {
         };
         // [CBE-Handbook p:138 s:6.1.3.10] A copy in the other congruence class is reloaded from the L2, so it arrives no earlier than an earlier touch brings the line there.
         let arrival = (sent + trip).max(earlier);
-        self.l1.fill(t, line, arrival);
+        self.l1.fill(t, line, arrival, 1);
         self.touched.record(t, line.real, arrival);
+        slot
     }
 
     /// The latest cycle a touched line of the bytes of `at` arrives.
@@ -961,15 +1055,15 @@ impl Caches {
         (held, self.l2.find(line.real).is_some())
     }
 
-    /// The first cycle the next touch can send its request.
-    pub(crate) fn touch_free(&self) -> u64 {
-        self.touch_free
-    }
-
     /// [`Self::load_queued`] at cycle 0, without the cycle its misses can
     /// start.
     pub(crate) fn load(&mut self, at: Operand, skip_l1: bool) -> Level {
         self.load_queued(0, at, skip_l1).0
+    }
+
+    /// The first cycle the next touch can send its request.
+    pub(crate) fn touch_free(&self) -> u64 {
+        self.touch_free
     }
 
     /// The first cycle the L1 set of `ea`'s line can take the next reload.

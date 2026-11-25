@@ -10,11 +10,11 @@
 //! - loop 8: loop 7 with a load of B0 before the wait;
 //! - loop 9: loop 7 with no touch.
 //!
-//! The tests do not assert loops 0 to 6, or the cycles of loops 7 and 8.
-//! On the console, each memory touch adds about 70 cycles to a later
-//! load: loops 0 to 6 take about 143 cycles more for each touch, and the
-//! wait grows by only about 77. CellGov's touches do not delay a later
-//! load.
+//! The `console_ppu_issue_touch_turn` tests assert what each touch of
+//! loops 1 to 6 adds to the pass. The tests do not assert the cycles of
+//! loops 0 to 8. A load of B0 right after B4's touch makes the console's
+//! pass about 76 cycles longer (loop 8 against loop 7), and CellGov's
+//! pass 1 cycle longer.
 
 use crate::console_ppu_issue_timing::{replay, Replay, Seed};
 use cellgov_ps3_abi::hw::ppu_issue::PPU_CYCLES_PER_TB_TICK;
@@ -71,10 +71,10 @@ const SEEDS: &[Seed] = &[
 ];
 
 /// The other touches of loops 0 to 6.
-const OTHER_TOUCHES: [u64; 7] = [0, 6, 7, 8, 12, 16, 32];
+pub(crate) const OTHER_TOUCHES: [u64; 7] = [0, 6, 7, 8, 12, 16, 32];
 
 /// The console's payload as big-endian words.
-fn console_words() -> Vec<u64> {
+pub(crate) fn console_words() -> Vec<u64> {
     let observation = cellgov_compare::baseline::load(std::path::Path::new(CONSOLE))
         .unwrap_or_else(|e| panic!("{CONSOLE}: {e}"));
     let p = &observation.memory_regions[0].data;
@@ -90,7 +90,7 @@ fn console_words() -> Vec<u64> {
 }
 
 /// Loop `k`'s fastest run, in core cycles an iteration.
-fn console_cycles(words: &[u64], k: usize) -> f64 {
+pub(crate) fn console_cycles(words: &[u64], k: usize) -> f64 {
     (words[2 * k] * PPU_CYCLES_PER_TB_TICK) as f64 / (1u64 << ITERATIONS_LOG2) as f64
 }
 
@@ -130,7 +130,7 @@ fn body(k: usize) -> Vec<u32> {
 }
 
 /// CellGov's cycles an iteration for loop `k`.
-fn cellgov_cycles(k: usize) -> f64 {
+pub(crate) fn cellgov_cycles(k: usize) -> f64 {
     let r = Replay {
         loop_index: k,
         words: looped(&body(k)),

@@ -1,0 +1,22 @@
+[test]
+name = "ppu_issue_touch_queue"
+
+# A hardware probe of how many later touches of other lines in a load's
+# L1 set the load waits behind after a touch of its own line: each count
+# from 0 to 8, with a second touch of the line, without the first touch,
+# after a wait that lets the first touch return, with touches in other
+# sets after them, and spaced apart, timed with mftb. The console
+# capture is the answer; ppu/main.c's header lists the loops and the
+# payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 400 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 400 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

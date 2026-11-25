@@ -213,6 +213,12 @@ const DRAIN: usize = (k::PPU_MEMORY_LOAD_USE_CYCLES + k::PPU_LOAD_MISS_ENTRY_REU
 /// [`NEXT_EA`] at `next_ra`. The unit moves each step's storage
 /// addresses to real before the timing model retires it.
 fn reload_gap(next_ra: u64, before: &[(I, u64)], last: u64) -> u64 {
+    let (ld_issued, use_issued) = load_and_use_issue(next_ra, before, last);
+    use_issued - ld_issued
+}
+
+/// The cycles that an `ld` of `last` and its use issue after `before`.
+fn load_and_use_issue(next_ra: u64, before: &[(I, u64)], last: u64) -> (u64, u64) {
     let unit = unit(next_ra);
     let mut state = PpuState::new();
     let mut timing = PpeTiming::new();
@@ -227,7 +233,7 @@ fn reload_gap(next_ra: u64, before: &[(I, u64)], last: u64) -> u64 {
         cycles.push(issued[0]);
     }
     assert_eq!(cycles.len(), before.len() + 2);
-    cycles[cycles.len() - 1] - cycles[cycles.len() - 2]
+    (cycles[cycles.len() - 2], cycles[cycles.len() - 1])
 }
 
 /// The gap of an `ld` of the first [`SET_0_EA`] page to its use, after
@@ -331,8 +337,8 @@ fn a_touch_through_an_alias_in_the_other_l1_set_moves_the_line_there() {
 fn a_second_touch_through_the_other_l1_set_arrives_no_earlier_than_the_first() {
     let twin = [(dcbt(), ALIAS_LOW_EA), (dcbt(), ALIAS_TWIN_EA)];
     let other = [(dcbt(), ALIAS_LOW_EA), (dcbt(), ALIAS_HIGH_EA)];
-    let same_set = reload_gap(ADJACENT_RA, &twin, ALIAS_TWIN_EA);
-    let other_set = reload_gap(ADJACENT_RA, &other, ALIAS_HIGH_EA);
+    let (_, same_set) = load_and_use_issue(ADJACENT_RA, &twin, ALIAS_TWIN_EA);
+    let (_, other_set) = load_and_use_issue(ADJACENT_RA, &other, ALIAS_HIGH_EA);
     assert_eq!(other_set, same_set);
 }
 

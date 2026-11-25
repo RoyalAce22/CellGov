@@ -12,10 +12,8 @@
 //! Each touch reload holds its L1 set, and a later miss to the set waits
 //! for it. Touches spread over the sets wait for no reload.
 //!
-//! The tests do not assert loops 7 and 8. On the console, a load after a
-//! touch of its line and 3 or 4 touches in its set waits for those
-//! touches after the line arrives. After 7 or 8 such touches, it waits
-//! for the line alone. CellGov makes the load wait for the line alone.
+//! The `console_ppu_issue_touch_queue` tests assert loops 7 and 8, beside
+//! the capture that settles how many later touches a load waits behind.
 
 use crate::console_ppu_issue_timing::{replay, Replay, Seed};
 use cellgov_ps3_abi::hw::ppu_issue::PPU_CYCLES_PER_TB_TICK;
@@ -65,7 +63,7 @@ const SEEDS: &[Seed] = &[
 ];
 
 /// The console's payload as big-endian words.
-fn console_words() -> Vec<u64> {
+pub(crate) fn console_words() -> Vec<u64> {
     let observation = cellgov_compare::baseline::load(std::path::Path::new(CONSOLE))
         .unwrap_or_else(|e| panic!("{CONSOLE}: {e}"));
     let p = &observation.memory_regions[0].data;
@@ -133,7 +131,7 @@ pub(crate) const IN_ORDER_CHASE_GAP: f64 = 0.10;
 
 /// Asserts that loop `k` replays within `IN_ORDER_CHASE_GAP` of the
 /// console's fastest run, and returns both, CellGov first.
-fn assert_within(words: &[u64], k: usize) -> (f64, f64) {
+pub(crate) fn assert_within(words: &[u64], k: usize) -> (f64, f64) {
     let (cellgov, console) = (cellgov_cycles(k), console_cycles(words, k));
     assert!(
         (console - cellgov).abs() / console <= IN_ORDER_CHASE_GAP,

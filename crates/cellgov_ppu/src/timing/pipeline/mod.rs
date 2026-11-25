@@ -1102,7 +1102,18 @@ impl PpeTiming {
                 queue_store(&mut self.tables, exec, op, Operand { ea, ra, len, tail });
             }
             Kind::ZeroLine { ra, .. } => self.tables.caches.zero(t, ra),
-            Kind::Touch { ea, ra } => self.tables.caches.touch(t, ea, ra),
+            Kind::Touch { ea, ra } => {
+                // In the `ppu_issue_reload_return` capture, each touch of a
+                // memory line adds one touch interval to a later load. The
+                // thread waits for each touch's turn to send its request, so
+                // no touch runs ahead of the thread.
+                let turn = self.tables.caches.touch(t, ea, ra);
+                let c = &mut self.core;
+                if turn > c.floor {
+                    c.floor = turn;
+                    c.older = None;
+                }
+            }
             Kind::Flush { ra, .. } => self.tables.caches.flush(t, ra),
             Kind::StoreBack { ra, .. } => self.tables.caches.store_back(t, ra),
             Kind::Branch {

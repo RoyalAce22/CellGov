@@ -32,7 +32,7 @@
       "class": "exact"
     },
     "ldarx": {
-      "value": 29045,
+      "value": 29046,
       "class": "at-least"
     },
     "lwarx": {
@@ -108,7 +108,7 @@
       "class": "at-least"
     },
     "stdcx": {
-      "value": 29045,
+      "value": 29046,
       "class": "at-least"
     },
     "stwcx": {
@@ -164,7 +164,7 @@
       "class": "absent"
     },
     "timer_sleeps": {
-      "value": 10192,
+      "value": 10193,
       "class": "at-least"
     },
     "uart_cids_distinct": {
@@ -199,11 +199,11 @@
   "unsupported_syscalls": {
     "45": {
       "hits": 2,
-      "first_hit": 2213878306
+      "first_hit": 2213877946
     },
     "133": {
       "hits": 4,
-      "first_hit": 2211428814
+      "first_hit": 2211428875
     },
     "230": {
       "hits": 1,
@@ -215,15 +215,15 @@
     },
     "380": {
       "hits": 5,
-      "first_hit": 235051034
+      "first_hit": 235051095
     },
     "382": {
       "hits": 1,
-      "first_hit": 2182591665
+      "first_hit": 2182591726
     },
     "398": {
       "hits": 1,
-      "first_hit": 66053553050
+      "first_hit": 66053552690
     },
     "465": {
       "hits": 1,
@@ -235,15 +235,15 @@
     },
     "610": {
       "hits": 21,
-      "first_hit": 2213133271
+      "first_hit": 2213132911
     },
     "612": {
       "hits": 1,
-      "first_hit": 2212728632
+      "first_hit": 2212728272
     },
     "635": {
       "hits": 1,
-      "first_hit": 2299342458
+      "first_hit": 2299342288
     },
     "650": {
       "hits": 1,
@@ -255,23 +255,23 @@
     },
     "811": {
       "hits": 3,
-      "first_hit": 2214727282
+      "first_hit": 2214726976
     },
     "817": {
       "hits": 9,
-      "first_hit": 2214666040
+      "first_hit": 2214665673
     },
     "837": {
       "hits": 7,
-      "first_hit": 267264701
+      "first_hit": 267264762
     },
     "867": {
       "hits": 1,
-      "first_hit": 2298573303
+      "first_hit": 2298573133
     },
     "873": {
       "hits": 3,
-      "first_hit": 2214654772
+      "first_hit": 2214654405
     },
     "956": {
       "hits": 1,
