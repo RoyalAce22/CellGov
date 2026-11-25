@@ -38,17 +38,8 @@ pub(crate) enum CommittedKernelError {
         #[source]
         source: archive::ArchiveError,
     },
-    #[error("PUP {pup_sha256} has no kernel.tsv row; run lv2-census for it first")]
-    NoKernelRow { pup_sha256: String },
-    #[error(
-        "kernel ELF SHA-256 {found} is not the kernel {expected} that kernel.tsv names for PUP \
-         {pup_sha256}"
-    )]
-    KernelMismatch {
-        pup_sha256: String,
-        expected: String,
-        found: String,
-    },
+    #[error(transparent)]
+    Verdict(#[from] archive::KernelElfError),
 }
 
 /// Refuses `elf` unless `kernel.tsv` names it as the kernel of
@@ -63,22 +54,13 @@ pub(crate) fn check_committed_kernel(
     pup_sha256: &str,
     elf: &[u8],
 ) -> Result<(), CommittedKernelError> {
-    let expected = archive::parse(&archive::KERNEL, KERNEL_TSV)
+    let kernels = archive::parse(&archive::KERNEL, KERNEL_TSV)
         .and_then(|table| archive::kernel_rows(&table))
-        .map_err(|source| CommittedKernelError::KernelTable { source })?
-        .into_iter()
-        .find(|row| row.pup_sha256 == pup_sha256)
-        .ok_or_else(|| CommittedKernelError::NoKernelRow {
-            pup_sha256: pup_sha256.to_string(),
-        })?
-        .kernel_elf_sha256;
-    let found = Sha256(sha256_of(elf)).to_hex();
-    if found != expected {
-        return Err(CommittedKernelError::KernelMismatch {
-            pup_sha256: pup_sha256.to_string(),
-            expected,
-            found,
-        });
-    }
-    Ok(())
+        .map_err(|source| CommittedKernelError::KernelTable { source })?;
+    let elf_sha256 = Sha256(sha256_of(elf)).to_hex();
+    Ok(archive::check_kernel_elf(
+        &kernels,
+        pup_sha256,
+        &elf_sha256,
+    )?)
 }

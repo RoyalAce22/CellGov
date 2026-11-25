@@ -119,15 +119,54 @@ fn the_emitter_refuses_an_elf_that_is_not_its_pups_committed_kernel() {
     let elf = kernel_elf(&[li_r11(74), SC_1]);
     assert!(matches!(
         emit(&args, &elf),
-        Err(HypercallCensusError::Kernel(CommittedKernelError::KernelMismatch {
-            pup_sha256,
-            expected,
-            ..
-        })) if pup_sha256 == kernel.pup_sha256 && expected == kernel.kernel_elf_sha256
+        Err(HypercallCensusError::Kernel(CommittedKernelError::Verdict(
+            archive::KernelElfError::KernelMismatch {
+                pup_sha256,
+                expected,
+                ..
+            }
+        ))) if pup_sha256 == kernel.pup_sha256 && expected == kernel.kernel_elf_sha256
     ));
     assert!(
         !output.join(HYPERCALL_SITE.file()).exists(),
         "a refused kernel writes no rows"
+    );
+}
+
+#[test]
+fn the_emitter_refuses_a_pup_with_no_kernel_row_and_writes_nothing() {
+    let table = archive::parse(&archive::KERNEL, crate::lv2_tables::KERNEL_TSV)
+        .expect("compiled kernel table");
+    let kernels = archive::kernel_rows(&table).expect("compiled kernel rows");
+    let pups = crate::lv2_tables::committed_pup_rows().expect("compiled PUP table");
+    let pup = pups
+        .iter()
+        .find(|pup| kernels.iter().all(|row| row.pup_sha256 != pup.pup_sha256))
+        .expect("pup.tsv holds a PUP with no kernel row");
+    let output = scratch_labeled("hypercall_census_no_kernel_row");
+    let args = HypercallCensusArgs {
+        path: "kernel.elf".into(),
+        fw: pup.fw.clone(),
+        pup_sha256: pup.pup_sha256.clone(),
+        output_dir: output.as_ref().to_path_buf(),
+    };
+    let error = emit(&args, &kernel_elf(&[li_r11(74), SC_1])).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "PUP {} has no kernel.tsv row; run lv2-census for it first",
+            pup.pup_sha256
+        )
+    );
+    assert!(matches!(
+        error,
+        HypercallCensusError::Kernel(CommittedKernelError::Verdict(
+            archive::KernelElfError::NoKernelRow { pup_sha256 }
+        )) if pup_sha256 == pup.pup_sha256
+    ));
+    assert!(
+        !output.join(HYPERCALL_SITE.file()).exists(),
+        "a PUP with no kernel row writes no rows"
     );
 }
 

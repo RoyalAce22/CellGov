@@ -1,4 +1,5 @@
-//! The rules that fold one PUP's extracted kernel rows into the archive.
+//! The rules that fold one PUP's extracted kernel rows into the archive,
+//! and the check that holds a kernel ELF to its PUP's kernel row.
 //!
 //! `cellgov_ppu` classifies a kernel; the caller maps that
 //! classification into the row types in [`super::census`] and hands them
@@ -199,6 +200,61 @@ pub fn select_pup<'a>(
         });
     }
     Ok(pup)
+}
+
+/// Why a kernel ELF is not the kernel that `kernel.tsv` names for a PUP.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum KernelElfError {
+    /// No kernel row names the PUP.
+    #[error("PUP {pup_sha256} has no kernel.tsv row; run lv2-census for it first")]
+    NoKernelRow {
+        /// The requested PUP digest.
+        pup_sha256: String,
+    },
+    /// The ELF digest is not the PUP's recorded kernel digest.
+    #[error(
+        "kernel ELF SHA-256 {found} is not the kernel {expected} that kernel.tsv names for PUP \
+         {pup_sha256}"
+    )]
+    KernelMismatch {
+        /// The requested PUP digest.
+        pup_sha256: String,
+        /// The kernel digest that the PUP's row records.
+        expected: String,
+        /// The digest of the ELF that the caller hashed.
+        found: String,
+    },
+}
+
+/// Refuses an ELF digest that the kernel row of `pup_sha256` does not record.
+///
+/// The caller hashes the ELF and passes the lowercase hex digest as
+/// `elf_sha256`. The check keeps the rows of a PUP tied to the kernel
+/// of that PUP.
+///
+/// # Errors
+///
+/// [`KernelElfError::NoKernelRow`] or [`KernelElfError::KernelMismatch`].
+pub fn check_kernel_elf(
+    kernels: &[KernelRow],
+    pup_sha256: &str,
+    elf_sha256: &str,
+) -> Result<(), KernelElfError> {
+    let expected = &kernels
+        .iter()
+        .find(|row| row.pup_sha256 == pup_sha256)
+        .ok_or_else(|| KernelElfError::NoKernelRow {
+            pup_sha256: pup_sha256.to_string(),
+        })?
+        .kernel_elf_sha256;
+    if expected != elf_sha256 {
+        return Err(KernelElfError::KernelMismatch {
+            pup_sha256: pup_sha256.to_string(),
+            expected: expected.clone(),
+            found: elf_sha256.to_string(),
+        });
+    }
+    Ok(())
 }
 
 /// Check the held rows before a merge.
@@ -463,3 +519,7 @@ impl ExtractedRows {
 #[cfg(test)]
 #[path = "tests/extraction_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/kernel_elf_tests.rs"]
+mod kernel_elf_tests;

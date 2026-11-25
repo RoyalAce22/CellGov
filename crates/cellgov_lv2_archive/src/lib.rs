@@ -65,9 +65,9 @@ pub use census::{
 };
 pub use coverage::{coverage_rows, coverage_tsv, CoverageRow, CoverageScope};
 pub use extraction::{
-    census_needs_write, control_flags1_read, gate_digest, merge_extraction, select_pup,
-    selector_slot_name, subentry_digest, validate_existing, ExtractedRows, ExtractionError,
-    PupExtraction,
+    census_needs_write, check_kernel_elf, control_flags1_read, gate_digest, merge_extraction,
+    select_pup, selector_slot_name, subentry_digest, validate_existing, ExtractedRows,
+    ExtractionError, KernelElfError, PupExtraction,
 };
 pub use firmware::{
     check_firmware_rows, firmware_rows, is_version_key, FirmwareRole, FirmwareRow,
