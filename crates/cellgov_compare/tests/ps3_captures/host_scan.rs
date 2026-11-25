@@ -14,10 +14,10 @@ const HOST_FIELDS: usize = 4;
 pub fn host_leaks(transcript: &str) -> Vec<String> {
     let mut leaks = Vec::new();
     for (n, line) in transcript.lines().enumerate() {
-        if holds_host_fields(line, '.', false) {
+        if holds_host_fields(line, b'.', false) {
             leaks.push(format!("line {}: a dotted IPv4 address", n + 1));
         }
-        if holds_host_fields(line, ',', true) {
+        if holds_host_fields(line, b',', true) {
             leaks.push(format!("line {}: a comma-form host address", n + 1));
         }
     }
@@ -27,15 +27,17 @@ pub fn host_leaks(transcript: &str) -> Vec<String> {
 /// Whether `line` holds [`HOST_FIELDS`] runs of one to three digits in a
 /// row, each joined to the next by `separator`. With `spaces`, a space
 /// may stand on either side of a separator.
-fn holds_host_fields(line: &str, separator: char, spaces: bool) -> bool {
-    let words =
-        line.split(|c: char| !(c.is_ascii_digit() || c == separator || (spaces && c == ' ')));
-    words.into_iter().any(|word| {
+fn holds_host_fields(line: &str, separator: u8, spaces: bool) -> bool {
+    let mut words = line
+        .as_bytes()
+        .split(|&b| !(b.is_ascii_digit() || b == separator || (spaces && b == b' ')));
+    words.any(|word| {
         let mut run = 0;
-        for field in word.split(separator) {
-            let field = field.trim_matches(' ');
-            let decimal =
-                (1..=3).contains(&field.len()) && field.bytes().all(|b| b.is_ascii_digit());
+        for field in word.split(|&b| b == separator) {
+            // A word holds digits, separators and spaces, so the only
+            // whitespace this trims is a space.
+            let field = field.trim_ascii();
+            let decimal = (1..=3).contains(&field.len()) && field.iter().all(u8::is_ascii_digit);
             run = if decimal { run + 1 } else { 0 };
             if run == HOST_FIELDS {
                 return true;

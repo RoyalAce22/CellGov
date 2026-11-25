@@ -107,8 +107,14 @@ fn microtests() -> BTreeMap<String, PathBuf> {
     let root = micro_root();
     fs::read_dir(&root)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", root.display()))
-        .map(|entry| entry.expect("directory entry").path())
-        .filter(|path| path.is_dir() && path.join("manifest.toml").is_file())
+        .map(|entry| entry.expect("directory entry"))
+        // The entry carries its own type, so only a link costs a stat.
+        .filter(|entry| {
+            let kind = entry.file_type().expect("directory entry type");
+            kind.is_dir() || (kind.is_symlink() && entry.path().is_dir())
+        })
+        .map(|entry| entry.path())
+        .filter(|path| path.join("manifest.toml").is_file())
         .map(|path| {
             let name = path
                 .file_name()
@@ -551,23 +557,35 @@ fn every_emulator_disagreement_with_hardware_is_classified() {
 fn identifier_leaks(transcript: &str) -> Vec<String> {
     let mut leaks = Vec::new();
     for (n, line) in transcript.lines().enumerate() {
+        let bytes = line.as_bytes();
         if line.contains("IDPS") || line.contains("PSID") {
             let mut run = 0usize;
-            for c in line.chars() {
-                run = if c.is_ascii_hexdigit() { run + 1 } else { 0 };
+            for b in bytes {
+                run = if b.is_ascii_hexdigit() { run + 1 } else { 0 };
                 if run == 32 {
                     leaks.push(format!("line {}: a 32-hex token beside IDPS/PSID", n + 1));
                 }
             }
         }
-        for word in line.split(|c: char| !(c.is_ascii_hexdigit() || c == ':' || c == '-')) {
-            let parts: Vec<&str> = word.split([':', '-']).collect();
-            if parts.len() == 6 && parts.iter().all(|p| p.len() == 2) {
+        for word in bytes.split(|&b| !(b.is_ascii_hexdigit() || b == b':' || b == b'-')) {
+            if is_mac_shaped(word) {
                 leaks.push(format!("line {}: a MAC-shaped token", n + 1));
             }
         }
     }
     leaks
+}
+
+/// Whether `word` is six two-digit parts, each joined to the next by `:`
+/// or `-`. Such a word is 17 bytes long.
+fn is_mac_shaped(word: &[u8]) -> bool {
+    let mut parts = 0;
+    word.len() == 17
+        && word.split(|&b| b == b':' || b == b'-').all(|part| {
+            parts += 1;
+            part.len() == 2
+        })
+        && parts == 6
 }
 
 #[test]
@@ -594,54 +612,104 @@ fn every_hardware_capture_is_well_formed() {
         captures.len(),
         profiles.reference
     );
-    let mut problems = Vec::new();
-    for (name, capture) in captures {
-        let loaded = match hardware_capture::load(&capture, &profiles) {
-            Ok(loaded) => loaded,
-            Err(e) => {
-                problems.push(format!("{name}: {e}"));
-                continue;
-            }
-        };
-        let observation = &loaded.observation;
-        if observation.metadata.runner != RUNNER_PS3_CEX {
-            problems.push(format!("{name}: runner {:?}", observation.metadata.runner));
-        }
-        if observation.state_hashes.is_some() {
-            problems.push(format!("{name}: carries state hashes"));
-        }
-        let m = manifest::load_console(&micro_root().join(&name).join("manifest.toml"))
-            .unwrap_or_else(|e| panic!("{name}: {e}"));
-        let declared: Vec<(&str, u64)> = m
-            .observe
-            .memory_regions
-            .iter()
-            .map(|r| (r.name.as_str(), r.size))
+    let workers = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZero::get)
+        .min(MAX_CAPTURE_WORKERS);
+    let mut found: Vec<(usize, Vec<String>)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|first| {
+                let (captures, profiles) = (&captures, &profiles);
+                scope.spawn(move || {
+                    (first..captures.len())
+                        .step_by(workers)
+                        .map(|i| {
+                            let (name, capture) = &captures[i];
+                            (i, capture_problems(name, capture, profiles))
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
             .collect();
-        let held: Vec<(&str, u64)> = observation
-            .memory_regions
-            .iter()
-            .map(|r| (r.name.as_str(), r.data.len() as u64))
-            .collect();
-        if declared != held {
-            problems.push(format!(
-                "{name}: regions {held:?}, the manifest declares {declared:?}"
-            ));
-        }
-        let empty = empty_provenance_fields(&loaded.provenance);
-        if !empty.is_empty() {
-            problems.push(format!("{name}: empty provenance fields {empty:?}"));
-        }
-        let transcript = fs::read_to_string(capture.join(TRANSCRIPT_FILE))
-            .unwrap_or_else(|e| panic!("{name}: {e}"));
-        for leak in identifier_leaks(&transcript)
+        handles
             .into_iter()
-            .chain(host_leaks(&transcript))
-        {
-            problems.push(format!("{name}: {TRANSCRIPT_FILE} {leak}"));
-        }
-    }
+            .flat_map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
+            .collect()
+    });
+    assert_eq!(found.len(), captures.len(), "a capture went unchecked");
+    found.sort_by_key(|(i, _)| *i);
+    let problems: Vec<String> = found.into_iter().flat_map(|(_, p)| p).collect();
     assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// The most threads that check captures at once. Each capture costs
+/// five file reads, so the threads overlap the waits for the disk.
+const MAX_CAPTURE_WORKERS: usize = 8;
+
+/// The problems with the reference capture of microtest `name` in
+/// `capture`. Each problem is one of these:
+///
+/// - the capture does not load;
+/// - the observation has another runner or carries state hashes;
+/// - the observation's regions differ from the manifest's;
+/// - a provenance field is empty;
+/// - the transcript is empty or names the console.
+///
+/// # Panics
+///
+/// Panics if the manifest does not load or the transcript is not UTF-8.
+fn capture_problems(name: &str, capture: &Path, profiles: &ConsoleProfiles) -> Vec<String> {
+    let mut problems = Vec::new();
+    let loaded = match hardware_capture::load(capture, profiles) {
+        Ok(loaded) => loaded,
+        Err(e) => {
+            problems.push(format!("{name}: {e}"));
+            return problems;
+        }
+    };
+    let observation = &loaded.observation;
+    if observation.metadata.runner != RUNNER_PS3_CEX {
+        problems.push(format!("{name}: runner {:?}", observation.metadata.runner));
+    }
+    if observation.state_hashes.is_some() {
+        problems.push(format!("{name}: carries state hashes"));
+    }
+    let m = manifest::load_console(&micro_root().join(name).join("manifest.toml"))
+        .unwrap_or_else(|e| panic!("{name}: {e}"));
+    let declared: Vec<(&str, u64)> = m
+        .observe
+        .memory_regions
+        .iter()
+        .map(|r| (r.name.as_str(), r.size))
+        .collect();
+    let held: Vec<(&str, u64)> = observation
+        .memory_regions
+        .iter()
+        .map(|r| (r.name.as_str(), r.data.len() as u64))
+        .collect();
+    if declared != held {
+        problems.push(format!(
+            "{name}: regions {held:?}, the manifest declares {declared:?}"
+        ));
+    }
+    let empty = empty_provenance_fields(&loaded.provenance);
+    if !empty.is_empty() {
+        problems.push(format!("{name}: empty provenance fields {empty:?}"));
+    }
+    if loaded.transcript.is_empty() {
+        problems.push(format!(
+            "{name}: {TRANSCRIPT_FILE} loaded empty, so the scan for the console's names \
+             reads nothing"
+        ));
+    }
+    let transcript =
+        std::str::from_utf8(&loaded.transcript).unwrap_or_else(|e| panic!("{name}: {e}"));
+    for leak in identifier_leaks(transcript)
+        .into_iter()
+        .chain(host_leaks(transcript))
+    {
+        problems.push(format!("{name}: {TRANSCRIPT_FILE} {leak}"));
+    }
+    problems
 }
 
 /// The text fields of a provenance record that are empty.

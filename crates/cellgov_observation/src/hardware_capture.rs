@@ -237,6 +237,8 @@ pub struct HardwareCapture {
     pub frame: Vec<u8>,
     /// The provenance record.
     pub provenance: CaptureProvenance,
+    /// The bytes of the runner's transcript.
+    pub transcript: Vec<u8>,
 }
 
 /// What a microtest directory holds as its reference.
@@ -437,12 +439,13 @@ pub fn load(
     }
     let observation: Observation = read_json(&dir.join(OBSERVATION_FILE))?;
     check_observation(&observation, console)?;
-    read(&dir.join(TRANSCRIPT_FILE))?;
+    let transcript = read(&dir.join(TRANSCRIPT_FILE))?;
     Ok(HardwareCapture {
         dir: dir.to_path_buf(),
         observation,
         frame,
         provenance,
+        transcript,
     })
 }
 
@@ -571,3 +574,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/capture_shape_tests.rs"]
 mod capture_shape_tests;
+
+#[cfg(test)]
+#[path = "tests/capture_transcript_tests.rs"]
+mod capture_transcript_tests;
