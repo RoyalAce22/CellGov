@@ -124,9 +124,11 @@ enum Flow {
 /// `bound` enter.
 ///
 /// An unbounded switch of `bound` can put control into real mode at any
-/// word, so then every word may run in real mode. A `bcctr` whose target
-/// `bound` lost can enter any word in either mode, so it leaves every
-/// site unresolved.
+/// word, so then every word may run in real mode. A `bcctr` or `bclr`
+/// that may run in real mode can reach the real address of each entry
+/// and each target of `bound`, and of each return address. A `bcctr`
+/// whose target `bound` lost can enter any word in either mode, so it
+/// leaves every site unresolved.
 pub(crate) fn scan(
     code: &Code,
     bound: &IndirectBound,
@@ -135,7 +137,7 @@ pub(crate) fn scan(
     let real_mode = if bound.unbounded_switches.is_empty() {
         let mut starts = real_mode_starts.clone();
         starts.extend(switched_words(code, bound));
-        RealMode::Words(real_mode_words(code, &starts, &bound.targets))
+        real_mode_words(code, &starts, bound)
     } else {
         RealMode::Every
     };
@@ -164,13 +166,12 @@ pub(crate) fn scan(
 /// - each word at the real address of a target of `bound` whose writer
 ///   is in `real_mode`;
 /// - each word at the real address of a real-mode switch of `bound`;
-/// - when `bound` has an unbounded switch, each word at the real address
-///   of an entry of `bound`.
+/// - when a `bcctr` or `bclr` may run in real mode, each word that
+///   [`real_indirect_words`] gives.
 ///
 /// An indirect branch in real mode and a real-mode switch reach an
 /// address at its real address. The entries of `bound` do not hold that
-/// word when no segment holds the address itself. An unbounded switch
-/// can reach each address that the bound holds. The entries of `bound`
+/// word when no segment holds the address itself. The entries of `bound`
 /// do not always hold a target, such as the word after a call, where a
 /// `bclr` returns.
 ///
@@ -179,13 +180,8 @@ pub(crate) fn scan(
 fn entered(code: &Code, bound: &IndirectBound, real_mode: &RealMode) -> BTreeSet<u64> {
     let mut entries = bound.entries.clone();
     entries.extend(switched_words(code, bound));
-    if !bound.unbounded_switches.is_empty() {
-        entries.extend(
-            bound
-                .entries
-                .iter()
-                .flat_map(|&entry| code.real_aliases(entry)),
-        );
+    if real_mode.branches_indirectly() {
+        entries.extend(real_indirect_words(code, bound));
     }
     for (by, targets) in &bound.targets {
         let real = real_mode.contains(*by);
@@ -207,7 +203,11 @@ enum RealMode {
     /// Every word.
     Every,
     /// The words that [`real_mode_words`] gives.
-    Words(BTreeSet<u64>),
+    Words {
+        words: BTreeSet<u64>,
+        /// Whether one of `words` is a `bcctr` or a `bclr`.
+        indirect: bool,
+    },
 }
 
 impl RealMode {
@@ -215,9 +215,75 @@ impl RealMode {
     fn contains(&self, address: u64) -> bool {
         match self {
             Self::Every => true,
-            Self::Words(words) => words.contains(&address),
+            Self::Words { words, .. } => words.contains(&address),
         }
     }
+
+    /// Whether a `bcctr` or a `bclr` may run in real mode.
+    ///
+    /// Under [`Self::Every`], an unbounded switch can also reach each
+    /// address that the bound holds.
+    fn branches_indirectly(&self) -> bool {
+        match self {
+            Self::Every => true,
+            Self::Words { indirect, .. } => *indirect,
+        }
+    }
+}
+
+/// Each word at the real address of an entry or a target of `bound`, or
+/// of the word after a branch that links: the words that a `bcctr` or
+/// `bclr` may reach in real mode.
+///
+/// `bound` keys each target by the word that wrote CTR or LR. The scan
+/// cannot tell which branch reaches a target, so a real-mode `bcctr` or
+/// `bclr` may reach any of these:
+/// - an entry, when no write that `bound` records reaches the branch;
+/// - a target whose writer did not run in real mode;
+/// - the word after a branch that links, with the LR that the branch
+///   wrote.
+fn real_indirect_words<'a>(
+    code: &'a Code,
+    bound: &'a IndirectBound,
+) -> impl Iterator<Item = u64> + 'a {
+    bound
+        .entries
+        .iter()
+        .chain(bound.targets.values().flatten())
+        .copied()
+        .chain(return_points(code))
+        .flat_map(|address| code.real_aliases(address))
+}
+
+/// The address of the word after each branch of `code` that links.
+///
+/// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.
+/// [PPC-Book1 p:25 s:2.4] `bclr` and `bcctr` with LK = 1 also set LR to CIA + 4.
+fn return_points(code: &Code) -> impl Iterator<Item = u64> + '_ {
+    code.segments
+        .iter()
+        .flat_map(CodeSegment::addressed)
+        .filter(|&(_, raw)| links(raw))
+        .filter_map(|(address, _)| address.checked_add(4))
+}
+
+/// Whether the word `raw` is a branch that writes LR.
+fn links(raw: u32) -> bool {
+    matches!(
+        crate::decode::decode(raw),
+        Ok(PpuInstruction::B { link: true, .. }
+            | PpuInstruction::Bc { link: true, .. }
+            | PpuInstruction::Bclr { link: true, .. }
+            | PpuInstruction::Bcctr { link: true, .. })
+    )
+}
+
+/// Whether the word `raw` is a `bcctr` or a `bclr`.
+fn is_indirect_branch(raw: u32) -> bool {
+    matches!(
+        crate::decode::decode(raw),
+        Ok(PpuInstruction::Bcctr { .. } | PpuInstruction::Bclr { .. })
+    )
 }
 
 /// Each word of `code` at the real address of a real-mode switch of
@@ -269,23 +335,21 @@ fn direct_targets(code: &Code, address: u64, raw: u32, real_mode: bool) -> BTree
 /// - a fall-through;
 /// - a direct branch;
 /// - from a word that writes CTR or LR, an indirect branch to each
-///   address that `targets` gives the word.
+///   address that `bound` gives the word as a target;
+/// - from a `bcctr` or a `bclr`, an indirect branch to each word that
+///   [`real_indirect_words`] gives.
 ///
 /// Real mode ignores EA bits 0 and 1, so an indirect branch reaches each
 /// word at the real address of its target. The set does not hold a word
 /// that runs in real mode only after one of these:
 /// - an `hrfid`;
 /// - an `rfid`, `mtmsr` or `mtmsrd` that is an unbounded switch, which
-///   [`scan`] handles;
-/// - a `bclr` or a `bcctr` whose target `targets` does not give.
+///   [`scan`] handles.
 ///
 /// [PPC-Book1 p:25 s:2.4] The registers that `bclr` and `bcctr` alter are CTR and LR, so the MSR at the target is the MSR at the branch.
-fn real_mode_words(
-    code: &Code,
-    starts: &BTreeSet<u64>,
-    targets: &BTreeMap<u64, BTreeSet<u64>>,
-) -> BTreeSet<u64> {
+fn real_mode_words(code: &Code, starts: &BTreeSet<u64>, bound: &IndirectBound) -> RealMode {
     let mut reached = BTreeSet::new();
+    let mut indirect = false;
     let mut pending: Vec<u64> = starts.iter().copied().collect();
     while let Some(at) = pending.pop() {
         if !code.holds(at) || !reached.insert(at) {
@@ -296,12 +360,19 @@ fn real_mode_words(
                 pending.extend(at.checked_add(4));
             }
             pending.extend(direct_targets(code, at, raw, true));
+            if !indirect && is_indirect_branch(raw) {
+                indirect = true;
+                pending.extend(real_indirect_words(code, bound));
+            }
         }
-        for &target in targets.get(&at).into_iter().flatten() {
+        for &target in bound.targets.get(&at).into_iter().flatten() {
             pending.extend(code.real_aliases(target));
         }
     }
-    reached
+    RealMode::Words {
+        words: reached,
+        indirect,
+    }
 }
 
 /// The address that a direct branch at `address` reaches in 64-bit mode.

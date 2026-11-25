@@ -780,3 +780,11 @@ mod hypercall_ctr_join_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_ctr_virtual_tests.rs"]
 mod hypercall_ctr_virtual_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_rfid_low_bits_tests.rs"]
+mod hypercall_rfid_low_bits_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_real_mode_alias_tests.rs"]
+mod hypercall_real_mode_alias_tests;

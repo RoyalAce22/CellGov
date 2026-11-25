@@ -121,18 +121,19 @@ fn a_bctr_to_a_built_address_outside_real_mode_adds_no_path() {
 }
 
 #[test]
-fn a_real_mode_bctr_whose_mtctr_runs_outside_real_mode_adds_no_path() {
-    // The vector word branches straight to the `bctr`, so the `bctr` runs
-    // in real mode with a CTR that the `mtctr` did not write.
+fn a_real_mode_bctr_whose_mtctr_runs_outside_real_mode_puts_its_absolute_branch_in_real_mode() {
+    // The vector word branches straight to the `bctr`. The `bctr` then
+    // runs in real mode with the CTR that the `mtctr` wrote earlier.
     let [lis, ori] = build_past();
-    let built = code(OUTSIDE, &[lis, ori, mtctr_r3(), bctr()]);
+    let built = || code(OUTSIDE, &[lis, ori, mtctr_r3(), bctr()]);
     let to_bctr = word(PpuInstruction::B {
         offset: i32::try_from(OUTSIDE + 0xC - VECTOR).expect("a near branch"),
         aa: false,
         link: false,
     });
-    let vector = code(VECTOR, &[to_bctr]);
-    assert_eq!(site(76, vec![vector, built]), [(SC, Some(75))]);
+    let vector = || code(VECTOR, &[to_bctr]);
+    assert_eq!(site(76, vec![vector(), built()]), [(SC, None)]);
+    assert_eq!(site(75, vec![vector(), built()]), [(SC, Some(75))]);
 }
 
 /// A real-mode `mtctr`, then `bdnz` to the next word, then `bctr`.
