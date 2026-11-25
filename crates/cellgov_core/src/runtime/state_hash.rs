@@ -56,8 +56,7 @@ impl Runtime {
     ///   - the deferred RSX effects
     ///   - the pending child inits
     ///   - the inputs that commits queued for each unit's next step
-    ///   - the hypervisor's memory regions, virtual address spaces,
-    ///     interrupt state bitmaps and event receive ports
+    ///   - the state of each hypervisor hypercall group
     /// - The LV2 host adds its partial.
     ///
     /// Replay tooling compares pairs via the `SyncState` checkpoint

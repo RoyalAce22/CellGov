@@ -14,9 +14,10 @@ fn li_r11(value: u16) -> u32 {
     (14 << 26) | (11 << 21) | u32::from(value)
 }
 
-/// A kernel-shaped ELF with one executable segment at `KERNEL + 0x3100`
-/// that holds `words`. The segment lies above the real pages of the
-/// interrupt vectors, where every word is an entry.
+/// A kernel-shaped ELF with one executable segment that holds `words`.
+///
+/// The segment starts at `KERNEL + 0x3100`, above the interrupt vector
+/// pages. An interrupt can enter every word of those pages.
 fn kernel_elf(words: &[u32]) -> Vec<u8> {
     const PAYLOAD: usize = ELF_HEADER_SIZE + ELF_PHENTSIZE;
     let size = 4 * words.len() as u64;

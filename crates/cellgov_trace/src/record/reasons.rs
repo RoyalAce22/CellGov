@@ -35,7 +35,7 @@ pub enum TracedYieldReason {
     Finished = 8,
     /// A request with nonzero LEV: a hypercall.
     ///
-    /// A thread in supervisor state yields it for `sc` with LEV = 1.
+    /// A thread with supervisor registers yields it for `sc` with LEV = 1.
     Hypercall = 9,
     /// Unit parked on a blocking channel whose count was zero; the
     /// stalled instruction runs again when the unit wakes.

@@ -11,7 +11,7 @@ mod manifest_build;
 mod prune;
 mod version_txt;
 
-pub use complete::KernelCompletionOutcome;
+pub use complete::{KernelCompletionOutcome, SelfCompletion};
 pub use core_os::CoreOsOmission;
 pub use error::{FirmwareInstallError, PackageFailure};
 pub use install::{installed_record, FirmwareInstallOutcome, PackageSummary};

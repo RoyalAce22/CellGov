@@ -1,9 +1,5 @@
-//! The table of the hypercall groups, from which the dispatch and the
-//! answered numbers are built.
-//!
-//! Each group declares its own registrations in its own module. This
-//! table lists the groups and never changes when a group adds a
-//! hypercall.
+//! The table of the hypercall groups, which the dispatch and the
+//! answered numbers read.
 
 use core::ops::RangeInclusive;
 

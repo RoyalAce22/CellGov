@@ -88,29 +88,31 @@ pub fn scan_syscalls(elf: &[u8]) -> Result<Vec<CallerSite>, CallerScanError> {
 }
 
 /// Find every LV1 hypercall site in executable, file-backed segments.
+///
 /// A site is a word that is exactly `sc 1`
 /// ([`PPC_SC_1`](cellgov_ps3_abi::hw::ppc_isa::PPC_SC_1)), and its
-/// `ordinal` is the hypercall number.
+/// `ordinal` is the hypercall number. A word with a nonzero reserved
+/// field also decodes as `sc 1`, but such a word is data, so it is not
+/// a site.
 ///
-/// A word with a nonzero reserved field also decodes as `sc 1`, but
-/// such a word is data, so it is not a site. A site resolves when every
-/// path to it loads the same non-negative constant into r11 with
-/// `li r11`. The paths are those of the control-flow graph of all the
-/// executable segments: direct branches, which may cross segments, and
-/// fall-throughs.
-///
-/// A site is unresolved when control can enter a word between the load
-/// and `sc` in another way. These ways are the ELF entry, an interrupt
-/// vector, and an indirect branch to an address that the image names.
+/// A site resolves when every path to it loads the same non-negative
+/// constant into r11 with `li r11`. A path follows the direct branches
+/// and fall-throughs of all the executable segments, and a direct
+/// branch may cross segments. A site stays unresolved when control can
+/// enter a word between the load and `sc` in one of these other ways:
+/// - the ELF entry;
+/// - an interrupt vector;
+/// - an indirect branch to an address that the image names.
 ///
 /// The segments may lie anywhere in the 64-bit address space, as a
 /// kernel's do.
 ///
 /// # Errors
 ///
-/// Returns [`CallerScanError`] if the ELF or one of its segments is
-/// malformed, or if a relative jump table runs past the most entries
-/// the scan reads from one table.
+/// Returns [`CallerScanError`] when:
+/// - the ELF or one of its segments is malformed;
+/// - a relative jump table runs past the most entries the scan reads
+///   from one table.
 pub fn scan_hypercalls(elf: &[u8]) -> Result<Vec<CallerSite>, CallerScanError> {
     let segments = pt_load_segments(elf)?;
     let code = Code::new(executable_segments(

@@ -6,15 +6,13 @@
 //!
 //! The checks and outputs come from the 4.93 `lv1.self`, decrypted
 //! offline and read with `cellgov dev disasm`. The vas id comes from the
-//! console capture
-//! [`VAS_BOOT_RECORD_CAPTURE`]. No byte of lv1 is committed; these facts
-//! are.
+//! console capture [`VAS_BOOT_RECORD_CAPTURE`]. The repository holds no
+//! byte of lv1, only these facts.
 //!
 //! A handler puts its outputs in the vector's return slots, and the
 //! vector loads r4 to r10 from them [OFW-4.93 lv1 a:0x1044-0x1068]. The
-//! vector's
-//! entry zeroes the slots, so each output that a handler does not write
-//! returns 0.
+//! vector's entry zeroes the slots, so each output that a handler does
+//! not write returns 0.
 //!
 //! The select handler gives these outcomes:
 //! - A vas id of 0 selects the partition's default address space and
@@ -23,8 +21,8 @@
 //!   `LV1_NO_ENTRY` (-6) with r3 marked in the high word, 0x1_FFFFFFFA
 //!   [OFW-4.93 lv1 a:0x2EB198]. The handler looks the id up in the partition's object
 //!   table and checks the object's class and its state word at +144.
-//! - An address space that the partition constructed is selected, and
-//!   the call returns 0.
+//! - An id that names an address space that the partition constructed
+//!   selects that address space and returns 0.
 //!
 //! The handler sets the address space of the PPE object that the calling
 //! thread's lv1 context names [OFW-4.93 lv1 a:0x2EB26C].
@@ -58,17 +56,17 @@ pub fn address_space_handlers(firmware: &str) -> Option<&'static AddressSpaceHan
         .find(|handlers| handlers.firmware == firmware)
 }
 
-/// The largest page table size exponent, in r3, that
-/// `construct_virtual_address_space` checks past. The handler compares
+/// The largest size exponent of the page table, in r3, that passes the
+/// check of `construct_virtual_address_space`. The handler compares
 /// r3 with 20, unsigned, at [OFW-4.93 lv1 a:0x2EC5F8].
 pub const HTAB_SIZE_EXP_MAX: u64 = 20;
 
-/// The smallest page table size exponent that lv1 uses. The handler
+/// The smallest size exponent of the page table that lv1 uses. The handler
 /// raises an r3 below 18 to 18 at [OFW-4.93 lv1 a:0x2EC64C], before any other use of r3.
 pub const HTAB_SIZE_EXP_MIN: u64 = 18;
 
-/// The page table size exponent that lv1 uses for an r3 of `r3`, or
-/// `None` when r3 fails the check against [`HTAB_SIZE_EXP_MAX`].
+/// The size exponent of the page table that lv1 uses for an r3 of `r3`,
+/// or `None` when r3 fails the check against [`HTAB_SIZE_EXP_MAX`].
 pub const fn htab_size_exp(r3: u64) -> Option<u64> {
     if r3 > HTAB_SIZE_EXP_MAX {
         None
@@ -118,7 +116,7 @@ pub fn page_shifts_accepted(count: u64, shifts: u64) -> bool {
 /// As with `allocate_memory`, bit 32 marks r3, bit 33 r4 and bit 34 r5.
 /// The handler checks the arguments in this order, and the first failure
 /// is the answer:
-/// 1. the page table size exponent;
+/// 1. the size exponent of the page table;
 /// 2. the page size count, at [OFW-4.93 lv1 a:0x2EC610];
 /// 3. the page shifts, at [OFW-4.93 lv1 a:0x2EC63C].
 ///
@@ -139,8 +137,8 @@ pub const CONSTRUCT_VAS_PAGE_SIZE_COUNT_R3: u64 = 0x0000_0002_FFFF_FFEF;
 /// not one of [`PAGE_SHIFTS`]: -17, with r5 marked [OFW-4.93 lv1 a:0x2EC790].
 pub const CONSTRUCT_VAS_PAGE_SHIFT_R3: u64 = 0x0000_0004_FFFF_FFEF;
 
-/// The console capture of the 4.93 kernel's virtual address space
-/// record, on the reference console, relative to the workspace root.
+/// The console capture of the 4.93 kernel's record of its virtual
+/// address space, relative to the workspace root.
 /// Its README gives the method and the analysis.
 pub const VAS_BOOT_RECORD_CAPTURE: &str = "tests/micro/lv2_vas_boot_record/ps3/cech20-cex-493";
 

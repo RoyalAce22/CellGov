@@ -56,7 +56,7 @@ impl RepositoryKey {
     ///
     /// A word renders as follows:
     /// - its name bytes from the high end, then `+` and the index that the
-    ///   remaining low bytes hold, when that index is not 0;
+    ///   low bytes after the name hold, when that index is not 0;
     /// - `0` for a zero word;
     /// - `0x` and its hex digits, when its high byte is not a name byte.
     ///
@@ -280,9 +280,10 @@ const fn boot_read_4_93(lr: u64) -> ReadSite {
     }
 }
 
-/// The console capture of lpar 1's `ss.param.debug.support` node in lv1's
-/// repository, on the reference console at firmware 4.93. Its README
-/// gives the method.
+/// The console capture of lpar 1's `ss.param.debug.support` node.
+///
+/// The capture reads the node in lv1's repository, on the reference
+/// console at firmware 4.93. Its README gives the method.
 pub const DEBUG_SUPPORT_CAPTURE: &str =
     "tests/micro/lv1_repository_debug_support/peek/cech20-cex-493";
 
@@ -299,9 +300,10 @@ pub const FLASH_EXT_CAPTURE: &str = "tests/micro/lv1_repository_flash/peek/cech2
 /// [`FLASH_EXT_CAPTURE`] read.
 const FLASH_EXT_V1_ADDRESS: u64 = 0x0068_8d78;
 
-/// The second value of a node that [`BOOT_RECORD_CAPTURE`] gives. The
-/// capture does not observe it, and the reads at `discarded_by` discard
-/// it.
+/// The second value of a node that [`BOOT_RECORD_CAPTURE`] gives.
+///
+/// The capture does not observe it, and the reads at `discarded_by`
+/// discard it.
 const fn unobserved(discarded_by: &'static [ReadSite]) -> SecondValue {
     SecondValue::Unobserved { discarded_by }
 }

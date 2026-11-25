@@ -27,10 +27,9 @@
 //! preserved `[[material]]` row of kind `lv1` also gives an LV1 keyset
 //! when it holds an `erk` and a `riv` under a version-range label. The
 //! loader keeps a SELF keyset with no stated label as an unlabeled
-//! candidate. For a SELF
-//! the vault has no labeled key for, the decrypt paths try every
-//! candidate, and the envelope's zero padding selects the one that
-//! fits.
+//! candidate. For a SELF the vault has no labeled key for, the decrypt
+//! paths try every candidate, and the envelope's zero padding selects
+//! the one that fits.
 //!
 //! Whatever the loose forms leave unplaced is listed with a reason
 //! (`cellgov keys show`); `keys.toml` is the exact form.

@@ -4,8 +4,8 @@
 //! - what lv1 does with a bitmap it registers.
 //!
 //! The facts come from the 4.93 `lv1.self`, decrypted offline and read
-//! with `cellgov dev disasm`. No byte of lv1 is committed; these facts
-//! are.
+//! with `cellgov dev disasm`. The repository holds no byte of lv1, only
+//! these facts.
 //!
 //! The handler reads three inputs and no other register:
 //! - r3 is a logical PPE id. The handler looks it up in the partition's

@@ -54,9 +54,7 @@ fn bi(second: &[u8]) -> RepositoryKey {
     )
 }
 
-/// The boot record offsets come from the console capture
-/// `tests/micro/lv2_repository_boot_nodes/ps3/cech20-cex-493`. The
-/// values are the doublewords its frame holds at those offsets.
+/// The README of [`BOOT_RECORD_CAPTURE`] gives the boot record offsets.
 #[test]
 fn the_4_93_boot_nodes_answer_the_captured_values_cited_to_the_capture() {
     let expected = [
@@ -98,8 +96,7 @@ fn a_floor_read_of_a_node_only_the_4_93_capture_gives_is_refused() {
 }
 
 /// The repository dump [PS3DEVWIKI-REPO s:3.41_GameOS] gives
-/// `bi.pu.1.rm_size` = 0x01000000; the 4.93 console capture gives
-/// the doubleword at offset 0x38 of the boot record.
+/// `bi.pu.1.rm_size` = 0x01000000.
 #[test]
 fn the_floors_keep_the_dump_real_mode_size_and_4_93_takes_the_captured_one() {
     for fw in FLOORS {

@@ -18,7 +18,7 @@ pub(crate) const GROUP: Group = Group {
     hashed_surfaces: &[],
 };
 
-/// The partition group's state. It holds nothing yet: the repository
+/// The partition group's state. It holds nothing: the repository
 /// and the logical console keep no guest state.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PartitionState {}
@@ -29,13 +29,13 @@ impl PartitionState {
         match change {}
     }
 
-    /// The sync-state terms of the state: none yet.
+    /// The sync-state terms of the state: none.
     pub fn sync_term(&self) -> u128 {
         0
     }
 }
 
-/// A change to the partition group's state. No answer carries one yet.
+/// A change to the partition group's state. No answer carries one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PartitionChange {}
 

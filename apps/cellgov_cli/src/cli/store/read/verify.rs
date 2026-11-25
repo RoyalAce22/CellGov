@@ -52,7 +52,7 @@ pub(crate) fn firmware_verify(
     finish(&doc, format, &format!("firmware {version}"))
 }
 
-/// Verify one installed firmware entry with the existing module and stored-kernel rules.
+/// Verify one installed firmware entry: its modules and its stored CoreOS SELFs.
 pub(super) fn firmware_entry_doc(
     view: &StoreView,
     entry: &FirmwareEntry,
@@ -82,6 +82,7 @@ pub(super) fn firmware_entry_doc(
 }
 
 /// Why the pass checked no stored CoreOS SELF, as the report prints it.
+///
 /// `not_recorded` is the text for a record that predates the
 /// `[core_os]` block.
 fn omission_text(absence: KernelAbsence<'_>, not_recorded: &str) -> String {

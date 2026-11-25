@@ -4,7 +4,7 @@
 
 /// The result that a compare instruction puts in a CR field.
 ///
-/// [PPC-Book1 p:60 s:3.3.9] A compare sets one of the three leftmost bits of the CR field (LT, GT or EQ) and copies XER[SO] into the fourth.
+/// [PPC-Book1 p:60 s:3.3.9] A compare sets one of the three leftmost bits of the CR field (LT, GT or EQ) and copies XER\[SO\] into the fourth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompareResult {
     /// LT: the first operand is less than the second.

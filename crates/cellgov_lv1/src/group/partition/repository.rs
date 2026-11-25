@@ -17,7 +17,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
     handler: |request, input| read_node(request, input.firmware),
 }];
 
-/// One repository read the kernel made, in the order of the reads.
+/// One repository read the kernel made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RepositoryRead {
     /// The partition and the raw key words of the read.

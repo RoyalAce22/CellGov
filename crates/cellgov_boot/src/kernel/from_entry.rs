@@ -108,12 +108,13 @@ pub enum KernelRunError {
 /// Each kernel segment lies at its real address. Real mode ignores the
 /// two high effective-address bits, so the link address loses its top
 /// bit. CellGov's hypervisor answers the kernel's repository reads with
-/// the values for `firmware`. The run stops at the first hypercall
-/// refusal, kernel fault or step refusal.
+/// the values for `firmware`. [`KernelRunStop`] gives the reason the run
+/// stops.
 ///
 /// # Errors
 ///
-/// Returns a [`KernelRunError`] when the ELF does not map.
+/// Returns a [`KernelRunError`] when the ELF does not map into the
+/// real-mode address space.
 pub fn run_kernel_from_entry(
     elf: &[u8],
     firmware: &str,
@@ -196,8 +197,8 @@ fn drive(rt: &mut Runtime, kernel: UnitId) -> KernelRunStop {
 ///
 /// The caller has mapped `elf` with `map_kernel`, which checks the
 /// segments and bounds their span by [`KERNEL_SPAN_LIMIT`]. That span
-/// starts at the lowest segment, so each segment is checked here to end
-/// at or below [`SPIN_WORD`].
+/// starts at the lowest segment, so this function checks that each
+/// segment ends at or below [`SPIN_WORD`].
 fn real_mode_image(elf: &[u8]) -> Result<GuestMemory, KernelRunError> {
     let segments = checked_pt_loads(elf).map_err(|source| KernelMapError::Elf { source })?;
     let mut mem = GuestMemory::from_regions(vec![

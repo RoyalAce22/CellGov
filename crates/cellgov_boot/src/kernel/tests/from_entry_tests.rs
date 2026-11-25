@@ -16,7 +16,8 @@ mod reader;
 #[path = "from_entry_page_table_tests.rs"]
 mod page_table;
 
-/// A firmware the psdevwiki dump's repository values are served to.
+/// A firmware for which CellGov serves the repository values of the
+/// psdevwiki dump.
 const FW: &str = "1.50";
 
 const BASE: u64 = LV2_KERNEL_LINK_BASE;
@@ -146,7 +147,7 @@ const BNE_8: u32 = 0x4082_0008;
 #[test]
 fn a_kernel_reads_bp_vr_without_an_interrupt_and_gets_the_modelled_value() {
     // A wrong value branches to the `b .` and runs to the step cap. An
-    // interrupt leaves for the program vector. Only the right value
+    // interrupt enters the program vector. Only the right value
     // reaches the unmodelled PVR read.
     let code = &[MFSPR_R0_BP_VR, CMPDI_R0_BP_VR, BNE_8, MFSPR_R0_PVR, B_SELF];
     let run = run_kernel_from_entry(&kernel_elf(code), FW, 10_000).unwrap();

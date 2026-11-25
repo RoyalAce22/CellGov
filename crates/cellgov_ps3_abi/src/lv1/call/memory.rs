@@ -31,7 +31,7 @@ pub const WRITE_HTAB_ENTRY: u64 = 1;
 /// with its own hashed page table.
 ///
 /// The inputs:
-/// - r3 is the page table size exponent.
+/// - r3 is the size exponent of the page table.
 /// - r4 is the number of page sizes.
 /// - r5 holds the page shifts, 8 bits each from the most significant
 ///   byte.
@@ -51,9 +51,11 @@ pub const SELECT_VIRTUAL_ADDRESS_SPACE: u64 = 7;
 /// `read_htab_entries`: read four entries of an address space's page
 /// table.
 ///
-/// The inputs are the vas id in r3, or 0 for the caller's address space,
-/// and the index of the first entry in r4. On success, r4 to r7 hold
-/// doubleword 0 of each entry, and r8 holds the low halfword of
+/// The inputs:
+/// - r3 is the vas id, or 0 for the caller's address space.
+/// - r4 is the index of the first entry.
+///
+/// On success, r4 to r7 hold doubleword 0 of each entry, and r8 holds the low halfword of
 /// doubleword 1 of each entry. The lv1 handler [OFW-4.93 lv1 a:0x2ECAF8]
 /// reads the inputs and writes the outputs in this form; see
 /// [`crate::lv1::page_table`].

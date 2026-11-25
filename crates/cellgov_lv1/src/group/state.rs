@@ -13,7 +13,7 @@ use super::uart::{UartChange, UartState};
 /// The guest state of each hypercall group.
 ///
 /// Each group defines its own state type in its own module. A group with
-/// no state yet holds an empty one.
+/// no state holds an empty one.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GroupStates {
     memory: MemoryGroupState,
@@ -109,10 +109,9 @@ impl GroupStates {
 /// A change to one group's state that an answer carries, which the
 /// hypervisor applies.
 ///
-/// Each group defines its own change type in its own module, and this
-/// enum holds it in a box. So a group can add a variant of any size to
-/// its own type, and this enum and [`crate::HypercallDisposition`] keep
-/// their size.
+/// Each group defines its own change type in its own module. The box
+/// keeps the size of this enum and of [`crate::HypercallDisposition`]
+/// fixed when a group's type grows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StateChange {
     /// A change to the memory and page table group's state.

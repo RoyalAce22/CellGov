@@ -96,6 +96,34 @@ impl CoreOsUnpack {
         }
     }
 
+    /// Why the unpack wrote no kernel, as text; `None` when it wrote one.
+    pub fn kernel_absence(&self) -> Option<String> {
+        self.kernel.as_ref().err().map(ToString::to_string)
+    }
+
+    /// Why the unpack wrote no hypervisor, as text; `None` when it wrote
+    /// one.
+    ///
+    /// A package that yielded no table stores neither SELF, so the
+    /// kernel's omission is also the hypervisor's reason.
+    pub fn lv1_absence(&self) -> Option<String> {
+        match (&self.lv1, &self.kernel) {
+            (Some(Ok(_)), _) => None,
+            (Some(Err(omission)), _) => Some(omission.to_string()),
+            (
+                None,
+                Err(
+                    omission @ (CoreOsOmission::NoPackage
+                    | CoreOsOmission::Undecryptable { .. }
+                    | CoreOsOmission::Table { .. }),
+                ),
+            ) => Some(omission.to_string()),
+            (None, Ok(_) | Err(CoreOsOmission::NoKernel { .. } | CoreOsOmission::Write { .. })) => {
+                Some(format!("{CORE_OS_PACKAGE_NAME} names no {LV1_SELF}"))
+            }
+        }
+    }
+
     /// The block the install record carries.
     pub fn into_record(self) -> CoreOsRecord {
         let (kernel, omission) = match self.kernel {

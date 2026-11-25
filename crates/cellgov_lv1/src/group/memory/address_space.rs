@@ -176,13 +176,12 @@ fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDispositio
     })
 }
 
-/// The r3 that lv1's `construct_virtual_address_space` handler returns
-/// for the first of its argument checks that the call fails, or `None`
-/// when every check passes.
+/// The r3 of the first lv1 argument check that the call fails, or `None` when all pass.
 ///
 /// The arguments are the page table size exponent in r3, the page size
-/// count in r4 and the page shifts in r5. The checks run in lv1's order;
-/// see [`CONSTRUCT_VAS_HTAB_SIZE_EXP_R3`].
+/// count in r4 and the page shifts in r5. The checks run in the order of
+/// lv1's `construct_virtual_address_space` handler; see
+/// [`CONSTRUCT_VAS_HTAB_SIZE_EXP_R3`].
 fn lv1_argument_check(exp: u64, count: u64, shifts: u64) -> Option<u64> {
     if htab_size_exp(exp).is_none() {
         Some(CONSTRUCT_VAS_HTAB_SIZE_EXP_R3)
@@ -195,13 +194,12 @@ fn lv1_argument_check(exp: u64, count: u64, shifts: u64) -> Option<u64> {
     }
 }
 
-/// Hypercall 2: a new virtual address space, with its vas id in r4 and
-/// its page table size in bytes in r5.
+/// Hypercall 2: a new virtual address space.
 ///
 /// A call that fails one of lv1's argument checks gets lv1's own r3,
-/// with r4 to r10 cleared. A call that passes them gets r6 to r10
-/// cleared. The answer carries the address space, and the hypervisor
-/// keeps it.
+/// with r4 to r10 cleared. A call that passes them gets the vas id in
+/// r4, the page table size in bytes in r5 and r6 to r10 cleared. The
+/// answer carries the address space, and the hypervisor keeps it.
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;

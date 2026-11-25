@@ -4,8 +4,8 @@
 //! reference console down. [`STOP_LIST`] beside it holds the ranges of
 //! the ledger's peek rows in a form the runner reads. The runner loads
 //! both before it waits for the console and refuses to use the console
-//! when they disagree. A peek whose page overlaps a listed range is
-//! refused before the peek waits.
+//! when they disagree. The runner refuses a peek whose page overlaps a
+//! listed range before the peek waits.
 //!
 //! A peek row of the ledger names its space as `` `peek.lv1` `` or
 //! `` `peek.lv2` ``, and its range as `of 0x<first> to 0x<last>`, both

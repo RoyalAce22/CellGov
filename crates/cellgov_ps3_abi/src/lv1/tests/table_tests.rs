@@ -1,6 +1,3 @@
-//! The hypercall table facts: the site rows, the live 4.93 map and its
-//! lookup.
-
 use super::{
     table_entry, table_site, TableEntry, HYPERCALL_TABLE_ENTRIES, HYPERCALL_TABLE_SITES,
     INVALID_HYPERCALL_R3, LIVE_TABLE_FIRMWARE, LIVE_TABLE_HANDLERS,

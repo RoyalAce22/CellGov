@@ -176,9 +176,7 @@ pub fn hypercall_name(number: u64) -> Option<HypercallName> {
     })
 }
 
-/// One hypercall number: its name, its call-table counts, its family and
-/// the work item that owns it, the kernels that call it, lv1's 4.93
-/// table entry and CellGov's answer.
+/// One `hypercall.tsv` row: what each source records of one hypercall number.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HypercallRow {
     /// The constant a site loads into r11.

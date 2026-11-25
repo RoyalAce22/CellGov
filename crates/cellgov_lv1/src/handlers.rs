@@ -12,9 +12,6 @@ use super::vector;
 
 /// The numbers a handler answers, ascending. Every other number takes
 /// the null backend, unless lv1's vector answers it first.
-///
-/// Each group registers its own numbers, so this list is built from the
-/// registrations and no file lists them.
 pub fn answered_numbers() -> Vec<u64> {
     let mut numbers: Vec<u64> = table::registrations().map(|h| h.number).collect();
     numbers.sort_unstable();
@@ -33,10 +30,10 @@ pub fn answers(number: u64) -> bool {
 /// read the page table there, and the bitmap and plug calls write the
 /// bitmaps there.
 ///
-/// lv1's vector answers first: a number past the table, and a
-/// problem-state call. The handler that a group registers for the number
-/// answers the call next. The null backend answers a number with no
-/// handler.
+/// The first of these that applies answers the call:
+/// 1. lv1's vector, for a number past the table or a problem-state call;
+/// 2. the handler that a group registers for the number;
+/// 3. the null backend.
 pub fn answer(
     request: &HypercallRequest,
     firmware: Option<&str>,

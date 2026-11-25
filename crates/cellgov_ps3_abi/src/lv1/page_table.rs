@@ -7,8 +7,8 @@
 //!   address space loads.
 //!
 //! The facts come from the 4.93 `lv1.self`, decrypted offline and read
-//! with `cellgov dev disasm`. No byte of lv1 is committed; these facts
-//! are.
+//! with `cellgov dev disasm`. The repository holds no byte of lv1, only
+//! these facts.
 //!
 //! Both handlers find the address space from r3 in the same way:
 //! - A vas id of 0 names the address space of the PPE object that the
@@ -183,7 +183,8 @@ pub const WRITE_HTAB_DUPLICATE_R3: u64 = zero_extended(LV1_DUPLICATE_ENTRY);
 /// The page size index of a large page entry with doubleword 1
 /// `doubleword1`: the number of 1 bits from bit 51 up.
 ///
-/// The caller has refused a [`LARGE_PAGE_FIELD`] with each bit set.
+/// The caller refuses a [`LARGE_PAGE_FIELD`] with each bit set before
+/// this call.
 pub const fn large_page_index(doubleword1: u64) -> u32 {
     (doubleword1 >> SMALL_PAGE_LOG2).trailing_ones()
 }

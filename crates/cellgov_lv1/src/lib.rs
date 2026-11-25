@@ -1,7 +1,6 @@
-//! CellGov's hypervisor answers LV1 hypercalls in lv1's place, and does
-//! not run or emulate lv1.
-//!
-//! It answers the hypercalls that a thread in supervisor state makes.
+//! CellGov's hypervisor answers the LV1 hypercalls that a thread in
+//! supervisor state makes. It answers them in lv1's place, and does not
+//! run or emulate lv1.
 //!
 //! Each hypercall group registers a handler for each number it answers,
 //! in the group's own module. A handler is a pure function of these
@@ -24,11 +23,8 @@
 //! [`StateChange`]s, each a change to one group's state, and
 //! [`Hypervisor`] applies them.
 //!
-//! Before a handler runs, the hypervisor gives the answers of lv1's own
-//! `sc` vector: a number past the hypercall table, and a problem-state
-//! call. A number with no handler takes the null backend. It answers
-//! lv1's invalid-entry status where lv1's table marks the number
-//! invalid, and refuses the number otherwise. [`Hypervisor`] keeps a
+//! [`answer()`] gives the order of the answers: lv1's own `sc` vector,
+//! then the handler, then the null backend. [`Hypervisor`] keeps a
 //! witness of each number with no handler.
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]

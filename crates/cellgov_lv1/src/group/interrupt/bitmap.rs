@@ -139,12 +139,12 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
     HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, []))
 }
 
-/// The r3 of lv1's region checks for a bitmap at `address` in the real
-/// mode region of `rm_size` bytes, or `None` when the bitmap passes.
+/// The r3 of lv1's region checks for a bitmap at `address`, or `None` when it passes.
 ///
-/// lv1 looks up the region at base 0, which holds the addresses below
-/// `rm_size`. An address at or past `rm_size` is in no region. A bitmap
-/// that passes the region's end fails the region check.
+/// lv1 looks up the region at base 0, the real mode region, which holds
+/// the addresses below `rm_size`. An address at or past `rm_size` is in
+/// no region. A bitmap that passes the region's end fails the region
+/// check.
 fn real_mode_region_check(address: u64, rm_size: u64) -> Option<u64> {
     if address >= rm_size {
         Some(IRQ_STATE_BITMAP_NO_REGION_R3)
@@ -155,15 +155,13 @@ fn real_mode_region_check(address: u64, rm_size: u64) -> Option<u64> {
     }
 }
 
-/// Hypercall 11: registers the bitmap at the logical partition address
-/// in r5 for thread r4 of the logical PPE that r3 names, with r4 to r10
-/// cleared.
+/// Hypercall 11: registers the bitmap at r5 for thread r4 of the logical PPE r3.
 ///
-/// The answer writes 0 to the bitmap's status doublewords. lv1 copies
-/// the thread's status shadow there, and the shadow is 0 because no call
-/// that CellGov answers raises a plug's bit. The answer carries the
-/// registration, and the hypervisor keeps it. A second registration for
-/// one thread replaces the first.
+/// The answer clears r4 to r10 and writes 0 to the bitmap's status
+/// doublewords. lv1 copies the thread's status shadow there, and the
+/// shadow is 0 because no call that CellGov answers raises a plug's bit.
+/// The answer carries the registration, and the hypervisor keeps it. A
+/// second registration for one thread replaces the first.
 ///
 /// A call that fails one of lv1's checks gets lv1's own r3, with r4 to
 /// r10 cleared. See [`IRQ_STATE_BITMAP_PPE_ID_R3`] for the checks and

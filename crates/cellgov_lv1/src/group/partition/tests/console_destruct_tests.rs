@@ -22,7 +22,7 @@ fn request(number: u64, console: u64) -> HypercallRequest {
 }
 
 /// The answer with the console gate off: lv1 puts 0 in r3 and does
-/// nothing else [OFW-4.93 lv1 a:0x313070-0x313090], and the capture
+/// nothing else [OFW-4.93 lv1 a:0x313070-0x313090]. The capture
 /// `tests/micro/lv1_console_gate` reads the gate off at 4.93. CellGov
 /// puts 0 in r4 to r10, which lv1 does not set.
 fn gate_off_answer() -> HypercallDisposition {

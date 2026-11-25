@@ -29,7 +29,8 @@ fn read(lpar: u64, second: &[u8], index: u64) -> HypercallRequest {
     }
 }
 
-/// A firmware the psdevwiki dump's values are served to.
+/// A firmware that the hypervisor answers with the psdevwiki dump's
+/// values.
 const DUMP_FW: Option<&str> = Some("1.50");
 
 /// The repository dump [PS3DEVWIKI-REPO s:3.41_GameOS] gives

@@ -5,15 +5,15 @@
 //! - what lv1 writes when it connects a port to a plug.
 //!
 //! The facts come from the 4.93 `lv1.self`, decrypted offline and read
-//! with `cellgov dev disasm`. No byte of lv1 is committed; these facts
-//! are.
+//! with `cellgov dev disasm`. The repository holds no byte of lv1, only
+//! these facts.
 //!
 //! The handler [OFW-4.93 lv1 a:0x2E9DA8] reads five inputs and no other
 //! register:
 //! - r3 is a logical PPE id;
 //! - r4 is a hardware thread of that PPE;
 //! - r5 is a plug number of that thread;
-//! - r6 is an event receive port id;
+//! - r6 is the id of an event receive port;
 //! - r7 must be 0.
 //!
 //! The handler returns the r3 that it builds in r31

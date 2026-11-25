@@ -2,7 +2,6 @@
 //!
 //! Each cost is the console's round trip for the call less the cycles of
 //! the kernel's own path to it. Each registration carries its own cost.
-//! No capture measures one yet, so every number is untimed.
 
 use cellgov_time::GuestTicks;
 

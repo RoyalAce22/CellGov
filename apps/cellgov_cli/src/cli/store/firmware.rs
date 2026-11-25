@@ -11,7 +11,9 @@ use crate::cli::parse::FirmwareInstallArgs;
 const EXIT_KERNEL_OMITTED: i32 = crate::cli::exit_codes::command_specific(42);
 
 #[cfg(feature = "decrypt")]
-use cellgov_install::firmware_install::{FirmwareInstallError, ManifestOmission, PackageSummary};
+use cellgov_install::firmware_install::{
+    FirmwareInstallError, KernelCompletionOutcome, ManifestOmission, PackageSummary, SelfCompletion,
+};
 #[cfg(feature = "decrypt")]
 use cellgov_install::progress::FIRMWARE_TASK;
 #[cfg(feature = "decrypt")]
@@ -38,8 +40,8 @@ pub(crate) fn install(
 }
 
 /// Install system software from a PUP into `store`, or with
-/// `--kernel-only` add the kernel to the entry the PUP already
-/// installed.
+/// `--kernel-only` add the kernel and the hypervisor to the entry the
+/// PUP already installed.
 #[cfg(feature = "decrypt")]
 pub(crate) fn install(
     args: &FirmwareInstallArgs,
@@ -54,7 +56,8 @@ pub(crate) fn install(
 
     if args.kernel_only {
         println!(
-            "cellgov: unpacking the kernel from {} ({:.1} MB) into its installed entry",
+            "cellgov: unpacking the kernel and the hypervisor from {} ({:.1} MB) into its \
+             installed entry",
             args.path.display(),
             megabytes(pup_data.len()),
         );
@@ -77,11 +80,8 @@ pub(crate) fn install(
             outcome.entry_dir.display()
         );
         println!("  record {}", outcome.record_path.display());
-        if outcome.replaced {
-            println!("  the kernel already stored there was written over");
-        }
-        report_core_os(&outcome.core_os);
-        let status = kernel_only_exit_status(&outcome.core_os);
+        report_completion(&outcome);
+        let status = kernel_only_exit_status(&outcome.kernel);
         return Ok(CommandExitCode::new(status));
     }
 
@@ -139,12 +139,63 @@ pub(crate) fn install(
     Ok(CommandExitCode::SUCCESS)
 }
 
+/// The exit status of a `--kernel-only` pass: `0` when it wrote the kernel.
+///
+/// An entry that keeps a kernel from an earlier pass still gets
+/// `EXIT_KERNEL_OMITTED`.
 #[cfg(feature = "decrypt")]
-fn kernel_only_exit_status(core_os: &CoreOsRecord) -> i32 {
-    if core_os.kernel.is_some() {
+fn kernel_only_exit_status(kernel: &SelfCompletion) -> i32 {
+    if kernel.written() {
         0
     } else {
         EXIT_KERNEL_OMITTED
+    }
+}
+
+/// Report what a `--kernel-only` pass did with the kernel and hypervisor.
+#[cfg(feature = "decrypt")]
+fn report_completion(outcome: &KernelCompletionOutcome) {
+    let kernel = completion_lines("kernel", &outcome.kernel, kernel_line(&outcome.core_os));
+    let lv1 = completion_lines(
+        "hypervisor",
+        &outcome.lv1,
+        hypervisor_line(&outcome.core_os),
+    );
+    for line in kernel.into_iter().chain(lv1) {
+        print_report_line(line);
+    }
+}
+
+/// The report lines for one SELF that a `--kernel-only` pass handled.
+///
+/// `block_line` is the line the recorded block gives the SELF. The
+/// caller prints an `Ok` line to stdout and an `Err` line to stderr.
+#[cfg(feature = "decrypt")]
+fn completion_lines(
+    what: &str,
+    completion: &SelfCompletion,
+    block_line: Result<String, String>,
+) -> Vec<Result<String, String>> {
+    match completion {
+        SelfCompletion::Written | SelfCompletion::Absent => vec![block_line],
+        SelfCompletion::Replaced => vec![
+            block_line,
+            Ok(format!(
+                "  the {what} already stored there was written over"
+            )),
+        ],
+        SelfCompletion::Kept { reason } => vec![Err(format!(
+            "  {what} not unpacked: {reason}; the {what} already stored there is kept, and the \
+             record still names it"
+        ))],
+    }
+}
+
+#[cfg(feature = "decrypt")]
+fn print_report_line(line: Result<String, String>) {
+    match line {
+        Ok(line) => println!("{line}"),
+        Err(line) => eprintln!("{line}"),
     }
 }
 
@@ -191,21 +242,25 @@ pub(super) fn report_omissions(omissions: &[ManifestOmission]) {
 /// there is none, and the stored hypervisor or why there is none.
 #[cfg(feature = "decrypt")]
 pub(super) fn report_core_os(core_os: &CoreOsRecord) {
+    print_report_line(kernel_line(core_os));
+    print_report_line(hypervisor_line(core_os));
+}
+
+/// The report line for the kernel: `Ok` when the block names a stored
+/// kernel, `Err` when it names none.
+#[cfg(feature = "decrypt")]
+fn kernel_line(core_os: &CoreOsRecord) -> Result<String, String> {
     match (&core_os.kernel, &core_os.omission) {
-        (Some(kernel), _) => println!(
+        (Some(kernel), _) => Ok(format!(
             "  kernel {} (as stored, sha256 {}; {} in the CoreOS table)",
             kernel.path,
             kernel.stored_sha256.to_hex(),
             plural(core_os.files.len(), "file", "files"),
-        ),
-        (None, Some(why)) => {
-            eprintln!("  kernel not unpacked (the dev_flash tree is unaffected): {why}");
-        }
-        (None, None) => eprintln!("  kernel not unpacked (the dev_flash tree is unaffected)"),
-    }
-    match hypervisor_line(core_os) {
-        Ok(line) => println!("{line}"),
-        Err(line) => eprintln!("{line}"),
+        )),
+        (None, Some(why)) => Err(format!(
+            "  kernel not unpacked (the dev_flash tree is unaffected): {why}"
+        )),
+        (None, None) => Err("  kernel not unpacked (the dev_flash tree is unaffected)".to_string()),
     }
 }
 
@@ -276,3 +331,7 @@ mod kernel_only_exit_tests;
 #[cfg(all(test, feature = "decrypt"))]
 #[path = "tests/hypervisor_line_tests.rs"]
 mod hypervisor_line_tests;
+
+#[cfg(all(test, feature = "decrypt"))]
+#[path = "tests/completion_lines_tests.rs"]
+mod completion_lines_tests;

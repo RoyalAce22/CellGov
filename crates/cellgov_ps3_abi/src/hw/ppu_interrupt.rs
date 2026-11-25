@@ -74,8 +74,7 @@ pub const VECTOR_SYSTEM_CALL: u64 = 0xC00;
 /// [CBE-Handbook p:258 s:9.5.15] The PPE's VXU unavailable interrupt is at 0xF20.
 pub const VECTOR_VXU_UNAVAILABLE: u64 = 0xF20;
 
-/// The real addresses where an interrupt can enter: every interrupt
-/// vector, of the architecture or of the implementation, lies in them.
+/// The real addresses that hold every architected and implementation-specific interrupt vector.
 ///
 /// [PPC-Book3 p:31 s:4.2.7] Real page 0 past its first 256 bytes holds the interrupt vectors, and the two real pages at 0x1000 are for implementation-specific use.
 /// [CBE-Handbook p:261 s:9.5.18] The PPE's thermal management interrupt vector is at 0x1800, in those pages.

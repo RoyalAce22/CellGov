@@ -104,7 +104,6 @@ pub fn page_table_storage() -> Region {
     )
 }
 
-/// Whether `storage` holds the page table of `space`.
 pub(crate) fn holds_table(storage: &GuestMemory, space: &AddressSpace) -> bool {
     storage.holds(PAGE_TABLE_STORAGE_BASE, htab_size(space.htab_size_exp))
 }
@@ -153,16 +152,18 @@ impl NoSpace {
     }
 }
 
-/// The address space that the vas id in r3 of `request` names, or why
-/// the call names none.
+/// The address space that the vas id in r3 of `request` names.
 ///
-/// A vas id of 0 names the selected address space. Before a selection
-/// the caller is on the partition's default address space, and lv1
-/// answers [`HTAB_NO_ENTRY_R3`].
+/// A vas id of 0 names the selected address space.
 ///
-/// The call is a refusal in these cases:
-/// - no lv1 image read shows the handlers for `firmware`;
-/// - the hypervisor did not construct the address space.
+/// # Errors
+///
+/// - [`NoSpace::Lv1NoEntry`] for a vas id of 0 before a selection: the
+///   caller is on the partition's default address space.
+/// - [`NoSpace::Refused`] when no lv1 image read shows the handlers for
+///   `firmware`.
+/// - [`NoSpace::Refused`] when the hypervisor did not construct the
+///   address space.
 pub(crate) fn named_space<'a>(
     request: &HypercallRequest,
     firmware: Option<&str>,
@@ -255,13 +256,16 @@ struct Page {
     large_page_bits: u64,
 }
 
-/// The page that doubleword 1 `doubleword1` maps in `space`, for a
-/// doubleword 0 `doubleword0` that passed the handler's checks, or the
-/// r3 of lv1's worker for a large page that it refuses.
+/// The page that `doubleword1` maps in `space`.
 ///
-/// The page's address is bits 2:51 of doubleword 1. A large page takes
+/// `doubleword0` passed the handler's checks. The page's address is bits
+/// 2:51 of doubleword 1. A large page takes
 /// its size from the address space's page shifts, and its address loses
 /// the large page bits [OFW-4.93 lv1 a:0x2D38D8-0x2D3938].
+///
+/// # Errors
+///
+/// Returns the r3 of lv1's worker for a large page that it refuses.
 fn page_of(space: &AddressSpace, doubleword0: u64, doubleword1: u64) -> Result<Page, u64> {
     let address = doubleword1 & PTE_RPN;
     if !large(doubleword0) {
@@ -288,9 +292,9 @@ fn page_of(space: &AddressSpace, doubleword0: u64, doubleword1: u64) -> Result<P
     })
 }
 
-/// The r3 of the handler's checks of doubleword 0 `doubleword0` and
-/// doubleword 1 `doubleword1`, or `None` when both pass. See
-/// [`WRITE_HTAB_INDEX_R3`] for the order.
+/// The r3 of the handler's checks of `doubleword0` and `doubleword1`, or `None` when both pass.
+///
+/// See [`WRITE_HTAB_INDEX_R3`] for the order.
 fn doubleword_check(doubleword0: u64, doubleword1: u64) -> Option<u64> {
     let full_field = doubleword1 & LARGE_PAGE_FIELD == LARGE_PAGE_FIELD;
     if doubleword1 & WRITE_HTAB_DOUBLEWORD1_RESERVED != 0 || (full_field && large(doubleword0)) {
@@ -315,9 +319,10 @@ fn group_doublewords0(storage: &GuestMemory, first: u64) -> Option<Vec<(u64, u64
     )
 }
 
-/// Whether a valid doubleword 0 `doubleword0` written at entry `index`
-/// duplicates an entry of `space`'s table, or `None` when no storage
-/// holds the two groups. See [`duplicates`].
+/// Whether a valid `doubleword0` at entry `index` duplicates an entry of `space`'s table.
+///
+/// The value is `None` when no storage holds the two groups. See
+/// [`duplicates`].
 fn duplicate(
     storage: &GuestMemory,
     space: &AddressSpace,
@@ -407,12 +412,11 @@ fn real_mode_page(firmware: &str, address: u64, end: Option<u64>) -> Result<u64,
     Ok(address)
 }
 
-/// Hypercall 1: writes the entry at the index in r4, from doubleword 0
-/// in r5 and doubleword 1 in r6, with r4 to r10 cleared.
+/// Hypercall 1: writes the entry at index r4 from doubleword 0 in r5 and doubleword 1 in r6.
 ///
-/// The stored doubleword 1 holds the page's real address and forces WIMG
-/// to M; see [`stored_doubleword1`]. The answer writes the 16 bytes of
-/// the entry to the storage.
+/// The answer clears r4 to r10. The stored doubleword 1 holds the page's
+/// real address and forces WIMG to M; see [`stored_doubleword1`]. The
+/// answer writes the 16 bytes of the entry to the storage.
 ///
 /// A call that fails one of lv1's checks gets lv1's own r3, with r4 to
 /// r10 cleared. See [`WRITE_HTAB_INDEX_R3`] for the checks and their
@@ -484,11 +488,10 @@ pub(crate) fn write_entry(
     HypercallDisposition::Answered(answer)
 }
 
-/// Hypercall 122: maps the page table of the address space that the vas
-/// id in r3 names, and gives the mapping's logical partition address in
-/// r4.
+/// Hypercall 122: maps the page table of the address space that r3 names.
 ///
-/// The mapping takes the next value of the partition's region counter in
+/// The answer gives the mapping's logical partition address in r4. The
+/// mapping takes the next value of the partition's region counter in
 /// `memory`, as an allocation does. Its address encodes the page table's
 /// size exponent. The answer carries the mapping, and the hypervisor
 /// keeps it. r5 to r10 get 0: lv1 leaves data from its own stack there,

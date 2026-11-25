@@ -386,7 +386,8 @@ pub trait ExecutionUnit {
     /// page sizes that `lb` selects, as the hypervisor loads them, and
     /// returns whether the thread took them.
     ///
-    /// `lb` is HID6\[LB\] as a 4-bit value, LB bit 0 most significant.
+    /// `lb` is HID6\[LB\] as a 4-bit value, with LB bit 0 the most
+    /// significant.
     /// The thread keeps its real mode limit and offset. A thread refuses
     /// values that name no page table or a reserved page size. A unit
     /// with no translation registers takes nothing.

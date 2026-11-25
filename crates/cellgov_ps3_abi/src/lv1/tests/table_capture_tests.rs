@@ -1,6 +1,3 @@
-//! The live 4.93 table map matches the committed console capture row for
-//! row.
-
 use super::{
     table_entry, table_site, TableEntry, HYPERCALL_TABLE_ENTRIES, LIVE_TABLE_CAPTURE,
     LIVE_TABLE_FIRMWARE,

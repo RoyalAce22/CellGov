@@ -76,18 +76,18 @@ pub(crate) struct PlugState<'a> {
     pub storage: &'a GuestMemory,
 }
 
-/// Hypercall 12: connects the port r6 to plug r5 of thread r4 of the
-/// logical PPE that r3 names, with r4 to r10 cleared.
+/// Hypercall 12: connects the port r6 to plug r5 of thread r4 of the logical PPE r3.
 ///
-/// The answer carries the port with its connection and its plug, and the
-/// hypervisor keeps it. For a thread with a registered bitmap, the answer
-/// writes 0 to the status doubleword that holds the plug's bit:
+/// The answer clears r4 to r10. It carries the port with its connection
+/// and its plug, and the hypervisor keeps it. For a thread with a
+/// registered bitmap, the answer writes 0 to the status doubleword that
+/// holds the plug's bit:
 /// - lv1 clears the bit in the thread's status shadow and stores the
 ///   shadow doubleword there.
 /// - The shadow is 0, because no call that CellGov answers raises a
 ///   plug's bit.
 /// - A port's pending byte is 0 for the same reason, so lv1 takes the
-///   clear path and not the raise path.
+///   clear path.
 ///
 /// A call that fails one of lv1's checks gets lv1's own r3, with r4 to
 /// r10 cleared. See [`IRQ_PLUG_PPE_ID_R3`] for the checks and their

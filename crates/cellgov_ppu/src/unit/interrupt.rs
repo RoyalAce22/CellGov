@@ -8,9 +8,9 @@
 //! - the external and decrementer interrupts, between two instructions.
 //!
 //! `sc` with LEV = 1 yields a hypercall in either processor state.
-//! Interrupt entry ends the batch. The next
-//! batch follows the new MSR, whose IR and DR are 0. A thread with no
-//! supervisor registers keeps the terminal fault of every interrupt.
+//! Interrupt entry ends the batch. The next batch follows the new MSR,
+//! whose IR and DR are 0. A thread with no supervisor registers keeps
+//! the terminal fault of every interrupt.
 
 use cellgov_effects::Effect;
 use cellgov_exec::{

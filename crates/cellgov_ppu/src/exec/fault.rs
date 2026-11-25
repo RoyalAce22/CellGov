@@ -154,7 +154,7 @@ pub enum PpuInterrupt {
     /// For this variant the thread stops, and neither LV2 nor CellGov's
     /// hypervisor receives a request. Such a thread runs a title with no
     /// kernel. On the console, lv1's vector answers the call in r3
-    /// (`cellgov_ps3_abi::lv1::dispatch`) and the thread continues;
+    /// (`cellgov_ps3_abi::lv1::dispatch`), and the thread continues.
     /// CellGov does not model that answer for such a thread.
     ///
     /// [PPC-Book3 p:12 s:2.3.1] `sc` with LEV = 1 invokes the hypervisor, even from problem state, and the architecture calls that a programming error.

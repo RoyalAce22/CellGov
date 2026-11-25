@@ -5,13 +5,13 @@
 //! - the logical PPE id of the GameOS partition.
 //!
 //! The handler facts come from the 4.93 `lv1.self`, decrypted offline
-//! and read with `cellgov dev disasm`. No byte of lv1 is committed;
-//! these facts are.
+//! and read with `cellgov dev disasm`. The repository holds no byte of
+//! lv1, only these facts.
 //!
 //! The handler returns these registers:
 //! - r3 is 0, `LV1_SUCCESS` [OFW-4.93 lv1 a:0x2E9024].
 //! - r4 is the doubleword at +72 of the logical PPE object that the
-//!   calling thread's lv1 context names at HSPRG0 - 0x67F0. The handler
+//!   caller's lv1 context names at HSPRG0 - 0x67F0. The handler
 //!   loads it at [OFW-4.93 lv1 a:0x2E8FA8-0x2E8FC0] and stores it in the return slot
 //!   of r4, HSPRG0 - 0x6A38, at [OFW-4.93 lv1 a:0x2E8FC4].
 //! - r5 to r10 are 0. The handler writes no other return slot, and the
@@ -79,10 +79,12 @@ pub const GAME_OS_PU_ID_NODE: RepositoryKey = RepositoryKey {
     n4: 0,
 };
 
-/// The console capture of the 4.93 kernel's two per-thread records, on
-/// the reference console, relative to the workspace root. Each record
-/// holds the r4 of the kernel's boot `get_logical_ppe_id` call at +0x08.
-/// Its README gives the method and the analysis.
+/// The console capture of the 4.93 kernel's two per-thread records.
+///
+/// The path is relative to the workspace root, and the capture is of the
+/// reference console. Each record holds the r4 of the kernel's boot
+/// `get_logical_ppe_id` call at +0x08. Its README gives the method and
+/// the analysis.
 pub const LOGICAL_PPE_RECORD_CAPTURE: &str =
     "tests/micro/lv2_logical_ppe_record/ps3/cech20-cex-493";
 

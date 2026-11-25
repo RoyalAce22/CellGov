@@ -16,8 +16,7 @@ fn an_address_space_state_with_no_space_adds_no_term() {
     assert_eq!(AddressSpaceState::default().sync_term(), 0);
 }
 
-/// The list holds every nonzero lane of a state with one address space
-/// that is selected.
+/// The list holds every nonzero lane of a state with one selected address space.
 #[test]
 fn address_space_sync_term_lane_vector_golden() {
     let mut spaces = AddressSpaceState::default();

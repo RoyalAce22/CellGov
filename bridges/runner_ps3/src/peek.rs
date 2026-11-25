@@ -84,8 +84,8 @@ pub enum PeekError {
 /// What one peek reads: words of one width in one space, each page
 /// read `reads` times.
 ///
-/// The fields are private, so [`PeekPlan::new`] is the only way to
-/// make a plan, and [`read`] can index each page by every address.
+/// [`PeekPlan::new`] is the only constructor and checks every field, so
+/// [`read`] can index each page by every address.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeekPlan {
     /// The memory.

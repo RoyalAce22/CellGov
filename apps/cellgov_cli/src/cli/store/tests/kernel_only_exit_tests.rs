@@ -1,30 +1,17 @@
 use super::*;
-use cellgov_install::manifest::Sha256;
-use cellgov_install::store::KernelRecord;
-
-fn record(kernel: Option<KernelRecord>, omission: Option<&str>) -> CoreOsRecord {
-    CoreOsRecord {
-        kernel,
-        omission: omission.map(str::to_string),
-        lv1: None,
-        lv1_omission: None,
-        files: Vec::new(),
-    }
-}
 
 #[test]
-fn kernel_only_succeeds_only_when_the_record_holds_a_kernel() {
-    let kernel = KernelRecord {
-        path: "core_os/lv2_kernel.self".to_string(),
-        stored_sha256: Sha256([0; 32]),
-    };
-    assert_eq!(kernel_only_exit_status(&record(Some(kernel), None)), 0);
+fn kernel_only_succeeds_only_when_the_pass_wrote_the_kernel() {
+    assert_eq!(kernel_only_exit_status(&SelfCompletion::Written), 0);
+    assert_eq!(kernel_only_exit_status(&SelfCompletion::Replaced), 0);
     assert_eq!(
-        kernel_only_exit_status(&record(None, Some("no CORE_OS_PACKAGE.pkg"))),
+        kernel_only_exit_status(&SelfCompletion::Kept {
+            reason: "CORE_OS_PACKAGE.pkg: no keyset opened it".to_string()
+        }),
         EXIT_KERNEL_OMITTED
     );
     assert_eq!(
-        kernel_only_exit_status(&record(None, None)),
+        kernel_only_exit_status(&SelfCompletion::Absent),
         EXIT_KERNEL_OMITTED
     );
 }

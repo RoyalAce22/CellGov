@@ -99,22 +99,24 @@ pub fn allocate_memory_checks_read(firmware: &str) -> bool {
         .any(|(fw, _)| *fw == firmware)
 }
 
-/// The largest size, in r3, that `allocate_memory` checks past. The
-/// worker builds it with `li r0, -1` and `clrldi r0, r0, 2`.
+/// The largest size, in r3, that passes the size check of
+/// `allocate_memory`. The worker builds it with `li r0, -1` and
+/// `clrldi r0, r0, 2`.
 pub const ALLOCATE_MEMORY_MAX_SIZE: u64 = 0x3FFF_FFFF_FFFF_FFFF;
 
-/// The smallest page size exponent, in r4, that `allocate_memory`
-/// checks past.
+/// The smallest page size exponent, in r4, that passes the check of
+/// `allocate_memory`.
 pub const ALLOCATE_MEMORY_PAGE_SIZE_EXP_MIN: u64 = 12;
 
-/// The largest page size exponent, in r4, that `allocate_memory` checks
-/// past. The worker compares r4 - 12 with 49, unsigned.
+/// The largest page size exponent, in r4, that passes the check of
+/// `allocate_memory`. The worker compares r4 - 12 with 49, unsigned.
 pub const ALLOCATE_MEMORY_PAGE_SIZE_EXP_MAX: u64 = 61;
 
-/// The largest value of r5 that `allocate_memory` checks past.
+/// The largest value of r5 that passes the check of `allocate_memory`.
 pub const ALLOCATE_MEMORY_R5_MAX: u64 = 1;
 
-/// The flag bits, in r6, that `allocate_memory` checks past: the low 4.
+/// The flag bits, in r6, that pass the check of `allocate_memory`: the
+/// low 4.
 pub const ALLOCATE_MEMORY_FLAGS_MASK: u64 = 0xF;
 
 /// The r3 of `allocate_memory` for a size above

@@ -1,4 +1,4 @@
-//! The GPU hypercalls. No call of the group is answered yet.
+//! The GPU hypercalls. The group answers no call.
 
 use super::state::StateChange;
 use super::table::Group;
@@ -11,7 +11,7 @@ pub(crate) const GROUP: Group = Group {
     hashed_surfaces: &[],
 };
 
-/// The GPU group's state. It holds nothing yet.
+/// The GPU group's state. It holds nothing.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GpuState {}
 
@@ -21,13 +21,13 @@ impl GpuState {
         match change {}
     }
 
-    /// The sync-state terms of the state: none yet.
+    /// The sync-state terms of the state: none.
     pub fn sync_term(&self) -> u128 {
         0
     }
 }
 
-/// A change to the GPU group's state. No answer carries one yet.
+/// A change to the GPU group's state. No answer carries one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GpuChange {}
 

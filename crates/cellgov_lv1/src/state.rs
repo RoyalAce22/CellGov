@@ -34,7 +34,7 @@ pub struct HypercallWitness {
 ///
 /// The firmware version selects the values that the repository reads,
 /// the allocations and the address space calls answer. The answers
-/// depend on the group states, so they are guest state, and
+/// depend on the group states, so the group states are guest state, and
 /// [`Self::sync_term`] hashes them. No answer depends on the records.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Hypervisor {
@@ -53,8 +53,8 @@ impl Hypervisor {
         Self::default()
     }
 
-    /// Makes the hypervisor answer repository reads for the firmware
-    /// version `version`, such as `"4.93"`.
+    /// Makes the hypervisor answer for the firmware version `version`,
+    /// such as `"4.93"`.
     pub fn set_firmware(&mut self, version: &str) {
         self.firmware = Some(version.to_string());
     }

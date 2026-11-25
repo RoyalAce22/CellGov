@@ -150,8 +150,8 @@ fn a_plan_reads_each_page_once_however_many_words_share_it() {
     );
 }
 
-/// A console that serves peek pages from a table, a different salt on
-/// each read of a page in `drift`, and records every path.
+/// A console that serves peek pages from a table, with a different salt
+/// on each read of a page in `drift`, and records every path.
 struct PageConsole {
     pages: BTreeMap<String, u64>,
     drift: Vec<u64>,

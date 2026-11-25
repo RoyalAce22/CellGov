@@ -165,10 +165,11 @@ impl Runtime {
     /// lv1 loads them on the calling thread.
     ///
     /// The hypervisor loads only values that name its page table storage,
-    /// which a thread with supervisor registers takes. A unit with none,
-    /// whose `sc` with LEV = 1 also reaches the hypervisor, refuses them:
-    /// the runtime then logs an invariant break, and the hypervisor's
-    /// selection and the caller's r3 stand.
+    /// which a thread with supervisor registers takes. A unit with no
+    /// supervisor registers can also reach the hypervisor through `sc`
+    /// with LEV = 1, and it refuses them. The runtime then logs an
+    /// invariant break, and the hypervisor's selection and the caller's
+    /// r3 stand.
     ///
     /// # Panics
     ///

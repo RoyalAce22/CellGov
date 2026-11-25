@@ -23,10 +23,10 @@ impl PpuExecutionUnit {
     /// - the text it fetched;
     /// - the R and C writes of its table searches.
     ///
-    /// The stores and the text reach the effect list at the block boundary
-    /// rather than per instruction, so the two orders a write to the text
-    /// region and a fetch of it can take are held apart without a packet
-    /// per fetch. A thread that translates publishes them at real
+    /// The stores and the text reach the effect list once, at the block
+    /// boundary. That keeps apart the two orders a write to the text
+    /// region and a fetch of it can take, with no packet per fetch. A
+    /// thread that translates publishes the stores and the text at real
     /// addresses.
     pub(super) fn close_block(&mut self, effects: &mut Vec<Effect>) {
         let translates = self.translates();

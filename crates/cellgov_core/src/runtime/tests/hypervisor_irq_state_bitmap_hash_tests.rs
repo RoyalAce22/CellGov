@@ -17,7 +17,8 @@ fn fresh() -> Runtime {
 }
 
 /// Registers the bitmap at `bitmap` for thread 0 of logical PPE 1
-/// through `rt`'s hypervisor, and checks that the call is answered.
+/// through `rt`'s hypervisor, and checks that the hypervisor answers the
+/// call.
 fn register(rt: &mut Runtime, bitmap: u64) {
     let mut inputs = [0; 8];
     inputs[..3].copy_from_slice(&[1, 0, bitmap]);

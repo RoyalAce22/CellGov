@@ -25,11 +25,17 @@ pub enum ExitCode {
     /// The command line did not parse, or named an input that is missing
     /// or unreadable.
     Usage = 1,
-    /// The runner refused before changing the console: a lease, a stale
-    /// result, a profile mismatch, an existing output directory, a hot
-    /// console, a full `/dev_hdd0`, a probe whose PPU relink holds a
-    /// UART or gamepad call number, a wait in the console queue that ran
-    /// out, or a peek of a range the crash ledger lists.
+    /// The runner refused before changing the console, for one of these:
+    ///
+    /// - a lease;
+    /// - a stale result;
+    /// - a profile mismatch;
+    /// - an existing output directory;
+    /// - a hot console;
+    /// - a full `/dev_hdd0`;
+    /// - a probe whose PPU relink holds a UART or gamepad call number;
+    /// - a wait in the console queue that ran out;
+    /// - a peek of a range the crash ledger lists.
     Refused = 2,
     /// The console did not answer as the protocol requires, or is down.
     Transport = 3,

@@ -9,7 +9,7 @@ use super::spec::{Column, ColumnKind, TableSpec};
 /// The cell that stands for the SQL NULL in a nullable column.
 pub const NONE: &str = "none";
 
-/// Why the loader refuses a table text.
+/// Why the loader refuses a table text, or [`checked_rows`] a parsed table.
 ///
 /// Where a variant carries them:
 ///
@@ -378,15 +378,14 @@ pub fn parse(spec: &'static TableSpec, text: &str) -> Result<Table, ArchiveError
 
 /// The rows of `table`, checked against `spec`.
 ///
-/// The check is the one [`parse`] makes on each row: the header, the
-/// cell count and the kind of each cell. It does not check the key
-/// order.
+/// It makes the header and row checks of [`parse`], and does not check
+/// the key order.
 ///
 /// # Errors
 ///
 /// - [`ArchiveError::Header`] if the columns of `table` are not those of `spec`.
 /// - [`ArchiveError::CellCount`] if a row has the wrong number of cells.
-/// - A cell variant of [`ArchiveError`] if a cell does not have its column's kind.
+/// - A cell variant of [`ArchiveError`] if a cell breaks a rule of its column.
 pub fn checked_rows<'t>(
     spec: &'static TableSpec,
     table: &'t Table,
@@ -416,7 +415,7 @@ pub fn checked_rows<'t>(
 
 /// One row that [`checked_rows`] checked against its spec.
 ///
-/// Each accessor takes the index of a column of that spec. It returns:
+/// Each accessor takes the index of a column of that spec, and refuses with:
 ///
 /// - [`ArchiveError::BadCell`] if the cell does not read as the accessor's kind;
 /// - [`ArchiveError::CellCount`] if the spec has no column at the index.

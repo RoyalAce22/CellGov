@@ -1,9 +1,9 @@
 //! The statuses lv1 returns for a `storage_write` (hypercall 246) that
-//! it refuses, read from the 4.93 lv1.
+//! it refuses.
 //!
 //! The facts come from the 4.93 `lv1.self`, decrypted offline and
-//! read with `cellgov dev disasm`. No byte of lv1 is committed; these
-//! facts are. The path of a write:
+//! read with `cellgov dev disasm`. The repository holds no byte of lv1,
+//! only these facts. The path of a write:
 //! 1. The handler, at [OFW-4.93 lv1 a:0x308A08] in the live table, calls the storage
 //!    write core at [OFW-4.93 lv1 a:0x251340] and returns its r3.
 //! 2. The core checks the device id and the device's state. Then it
@@ -13,7 +13,7 @@
 //!    at [OFW-4.93 lv1 a:0x254CB4]. It checks the flags, the flash alignment and the
 //!    region. Then it calls the region access check at [OFW-4.93 lv1 a:0x25B5AC].
 //!
-//! These parts of the path were not read:
+//! No read of the image covers these parts of the path:
 //! - the order in which the write method makes its checks;
 //! - the write method of the eighth class (virtual table [OFW-4.93 lv1 a:0x35DD30],
 //!   method [OFW-4.93 lv1 a:0x25A664]), so the status for a read-only device is not
@@ -36,8 +36,9 @@ use super::status::{
 /// [PS3DEVWIKI-HV-RE s:Storage_bus_subsystem] The storage bus object holds a table of pointers to at most 7 storage device objects at offset 0xEE8.
 pub const STORAGE_DEVICE_ID_MAX: u64 = 6;
 
-/// The device id of the notification pseudo-device, -1. The write core
-/// sends it down a path of its own.
+/// The device id of the notification pseudo-device, -1.
+///
+/// The write core takes a separate path for it.
 pub const STORAGE_NOTIFICATION_DEVICE_ID: u64 = u64::MAX;
 
 /// The status of a write to a device that does not exist:
@@ -61,12 +62,15 @@ pub const STORAGE_WRITE_RESERVED_FLAGS: u64 = 0xFFFF_FFF8_00FF_FFC1;
 
 /// The status of a write whose flags set a bit of
 /// [`STORAGE_WRITE_RESERVED_FLAGS`]: `LV1_ILLEGAL_PARAMETER_VALUE` (-17).
+///
 /// The shared write method returns it at [OFW-4.93 lv1 a:0x254EE0].
 pub const STORAGE_WRITE_BAD_FLAGS_STATUS: i64 = LV1_ILLEGAL_PARAMETER_VALUE;
 
 /// The device type of a flash device, which the shared write method
-/// reads through slot 37 of the device's virtual table. Linux
-/// `arch/powerpc/platforms/ps3/platform.h` names it `PS3_DEV_TYPE_STOR_FLASH`.
+/// reads through slot 37 of the device's virtual table.
+///
+/// Linux `arch/powerpc/platforms/ps3/platform.h` names it
+/// `PS3_DEV_TYPE_STOR_FLASH`.
 pub const STORAGE_FLASH_DEVICE_TYPE: u64 = 14;
 
 /// The bits of a flash write's start sector and sector count that must
@@ -74,19 +78,25 @@ pub const STORAGE_FLASH_DEVICE_TYPE: u64 = 14;
 pub const STORAGE_FLASH_ALIGNMENT_MASK: u64 = 0x1FF;
 
 /// The status of a flash write whose start sector or sector count sets a
-/// bit of [`STORAGE_FLASH_ALIGNMENT_MASK`]: -17. The shared write method
+/// bit of [`STORAGE_FLASH_ALIGNMENT_MASK`]: -17.
+///
+/// The shared write method
 /// makes this check from [OFW-4.93 lv1 a:0x254EA4-0x254EDC].
 pub const STORAGE_WRITE_FLASH_ALIGNMENT_STATUS: i64 = LV1_ILLEGAL_PARAMETER_VALUE;
 
 /// The status of a write to a region id that the device's region list
-/// does not hold: -6. The shared write method returns it at
+/// does not hold: -6.
+///
+/// The shared write method returns it at
 /// [OFW-4.93 lv1 a:0x254DC0] and [OFW-4.93 lv1 a:0x254E4C]. The region
 /// access check also returns it, at [OFW-4.93 lv1 a:0x25B6C8], when no
 /// region matches.
 pub const STORAGE_WRITE_NO_REGION_STATUS: i64 = LV1_NO_ENTRY;
 
-/// The flag bits that skip the region access check. With either bit
-/// set, the shared write method looks the partition up instead
+/// The flag bits that skip the region access check.
+///
+/// With either bit set, the shared write method searches for the
+/// partition instead
 /// [OFW-4.93 lv1 a:0x254D2C], and returns [`STORAGE_WRITE_DENIED_STATUS`] when the
 /// lookup fails.
 ///

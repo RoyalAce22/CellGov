@@ -1,8 +1,5 @@
-//! Small read-only diagnostic helpers: ASCII byte preview, raw-word
-//! fetch at a PC, region label lookup, longest-readable-prefix probe,
-//! HLE-index formatter, and the hypercall test for a syscall yield.
-//! Shared across the fault / exit / max-step formatters in sibling
-//! submodules and the boot step loop.
+//! Small read-only diagnostic helpers. The fault, exit and max-step
+//! formatters in sibling submodules and the boot step loop share them.
 
 use cellgov_mem::GuestMemory;
 
@@ -83,7 +80,7 @@ pub(crate) fn format_hle_idx(idx: u32) -> String {
 /// The `sc` of a hypercall has LEV = 1, and its r11 holds an LV1
 /// hypercall number.
 ///
-/// [PPC-Book3 p:65 s:5.5] A System Call interrupt sets MSR[HV] when LEV = 1.
+/// [PPC-Book3 p:65 s:5.5] A System Call interrupt sets MSR\[HV\] when LEV = 1.
 pub(crate) fn is_hypercall(result: &cellgov_exec::ExecutionStepResult) -> bool {
     result.local_diagnostics.syscall_lev == Some(1)
 }

@@ -187,8 +187,8 @@ fn run(number: u64, lev: u8, supervisor: bool) -> Records {
     }
 }
 
-/// The refusal the hypervisor records for a hypercall `number` from the
-/// one unit at [`SC_PC`]: a runtime with no firmware answers none.
+/// Whether the hypervisor refused hypercall `number` from the `sc` at
+/// [`SC_PC`]. A runtime with no firmware answers no hypercall.
 fn refused(number: u64, records: &Records) -> bool {
     matches!(
         records.refusal,

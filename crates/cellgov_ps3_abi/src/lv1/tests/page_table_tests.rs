@@ -1,6 +1,3 @@
-//! The page table call facts hold lv1's status marks, entry layout and
-//! register loads.
-
 use super::*;
 use crate::hw::ppu_mmu::{large_page_log2, PTE_C, PTE_G, PTE_I, PTE_N, PTE_PP, PTE_R};
 use crate::lv1::status::{

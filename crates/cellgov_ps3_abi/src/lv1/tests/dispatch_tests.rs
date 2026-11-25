@@ -1,6 +1,3 @@
-//! The r3 values read from lv1's sc vector hold the Linux-named statuses
-//! zero-extended.
-
 use super::super::status::{zero_extended, LV1_NOT_IMPLEMENTED, LV1_NO_PRIVILEGE};
 use super::{PROBLEM_STATE_DENIED_R3, UNKNOWN_HYPERCALL_R3};
 

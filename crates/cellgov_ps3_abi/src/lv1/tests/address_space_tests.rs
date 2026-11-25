@@ -1,7 +1,3 @@
-//! The virtual address space checks hold the Linux-named status in the
-//! low word and the failing argument's mark in the high word, and their
-//! bounds hold lv1's compare values.
-
 use super::*;
 use crate::lv1::status::{zero_extended, LV1_ILLEGAL_PARAMETER_VALUE};
 use crate::lv1::table::{table_entry, TableEntry};

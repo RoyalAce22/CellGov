@@ -103,7 +103,7 @@ pub(crate) fn flush() -> HypercallDisposition {
 /// CellGov does not model that data. The kernel reads r3 alone.
 ///
 /// The call is a refusal at a firmware where no console capture shows the
-/// gate off. Each such capture needs the lv1 worker read.
+/// gate off.
 pub(crate) fn destruct(request: &HypercallRequest, firmware: Option<&str>) -> HypercallDisposition {
     if !firmware.is_some_and(console_gate_off) {
         return HypercallDisposition::Refused(HypercallRefusal::UnmodelledInput {

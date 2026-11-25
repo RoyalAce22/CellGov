@@ -195,11 +195,13 @@ impl From<RunnerPs3Error> for Box<Failure> {
     }
 }
 
-/// Run `command`'s verb. `connect` opens the console a host names, and
-/// runs at most once; `sleep` waits between polls and between looks at
-/// the console queue; `now` stamps a capture; `may_reclaim` answers
-/// whether `--reclaim` may empty an occupied game directory, shown the
-/// directory and what it holds.
+/// Run `command`'s verb with these callbacks:
+///
+/// - `connect` opens the console a host names, and runs at most once;
+/// - `sleep` waits between polls and between looks at the console queue;
+/// - `now` stamps a capture;
+/// - `may_reclaim` answers whether `--reclaim` may empty an occupied
+///   game directory, shown the directory and what it holds.
 ///
 /// Every verb but `convert` loads the crash ledger's stop list and
 /// waits for its turn in [`Context::queue`] before it sends a request.
@@ -225,9 +227,9 @@ pub fn execute<C: ConsoleOps>(
 }
 
 /// Wait for this runner's turn in the host-wide queue, then read the
-/// console's status page. A page that does not answer
-/// [`HEALTH_TRIES`] reads marks the console down, so every waiter stops
-/// waiting.
+/// console's status page. When the page does not answer
+/// [`HEALTH_TRIES`] reads, the runner marks the console down, so every
+/// waiter stops waiting.
 ///
 /// # Errors
 ///
@@ -478,10 +480,12 @@ fn verb_line(
         .join(" ")
 }
 
-/// Every verb that talks to the console: wait for the queue, identify
-/// the console and check the claim, hold any verb but `cleanup` to the
-/// load interlock, then take the lease for any verb that changes the
-/// console.
+/// Every verb that talks to the console, in these steps:
+///
+/// 1. wait for the queue;
+/// 2. identify the console and check the claim;
+/// 3. hold any verb but `cleanup` to the load interlock;
+/// 4. take the lease for any verb that changes the console.
 fn on_console<C: ConsoleOps>(
     verb: Verb,
     command: &Command,

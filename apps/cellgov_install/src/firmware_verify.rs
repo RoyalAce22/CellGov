@@ -526,9 +526,10 @@ pub fn verify_firmware_entry<'a>(
     })
 }
 
-/// Holds the stored CoreOS SELF that `stored` names to its recorded
-/// digest, and counts the result into `report`. Returns the absence
-/// when the entry holds no such SELF.
+/// Holds the SELF that `stored` names to its recorded digest.
+///
+/// Counts a match or a divergence into `report`. Returns the absence
+/// when `stored` names no SELF.
 fn verify_core_os_self<'a>(
     entry_dir: &Path,
     stored: Result<&KernelRecord, KernelAbsence<'a>>,

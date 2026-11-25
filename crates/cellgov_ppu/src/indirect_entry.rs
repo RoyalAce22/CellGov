@@ -157,10 +157,11 @@ impl Bound<'_> {
 
     /// Adds each target of each relative jump table.
     ///
-    /// A table starts at a named address or at the word after a
-    /// `bcctr`. Each entry is a 32-bit offset from the table's start.
-    /// The run of entries ends at the first offset that reaches no word
-    /// of the code, or that reaches back into the run itself.
+    /// A table starts at a named address or at the word after a `bcctr`
+    /// that does not link. Each entry is a 32-bit offset from the
+    /// table's start. The run of entries ends at the first offset that:
+    /// - reaches no word of the code; or
+    /// - reaches back into the run itself.
     ///
     /// [PPC-Book1 p:25 s:2.4] `bcctr` branches to the address in CTR.
     fn jump_tables(&mut self) -> Result<(), CallerScanError> {
@@ -210,7 +211,7 @@ impl Bound<'_> {
     }
 }
 
-/// The constants that the code has built in its GPRs and in LR on one
+/// The constants that the code builds in its GPRs and in LR on one
 /// straight-line path.
 #[derive(Debug, Default)]
 struct Constants {

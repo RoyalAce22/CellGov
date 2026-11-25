@@ -19,8 +19,8 @@ fn fresh() -> Runtime {
 }
 
 /// Makes hypercall `number` with r3 to r5 `inputs` through `rt`'s
-/// hypervisor, over the page table storage, and checks that it is
-/// answered.
+/// hypervisor, over the page table storage, and checks that the
+/// hypervisor answers it.
 fn call(rt: &mut Runtime, number: u64, inputs: [u64; 3]) {
     let mut all = [0; 8];
     all[..3].copy_from_slice(&inputs);

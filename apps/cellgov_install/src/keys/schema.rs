@@ -194,14 +194,16 @@ impl Loader {
 
 /// The LV1 keyset a preserved `[[material]]` row of kind `lv1` holds.
 ///
-/// A catalog import before the LV1 class existed kept these rows as
-/// material only. The row's `erk` and `riv` components are the keyset,
-/// and its label is the version range that the builder parses. A row of
-/// another kind, one whose label is no version range, or one whose
-/// `erk` or `riv` is absent or of another length, gives `None` and stays
-/// material only. The catalog import files no LV1 keyset from a row
-/// with no version range, so its `keys.toml` reads back to the same
-/// vault.
+/// The row's `erk` and `riv` components are the keyset, and its label is
+/// the version range that the builder parses. These rows give `None` and
+/// stay material only:
+///
+/// - a row of another kind;
+/// - a row whose label is no version range;
+/// - a row whose `erk` or `riv` is absent or of another length.
+///
+/// The catalog import files no LV1 keyset from a row with no version
+/// range, so its `keys.toml` reads back to the same vault.
 fn lv1_material_key(kind: &str, label: &str, components: &[(String, Vec<u8>)]) -> Option<SelfKey> {
     if kind != "lv1" {
         return None;

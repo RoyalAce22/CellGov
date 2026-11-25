@@ -9,10 +9,10 @@
 //!
 //! CellGov answers each one only at a firmware whose lv1 shows the fact
 //! the answer needs, and stops the run elsewhere:
-//! - The entry count is read for each firmware of
+//! - CellGov reads the entry count for each firmware of
 //!   [`table::HYPERCALL_TABLE_SITES`].
-//! - Which entries are invalid, and which are problem-state callable,
-//!   is read only from the live 4.93 table.
+//! - CellGov reads which entries are invalid, and which are
+//!   problem-state callable, only from the live 4.93 table.
 
 use cellgov_ps3_abi::lv1::dispatch::{PROBLEM_STATE_DENIED_R3, UNKNOWN_HYPERCALL_R3};
 use cellgov_ps3_abi::lv1::table::{self, TableEntry, HYPERCALL_TABLE_ENTRIES};
@@ -73,8 +73,9 @@ pub(super) fn vector_disposition(
 ///
 /// An entry that holds the Invalid HV Call function gets
 /// [`table::INVALID_HYPERCALL_R3`] with r4 to r10 cleared. Every other
-/// call stops the run: lv1 has a handler for the number that CellGov
-/// does not model, or no capture gives the firmware's table.
+/// call stops the run, for one of these reasons:
+/// - lv1 has a handler for the number that CellGov does not model;
+/// - no capture gives the firmware's table.
 pub(super) fn null_backend(
     request: &HypercallRequest,
     firmware: Option<&str>,

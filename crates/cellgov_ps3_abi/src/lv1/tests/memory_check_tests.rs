@@ -1,6 +1,3 @@
-//! The allocate_memory check results hold the Linux-named status in the
-//! low word and the failing argument's mark in the high word.
-
 use super::{
     allocate_memory_checks_read, ALLOCATE_MEMORY_FLAGS_R3, ALLOCATE_MEMORY_PAGE_SIZE_EXP_MAX,
     ALLOCATE_MEMORY_PAGE_SIZE_EXP_MIN, ALLOCATE_MEMORY_PAGE_SIZE_EXP_R3, ALLOCATE_MEMORY_R5_R3,

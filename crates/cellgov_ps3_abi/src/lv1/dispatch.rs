@@ -5,9 +5,10 @@
 //! - the r0 of every return;
 //! - the CR7 of the return through `hrfid`, by firmware.
 //!
-//! These values have no public source. They were read from the
-//! firmware's own `lv1.self`, decrypted offline and disassembled with
-//! `cellgov dev disasm`. No byte of lv1 is committed; these facts are.
+//! These values have no public source. They come from the firmware's
+//! own `lv1.self`, decrypted offline and disassembled with
+//! `cellgov dev disasm`. The repository holds no byte of lv1, only these
+//! facts.
 //!
 //! The vector is at the system-call interrupt address 0x0c00. Its entry
 //! block is byte-identical in the lv1 images of 3.15
@@ -51,8 +52,8 @@ pub const UNKNOWN_HYPERCALL_R3: u64 = 0x0000_0000_FFFF_FFEC;
 /// lv1 checks `SRR1[PR]` on entry. The vector reads SRR1 (`mfspr r12,
 /// 27`) and extracts `MSR[PR]`, SRR1 bit 49 (`rldicl r12, r12, 50, 63`).
 /// When the caller is in problem state and the table entry's low bit is
-/// clear, the vector runs `li r3, -3` and `clrldi r3, r3, 32`. A
-/// problem-state call is answered, never stopped.
+/// clear, the vector runs `li r3, -3` and `clrldi r3, r3, 32`. The
+/// caller then continues with this r3.
 ///
 /// Addresses by firmware:
 /// - 4.93: SRR1 read [OFW-4.93 lv1 a:0x0f64], PR extract

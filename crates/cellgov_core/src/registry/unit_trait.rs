@@ -98,7 +98,7 @@ pub trait RegisteredUnit: 'static {
     /// [`ExecutionUnit::system_call_save_restore`].
     fn system_call_save_restore(&self) -> Option<SaveRestore>;
 
-    /// Give the thread a page table and large page sizes. See
+    /// Gives the thread a page table and large page sizes. See
     /// [`ExecutionUnit::load_page_table`].
     fn load_page_table(&mut self, sdr1: u64, lb: u8) -> bool;
 

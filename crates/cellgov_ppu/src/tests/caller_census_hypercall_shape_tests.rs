@@ -65,7 +65,7 @@ fn an_sc_block_after_blr_and_padding_resolves_its_number() {
     assert_eq!(sites(&words), [site(6, Some(231))]);
 }
 
-/// Shape B: `li r11` is 19 words above `sc`, past the old 12-word
+/// Shape B: `li r11` is 19 words above `sc`, past the LV2 scan's 12-word
 /// lookback [OFW-4.93 lv2_kernel a:0x8000000000119578-0x80000000001195c4].
 #[test]
 fn an_li_r11_hoisted_19_words_above_sc_resolves_its_number() {

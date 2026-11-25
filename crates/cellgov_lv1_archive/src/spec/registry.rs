@@ -45,7 +45,7 @@ pub fn manifest() -> Vec<ManifestRow> {
     rows
 }
 
-/// Lists every archive file in file-name order.
+/// The file names of [`manifest`], in its order.
 pub fn files() -> Vec<String> {
     manifest().into_iter().map(|row| row.file).collect()
 }

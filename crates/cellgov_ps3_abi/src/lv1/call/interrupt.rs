@@ -18,7 +18,7 @@ pub const CONFIGURE_IRQ_STATE_BITMAP: u64 = 11;
 /// - r3 is the logical PPE id.
 /// - r4 is the hardware thread.
 /// - r5 is the plug.
-/// - r6 is the event receive port id.
+/// - r6 is the id of the event receive port.
 /// - r7 is 0.
 ///
 /// Linux `arch/powerpc/platforms/ps3/interrupt.c`, `ps3_irq_plug_setup`,

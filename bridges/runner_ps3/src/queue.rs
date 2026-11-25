@@ -62,9 +62,9 @@ pub const LOG_FILE: &str = "log";
 ///
 /// It is `%ProgramData%\cellgov\console_queue` on Windows and
 /// `/tmp/cellgov-console-queue` elsewhere. Both are one directory for
-/// the whole machine. The temp directory is not used, because each
+/// the whole machine. The runner does not use the temp directory: each
 /// session or sandbox can set `TMP`, `TEMP` or `TMPDIR` differently, and
-/// then two runners would see two queues.
+/// then two runners see two queues.
 pub fn host_wide_dir() -> PathBuf {
     if cfg!(windows) {
         std::env::var_os("ProgramData")
@@ -78,7 +78,7 @@ pub fn host_wide_dir() -> PathBuf {
 }
 
 /// What a holder file says: the process, the user and machine, and the
-/// command line, which the caller has masked.
+/// command line, which the caller masks first.
 pub fn holder_text(who: &str, command_line: &str) -> String {
     format!("pid {}, {who}, running {command_line}", std::process::id())
 }
@@ -183,8 +183,8 @@ pub(crate) enum Position {
 }
 
 impl Queue {
-    /// The queue in `dir`. A waiter looks every `poll`, at least once a
-    /// millisecond, and gives up after `wait`.
+    /// The queue in `dir`. A waiter looks every `poll` and gives up after
+    /// `wait`. A `poll` under one millisecond counts as one millisecond.
     pub fn new(dir: PathBuf, wait: Duration, poll: Duration) -> Self {
         Self {
             dir,
@@ -392,8 +392,8 @@ fn holder_path(dir: &Path, number: u64) -> PathBuf {
     dir.join(format!("{number:020}.holder"))
 }
 
-/// Remove `path`. A file that does not remove is left for the next scan
-/// to find unlocked.
+/// Remove `path`. A file that does not remove stays, and the next scan
+/// finds it unlocked.
 fn remove_quietly(path: &Path) {
     let _removed = fs::remove_file(path);
 }
@@ -453,12 +453,12 @@ impl Ticket {
 
 impl Drop for Ticket {
     fn drop(&mut self) {
-        // Remove both files while the lock is held, then unlock. Locked,
-        // the number is this ticket's alone: no scan reclaims it and no
-        // joiner reuses it, so these removals never hit a later ticket's
-        // files. std opens files with delete sharing on Windows, so the
-        // removal succeeds with the handle open; a name that stays listed
-        // until the unlock does not open, and the scan counts it as live.
+        // Remove both files while this ticket holds its lock, then unlock.
+        // While the lock holds, no scan reclaims the number and no joiner
+        // reuses it, so these removals never hit a later ticket's files.
+        // On Windows, std opens files with delete sharing, so the removal
+        // succeeds with the handle open. A name that stays listed until
+        // the unlock does not open, and the scan counts it as live.
         remove_quietly(&self.holder_path());
         remove_quietly(&self.ticket_path());
         drop(self.lock.take());

@@ -1,5 +1,5 @@
 //! The device bus hypercalls: open and close, the MMIO and DMA regions,
-//! the I/O segments and the IOMMU entries. No call of the group is answered yet.
+//! the I/O segments and the IOMMU entries. The group answers no call.
 
 use super::state::StateChange;
 use super::table::Group;
@@ -12,7 +12,7 @@ pub(crate) const GROUP: Group = Group {
     hashed_surfaces: &[],
 };
 
-/// The device bus group's state. It holds nothing yet.
+/// The device bus group's state. It holds nothing.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeviceBusState {}
 
@@ -22,13 +22,13 @@ impl DeviceBusState {
         match change {}
     }
 
-    /// The sync-state terms of the state: none yet.
+    /// The sync-state terms of the state: none.
     pub fn sync_term(&self) -> u128 {
         0
     }
 }
 
-/// A change to the device bus group's state. No answer carries one yet.
+/// A change to the device bus group's state. No answer carries one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeviceBusChange {}
 

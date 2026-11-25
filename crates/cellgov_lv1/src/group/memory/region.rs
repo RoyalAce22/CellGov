@@ -2,7 +2,8 @@
 //! keeps for the partition.
 //!
 //! The hypervisor keeps each region it creates and the partition's region
-//! counter. Only `allocate_memory` reads them.
+//! counter. `allocate_memory` reads both, and `map_htab` reads the
+//! counter.
 
 use cellgov_mem::lanes::{self, LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::call::ALLOCATE_MEMORY;
@@ -116,19 +117,18 @@ impl MemoryState {
     }
 }
 
-/// The GameOS partition's memory past its real mode region at the
-/// firmware version `firmware`: `bi.rgntotal` less the real mode size.
+/// The GameOS partition's memory past its real mode region at `firmware`.
 ///
-/// Linux `ps3_mm_init` asks lv1 for this amount for its one high
-/// region. It is `None` when no repository source gives either value.
+/// It is `bi.rgntotal` less the real mode size, or `None` when no
+/// repository source gives either value. Linux `ps3_mm_init` asks lv1
+/// for this amount for its one high region.
 fn partition_pool(firmware: &str) -> Option<u64> {
     let bi = first_field(b"bi", 0);
     let total = game_os_node(bi, field(b"rgntotal", 0), 0, 0, firmware)?;
     total.checked_sub(real_mode_size(firmware)?)
 }
 
-/// The first value of the GameOS partition's repository node with the
-/// key words `n1` to `n4` at the firmware version `firmware`.
+/// The first value of the GameOS repository node with the key words `n1` to `n4` at `firmware`.
 fn game_os_node(n1: u64, n2: u64, n3: u64, n4: u64, firmware: &str) -> Option<u64> {
     let key = RepositoryKey {
         lpar: LPAR_ID_GAME_OS,
@@ -140,9 +140,9 @@ fn game_os_node(n1: u64, n2: u64, n3: u64, n4: u64, firmware: &str) -> Option<u6
     lookup(&key, firmware).map(|node| node.v1)
 }
 
-/// The size of the GameOS partition's real mode region at the firmware
-/// version `firmware`: `bi.pu.rm_size`, or `None` when no repository
-/// source gives it.
+/// The size of the GameOS partition's real mode region at `firmware`.
+///
+/// It is `bi.pu.rm_size`, or `None` when no repository source gives it.
 pub(crate) fn real_mode_size(firmware: &str) -> Option<u64> {
     let bi = first_field(b"bi", 0);
     let pu = game_os_node(bi, field(b"pu", 0), 0, 0, firmware)?;
@@ -158,13 +158,11 @@ fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDispositio
     })
 }
 
-/// The r3 that lv1's `allocate_memory` worker returns for the first of
-/// its argument checks that the call fails, or `None` when every check
-/// passes.
+/// The r3 of the first lv1 argument check that the call fails, or `None` when all pass.
 ///
 /// The arguments are the size in r3, the page size exponent in r4, r5
-/// and the flags in r6. The checks run in lv1's order; see
-/// [`ALLOCATE_MEMORY_SIZE_TOO_LARGE_R3`].
+/// and the flags in r6. The checks run in the order of lv1's
+/// `allocate_memory` worker; see [`ALLOCATE_MEMORY_SIZE_TOO_LARGE_R3`].
 fn lv1_argument_check(size: u64, exp: u64, r5: u64, flags: u64) -> Option<u64> {
     let exp_span = ALLOCATE_MEMORY_PAGE_SIZE_EXP_MAX - ALLOCATE_MEMORY_PAGE_SIZE_EXP_MIN;
     if size > ALLOCATE_MEMORY_MAX_SIZE {
@@ -182,12 +180,13 @@ fn lv1_argument_check(size: u64, exp: u64, r5: u64, flags: u64) -> Option<u64> {
     }
 }
 
-/// Hypercall 0: a new region of r3 bytes in 2^r4-byte pages, with its
-/// logical partition address in r4 and its memory unit id in r5.
+/// Hypercall 0: a new region of r3 bytes in 2^r4-byte pages.
 ///
-/// A call that fails one of lv1's argument checks gets lv1's own r3,
-/// with r4 to r10 cleared, at each firmware whose lv1 shows the checks.
-/// This assumes that lv1 writes no return slot on that path.
+/// The answer gives the region's logical partition address in r4 and
+/// its memory unit id in r5. A call that fails one of lv1's argument
+/// checks gets lv1's own r3, with r4 to r10 cleared, at each firmware
+/// whose lv1 shows the checks. This assumes that lv1 writes no return
+/// slot on that path.
 ///
 /// The address takes the partition's region counter, which starts at the
 /// firmware's boot value. The answer carries the region, and the

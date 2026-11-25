@@ -13,8 +13,8 @@
 //!   none, never both and never neither.
 //! - Every string a consumer joins onto a path -- `store_path`, the
 //!   `[files]` keys, the `[rap]` filename, the `[title]` ids, the
-//!   `[core_os] kernel.path` and `lv1.path` -- is gated here, so no record read off
-//!   disk can name a file outside the tree it describes.
+//!   `[core_os] kernel.path` and `lv1.path` -- is gated here, so no
+//!   record read off disk can name a file outside the tree it describes.
 //! - The version of a kind whose store path encodes one (firmware,
 //!   update) is a usable directory name. A base's version is the one
 //!   its PARAM.SFO names, which the path does not encode and a container
@@ -252,7 +252,7 @@ pub struct KernelRecord {
 }
 
 impl KernelRecord {
-    /// Where the stored kernel sits under the entry directory
+    /// Where the stored SELF sits under the entry directory
     /// `entry_dir`. The record gate proved the path stays inside it.
     #[must_use]
     pub fn path_in(&self, entry_dir: &Path) -> PathBuf {
@@ -269,8 +269,8 @@ pub enum KernelAbsence<'a> {
     /// The entry's record predates the `[core_os]` block, so it names
     /// neither the SELF nor a reason.
     NotRecorded,
-    /// The install stored no SELF. The reason it recorded, when it
-    /// named one.
+    /// The install stored no SELF. The value is the reason it recorded,
+    /// when it named one.
     Omitted(Option<&'a str>),
 }
 
@@ -309,9 +309,11 @@ pub fn stored_hypervisor(
 ///
 /// Every install writes the block. A record without one predates the
 /// block, reads as "not unpacked", and names no reason. A block without
-/// `lv1` and `lv1_omission` predates the hypervisor's storage, comes
-/// from a package whose table names no hypervisor, or comes from a
-/// package that yielded no table; `omission` then names why.
+/// `lv1` and `lv1_omission` comes from one of these:
+///
+/// - an install that predates the hypervisor's storage;
+/// - a package whose table names no hypervisor;
+/// - a package that yielded no table; `omission` then names why.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CoreOsRecord {
@@ -329,7 +331,7 @@ pub struct CoreOsRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lv1_omission: Option<String>,
     /// Every entry the package's file table held, in table order.
-    /// Empty when the install could not read the table.
+    /// Empty when no install or completion pass could read the table.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<CoreOsFileRecord>,
 }

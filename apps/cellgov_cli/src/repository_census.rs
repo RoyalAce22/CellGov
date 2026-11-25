@@ -148,8 +148,10 @@ fn emit(args: &RepositoryCensusArgs, elf: &[u8]) -> Result<KernelRun, Repository
 /// The rows of `boot`, a run of the kernel of the PUP `pup_sha256` capped
 /// at `max_steps`.
 ///
-/// A run cut off by its step cap is refused, so its rows never replace a
-/// logged boot.
+/// # Errors
+///
+/// Returns [`RepositoryCensusError::StepCap`] for a run that its step cap
+/// stopped, so its rows never replace a logged boot.
 // The step cap is a deadlock bound that callers abort on (cellgov_core
 // `StepError::MaxStepsExceeded`). The archive logs each boot's reads up to
 // where CellGov's hypervisor stops it (docs/lv1/README.md, "Hypervisor

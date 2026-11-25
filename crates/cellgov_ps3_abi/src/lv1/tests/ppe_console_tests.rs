@@ -1,5 +1,4 @@
-//! The 4.93 logical PPE id held to the console capture of the kernel's
-//! per-thread records. The README of the capture gives the offsets.
+//! The README of the capture gives the record offsets.
 
 use super::*;
 use crate::lv1::boot_record_capture::captured_doubleword_in;
@@ -15,12 +14,12 @@ const RECORDS: u64 = 0x8000_0000_0036_8f80;
 /// The size of one record.
 const RECORD_SIZE: u64 = 640;
 
-/// The address of the 4.93 kernel's count of records it set up.
+/// The address of the 4.93 kernel's count of its per-thread records.
 const COUNT: u64 = 0x8000_0000_0036_9488;
 
 /// The record's thread index.
 const INDEX: u64 = 0x00;
-/// r4 out of hypercall 69: the logical PPE id.
+/// The offset of the r4 of hypercall 69: the logical PPE id.
 const LOGICAL_PPE_ID: u64 = 0x08;
 
 fn captured(address: u64) -> u64 {

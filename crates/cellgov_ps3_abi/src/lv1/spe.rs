@@ -11,17 +11,17 @@
 //!   boot.
 //!
 //! The facts come from the 4.93 `lv1.self`, decrypted offline and read
-//! with `cellgov dev disasm`. No byte of lv1 is committed; these facts
-//! are.
+//! with `cellgov dev disasm`. The repository holds no byte of lv1, only
+//! these facts.
 //!
 //! The handler [OFW-4.93 lv1 a:0x31AB6C] gives r3 to r9 and the
 //! addresses of six stack slots to the worker [OFW-4.93 lv1 a:0x31AC64].
 //! It then copies the six slots to the return slots of r4 to r9
 //! [OFW-4.93 lv1 a:0x31AC68-0x31ACA4], and returns the worker's r3
 //! [OFW-4.93 lv1 a:0x31AD08]. It copies the slots on each path, and a
-//! failing path leaves some slots unwritten. So r4 to r9 of a failed call
-//! are stack values that no source gives. The handler writes no return
-//! slot of r10, and the vector's entry zeroes the slots
+//! path that fails leaves some slots unwritten. So r4 to r9 of a failed
+//! call are stack values that no source gives. The handler writes no
+//! return slot of r10, and the vector's entry zeroes the slots
 //! [OFW-4.93 lv1 a:0x0C08]. So r10 returns 0.
 //!
 //! The worker [OFW-4.93 lv1 a:0x31A34C] makes these checks in this order:
@@ -269,7 +269,7 @@ pub fn construct_logical_spe_handler(
         .find(|handler| handler.firmware == firmware)
 }
 
-/// The SPE type whose worker is read: the type 1 worker
+/// The SPE type of the worker that this module describes: the type 1 worker
 /// [OFW-4.93 lv1 a:0x31588C].
 pub const LOGICAL_SPE_TYPE_1: u64 = 1;
 
@@ -402,9 +402,10 @@ pub struct GameOsSpeCalls {
     pub calls: &'static [GameOsSpeCall],
 }
 
-/// The console capture of the 4.93 kernel's boot logical SPE object,
-/// relative to the workspace root. Its README gives the method and the
-/// kernel addresses.
+/// The console capture of the 4.93 kernel's boot logical SPE object.
+///
+/// The path is relative to the workspace root. Its README gives the
+/// method and the kernel addresses.
 pub const LOGICAL_SPE_OBJECT_CAPTURE: &str = "tests/micro/lv2_logical_spe_object";
 
 /// The spe id and the outlet ids of each `construct_logical_spe` call of

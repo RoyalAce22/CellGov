@@ -147,19 +147,14 @@ fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDispositio
     })
 }
 
-/// Hypercall 18: a new event receive port, with its id in r4 and r5 to
-/// r10 cleared.
+/// Hypercall 18: a new event receive port, with its id in r4 and r5 to r10 cleared.
 ///
-/// The answer carries the port, and the hypervisor keeps it.
-///
-/// lv1 gives the port the first free id of the partition's object table.
-/// The partition's other objects decide that id. So CellGov answers the
-/// id that a console capture gives for the call's hardware thread and
-/// its `sc` address.
-///
-/// The capture gives the id that lv1 gave on the console. CellGov gives
-/// that id whatever objects the hypervisor holds and whatever order it
-/// runs the threads in.
+/// The answer carries the port, and the hypervisor keeps it. lv1 gives
+/// the port the first free id of the partition's object table, so the
+/// partition's other objects decide that id. CellGov answers the id that
+/// a console capture gives for the call's hardware thread and its `sc`
+/// address. It gives that id whatever objects the hypervisor holds and
+/// whatever order it runs the threads in.
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;

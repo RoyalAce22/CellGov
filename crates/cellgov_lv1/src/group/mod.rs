@@ -14,15 +14,8 @@
 //! - its range of lane source tags, and its hashed surfaces, each with
 //!   the checkpoint scheme version that first covers it.
 //!
-//! A group's hash tests stay in its own `tests` directory. The runtime
-//! adds [`crate::Hypervisor::sync_term`] to the sync-state hash and a
-//! snapshot clones the [`crate::Hypervisor`] whole, so a new group state
-//! needs no test in the runtime.
-//!
 //! The dispatch, the answered numbers and the census read the
-//! registrations through [`table::GROUPS`], which lists the groups and
-//! never changes when a group adds a hypercall. So two hypercalls in two
-//! groups edit disjoint files.
+//! registrations through [`table::GROUPS`].
 
 pub(crate) mod device_bus;
 pub(crate) mod gpu;

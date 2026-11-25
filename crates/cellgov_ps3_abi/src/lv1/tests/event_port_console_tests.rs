@@ -1,6 +1,6 @@
 //! The 4.93 port ids of the record calls held to the console capture of
 //! the kernel's per-thread records. The README of the capture gives the
-//! record's other fields; the port id's place is cited on [`PORT_ID`].
+//! record's other fields, and [`PORT_ID`] cites the place of the port id.
 
 use super::*;
 use crate::lv1::boot_record_capture::captured_doubleword_in;

@@ -65,9 +65,9 @@ impl SelfTable {
             }
             return Ok(());
         }
-        // Dropping the same keyset from the candidates here, and
-        // `push_unlabeled` skipping a key that is already labeled, keep
-        // the vault independent of walk order.
+        // This drops the same keyset from the candidates, and
+        // `push_unlabeled` skips a key that is already labeled. Together
+        // they keep the vault independent of walk order.
         self.unlabeled.retain(|e| e.key != entry.key);
         self.labeled.insert(revision, entry);
         Ok(())
@@ -133,9 +133,7 @@ impl VersionTable {
 }
 
 /// A class's keyset table, by what labels it: a revision (APP, NPDRM)
-/// or a firmware version range (LV2, LV1). The variant is the proof of
-/// which label a keyset files under, so no caller can file one under
-/// the other kind.
+/// or a firmware version range (LV2, LV1).
 pub(super) enum ClassTableMut<'a> {
     /// The APP or NPDRM table.
     Revision(&'a mut SelfTable),

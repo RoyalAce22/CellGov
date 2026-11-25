@@ -1,6 +1,3 @@
-//! The console destruct worker and the gate, held to the live table
-//! capture and the gate capture.
-
 use super::*;
 use crate::lv1::call::{lookup, LOGICAL_CONSOLE_DESTRUCT};
 use crate::lv1::table::{table_entry, TableEntry, LIVE_TABLE_CAPTURE};

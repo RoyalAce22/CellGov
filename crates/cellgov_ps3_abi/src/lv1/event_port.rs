@@ -5,8 +5,8 @@
 //! - the port id of each call of the GameOS kernel's boot.
 //!
 //! The facts come from the 4.93 `lv1.self`, decrypted offline and read
-//! with `cellgov dev disasm`. No byte of lv1 is committed; these facts
-//! are.
+//! with `cellgov dev disasm`. The repository holds no byte of lv1, only
+//! these facts.
 //!
 //! The handler [OFW-4.93 lv1 a:0x2EF424] reads no input register. It
 //! gives the function [OFW-4.93 lv1 a:0x2E24E8] the address of the

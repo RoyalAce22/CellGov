@@ -3,12 +3,14 @@
 //!
 //! lv1 gives a new SPE an id in the partition's object table and two
 //! regions: an area and a shadow page; see [`cellgov_ps3_abi::lv1::spe`].
-//! Later SPE calls look the SPE up by its id. So the hypervisor keeps
-//! each SPE, and hashes it.
+//! Later SPE calls find the SPE by its id, so the hypervisor keeps each
+//! SPE and hashes it.
 //!
-//! A console capture gives the spe id of the GameOS kernel's boot call by
-//! its `sc` address. So the handler reads [`HypercallRequest::pc`],
-//! although lv1 does not read it.
+//! lv1 gives the SPE the first free id of the partition's object table,
+//! so the partition's other objects decide that id. A console capture
+//! gives the spe id of the GameOS kernel's boot call by its `sc` address.
+//! So the handler reads [`HypercallRequest::pc`], although lv1 does not
+//! read it.
 
 use std::collections::BTreeMap;
 
@@ -152,10 +154,6 @@ fn kernel_inputs(request: &HypercallRequest, spe_type: u64) -> bool {
 /// shadow page takes the value after it. The shadow page gets the next
 /// page of CellGov's shadow page storage. The answer carries the SPE and
 /// the shadow page's counter value, and the hypervisor keeps both.
-///
-/// lv1 gives the SPE the first free id of the partition's object table.
-/// The partition's other objects decide that id. So CellGov answers the
-/// id that a console capture gives for the call's `sc` address.
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;

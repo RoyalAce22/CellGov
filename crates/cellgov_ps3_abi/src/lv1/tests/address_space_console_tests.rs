@@ -1,5 +1,5 @@
-//! The 4.93 boot address space facts held to the console capture of the
-//! kernel's record. The README of the capture gives the offsets.
+//! The 4.93 facts of the boot address space, held to the console capture
+//! of the kernel's record. The README of the capture gives the offsets.
 
 use super::*;
 use crate::lv1::boot_record_capture::captured_doubleword_in;

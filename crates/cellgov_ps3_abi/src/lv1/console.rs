@@ -5,8 +5,8 @@
 //! - the gate on the reference console.
 //!
 //! The facts come from the 4.93 `lv1.self`, decrypted offline and read
-//! with `cellgov dev disasm`. No byte of lv1 is committed; these facts
-//! are.
+//! with `cellgov dev disasm`. The repository holds no byte of lv1, only
+//! these facts.
 //!
 //! Hypercall 106 reaches lv1's memory call thunk [OFW-4.93 lv1 a:0x2C89CC].
 //! The console family's array gives 106 its descriptor
@@ -74,8 +74,10 @@ pub fn console_destruct_worker(firmware: &str) -> Option<&'static ConsoleDestruc
 /// worker stores when the name lookup fails.
 pub const CONSOLE_GATE_OFF: u8 = 2;
 
-/// The console capture of the gate byte on the reference console,
-/// relative to the workspace root. Its README gives the method.
+/// The console capture of the gate byte on the reference console.
+///
+/// The path is relative to the workspace root. Its README gives the
+/// method.
 pub const CONSOLE_GATE_CAPTURE: &str = "tests/micro/lv1_console_gate";
 
 /// Each firmware at which the capture [`CONSOLE_GATE_CAPTURE`] reads the

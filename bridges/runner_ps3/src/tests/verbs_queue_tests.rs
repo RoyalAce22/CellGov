@@ -15,9 +15,6 @@ use crate::transport::TransportError;
 /// One console that two runners share, as the reference console is
 /// shared. Each runner's handle tags every request it sends, and every
 /// request waits a little, so two runners that are not queued overlap.
-///
-/// `Arc<Mutex<_>>`: the two runners run on two threads and send their
-/// requests to the one console state, which is what a console is.
 #[derive(Clone)]
 struct SharedConsole {
     console: Arc<Mutex<MemoryConsole>>,

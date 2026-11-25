@@ -20,10 +20,6 @@
 //! - network device: [`network`];
 //! - virtual UART: [`uart`].
 //!
-//! A new fact goes in a module of its group. A group that needs a new
-//! module adds it as a child of one of its own modules, so two groups
-//! never edit this file.
-//!
 //! A hypercall is `sc` with LEV = 1 from supervisor state. r11 holds
 //! the number, and r3 onward hold the inputs. On return, r3 holds the
 //! status, and r4 onward hold the outputs.

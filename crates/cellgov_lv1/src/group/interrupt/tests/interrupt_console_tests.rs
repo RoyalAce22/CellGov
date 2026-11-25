@@ -2,10 +2,9 @@
 //! bitmaps, held to the `lv2_irq_state_bitmaps` capture of those bitmaps
 //! on the reference console after boot.
 //!
-//! The capture is the state after boot. The status words agree with the
-//! registration's write while no interrupt on a connected plug is
-//! pending. The mask words are the kernel's own, which the registration
-//! does not write.
+//! The status words agree with the registration's write while no
+//! interrupt on a connected plug is pending. The kernel writes the mask
+//! words, and the registration writes none of them.
 
 use super::*;
 use crate::Hypervisor;

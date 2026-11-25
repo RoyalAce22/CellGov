@@ -6,17 +6,17 @@
 //! lv1 builds the table at run time, so the stock image holds zeros
 //! there. The count and the function come from each firmware's own
 //! `lv1.self`, decrypted offline and read with `cellgov dev disasm`. The
-//! live table comes from the console capture [`LIVE_TABLE_CAPTURE`]. No
-//! byte of lv1 is committed; these facts are.
+//! repository holds no byte of lv1, only these facts. The live table
+//! comes from the console capture [`LIVE_TABLE_CAPTURE`].
 
-/// The entry count of lv1's hypercall table. A number at or past it gets
-/// [`super::dispatch::UNKNOWN_HYPERCALL_R3`].
+/// The entry count of lv1's hypercall table.
+///
+/// A number at or past it gets [`super::dispatch::UNKNOWN_HYPERCALL_R3`].
 ///
 /// `set_lv1_hvcall_table` stores this count (`li r0, 256`) at HSPRG0 -
 /// 0x6FD0, and the table base at HSPRG0 - 0x6FC8. The `sc` vector reads
 /// both, at [OFW-4.93 lv1 a:0x0c24] and [OFW-4.93 lv1 a:0x0c30]. The count
-/// is a constant in each image of
-/// [`HYPERCALL_TABLE_SITES`].
+/// is a constant in each image of [`HYPERCALL_TABLE_SITES`].
 ///
 /// [PS3DEVWIKI-HV-RE s:HV_call] The size of the HV call table is stored at -0x6FD0(HSPRG0).
 pub const HYPERCALL_TABLE_ENTRIES: u64 = 256;
@@ -33,7 +33,7 @@ pub const HYPERCALL_TABLE_ENTRIES: u64 = 256;
 /// [PS3DEVWIKI-HV-RE s:set_lv1_hvcall_table_entry_invalid] This function puts the Invalid HV Call function in an entry of the HV call table.
 pub const INVALID_HYPERCALL_R3: u64 = 0x0000_0000_FFFF_FFEC;
 
-/// Where one firmware's lv1 sets up its hypercall table.
+/// Where one firmware's lv1 builds its hypercall table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HypercallTableSite {
     /// The firmware version, such as `"4.93"`.
@@ -56,7 +56,7 @@ pub struct HypercallTableSite {
 ///
 /// The 3.15 and 3.41 rows match the addresses that psdevwiki gives for
 /// both functions. The 1.50 image does not hold the code these images
-/// share, and no further reading of it was made.
+/// share, so no 1.50 row exists.
 ///
 /// `set_lv1_hvcall_table` loads the table base from its TOC. At 1.94 it
 /// loads the doubleword at TOC - 0x1540 [OFW-1.94 lv1 a:0x2D8DEC], and that
@@ -108,8 +108,10 @@ pub fn table_site(firmware: &str) -> Option<&'static HypercallTableSite> {
 /// The firmware version of [`LIVE_TABLE_HANDLERS`].
 pub const LIVE_TABLE_FIRMWARE: &str = "4.93";
 
-/// The console capture of the live 4.93 table, relative to the
-/// workspace root. Its README gives the method.
+/// The console capture of the live 4.93 table.
+///
+/// The path is relative to the workspace root. Its README gives the
+/// method.
 pub const LIVE_TABLE_CAPTURE: &str = "tests/micro/lv1_hypercall_table";
 
 /// Each number that has a handler in lv1's live 4.93 table, ascending,
@@ -286,9 +288,10 @@ pub enum TableEntry {
 }
 
 impl TableEntry {
-    /// Whether a problem-state `sc 1` reaches this entry. The vector
-    /// answers [`super::dispatch::PROBLEM_STATE_DENIED_R3`] to every
-    /// other problem-state call.
+    /// Whether a problem-state `sc 1` reaches this entry.
+    ///
+    /// The vector answers [`super::dispatch::PROBLEM_STATE_DENIED_R3`] to
+    /// every other problem-state call.
     pub const fn problem_state_callable(self) -> bool {
         matches!(self, Self::Handler(word) if word & 1 != 0)
     }

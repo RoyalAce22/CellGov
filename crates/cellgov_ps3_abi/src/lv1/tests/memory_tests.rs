@@ -1,8 +1,7 @@
 use super::*;
 use crate::lv1::call::{lookup, CallSource, ALLOCATE_MEMORY};
 
-/// Linux `lv1call.h` lists `allocate_memory` as number 0 with 4 inputs
-/// and 2 outputs.
+/// The row is the `LV1_CALL` row of Linux `lv1call.h` for 0.
 #[test]
 fn allocate_memory_carries_its_header_number_name_and_counts() {
     assert_eq!(ALLOCATE_MEMORY, 0);

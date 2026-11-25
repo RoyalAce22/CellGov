@@ -16,7 +16,7 @@ const RECORDS: u64 = 0x8000_0000_0036_8f80;
 /// The size of one record.
 const RECORD_SIZE: u64 = 640;
 
-/// The address of the 4.93 kernel's count of records it set up.
+/// The address of the 4.93 kernel's count of the records that it builds.
 const COUNT: u64 = 0x8000_0000_0036_9488;
 
 /// The record's thread index.

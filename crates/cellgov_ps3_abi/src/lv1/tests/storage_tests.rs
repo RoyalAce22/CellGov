@@ -1,6 +1,3 @@
-//! The storage_write refusal statuses keep their Linux values, and the
-//! flag masks agree with each other.
-
 use super::{
     STORAGE_DEVICE_ID_MAX, STORAGE_FLASH_ALIGNMENT_MASK, STORAGE_FLASH_DEVICE_TYPE,
     STORAGE_NOTIFICATION_DEVICE_ID, STORAGE_WRITE_BAD_FLAGS_STATUS, STORAGE_WRITE_DENIED_STATUS,

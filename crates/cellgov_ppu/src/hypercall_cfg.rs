@@ -114,8 +114,8 @@ pub(crate) fn scan(code: &Code, entries: &BTreeSet<u64>) -> Vec<CallerSite> {
 }
 
 /// Each address that a direct branch of `code` reaches, with the
-/// addresses of the branches that reach it. A target that no segment
-/// holds is dropped.
+/// addresses of the branches that reach it. The map omits a target that
+/// no segment holds.
 fn branch_sources(code: &Code) -> BTreeMap<u64, Vec<u64>> {
     let mut sources: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
     for (address, raw) in code.segments.iter().flat_map(CodeSegment::addressed) {
@@ -177,8 +177,8 @@ fn resolve(
 /// What the word before `at` does to r11 on the path that falls through
 /// it into `at`.
 ///
-/// When two segments hold different words there, the walk cannot know
-/// which one runs, so the flow is unknown.
+/// When two segments hold words there with different flows, the walk
+/// cannot know which flow runs, so the flow is unknown.
 fn flow_into(code: &Code, at: u64) -> Flow {
     let Some(before) = at.checked_sub(4) else {
         return Flow::Stops;

@@ -35,7 +35,7 @@ fn an_index_adds_to_the_key_word() {
     assert_eq!(field(b"pu", 1), 0x7075_0000_0000_0001);
 }
 
-/// A firmware the psdevwiki dump's values are served to.
+/// A firmware that CellGov serves the psdevwiki dump's values to.
 const DUMP_FW: &str = "1.50";
 
 #[test]
@@ -92,8 +92,9 @@ fn lookup_answers_the_game_os_pu_count_and_pu_id() {
 }
 
 /// The repository dump [PS3DEVWIKI-REPO s:3.41_GameOS] gives
-/// `bi.pu.1.rm_addr` = 0 and `bi.pu.1.rm_size` = 0x01000000. PU id 1 is the third key word, as
-/// Linux `ps3_repository_read_rm_size` passes the PPE id.
+/// `bi.pu.1.rm_addr` = 0 and `bi.pu.1.rm_size` = 0x01000000. PU id 1 is
+/// the third key word, as Linux `ps3_repository_read_rm_size` passes the
+/// PPE id.
 #[test]
 fn lookup_answers_the_real_mode_base_and_size_of_pu_1() {
     let rm = |name: &[u8]| RepositoryKey {

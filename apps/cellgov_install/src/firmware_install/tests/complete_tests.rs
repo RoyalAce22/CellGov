@@ -103,7 +103,12 @@ fn a_matching_pup_completes_the_entry_in_place_and_leaves_dev_flash_alone() {
     assert_eq!(outcome.version, VERSION);
     assert_eq!(outcome.entry_dir, entry_dir);
     assert_eq!(outcome.record_path, record_path);
-    assert!(!outcome.replaced);
+    assert_eq!(outcome.kernel, SelfCompletion::Written);
+    assert_eq!(
+        outcome.lv1,
+        SelfCompletion::Absent,
+        "the package names no lv1.self and the entry held none"
+    );
     let kernel = outcome.core_os.kernel.as_ref().expect("the kernel landed");
     assert_eq!(kernel.stored_sha256, digest_of(KERNEL));
     assert_eq!(
@@ -129,7 +134,8 @@ fn a_matching_pup_completes_the_entry_in_place_and_leaves_dev_flash_alone() {
 
     // A second pass writes over the kernel and says so.
     let again = complete_kernel(&pup, &keys, &vfs, &()).expect("idempotent");
-    assert!(again.replaced);
+    assert_eq!(again.kernel, SelfCompletion::Replaced);
+    assert_eq!(again.lv1, SelfCompletion::Absent);
 }
 
 #[test]
@@ -204,7 +210,7 @@ fn a_record_naming_another_versions_tree_is_refused_and_that_tree_is_not_written
 }
 
 #[test]
-fn a_kernel_the_pass_could_not_write_over_is_not_reported_as_replaced() {
+fn a_kernel_the_pass_could_not_write_over_is_kept_and_not_reported_as_replaced() {
     let out = scratch();
     let vfs = out.join("vfs");
     let keys = synthetic_vault();
@@ -222,25 +228,21 @@ fn a_kernel_the_pass_could_not_write_over_is_not_reported_as_replaced() {
         lv1_omission: None,
         files: Vec::new(),
     };
-    install_entry_at(&vfs, &entry_dir, digest_of(&pup), Some(held));
+    install_entry_at(&vfs, &entry_dir, digest_of(&pup), Some(held.clone()));
     // A directory under the kernel's name: no host renames a file over
     // it, so the rename fails and whatever was there stays.
     std::fs::create_dir_all(entry_dir.join("core_os/lv2_kernel.self")).unwrap();
 
     let outcome = complete_kernel(&pup, &keys, &vfs, &()).expect("an omission is not a refusal");
-    assert!(
-        outcome
-            .core_os
-            .omission
-            .as_deref()
-            .is_some_and(|o| o.starts_with("write ")),
-        "{:?}",
-        outcome.core_os
-    );
-    assert!(
-        !outcome.replaced,
-        "nothing was written over, so nothing was replaced"
-    );
+    let SelfCompletion::Kept { reason } = &outcome.kernel else {
+        panic!(
+            "nothing was written over, so the held kernel is kept: {:?}",
+            outcome.kernel
+        );
+    };
+    assert!(reason.starts_with("write "), "{reason}");
+    assert_eq!(outcome.core_os.kernel, held.kernel);
+    assert_eq!(outcome.core_os.omission, None);
     assert!(entry_dir.join("core_os/lv2_kernel.self").is_dir());
 }
 

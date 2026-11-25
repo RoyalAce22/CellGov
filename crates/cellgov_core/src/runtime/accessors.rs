@@ -110,8 +110,8 @@ impl Runtime {
 
     // -- Hypervisor --
 
-    /// CellGov's hypervisor: the partition's memory regions, its
-    /// witnesses, its TTY sink and the refusal that stopped the run.
+    /// CellGov's hypervisor, with its hypercall group states and its
+    /// records.
     #[inline]
     pub fn hypervisor(&self) -> &cellgov_lv1::Hypervisor {
         &self.hypervisor

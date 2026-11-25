@@ -71,7 +71,6 @@ fn hex(cell: &str) -> u64 {
     u64::from_str_radix(digits, 16).unwrap_or_else(|e| panic!("{cell}: {e}"))
 }
 
-/// The values and the address are those of the capture's `node.tsv`.
 /// lpar 1's update manager sets both values to all-ones on a unit whose
 /// target id is not 0x81 or 0x82 [OFW-4.93 lv1 a:0x4F4874-0x4F48E4], and
 /// the reference console is a retail unit.

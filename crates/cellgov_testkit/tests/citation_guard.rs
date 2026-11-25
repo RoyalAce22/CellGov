@@ -163,8 +163,8 @@ const FIRMWARE_KEY: &str = "OFW-";
 /// The CoreOS images a firmware citation may name besides a module.
 const CORE_OS_IMAGES: &[&str] = &["lv1", "lv2_kernel"];
 
-/// The archive tables a firmware citation is checked against, relative
-/// to the workspace root: the PUP of each firmware version, and every
+/// The archive tables the guard checks a firmware citation against,
+/// relative to the workspace root: the PUP of each firmware version, and every
 /// module the extraction scanned in each PUP.
 const PUP_TABLE: &str = "docs/lv2/tables/pup.tsv";
 const MODULE_TABLE: &str = "docs/lv2/tables/caller_unresolved.tsv";
@@ -190,8 +190,9 @@ fn firmware_modules() -> &'static BTreeMap<String, BTreeSet<String>> {
 ///
 /// # Panics
 ///
-/// Panics when a table header is not the expected one, or when a module
-/// row names a PUP that the PUP table does not hold.
+/// Panics in these cases:
+/// - a table header is not the expected one;
+/// - a module row names a PUP that the PUP table does not hold.
 fn load_firmware_modules(pups: &str, modules: &str) -> BTreeMap<String, BTreeSet<String>> {
     let mut pup_lines = pups.lines();
     assert!(
@@ -605,9 +606,10 @@ fn defines_a_rule(path: &Path) -> bool {
         .is_some_and(|n| n.to_string_lossy().ends_with("_guard.rs"))
 }
 
-/// Shipped Rust plus the public documents: `README.md`, `docs/`
-/// without its `dev/` subtree, which git does not track, and each
-/// microtest's `README.md`.
+/// Shipped Rust plus the public documents:
+/// - `README.md`;
+/// - `docs/`, without its `dev/` subtree, which git does not track;
+/// - each microtest's `README.md`.
 fn scanned_files(root: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let rust = |p: &Path| p.extension().is_some_and(|e| e == "rs") && !defines_a_rule(p);

@@ -53,8 +53,6 @@ fn every_plug_has_its_own_bit_in_the_four_status_doublewords() {
     assert_eq!(seen, [u64::MAX; 4]);
 }
 
-/// Each refusal holds the status in its low word and the mark of the
-/// argument it names in its high word: bit 32 for r3 to bit 36 for r7.
 #[test]
 fn each_refusal_marks_the_argument_it_names() {
     let marked = |register: u32, status: i64| (1u64 << (32 + register - 3)) | zero_extended(status);

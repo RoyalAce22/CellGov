@@ -2,7 +2,9 @@
 //! console and time hypercalls.
 
 /// `get_logical_ppe_id`: no input, and the id of the caller's logical
-/// PPE in r4. Linux `arch/powerpc/platforms/ps3/repository.c`,
+/// PPE in r4.
+///
+/// Linux `arch/powerpc/platforms/ps3/repository.c`,
 /// `ps3_repository_read_mm_info`, makes the call in this form. The lv1
 /// handler [OFW-4.93 lv1 a:0x2E8F38] writes the outputs in this form; see
 /// [`crate::lv1::ppe`].

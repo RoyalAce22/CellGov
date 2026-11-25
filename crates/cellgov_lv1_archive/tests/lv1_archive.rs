@@ -218,8 +218,11 @@ fn committed_census_answered() -> BTreeSet<u64> {
 ///
 /// A regeneration takes the registrations. The gate takes the committed
 /// census's own answered numbers, because the census may lag the
-/// registrations until the next regeneration. A committed number that no
-/// registration answers is refused.
+/// registrations until the next regeneration.
+///
+/// # Panics
+///
+/// Panics when no registration answers a committed number.
 fn census_answered_numbers() -> BTreeSet<u64> {
     let registered = registered_numbers();
     if regenerate::asked() {
