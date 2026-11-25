@@ -5,21 +5,23 @@
 //! [`cellgov_ps3_abi::lv1::device_bus`]:
 //! - devices 0, 1 and 2 of bus 1;
 //! - the storage bus object, device -1 of bus 4;
+//! - each device of the 4.93 storage bus table, which the 4.93 kernel
+//!   opens after lv1 reports the device;
 //! - each device of bus 4 above 6, other than -1, which lv1's lookup
 //!   finds absent whatever the storage bus object holds
 //!   [OFW-4.93 lv1 a:0x2365E4-0x2365F8];
 //! - the bus ids that the handler's checks refuse.
 //!
-//! lv1 finds each other device of buses 1 to 3, and devices 0 to 6 of
-//! bus 4, through state that CellGov does not model. A call for one of
-//! these devices is a refusal.
+//! lv1 finds each other device of buses 1 to 3, and each other device
+//! from 0 to 6 of bus 4, through state that CellGov does not model. A
+//! call for one of these devices is a refusal.
 
 use cellgov_mem::lanes::{LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::call::OPEN_DEVICE;
 use cellgov_ps3_abi::lv1::device_bus::{
     open_device_bus_r3, open_device_handler, open_device_path_read, opens_storage_bus,
-    storage_bus_device_absent, OPEN_DEVICE_BUSY_R3, OPEN_DEVICE_NO_DEVICE_R3,
-    OPEN_STORAGE_BUS_BUSY_R3,
+    opens_storage_device, storage_bus_device_absent, OPEN_DEVICE_BUSY_R3, OPEN_DEVICE_NO_DEVICE_R3,
+    OPEN_STORAGE_BUS_BUSY_R3, OPEN_STORAGE_DEVICE_BUSY_R3,
 };
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
@@ -77,11 +79,34 @@ impl LaneValue for StorageBusOpen {
     }
 }
 
+/// One storage device that the partition opened.
+///
+/// The partition check keeps the caller's partition and the call's r5 in
+/// a slot of the device object [OFW-4.93 lv1 a:0x254710-0x25472C].
+/// CellGov's hypervisor runs one partition, so the state keeps no
+/// partition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StorageDeviceOpen {
+    /// The device id on the storage bus, from r4.
+    pub device: u64,
+    /// The r5 of the open, which the slot keeps.
+    pub r5: u64,
+}
+
+/// Fields 1 and 2: the device id and the r5 of the open.
+impl LaneValue for StorageDeviceOpen {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, self.device);
+        lanes.lane(2, 0, self.r5);
+    }
+}
+
 /// The open of a device that lv1 finds through state that CellGov does
 /// not model.
 const OTHER_DEVICE: UnmodelledError = UnmodelledError::new(
-    "an open of a device of buses 1 to 3 other than devices 0, 1 and 2 of bus 1, or of devices 0 \
-     to 6 of bus 4, which lv1 finds through state that CellGov does not model",
+    "an open of a device of buses 1 to 3 other than devices 0, 1 and 2 of bus 1, or of a device 0 \
+     to 6 of bus 4 that the firmware's storage bus table holds no entry for, which lv1 finds \
+     through state that CellGov does not model",
 );
 
 /// The open at a firmware whose handler no lv1 image read shows.
@@ -98,6 +123,8 @@ const UNREAD_FIRMWARE: UnmodelledError =
 ///   the network device, as lv1's open hook stores 2 in its state word
 ///   [OFW-4.93 lv1 a:0x23E1C8-0x23E1D4];
 /// - for the storage bus, the r3 of [`open_storage_bus`];
+/// - for a device of the firmware's storage bus table, the r3 of
+///   [`open_storage_device`];
 /// - for a device of bus 4 above 6, other than -1,
 ///   [`OPEN_DEVICE_NO_DEVICE_R3`], and the answer changes no state.
 ///
@@ -116,14 +143,17 @@ pub(crate) fn open_device(
     firmware: Option<&str>,
     state: &DeviceBusState,
 ) -> HypercallDisposition {
-    if firmware.and_then(open_device_handler).is_none() {
+    let Some(firmware) = firmware.filter(|firmware| open_device_handler(firmware).is_some()) else {
         return UNREAD_FIRMWARE.refusal(request);
-    }
+    };
     if let Some(r3) = open_device_bus_r3(request.r(3)) {
         return HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, []));
     }
     if opens_storage_bus(request.r(3), request.r(4)) {
         return open_storage_bus(request.r(5), state);
+    }
+    if opens_storage_device(firmware, request.r(3), request.r(4)) {
+        return open_storage_device(request.r(4), request.r(5), state);
     }
     if storage_bus_device_absent(request.r(3), request.r(4)) {
         return HypercallDisposition::Answered(HypercallAnswer::lv1_status(
@@ -173,6 +203,30 @@ fn open_storage_bus(r5: u64, state: &DeviceBusState) -> HypercallDisposition {
     HypercallDisposition::Answered(answer)
 }
 
+/// Opens storage device `device` with the call's `r5`.
+///
+/// The r3 is one of these values:
+/// - when the partition holds the device open,
+///   [`OPEN_STORAGE_DEVICE_BUSY_R3`];
+/// - otherwise 0, and the answer carries the open with `r5`.
+///
+/// The model assumes that the partition check passes and that a slot of
+/// the device is free, as the capture of the 4.93 boot shows.
+fn open_storage_device(device: u64, r5: u64, state: &DeviceBusState) -> HypercallDisposition {
+    if state.storage_device_open(device).is_some() {
+        return HypercallDisposition::Answered(HypercallAnswer::lv1_status(
+            OPEN_STORAGE_DEVICE_BUSY_R3,
+            [],
+        ));
+    }
+    let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []);
+    answer.push_change(DeviceBusChange::StorageDeviceOpened(StorageDeviceOpen {
+        device,
+        r5,
+    }));
+    HypercallDisposition::Answered(answer)
+}
+
 #[cfg(test)]
 #[path = "tests/open_device_tests.rs"]
 mod tests;
@@ -208,3 +262,11 @@ mod console_storage_bus_tests;
 #[cfg(test)]
 #[path = "tests/open_absent_device_tests.rs"]
 mod absent_device_tests;
+
+#[cfg(test)]
+#[path = "tests/open_storage_device_tests.rs"]
+mod storage_device_tests;
+
+#[cfg(test)]
+#[path = "tests/console_open_storage_device_tests.rs"]
+mod console_storage_device_tests;

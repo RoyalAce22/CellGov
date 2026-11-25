@@ -218,6 +218,65 @@
 //! model the object's +108 and +112, the slot of partition 1, or the
 //! record and its entries.
 //!
+//! # Devices 0 to 6 of the storage bus
+//!
+//! For a device id up to 6, the lookup returns the device object D at
+//! +3816 + 8 x id of the storage bus object
+//! [OFW-4.93 lv1 a:0x236604-0x23661C]. The open function then calls the
+//! method at +24 of D's method table with D, the caller's partition and
+//! the call's r5. It returns that method's r3 zero-extended
+//! [OFW-4.93 lv1 a:0x23760C-0x237630].
+//!
+//! The capture [`STORAGE_DEVICE_OPEN_CAPTURE`] reads the method table of
+//! each of the five devices of the 4.93 bus table. The entry at +24 of
+//! each table holds the descriptor 0x334BF0:
+//! - device 0, table 0x35E518 [OFW-4.93 lv1 a:0x35E530-0x35E534];
+//! - device 1, table 0x35E6E8 [OFW-4.93 lv1 a:0x35E700-0x35E704];
+//! - device 2, table 0x35E370 [OFW-4.93 lv1 a:0x35E388-0x35E38C];
+//! - device 3, table 0x35E1C8 [OFW-4.93 lv1 a:0x35E1E0-0x35E1E4];
+//! - device 4, table 0x35DFF8 [OFW-4.93 lv1 a:0x35E010-0x35E014].
+//!
+//! The descriptor's entry is the partition check of the storage bus
+//! [OFW-4.93 lv1 a:0x334BF0-0x334BF4]. So the open of a storage device is
+//! that check on D, with no record after it. The check returns its status
+//! sign-extended [OFW-4.93 lv1 a:0x254678], and the open function clears
+//! the high word.
+//!
+//! The check's second step passes for D when these tests pass:
+//! - D's byte at +3496 is set [OFW-4.93 lv1 a:0x2545DC-0x2545E4];
+//! - the doubleword at +2352 of the object at D + 144 is not 0, or the
+//!   method at +296 of D's table returns a value that is not 0
+//!   [OFW-4.93 lv1 a:0x2545E8-0x2545F4] [OFW-4.93 lv1 a:0x254694-0x2546B4].
+//!
+//! When either test fails, the partition's authority id decides. A
+//! failed second test passes for two authority ids
+//! [OFW-4.93 lv1 a:0x2546B8-0x2546E8]. A clear byte at +3496 lets one
+//! authority id go on to the second test, and the check returns -6 for
+//! each other id [OFW-4.93 lv1 a:0x25473C-0x25475C].
+//!
+//! The capture reads these values after the boot to the XMB:
+//! - Each device's byte at +3496 is 1, its byte at +108 is 1 and its
+//!   +112 holds partition 2.
+//! - For devices 0, 2 and 3, slot 0 holds partition 2 with r5 =
+//!   0x8000000000000000, and slot 1 is free.
+//! - For devices 1 and 4, slot 0 holds partition 1 with r5 = 0, and
+//!   slot 1 holds partition 2 with r5 = 0x8000000000000000.
+//!
+//! The check writes a slot only on the path that returns 0. So the game
+//! OS partition opened each device with r5 = 0x8000000000000000, and the
+//! check passed for each open. A second open of the game OS partition
+//! finds its own slot, and gets -9.
+//!
+//! The 4.93 kernel's device object opens device +152 of bus +144 with
+//! r5 = 0x8000000000000000
+//! [OFW-4.93 lv2_kernel a:0x80000000000ac0fc-0x80000000000ac120]. The
+//! object's constructor copies the bus id and the device id from +0 and
+//! +8 of the kernel's device record
+//! [OFW-4.93 lv2_kernel a:0x80000000000a98c8-0x80000000000a98e8].
+//!
+//! CellGov keeps only the device id and the r5 of each game OS open. It
+//! does not model the slot of partition 1 or D's +108 and +112.
+//!
 //! # `close_device`
 //!
 //! The handler [OFW-4.93 lv1 a:0x306EEC] does these steps:
@@ -629,6 +688,7 @@ use std::ops::RangeInclusive;
 
 use super::status::{zero_extended, LV1_BUSY, LV1_ILLEGAL_PARAMETER_VALUE, LV1_WRONG_STATE};
 use super::storage::STORAGE_DEVICE_ID_MAX;
+use super::storage_registration::registration;
 
 /// The handler of hypercall 170 in one firmware's lv1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -748,6 +808,30 @@ pub const OPEN_STORAGE_BUS_BUSY_R3: u64 = zero_extended(LV1_BUSY);
 /// The read-only lv1 capture of the storage bus object after the 4.93
 /// boot, which shows the game OS partition's open of the storage bus.
 pub const STORAGE_BUS_OPEN_CAPTURE: &str = "tests/micro/lv1_storage_bus_open";
+
+/// The read-only lv1 capture of the storage device objects after the 4.93
+/// boot, which shows the game OS partition's open of each device.
+pub const STORAGE_DEVICE_OPEN_CAPTURE: &str = "tests/micro/lv1_storage_device_open";
+
+/// Whether `open_device` of device `device` on bus `bus` at the firmware
+/// version `firmware` opens a storage device whose open path CellGov read.
+///
+/// These devices are the devices of the bus table of [`registration`] at
+/// `firmware`. [`STORAGE_DEVICE_OPEN_CAPTURE`] reads the device object of
+/// each 4.93 device.
+pub fn opens_storage_device(firmware: &str, bus: u64, device: u64) -> bool {
+    bus == STORAGE_BUS
+        && device <= STORAGE_DEVICE_ID_MAX
+        && registration(firmware).is_some_and(|table| table.device(device).is_some())
+}
+
+/// The r3 of an open of a storage device that the partition holds open:
+/// `LV1_BUSY` (-9), zero-extended.
+///
+/// The partition check returns -9 [OFW-4.93 lv1 a:0x254734] sign-extended
+/// [OFW-4.93 lv1 a:0x254678], and the open function clears the high word
+/// [OFW-4.93 lv1 a:0x237630].
+pub const OPEN_STORAGE_DEVICE_BUSY_R3: u64 = zero_extended(LV1_BUSY);
 
 /// The handler of hypercall 171 in one firmware's lv1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
