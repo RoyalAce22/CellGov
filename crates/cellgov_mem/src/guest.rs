@@ -352,7 +352,8 @@ pub struct RegionView<'a> {
     pub caching_inhibited: bool,
     /// Whether a caching-inhibited store's alignment interrupt precedes
     /// the view's write refusal. A translating unit sets it on a view of
-    /// a read-only page whose page table entry has its change bit set.
+    /// a page that refuses stores and whose page table entry has its
+    /// change bit set.
     pub store_alignment_first: bool,
 }
 

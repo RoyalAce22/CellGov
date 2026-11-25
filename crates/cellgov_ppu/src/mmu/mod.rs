@@ -11,7 +11,7 @@ mod translate;
 
 pub(crate) use cache::TranslationCache;
 pub use partition::{Partition, PartitionRefusal};
-pub(crate) use translate::{translate_entry, Access, EntryHit, Translation};
+pub(crate) use translate::{no_access_page, translate_entry, Access, EntryHit, Translation};
 
 #[cfg(test)]
 #[path = "tests/translate_tests.rs"]

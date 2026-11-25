@@ -8,7 +8,7 @@ use crate::exec::{PpuFault, PpuInterrupt};
 use crate::instruction;
 use crate::mmu::{Access, Translation};
 use crate::unit::ppu_unit::PpuExecutionUnit;
-use crate::unit::translation::{RefillStop, CHANGE_UNSET};
+use crate::unit::translation::{RefillStop, CHANGE_UNSET, PAGE_PROTECTION};
 use cellgov_effects::Effect;
 
 /// What a translating thread does after an access missed every view.
@@ -193,6 +193,11 @@ impl PpuExecutionUnit {
         //
         // A store to a writable page whose entry has C = 0 is no fault
         // either: the unit writes C and the store runs again.
+        //
+        // A page that refuses a store can take the alignment interrupt
+        // first. Its refusal then waits until the unit knows whether the
+        // store runs into a caching-inhibited page that the cache does
+        // not hold. A page that refuses a load waits in the same way.
         let (true, FaultExit::Mem(refused, store)) = (translating, &exit) else {
             return MissStep::Stop(exit);
         };
@@ -213,6 +218,14 @@ impl PpuExecutionUnit {
                 if *store && *region == CHANGE_UNSET =>
             {
                 self.change_miss(mem, regions, effects, marks, *addr)
+            }
+            cellgov_mem::MemError::ReservedWrite { addr, region }
+                if *store && *region == PAGE_PROTECTION =>
+            {
+                let addr = *addr;
+                effects.truncate(attempt.effects_before);
+                self.store_buf.truncate(attempt.stores_before);
+                self.protected_store(&attempt.insn, mem, regions.as_slice(), addr, exit)
             }
             _ => return MissStep::Stop(exit),
         };
@@ -265,7 +278,7 @@ impl PpuExecutionUnit {
                 return self.unbacked_access(insn, mem, regions.as_slice(), ea, access);
             }
             Some(Err(RefillStop::Fault(refused))) => {
-                return MissStep::Stop(FaultExit::Verdict(refused));
+                return self.refused_access(insn, mem, regions.as_slice(), (ea, access), refused);
             }
             Some(Err(RefillStop::AfterStores)) => return MissStep::EndBatch,
             Some(Ok(t)) => t,

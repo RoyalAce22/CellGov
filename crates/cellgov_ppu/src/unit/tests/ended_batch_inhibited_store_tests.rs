@@ -19,6 +19,24 @@ use cellgov_time::Budget;
 #[path = "ended_batch_store_prediction_tests.rs"]
 mod prediction;
 
+#[path = "refused_page_store_order_tests.rs"]
+mod refused_page_order;
+
+#[path = "no_access_store_order_tests.rs"]
+mod no_access_order;
+
+#[path = "inhibited_next_page_protection_tests.rs"]
+mod inhibited_next_protection;
+
+#[path = "no_access_load_order_tests.rs"]
+mod no_access_load_order;
+
+#[path = "no_access_crossing_store_tests.rs"]
+mod no_access_crossing;
+
+#[path = "read_only_crossing_store_tests.rs"]
+mod read_only_crossing;
+
 /// The page table: 2^11 groups from 256 KB to the end of the memory.
 const HTAB: u64 = 0x4_0000;
 /// The segment that the SLB maps, and its VSID.

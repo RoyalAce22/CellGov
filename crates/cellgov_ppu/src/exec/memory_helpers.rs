@@ -467,7 +467,7 @@ pub(crate) fn inhibited_load(
 ///
 /// A store that a region also refuses faults as that refusal. The one
 /// exception is a view with `store_alignment_first` set: a translating
-/// thread's read-only page whose page table entry has C = 1. There, the
+/// thread's page that refuses stores, whose page table entry has C = 1. There, the
 /// store faults on a byte that no view holds, at any place in the range,
 /// and otherwise takes the alignment interrupt.
 ///

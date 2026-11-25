@@ -29,17 +29,18 @@ fn a_misaligned_store_whose_batch_ends_at_a_buffered_store_that_sets_i_in_its_ne
 }
 
 /// [CBE-Handbook p:90 s:4.2.6.8] Each table lookup but that of a misaligned caching-inhibited store is nonspeculative, so it sets R whatever interrupt the access takes.
+/// [CBE-Handbook p:290 s:9.10] A store's alignment interrupt in caching-inhibited storage follows the page-protection data storage interrupt when C is 0.
 #[test]
 fn a_misaligned_store_whose_batch_ends_after_a_load_of_its_read_only_cacheable_next_page_publishes_its_first_page_r(
 ) {
     // Page 4 is caching-inhibited and writable with R = C = 0. Page 5 is
-    // read-only and cacheable with R = C = 1, and the lbz caches its load
-    // translation. The stb writes byte 15 of page 4's entry with its
+    // read-only and cacheable with R = 1 and C = 0, and the lbz caches its
+    // load translation. The stb writes byte 15 of page 4's entry with its
     // value unchanged. The C write of page 4 waits for the stb, so the
     // batch ends ahead of the sth. In the next batch the sth meets page 5
     // through a search, which refuses the store.
     let page = PAGE_RA | PTE_I | 0b10;
-    let next = NEXT_RA | PTE_R | PTE_C | 0b11;
+    let next = NEXT_RA | PTE_R | 0b11;
     let mut mem = memory(&[lbz(8, 0, 9), stb(6, 0, 7), sth(4, 0xFFF, 5)], page);
     map_page(&mut mem, NEXT, next);
     let mut unit = kernel_unit();

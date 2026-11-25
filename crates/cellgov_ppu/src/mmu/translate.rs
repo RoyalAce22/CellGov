@@ -262,13 +262,7 @@ fn virtual_mode(
     let Some(slbe) = segment(sup, ea) else {
         return (Err(refusal(ea, access, Refusal::Segment)), None);
     };
-    let large = slbe.vsid_flags & SLB_L != 0;
-    let lp = slbe.vsid_flags & PPE_SLB_LP != 0;
-    let p = if large {
-        sup.partition.large_page_log2(lp)
-    } else {
-        SMALL_PAGE_LOG2
-    };
+    let p = page_log2(sup, slbe);
     let Some(hit) = search(sup.partition.sdr1(), slbe, ea, p, &pteg) else {
         return (Err(refusal(ea, access, Refusal::NotFound)), None);
     };
@@ -293,8 +287,7 @@ fn entry_translation(
     if access == Access::Fetch && (slbe.vsid_flags & SLB_N != 0 || d1 & (PTE_N | PTE_G) != 0) {
         return Err(refusal(ea, access, Refusal::NoExecute));
     }
-    let key_bit = if sup.problem_state() { SLB_KP } else { SLB_KS };
-    let allowed = authority(slbe.vsid_flags & key_bit != 0, d1 & PTE_PP);
+    let allowed = entry_authority(sup, slbe, d1);
     let refused = match access {
         Access::Load | Access::Fetch => allowed == Authority::None,
         Access::Store => allowed != Authority::ReadWrite,
@@ -302,21 +295,68 @@ fn entry_translation(
     if refused {
         return Err(refusal(ea, access, Refusal::Protection));
     }
+    Ok(page_translation(ea, p, d1, allowed == Authority::ReadWrite))
+}
 
+/// What the entry with doubleword 1 `d1` in the segment of `slbe` allows
+/// the thread of `sup`.
+fn entry_authority(sup: &SupervisorState, slbe: &SlbEntry, d1: u64) -> Authority {
+    let key_bit = if sup.problem_state() { SLB_KP } else { SLB_KS };
+    authority(slbe.vsid_flags & key_bit != 0, d1 & PTE_PP)
+}
+
+/// The base 2 logarithm of the page size in the segment of `slbe`.
+fn page_log2(sup: &SupervisorState, slbe: &SlbEntry) -> u32 {
+    if slbe.vsid_flags & SLB_L != 0 {
+        sup.partition
+            .large_page_log2(slbe.vsid_flags & PPE_SLB_LP != 0)
+    } else {
+        SMALL_PAGE_LOG2
+    }
+}
+
+/// The translation of the page of 2^`p` bytes that holds `ea`, through
+/// the entry with doubleword 1 `d1`.
+fn page_translation(ea: u64, p: u32, d1: u64, writable: bool) -> Translation {
     // [PPC-Book3 p:38 s:4.5.3] RA is RPN bits 0:61-p followed by EA bits 64-p:63.
     // [CBE-Handbook p:79 s:4.2.1] Table 4-1: the PPE does not implement RA bits 2:21 and treats them as 0.
     let page_mask = (1u64 << p) - 1;
     // [CBE-Handbook p:90 s:4.2.6.7] Table 4-4: the PPE implements each cacheable WIMG setting as 0010, so a cacheable access is nonguarded.
     let inhibited = d1 & PTE_I != 0;
-    Ok(Translation {
+    Translation {
         ea: ea & !page_mask,
         ra: d1 & PPE_PTE_RPN & !page_mask,
         len: 1 << p,
-        writable: allowed == Authority::ReadWrite,
+        writable,
         inhibited,
         guarded: inhibited && d1 & PTE_G != 0,
         changed: d1 & PTE_C != 0,
-    })
+    }
+}
+
+/// The translation of the page at `ea` when its entry lets the thread of
+/// `sup` neither load nor store there, or `None` for any other page.
+///
+/// The translation is not writable. Translation refuses every data access
+/// to the page, so CellGov uses it only to order the interrupts of a load
+/// or a store that the page refuses.
+/// `pteg` reads the groups as [`translate_entry`] reads them, and the
+/// function writes no entry.
+///
+/// [PPC-Book3 p:45 s:4.10.1] Figure 30: with key 1, PP 00 permits no access.
+pub fn no_access_page(
+    ea: u64,
+    sup: &SupervisorState,
+    pteg: impl Fn(u64) -> Option<[u8; PTEG_BYTES]>,
+) -> Option<Translation> {
+    if sup.msr & MSR_DR == 0 {
+        return None;
+    }
+    let slbe = segment(sup, ea)?;
+    let p = page_log2(sup, slbe);
+    let hit = search(sup.partition.sdr1(), slbe, ea, p, &pteg)?;
+    (entry_authority(sup, slbe, hit.d1) == Authority::None)
+        .then(|| page_translation(ea, p, hit.d1, false))
 }
 
 /// The first PTE that translates `ea` in `slbe`, with pages of 2^`p` bytes.
