@@ -9,9 +9,7 @@ const MTDEC_R4: u32 = 0x7C96_03A6;
 /// `mfspr r8, 22`: `mfdec r8`.
 const MFDEC_R8: u32 = 0x7D16_02A6;
 
-/// The pause begins with DEC negative, so the decrementer ends it at once.
-/// lv1's return writes DEC = 0 [OFW-4.93 lv1 a:0x2C425C-0x2C4274], so the
-/// `mfdec` after the call reads 0 and the console gets it.
+/// lv1's return writes DEC = 0 [OFW-4.93 lv1 a:0x2C425C-0x2C4274].
 #[test]
 fn a_decrementer_wake_from_a_negative_decrementer_resumes_with_dec_0() {
     let mut code = vec![LIS_R4_8000, MTDEC_R4, LI_R3_0, LI_R11_PAUSE, SC_1, MFDEC_R8];

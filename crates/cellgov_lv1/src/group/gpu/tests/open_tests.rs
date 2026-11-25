@@ -8,7 +8,6 @@ use cellgov_time::GuestTicks;
 /// [OFW-4.93 lv2_kernel a:0x80000000000E8F8C].
 const KERNEL_SC: u64 = 0x8000_0000_000E_8F8C;
 
-/// The open with r3 = `r3`.
 fn open_call(r3: u64) -> HypercallRequest {
     let mut inputs = [0; 8];
     inputs[0] = r3;

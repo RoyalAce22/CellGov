@@ -32,12 +32,10 @@ fn request(number: u64, registers: &[u64]) -> HypercallRequest {
     }
 }
 
-/// The free call with r3 to r5.
 fn free_call(bus: u64, device: u64, bus_address: u64) -> HypercallRequest {
     request(FREE_DEVICE_DMA_REGION, &[bus, device, bus_address])
 }
 
-/// The free call that names the address of `region`.
 fn free_of(region: DmaRegion) -> HypercallRequest {
     free_call(region.bus, region.device, region.address)
 }

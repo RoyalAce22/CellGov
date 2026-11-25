@@ -6,7 +6,7 @@ use cellgov_mem::scheme::{HashedSurface, Stamp};
 use super::bitmap::{self, IrqStateBitmapRegistration, IrqStateBitmapState, StatusShadowWrite};
 use super::event_port::{self, EventReceivePort, EventReceivePortState};
 use super::pause::{self, PausedThread, PausedThreadState};
-use super::{end_of_interrupt, irq_plug, mask, send_event};
+use super::{end_of_interrupt, io_irq_outlet, irq_plug, mask, send_event};
 use crate::group::state::StateChange;
 use crate::group::table::Group;
 
@@ -17,6 +17,7 @@ pub(crate) const GROUP: Group = Group {
         bitmap::HYPERCALLS,
         end_of_interrupt::HYPERCALLS,
         event_port::HYPERCALLS,
+        io_irq_outlet::HYPERCALLS,
         irq_plug::HYPERCALLS,
         mask::HYPERCALLS,
         pause::HYPERCALLS,

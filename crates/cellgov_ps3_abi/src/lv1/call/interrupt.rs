@@ -67,3 +67,12 @@ pub const END_OF_INTERRUPT_EXT: u64 = 30;
 /// handler [OFW-4.93 lv1 a:0x2E9354] reads the inputs in this form; see
 /// [`crate::lv1::interrupt_mask`].
 pub const DID_UPDATE_INTERRUPT_MASK: u64 = 31;
+
+/// `construct_io_irq_outlet`: one input, and the new outlet's id in r4.
+/// r3 is the interrupt id of a device.
+///
+/// Linux `arch/powerpc/platforms/ps3/interrupt.c`, `ps3_io_irq_setup`,
+/// makes the call in this form. The lv1 handler [OFW-4.93 lv1 a:0x2C0604]
+/// reads the input and writes the output in this form; see
+/// [`crate::lv1::io_irq_outlet`].
+pub const CONSTRUCT_IO_IRQ_OUTLET: u64 = 120;

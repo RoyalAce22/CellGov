@@ -11,8 +11,8 @@
 //! - memory and page table: [`memory`], [`address_space`],
 //!   [`page_table`];
 //! - interrupt delivery: [`interrupt`], [`interrupt_mask`],
-//!   [`event_port`], [`irq_plug`], [`pause`], [`send_event`],
-//!   [`end_of_interrupt`];
+//!   [`event_port`], [`irq_plug`], [`io_irq_outlet`], [`pause`],
+//!   [`send_event`], [`end_of_interrupt`];
 //! - partition, console and time: [`partition`], [`ppe`],
 //!   [`repository`], [`console`];
 //! - device bus: [`device_bus`];
@@ -37,6 +37,7 @@ pub mod event_port;
 pub mod gpu;
 pub mod interrupt;
 pub mod interrupt_mask;
+pub mod io_irq_outlet;
 pub mod irq_plug;
 pub mod memory;
 pub mod network;

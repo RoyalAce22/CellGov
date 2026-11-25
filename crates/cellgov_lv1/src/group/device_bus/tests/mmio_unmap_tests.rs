@@ -149,7 +149,6 @@ fn unmap(groups: &GroupStates, request: &HypercallRequest) -> HypercallDispositi
     )
 }
 
-/// The unmap of `request`, applied to `groups`.
 fn unmap_applied(
     groups: &mut GroupStates,
     request: &HypercallRequest,

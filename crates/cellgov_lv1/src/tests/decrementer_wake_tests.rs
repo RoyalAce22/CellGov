@@ -84,8 +84,8 @@ fn storage(mask: u64) -> GuestMemory {
     storage
 }
 
-/// 4.93 group states where thread 1 registered its bitmap, holds
-/// [`PLUG_BIT`] in its status shadow, and paused in mode 0.
+/// 4.93 group states where thread 1 registered its bitmap and paused in
+/// mode 0, and its status shadow holds [`PLUG_BIT`].
 fn raised_while_paused() -> GroupStates {
     let key = IrqStateBitmapKey {
         ppe_id: game_os_logical_ppe_id("4.93").expect("the 4.93 logical PPE id"),

@@ -4,6 +4,7 @@
 //! - the interrupt state bitmaps and their masks;
 //! - the event receive ports, the irq outlets and the plugs that connect
 //!   them;
+//! - the irq outlets of device interrupts;
 //! - the pause of a thread until an interrupt;
 //! - the events that the partition sends on its ports;
 //! - the end of the interrupt on a plug.
@@ -11,6 +12,7 @@
 pub(crate) mod bitmap;
 pub(crate) mod end_of_interrupt;
 pub(crate) mod event_port;
+pub(crate) mod io_irq_outlet;
 pub(crate) mod irq_plug;
 pub(crate) mod mask;
 pub(crate) mod pause;

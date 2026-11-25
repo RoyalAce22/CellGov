@@ -344,8 +344,7 @@ pub struct EhciSetupBitSet {
 ///
 /// The reader keeps no bit, so it answers each load of the helper, from
 /// any caller. The kernel calls the read helper only at step 1
-/// [OFW-4.93 lv2_kernel a:0x8000000000245F10]. A new row needs the same
-/// check of the callers of its helper.
+/// [OFW-4.93 lv2_kernel a:0x8000000000245F10].
 pub const EHCI_SETUP_BIT_SETS: &[EhciSetupBitSet] = &[EhciSetupBitSet {
     firmware: "4.93",
     register: INSNREG02,

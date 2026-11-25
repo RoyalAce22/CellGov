@@ -107,8 +107,8 @@ impl MemoryState {
     }
 
     /// The counter value of the next region's first attempt, or `None`
-    /// while no region has taken a value. The counter then holds its value
-    /// at the partition's start.
+    /// until a region takes a value. Until then the counter holds its
+    /// value at the partition's start.
     pub fn next_counter(&self) -> Option<u64> {
         self.next_counter
     }
@@ -250,8 +250,9 @@ fn lv1_argument_check(size: u64, exp: u64, r5: u64, flags: u64) -> Option<u64> {
 /// slot on that path.
 ///
 /// The address takes the partition's region counter and skips each
-/// address in `held`; see [`CounterDraw`]. The answer carries the region, and the hypervisor keeps
-/// it. The call is a refusal in these cases:
+/// address in `held`; see [`CounterDraw`]. The answer carries the
+/// region, and the hypervisor keeps it. The call is a refusal in these
+/// cases:
 /// - no lv1 image read shows the argument checks for `firmware`;
 /// - r5 is 1, or r6 sets one of its low 4 bits, which lv1's checks pass;
 /// - r4 is a page size exponent that the kernel's boot allocations do

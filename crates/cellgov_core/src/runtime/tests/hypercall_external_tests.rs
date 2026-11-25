@@ -134,7 +134,6 @@ struct Seen {
 }
 
 impl Seen {
-    /// Records the thread's hypercall `number`.
     fn called(&mut self, number: u64) {
         if number == PAUSE {
             self.paused = true;

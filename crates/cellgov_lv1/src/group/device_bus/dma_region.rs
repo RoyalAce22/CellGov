@@ -105,8 +105,8 @@ const OTHER_HELD: UnmodelledError = UnmodelledError::new(
 /// A call for a device after lv1 freed one of its regions.
 ///
 /// A close of the device and `free_device_dma_region` reach the same
-/// free method. lv1's free calls the device's method at +112 with the region's address
-/// [OFW-4.93 lv1 a:0x2276C8-0x2276E4]. That method reaches the pool's
+/// free method. lv1's free calls the device's method at +112 with the
+/// region's address [OFW-4.93 lv1 a:0x2276C8-0x2276E4]. That method reaches the pool's
 /// release [OFW-4.93 lv1 a:0x22D918-0x22D924]
 /// [OFW-4.93 lv1 a:0x22CEE0-0x22CEE4]. The release passes the address to
 /// the free function of the object that the pool's word at +160 selects
@@ -129,9 +129,9 @@ const OTHER_HELD: UnmodelledError = UnmodelledError::new(
 /// [OFW-4.93 lv1 a:0x2D72D4-0x2D7308]. No read shows which code sends that
 /// event. So no source shows the address after the free.
 ///
-/// The refusal holds for the device of the freed region alone. lv1's init gives the
-/// word at +160 the value 2 for device 0, 8 for device 1 and 9 for
-/// device 2 [OFW-4.93 lv1 a:0x3A9924-0x3A9938]
+/// The refusal holds for the device of the freed region alone. lv1's init
+/// gives the word at +160 the value 2 for device 0, 8 for device 1 and 9
+/// for device 2 [OFW-4.93 lv1 a:0x3A9924-0x3A9938]
 /// [OFW-4.93 lv1 a:0x3A9A4C-0x3A9A5C] [OFW-4.93 lv1 a:0x3A9AA0-0x3A9AB0].
 /// Each value selects an allocator with ranges of its own
 /// [OFW-4.93 lv1 a:0x22CD58-0x22CD90] [OFW-4.93 lv1 a:0x22A1F0-0x22A214],

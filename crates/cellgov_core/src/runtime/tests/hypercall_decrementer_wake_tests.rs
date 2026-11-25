@@ -66,11 +66,6 @@ fn a_decrementer_deadline_inside_a_raising_step_wakes_the_thread_before_the_rais
     assert_eq!(thread_1.interrupts, 0);
 }
 
-/// Thread 0's send wakes paused thread 1 at tick 5, before its first
-/// deadline at tick 100. The plug wake writes no DEC and cancels that
-/// deadline. With the mask then cleared, the next `pause` holds and
-/// queues its own deadline with nothing to displace. Only the second
-/// deadline fires.
 #[test]
 fn a_pause_after_a_plug_wake_keeps_only_its_own_decrementer_deadline() {
     let mut rt = runtime(PLUG_BIT);

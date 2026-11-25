@@ -39,7 +39,6 @@ fn request(number: u64, pc: u64, registers: &[u64]) -> HypercallRequest {
     }
 }
 
-/// The unmap call with r3 to r6.
 fn unmap_call(bus: u64, device: u64, bus_address: u64, length: u64) -> HypercallRequest {
     request(
         UNMAP_DEVICE_DMA_REGION,
@@ -48,7 +47,6 @@ fn unmap_call(bus: u64, device: u64, bus_address: u64, length: u64) -> Hypercall
     )
 }
 
-/// The unmap call that names the first byte and the length of `m`.
 fn unmap_of(m: DmaMapping) -> HypercallRequest {
     unmap_call(m.bus, m.device, m.bus_address, m.length)
 }

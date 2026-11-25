@@ -36,7 +36,6 @@ impl GpuState {
         self.open
     }
 
-    /// Applies `change` to the state.
     pub(crate) fn apply(&mut self, change: GpuChange) {
         match change {
             GpuChange::Opened(open) => self.open = Some(open),

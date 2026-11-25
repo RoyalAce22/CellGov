@@ -105,7 +105,8 @@
 //!    calls that function again [OFW-4.93 lv1 a:0x23D728-0x23D794]. It
 //!    then returns 0.
 //! 4. When a search finds no slot, it returns -1
-//!    [OFW-4.93 lv1 a:0x23D7D4-0x23D7EC]. The region is freed by then.
+//!    [OFW-4.93 lv1 a:0x23D7D4-0x23D7EC]. The device's free function
+//!    already freed the region by then.
 //!
 //! `allocate_device_dma_region` marks a slot with the partition and the
 //! low word of the address of each region that it gives device 1 or 2.
