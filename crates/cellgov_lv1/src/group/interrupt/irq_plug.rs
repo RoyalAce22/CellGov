@@ -208,3 +208,7 @@ mod boot_outlet_tests;
 #[cfg(test)]
 #[path = "tests/irq_plug_clear_path_tests.rs"]
 mod clear_path_tests;
+
+#[cfg(test)]
+#[path = "tests/irq_plug_raised_bit_tests.rs"]
+mod raised_bit_tests;
