@@ -1069,3 +1069,7 @@ mod hypercall_progression_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_progression_mode32_tests.rs"]
 mod hypercall_progression_mode32_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_loaded_step_tests.rs"]
+mod hypercall_loaded_step_tests;
