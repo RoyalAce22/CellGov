@@ -1,0 +1,4 @@
+address	field	width	reads	agree	value
+0x00000000003682b0	global	8	2	yes	0x000000000007c110
+0x000000000007c12c	vlan_flag	1	2	yes	0x00
+0x000000000007c130	vlan_capability	8	2	yes	0x0000000000000001
