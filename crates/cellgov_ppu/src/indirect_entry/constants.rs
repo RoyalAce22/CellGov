@@ -393,16 +393,22 @@ impl Constants {
         self.lost_gprs.get(gpr)
     }
 
-    /// The origins of the source of the GPR that `decoded` builds, when
-    /// that source can hold a constant that the scan dropped.
+    /// The origins of the GPR that `decoded` builds, when its source can
+    /// hold a constant that the scan dropped.
+    ///
+    /// A word that copies its source unchanged gives the origins of the
+    /// source. Any other step gives them stepped.
     fn copied_lost(&self, decoded: PpuInstruction) -> Option<Origins> {
         if let PpuInstruction::Mflr { .. } = decoded {
             return self.lr_lost.clone();
         }
-        GprStep::of(decoded)
-            .and_then(|step| step.source)
-            .and_then(|gpr| self.lost(gpr))
-            .cloned()
+        let step = GprStep::of(decoded)?;
+        let origins = self.lost(step.source?)?;
+        Some(if step.step.keeps_value() {
+            origins.clone()
+        } else {
+            origins.stepped()
+        })
     }
 
     /// The GPR that `decoded` writes and the constant it writes there,

@@ -224,6 +224,10 @@ pub(crate) struct IndirectBound {
     /// A path reaches the `bclr` with an LR that can hold a constant that
     /// `JoinFlow` dropped.
     ///
+    /// A dropped constant that is a TOC of a descriptor, and that no word
+    /// stepped, does not make the `bcctr` or the `bclr` lost. The bound
+    /// names each such TOC, because it is a doubleword of the file bytes.
+    ///
     /// The set also holds each `rfid` that can leave MSR\[IR\] at 1 when a
     /// path reaches it with a lost SRR0. A lost SRR0 can hold a constant
     /// that `JoinFlow` dropped.
@@ -421,15 +425,18 @@ pub(super) struct Bound<'a> {
     targets: BTreeMap<u64, BTreeSet<u64>>,
     /// The constants that each `mtctr` copies into CTR on the paths to
     /// it, by segment index and address, from the TOCs of the latest
-    /// round.
+    /// round. For a GPR for which [`JoinFlow::holds_only_tocs`] holds,
+    /// the constants also hold each TOC that a descriptor gives.
     ctr_writes: BTreeMap<(usize, u64), Value>,
     /// Each `mtctr` that can also copy a constant that [`JoinFlow`]
     /// dropped, by segment index and address, with the origins of the
-    /// GPR, from the TOCs of the latest round.
+    /// GPR, from the TOCs of the latest round. The map leaves out a GPR
+    /// for which [`JoinFlow::holds_only_tocs`] holds.
     lost_ctr_writes: BTreeMap<(usize, u64), Origins>,
     /// The address of each `bclr` whose LR can hold a constant that
     /// [`JoinFlow`] dropped, with the origins of LR, from the TOCs of the
-    /// latest round.
+    /// latest round. The map leaves out an LR for which
+    /// [`JoinFlow::holds_only_tocs`] holds.
     lost_returns: BTreeMap<u64, Origins>,
     /// The address of each `rfid` that [`Constants::translated_rfid_lost`]
     /// gives, with the origins of SRR0, from the TOCs of the latest round.
@@ -674,6 +681,9 @@ impl Bound<'_> {
     /// - names each constant that the code builds in a GPR;
     /// - keeps the target of each `bclr` whose LR the code builds;
     /// - keeps each constant that an `mtctr` copies;
+    /// - keeps each `mtctr` and each `bclr` that takes a lost value,
+    ///   unless [`JoinFlow::holds_only_tocs`] holds for its mark. Then an
+    ///   `mtctr` copies each TOC that a descriptor gives;
     /// - enters each word that an `rfid` can enter with MSR\[IR\] at 1;
     /// - keeps each `rfid` that can enter a word with MSR\[IR\] at 1 from
     ///   an SRR0 that can hold a constant that [`JoinFlow`] dropped.
@@ -701,6 +711,7 @@ impl Bound<'_> {
         joins: Option<&JoinFlow<'_>>,
         reach: &Reach<'_>,
     ) {
+        let lost = |origins: &&Origins| !joins.is_some_and(|joins| joins.holds_only_tocs(origins));
         let mut constants = Constants::default();
         for (word, ((address, raw), &toc)) in segment.addressed().zip(tocs).enumerate() {
             if !reach.contains(index, word) {
@@ -719,7 +730,7 @@ impl Bound<'_> {
                         .or_default()
                         .extend(lr.constants().iter().map(|&lr| lr & !0b11));
                 }
-                if let Some(origins) = &constants.lr_lost {
+                if let Some(origins) = constants.lr_lost.as_ref().filter(lost) {
                     note(&mut self.lost_returns, address, origins);
                 }
             }
@@ -730,8 +741,21 @@ impl Bound<'_> {
                         .and_modify(|own| *own = own.clone().union(value))
                         .or_insert_with(|| value.clone());
                 }
-                if let Some(origins) = constants.lost(rs) {
-                    note(&mut self.lost_ctr_writes, (index, address), origins);
+                match constants.lost(rs) {
+                    Some(origins) if lost(&origins) => {
+                        note(&mut self.lost_ctr_writes, (index, address), origins);
+                    }
+                    // The GPR can also hold a dropped TOC. CTR keeps it as
+                    // a constant, so that a decrement or a stepped copy of
+                    // CTR makes the `bcctr` lost, as for a kept constant.
+                    // [PPC-Book1 p:24 s:2.4] A `bc` with BO bit 2 at 0 decrements CTR.
+                    Some(_) => {
+                        self.ctr_writes
+                            .entry((index, address))
+                            .and_modify(|own| *own = own.clone().union(every))
+                            .or_insert_with(|| every.clone());
+                    }
+                    None => {}
                 }
             }
             for target in constants.translated_rfid_targets(raw) {

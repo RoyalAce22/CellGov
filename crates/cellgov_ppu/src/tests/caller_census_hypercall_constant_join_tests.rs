@@ -12,7 +12,7 @@ const NOP_REAL: u16 = 0x3004;
 const WINDOW_REAL: u16 = 0x3000;
 
 /// A real address with no word of the code at it.
-const NOWHERE: u16 = 0x5000;
+pub(super) const NOWHERE: u16 = 0x5000;
 
 /// A word that runs only in virtual mode: no real-mode word reaches it.
 const OUTSIDE: u64 = KERNEL + 0x5000;
@@ -21,7 +21,7 @@ const OUTSIDE: u64 = KERNEL + 0x5000;
 const WINDOW_UNRESOLVED: [(u64, Option<u16>); 2] = [(SC, None), (QUIET_SC, Some(77))];
 
 /// `lis rt,0; ori rt,rt,value`.
-fn build(rt: u8, value: u16) -> [u32; 2] {
+pub(super) fn build(rt: u8, value: u16) -> [u32; 2] {
     [
         word(PpuInstruction::Addis { rt, ra: 0, imm: 0 }),
         word(PpuInstruction::Ori {
@@ -62,7 +62,7 @@ fn build_kernel(rt: u8, value: u16) -> [u32; 3] {
 /// `blt` over the next `words` words: a `bc` on CR bit 0.
 ///
 /// [PPC-Book1 p:20 s:2.4.1] BO 011at branches if the CR bit is 1 and does not decrement CTR.
-fn skip(words: i16) -> u32 {
+pub(super) fn skip(words: i16) -> u32 {
     bc(0b01100, 4 * (words + 1))
 }
 
@@ -89,7 +89,7 @@ fn targets_of(at: u64, words: &[u32], writer: u32) -> BTreeSet<u64> {
         .unwrap_or_default()
 }
 
-fn addi(rt: u8, ra: u8, imm: i16) -> u32 {
+pub(super) fn addi(rt: u8, ra: u8, imm: i16) -> u32 {
     word(PpuInstruction::Addi { rt, ra, imm })
 }
 
@@ -377,13 +377,13 @@ fn a_join_takes_a_second_constant_of_one_lr_writer_that_fills_the_lr_to_the_join
 }
 
 /// The address of the data segment that holds the descriptors.
-const DESCRIPTORS: u64 = KERNEL + 0x2_0000;
+pub(super) const DESCRIPTORS: u64 = KERNEL + 0x2_0000;
 
 /// The bytes of a function descriptor for the word at `entry` with the
 /// TOC `toc`.
 ///
 /// [OFW-4.93 lv2_kernel a:0x80000000002765e4-0x8000000000276600] A call through a descriptor loads LR from its first doubleword and r2 from its second.
-fn descriptor(entry: u64, toc: u64) -> Vec<u8> {
+pub(super) fn descriptor(entry: u64, toc: u64) -> Vec<u8> {
     [entry, toc, 0]
         .iter()
         .flat_map(|doubleword| doubleword.to_be_bytes())
@@ -393,13 +393,14 @@ fn descriptor(entry: u64, toc: u64) -> Vec<u8> {
 /// Sixty-five descriptors give the first word sixty-five TOCs, so r2
 /// holds each of them on the path to the `mtctr`. The `blt` brings that
 /// r2 to the `mtctr`, a join with more TOCs than the raised limit, so
-/// the join marks r2.
+/// the join marks r2. The join dropped only TOCs, and the bound names
+/// each of them, so the `bctr` reaches no word that the bound misses.
 ///
 /// [PPC-Book1 p:24 s:2.4] A branch alters only CTR and LR, so r2 at the target is r2 at the branch.
 /// [PPC-Book1 p:81 s:3.3.13] `mtlr` and `mtctr` copy RS into LR or CTR.
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
 #[test]
-fn a_bctr_of_an_r2_with_more_tocs_than_the_raised_limit_at_a_join_leaves_every_site_unresolved() {
+fn a_bctr_of_an_r2_with_more_tocs_than_the_raised_limit_at_a_join_keeps_the_sites_resolved() {
     let words = [skip(0), mtctr(2), bctr()];
     let descriptors: Vec<u8> = (0..=RAISED_LIMIT)
         .flat_map(|toc| descriptor(VECTOR, u64::from(NOWHERE + 0x10 * toc)))
@@ -410,7 +411,7 @@ fn a_bctr_of_an_r2_with_more_tocs_than_the_raised_limit_at_a_join_leaves_every_s
         quiet(),
         data_bytes(DESCRIPTORS, descriptors),
     ];
-    assert_eq!(ordinals(0, &segments), EVERY_UNRESOLVED);
+    assert_eq!(ordinals(0, &segments), WINDOW_RESOLVED);
 }
 
 /// The 65 paths bring more constants in r3 than a raised bound keeps,

@@ -108,7 +108,8 @@ impl Brought {
                 Joined::Overflowed => {
                     let own = self.gpr(gpr);
                     let dropped = missing(own, value).map(|constant| (0, constant));
-                    let origins = drops.record(join.slot, register, dropped);
+                    let only_tocs = || drops_only_tocs(join.every, own, value);
+                    let origins = drops.record(join.slot, register, dropped, only_tocs);
                     changed |= self.lost_gprs.join_gpr(gpr, &origins);
                 }
             }
@@ -139,7 +140,7 @@ impl Brought {
             }
         }
         if !dropped.is_empty() {
-            let origins = drops.record(join.slot, JoinRegister::Lr, dropped.into_iter());
+            let origins = drops.record(join.slot, JoinRegister::Lr, dropped.into_iter(), || false);
             changed |= join_origins(&mut self.lr_lost, Some(&origins));
         }
         changed |= join_origins(&mut self.srrs_lost[0], path.srr0_lost.as_ref());
@@ -189,12 +190,20 @@ fn missing<'v>(own: Option<&'v Value>, value: &'v Value) -> impl Iterator<Item =
         .copied()
 }
 
-/// The join word that a path joins into: its slot, and the bounds that
-/// [`Bounds`] raises there.
+/// Whether each constant of `value` that `own` does not hold is one of
+/// `every`, the TOCs that a descriptor gives.
+fn drops_only_tocs(every: &Value, own: Option<&Value>, value: &Value) -> bool {
+    every.holds_all(value)
+        || missing(own, value).all(|constant| every.constants().binary_search(&constant).is_ok())
+}
+
+/// The join word that a path joins into: its slot, the bounds that
+/// [`Bounds`] raises there, and each TOC that a descriptor gives.
 #[derive(Clone, Copy)]
 struct JoinAt<'b> {
     slot: usize,
     raised: Option<&'b BTreeMap<JoinRegister, usize>>,
+    every: &'b Value,
 }
 
 impl JoinAt<'_> {
@@ -361,6 +370,28 @@ impl<'a> JoinFlow<'a> {
             .map(|slot| self.at[slot].entered())
     }
 
+    /// Whether a register with the lost mark `origins` can hold only the
+    /// constants of its value and TOCs that a descriptor gives.
+    ///
+    /// This holds when each of these is true:
+    /// - the mark names each of its drops, and each dropped only TOCs;
+    /// - no word stepped a dropped constant on the way.
+    ///
+    /// The bound names each such TOC, because each is a doubleword of the
+    /// file bytes. So the register adds no value to the bound that it
+    /// does not hold.
+    pub(super) fn holds_only_tocs(&self, origins: &Origins) -> bool {
+        !origins.has_more()
+            && !origins.is_stepped()
+            && !origins.drops().is_empty()
+            && origins.drops().iter().all(|&id| {
+                self.drops
+                    .records
+                    .get(id as usize)
+                    .is_some_and(|record| record.only_tocs)
+            })
+    }
+
     /// Steps from the word at `start` to the next join word or to the end
     /// of the path, and joins what the path brings into each join word on
     /// the way.
@@ -402,6 +433,7 @@ impl<'a> JoinFlow<'a> {
         let at = JoinAt {
             slot,
             raised: self.bounds.0.get(&slot),
+            every: self.every,
         };
         if self.at[slot].join(constants, at, &mut self.drops) {
             work.push(self.words.joins[slot]);
@@ -462,12 +494,19 @@ struct DropRecord {
     /// The record keeps at most `RAISED_LIMIT + 1` of them, which is
     /// enough to show that the count is past [`RAISED_LIMIT`].
     dropped: BTreeSet<(u64, u64)>,
+    /// Whether each constant that the joins dropped is a TOC that a
+    /// descriptor gives.
+    only_tocs: bool,
 }
 
 impl Drops {
     /// Records that the join at `slot` dropped the constants `dropped`
     /// of `register`, and returns the origins of the mark that the drop
     /// sets.
+    ///
+    /// `only_tocs` tells whether each dropped constant is a TOC that a
+    /// descriptor gives. The record calls it only while each earlier
+    /// drop of the record dropped only TOCs.
     ///
     /// A drop past the last id that a `u32` holds gets no id: its mark
     /// names no drop and has more, so the register stays lost.
@@ -476,6 +515,7 @@ impl Drops {
         slot: usize,
         register: JoinRegister,
         dropped: impl Iterator<Item = (u64, u64)>,
+        only_tocs: impl FnOnce() -> bool,
     ) -> Origins {
         let id = match self.ids.get(&(slot, register)) {
             Some(&id) => id,
@@ -488,10 +528,13 @@ impl Drops {
                     slot,
                     register,
                     dropped: BTreeSet::new(),
+                    only_tocs: true,
                 });
                 id
             }
         };
+        let record = &mut self.records[id as usize];
+        record.only_tocs = record.only_tocs && only_tocs();
         if self.counting {
             let record = &mut self.records[id as usize];
             for item in dropped {
@@ -514,8 +557,11 @@ impl Bounds {
     /// The bound of `register` at the join word at `slot`.
     #[cfg(test)]
     pub(super) fn bound(&self, slot: usize, register: JoinRegister) -> usize {
-        let raised = self.0.get(&slot);
-        JoinAt { slot, raised }.limit(register)
+        self.0
+            .get(&slot)
+            .and_then(|raised| raised.get(&register))
+            .copied()
+            .unwrap_or(JOIN_LIMIT)
     }
 
     /// Raises the bound of each drop that `origins` names, when its count

@@ -84,9 +84,10 @@
 //! - it keeps at most 16 constants of one register at a branch target,
 //!   until it raises that bound as the next item states. When the
 //!   paths bring more, it drops them and marks the register as one
-//!   that can hold a constant the scan dropped. The image does not
-//!   name a dropped constant. The mark moves only with a copy of the
-//!   register, also a copy into or out of SRR0 or SRR1. A call keeps
+//!   that can hold a constant the scan dropped. The image need not
+//!   name a dropped constant. The mark moves with a copy of the
+//!   register, also a copy into or out of SRR0 or SRR1, and with a word
+//!   that steps the register as the scan follows it. A call keeps
 //!   the marks of SRR0 and SRR1, and an `sc` clears them. So the scan
 //!   does not record a dropped constant that a store and a load move,
 //!   or that a call takes into its routine;
@@ -94,7 +95,12 @@
 //!   the number of constants that the paths brought there. When a
 //!   `bcctr`, `bclr` or `rfid` can reach a dropped constant, the scan
 //!   raises the bound at those origins to at most 64 constants and runs
-//!   again.
+//!   again;
+//! - a mark whose drops dropped only TOCs that a descriptor gives, and
+//!   that no word stepped, makes no `bcctr` or `bclr` lost. Each such TOC
+//!   is a doubleword of the file bytes, so the bound names it. A word
+//!   that steps the register, such as an `addi` that builds an address
+//!   from r2, makes the mark lost again.
 //!
 //! A second scan finds where an `rfid`, `mtmsr` or `mtmsrd` can put
 //! control into real mode. It forgets each constant at a word that

@@ -22,6 +22,9 @@ pub(super) struct Origins {
     /// Whether the register can also hold a constant of a drop that
     /// `drops` does not name.
     more: bool,
+    /// Whether the register can hold a value that a word computed from a
+    /// dropped constant, other than an unchanged copy of it.
+    stepped: bool,
 }
 
 impl Origins {
@@ -30,6 +33,7 @@ impl Origins {
         Self {
             drops: Rc::from([drop]),
             more: false,
+            stepped: false,
         }
     }
 
@@ -39,7 +43,23 @@ impl Origins {
         Self {
             drops: Rc::from([]),
             more: true,
+            stepped: false,
         }
+    }
+
+    /// The origins of a value that a word computes from a register with
+    /// these origins, when the word does not copy the value unchanged.
+    pub(super) fn stepped(&self) -> Self {
+        Self {
+            stepped: true,
+            ..self.clone()
+        }
+    }
+
+    /// Whether the register can hold a value that a word computed from a
+    /// dropped constant, other than an unchanged copy of it.
+    pub(super) fn is_stepped(&self) -> bool {
+        self.stepped
     }
 
     /// The drop ids that the mark names, in ascending order.
@@ -69,6 +89,7 @@ impl Origins {
         Self {
             drops: drops.into(),
             more,
+            stepped: self.stepped || other.stepped,
         }
     }
 
@@ -78,7 +99,7 @@ impl Origins {
     /// [`ORIGIN_LIMIT`] drops and has more, and the drop is above each
     /// of them.
     fn holds_all(&self, other: &Self) -> bool {
-        if !self.more && other.more {
+        if (!self.more && other.more) || (!self.stepped && other.stepped) {
             return false;
         }
         if Rc::ptr_eq(&self.drops, &other.drops) {
