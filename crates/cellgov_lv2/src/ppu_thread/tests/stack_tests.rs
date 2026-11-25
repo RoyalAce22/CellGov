@@ -160,7 +160,8 @@ fn thread_stack_initial_sp_leaves_a_whole_minimum_frame() {
     assert_eq!(
         s.initial_sp(),
         0xD002_0000 - 0x70,
-        "16 bytes is the header's first two doublewords, not a frame: a          callee saving LR at 16(r1) would write above the block",
+        "16 bytes is the header's first two doublewords, not a frame: a \
+         callee saving LR at 16(r1) would write above the block",
     );
     assert_eq!(s.end(), 0xD002_0000);
     assert_eq!(s.end() - s.initial_sp(), ABI_MIN_STACK_FRAME);

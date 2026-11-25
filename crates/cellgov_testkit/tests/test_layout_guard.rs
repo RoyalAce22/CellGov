@@ -408,7 +408,9 @@ fn unit_test_modules_are_external_files() {
     violations.sort();
     assert!(
         conforming >= MIN_CONFORMING_MODULES,
-        "gate went vacuous: only {conforming} conforming `mod tests`          declaration(s) recognised across {} source files, expected at least          {MIN_CONFORMING_MODULES}",
+        "gate went vacuous: only {conforming} conforming `mod tests` \
+         declaration(s) recognised across {} source files, expected at least \
+         {MIN_CONFORMING_MODULES}",
         files.len()
     );
 

@@ -274,7 +274,8 @@ fn the_scan_reaches_the_file_it_excludes_from_itself() {
     );
     assert!(
         !literals_in_line(r#"assert!(is_capture_intermediate("tests/x/boot.tty"));"#).is_empty(),
-        "this file is skipped because it carries example tests/ literals;          if it no longer does, drop the skip"
+        "this file is skipped because it carries example tests/ literals; \
+         if it no longer does, drop the skip"
     );
 }
 
@@ -291,7 +292,8 @@ fn the_scan_finds_fixture_literals() {
     let anchored = found.iter().filter(|l| l.anchored).count();
     assert!(
         anchored >= MIN_ANCHORED_LITERALS,
-        "gate went vacuous: only {anchored} of {} literals were anchored, so          the existence rule polices almost nothing",
+        "gate went vacuous: only {anchored} of {} literals were anchored, so \
+         the existence rule polices almost nothing",
         found.len()
     );
 }
@@ -377,7 +379,10 @@ fn every_committed_fixture_a_test_names_exists() {
     }
     assert!(
         checked >= MIN_CHECKED_FIXTURES,
-        "gate went vacuous: only {checked} literal(s) reached the existence          check, expected at least {MIN_CHECKED_FIXTURES}. Either the external-data          allowlist swallowed the population or the scan lost its anchored          literals"
+        "gate went vacuous: only {checked} literal(s) reached the existence \
+         check, expected at least {MIN_CHECKED_FIXTURES}. Either the external-data \
+         allowlist swallowed the population or the scan lost its anchored \
+         literals"
     );
     assert!(
         missing.is_empty(),
