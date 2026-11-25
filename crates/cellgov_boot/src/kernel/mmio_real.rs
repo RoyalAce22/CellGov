@@ -113,6 +113,20 @@ pub enum DeviceMmioError {
         /// Why the region has no real address.
         source: MmioRealRefusal,
     },
+    /// An EHCI controller is at a firmware for which CellGov has no
+    /// register rule. The run declares none of the device MMIO.
+    #[error(
+        "the EHCI controller of device {device} of bus {bus} at firmware {firmware} has no \
+         register rule"
+    )]
+    NoEhciRule {
+        /// The firmware version.
+        firmware: String,
+        /// The bus id of the controller's device.
+        bus: u64,
+        /// The device id of the controller's device.
+        device: u64,
+    },
     /// The real-mode address space refused a declaration.
     #[error("real-mode kernel address space: {0}")]
     Memory(#[from] MemError),

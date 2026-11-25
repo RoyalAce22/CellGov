@@ -59,27 +59,47 @@ const RULES: [RegisterRule; EHCI_CONTROLLERS.len()] = [store_operational::<0>];
 /// The real address of the operational registers of each EHCI controller
 /// of `tables` at `firmware`, with the rule of that controller.
 ///
-/// The rule of a controller is the entry of [`RULES`] at the controller's
-/// index in `tables`.
+/// Each controller at `firmware` gets the rule of `firmware`
+/// ([`rule_of`]).
 ///
 /// # Errors
 ///
-/// Returns [`DeviceMmioError::NoRealAddress`] for the first controller
-/// whose region has no real address.
+/// Returns one of these for the first controller that has it:
+/// - [`DeviceMmioError::NoEhciRule`] when `firmware` has no rule;
+/// - [`DeviceMmioError::NoRealAddress`] when the controller's region has
+///   no real address.
 pub(super) fn controllers_of(
     tables: MmioTables<'_>,
     firmware: &str,
 ) -> Result<Vec<(u64, RegisterRule)>, DeviceMmioError> {
+    let rule = rule_of(firmware);
     tables
         .controllers
         .iter()
-        .zip(RULES)
-        .filter(|(c, _)| c.firmware == firmware)
-        .map(|(c, rule)| {
+        .filter(|c| c.firmware == firmware)
+        .map(|c| {
+            let rule = rule.ok_or_else(|| DeviceMmioError::NoEhciRule {
+                firmware: firmware.to_owned(),
+                bus: c.bus,
+                device: c.device,
+            })?;
             let real = tables.real(firmware, c.bus, c.device, c.region)?;
             Ok((real + c.operational, rule))
         })
         .collect()
+}
+
+/// The rule of an EHCI controller at `firmware`, or `None` when no
+/// controller of [`EHCI_CONTROLLERS`] is at `firmware`.
+///
+/// The rule is the entry of [`RULES`] at the index of the first such
+/// controller. That rule reads the firmware of that controller, which is
+/// `firmware`.
+fn rule_of(firmware: &str) -> Option<RegisterRule> {
+    EHCI_CONTROLLERS
+        .iter()
+        .zip(RULES)
+        .find_map(|(c, rule)| (c.firmware == firmware).then_some(rule))
 }
 
 /// Declares the registers of each controller of `controllers` as a

@@ -37,6 +37,10 @@ mod real_tests;
 #[path = "tests/device_mmio_no_region_tests.rs"]
 mod no_region_tests;
 
+#[cfg(test)]
+#[path = "tests/device_mmio_ehci_rule_tests.rs"]
+mod ehci_rule_tests;
+
 #[path = "ehci.rs"]
 mod ehci;
 
@@ -119,6 +123,8 @@ fn words_of<'a>(
 /// Returns one of these:
 /// - [`DeviceMmioError::NoRealAddress`] when a region, a word or a
 ///   controller has no real address. The function then declares nothing;
+/// - [`DeviceMmioError::NoEhciRule`] when an EHCI controller is at a
+///   firmware with no register rule. The function then declares nothing;
 /// - the refusal of [`GuestMemory::declare_unmodelled`] when a region
 ///   overlaps a region of `mem` or another span, or runs past the end of
 ///   the address space;

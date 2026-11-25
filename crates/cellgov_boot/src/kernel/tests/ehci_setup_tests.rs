@@ -37,7 +37,7 @@ fn registers() -> [u64; 3] {
 
 /// Commits a store of `value` to the register at `real` through the
 /// staging drain, as the commit pipeline does.
-fn store(mem: &mut GuestMemory, real: u64, value: u32) -> Result<(), MemError> {
+pub(super) fn store(mem: &mut GuestMemory, real: u64, value: u32) -> Result<(), MemError> {
     let range = ByteRange::new(GuestAddr::new(real), 4).unwrap();
     let mut staging = StagingMemory::new();
     staging.stage(StagedWrite::new(range, &value.to_be_bytes()));
