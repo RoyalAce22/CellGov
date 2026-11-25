@@ -37,6 +37,16 @@ pub const USBSTS: u64 = 0x4;
 /// The offset of USBINTR from the operational base.
 pub const USBINTR: u64 = 0x8;
 
+/// The offset of PERIODICLISTBASE from the operational base.
+///
+/// [EHCI p:24 s:2.3.6] PERIODICLISTBASE is at operational base + 14h and holds the start address of the Periodic Frame List. Its default value is undefined.
+pub const PERIODICLISTBASE: u64 = 0x14;
+
+/// The bits of PERIODICLISTBASE that software must write as 0.
+///
+/// [EHCI p:25 s:2.3.6] Bits 11:0 are reserved and must be written as 0s. During runtime their values are undefined.
+pub const PERIODICLISTBASE_RESERVED_BITS: u32 = 0xFFF;
+
 /// The offset of ASYNCLISTADDR from the operational base.
 ///
 /// [EHCI p:25 s:2.3.7] ASYNCLISTADDR is at operational base + 18h and holds the address of the next asynchronous queue head. Its default value is undefined.
@@ -92,6 +102,16 @@ pub const USBCMD_RS: u32 = 1 << 0;
 ///
 /// [EHCI p:20 s:2.3.1] Bit 1 is HCRESET. The controller clears it when the reset is complete, and the reset sets every operational register to its initial value.
 pub const USBCMD_HCRESET: u32 = 1 << 1;
+
+/// The Periodic Schedule Enable bit of USBCMD.
+///
+/// [EHCI p:19 s:2.3.1] Bit 4 is Periodic Schedule Enable, default 0. At 0 the controller does not process the periodic schedule.
+pub const USBCMD_PSE: u32 = 1 << 4;
+
+/// The Periodic Schedule Status bit of USBSTS.
+///
+/// [EHCI p:21 s:2.3.2] Bit 14 is Periodic Schedule Status, default 0. At 0 the periodic schedule is disabled.
+pub const USBSTS_PSS: u32 = 1 << 14;
 
 /// The Asynchronous Schedule Enable bit of USBCMD.
 ///
@@ -351,29 +371,41 @@ pub struct EhciAddressStore {
 /// The stores of a schedule address that the kernel makes after its
 /// controller reset, at each controller of [`EHCI_CONTROLLERS`].
 ///
-/// The kernel does these steps:
-/// 1. It builds two queue heads and links each one to the other
-///    [OFW-4.93 lv2_kernel a:0x8000000000245C5C-0x8000000000245CDC].
-/// 2. It calls the function at [OFW-4.93 lv2_kernel a:0x80000000002400E0]
-///    with the first queue head. With r5 = 0, that function returns the
-///    queue head's offset in its DMA pool plus the pool's bus address
-///    [OFW-4.93 lv2_kernel a:0x8000000000240104-0x8000000000240130].
-/// 3. It stores the returned word to ASYNCLISTADDR
-///    [OFW-4.93 lv2_kernel a:0x8000000000245CEC].
+/// For each row, the kernel calls the function at
+/// [OFW-4.93 lv2_kernel a:0x80000000002400E0] with a structure of its
+/// DMA pool. With r5 = 0, that function returns the structure's offset in
+/// the pool plus the pool's bus address
+/// [OFW-4.93 lv2_kernel a:0x8000000000240104-0x8000000000240130]. The
+/// kernel then stores the returned word to the row's register. So the
+/// kernel computes each stored word from its own state.
 ///
-/// The kernel computes the stored word from its own state. Linux
-/// `drivers/usb/host/ehci-hcd.c`, `ehci_run`, also writes the DMA
-/// address of the first queue head of the asynchronous list to this
-/// register.
-pub const EHCI_ADDRESS_STORES: &[EhciAddressStore] = &[EhciAddressStore {
-    firmware: "4.93",
-    register: ASYNCLISTADDR,
-    // [OFW-4.93 lv2_kernel a:0x8000000000245CEC] stw r3,24(r28). The
-    // ld at [OFW-4.93 lv2_kernel a:0x8000000000245CC4] loads r28 from
-    // +128 of the kernel's state, which holds the operational base
-    // [OFW-4.93 lv2_kernel a:0x8000000000245914-0x8000000000245924].
-    store: 0x8000_0000_0024_5CEC,
-}];
+/// Linux `drivers/usb/host/ehci-hcd.c`, `ehci_run`, also writes the DMA
+/// address of the periodic frame list to PERIODICLISTBASE, and the DMA
+/// address of the first queue head of the asynchronous list to
+/// ASYNCLISTADDR.
+pub const EHCI_ADDRESS_STORES: &[EhciAddressStore] = &[
+    // The first of two queue heads that the kernel links to each other
+    // [OFW-4.93 lv2_kernel a:0x8000000000245C5C-0x8000000000245CDC].
+    EhciAddressStore {
+        firmware: "4.93",
+        register: ASYNCLISTADDR,
+        // [OFW-4.93 lv2_kernel a:0x8000000000245CEC] stw r3,24(r28). The
+        // ld at [OFW-4.93 lv2_kernel a:0x8000000000245CC4] loads r28 from
+        // +128 of the kernel's state, which holds the operational base
+        // [OFW-4.93 lv2_kernel a:0x8000000000245914-0x8000000000245924].
+        store: 0x8000_0000_0024_5CEC,
+    },
+    // The periodic frame list: the structure in r24 at the call
+    // [OFW-4.93 lv2_kernel a:0x8000000000245E54-0x8000000000245E64].
+    EhciAddressStore {
+        firmware: "4.93",
+        register: PERIODICLISTBASE,
+        // [OFW-4.93 lv2_kernel a:0x8000000000245E6C] stw r3,20(r29). The
+        // ld at [OFW-4.93 lv2_kernel a:0x8000000000245E4C] loads r29 from
+        // +128 of the kernel's state, which holds the operational base.
+        store: 0x8000_0000_0024_5E6C,
+    },
+];
 
 #[cfg(test)]
 #[path = "tests/ehci_tests.rs"]
@@ -382,6 +414,10 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/ehci_address_store_tests.rs"]
 mod address_store_tests;
+
+#[cfg(test)]
+#[path = "tests/ehci_periodic_store_tests.rs"]
+mod periodic_store_tests;
 
 #[cfg(test)]
 #[path = "tests/ehci_setup_tests.rs"]

@@ -63,6 +63,10 @@ mod ehci_bit_set_tests;
 #[path = "tests/ehci_async_list_tests.rs"]
 mod ehci_async_list_tests;
 
+#[cfg(test)]
+#[path = "tests/ehci_periodic_list_tests.rs"]
+mod ehci_periodic_list_tests;
+
 /// An access of a hardware thread to the MMIO of a device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeviceMmioAccess {

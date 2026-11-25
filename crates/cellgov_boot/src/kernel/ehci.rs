@@ -3,7 +3,8 @@
 //!
 //! The run models these registers of each controller of
 //! [`EHCI_CONTROLLERS`] as register words:
-//! - USBCMD, USBSTS, USBINTR and ASYNCLISTADDR;
+//! - USBCMD, USBSTS and USBINTR;
+//! - PERIODICLISTBASE and ASYNCLISTADDR;
 //! - the PS3 setup registers `insnreg01`, `insnreg02` and `insnreg03`.
 //!
 //! No source gives their state when the kernel starts, so each word
@@ -14,8 +15,11 @@
 //!   store, so USBSTS gets HCHalted = 1;
 //! - a store to USBCMD that sets HCRESET while HCHalted is 1: the reset
 //!   ends at the store. It sets USBCMD, USBSTS and USBINTR to their
-//!   initial values, and ASYNCLISTADDR and the setup registers to
-//!   unknown values;
+//!   initial values. It sets PERIODICLISTBASE, ASYNCLISTADDR and the
+//!   setup registers to unknown values;
+//! - a store to PERIODICLISTBASE by the instruction of a row of
+//!   [`EHCI_ADDRESS_STORES`], while the periodic schedule is known to be
+//!   disabled. The register then holds bits 31:12 of the stored word;
 //! - a store to ASYNCLISTADDR by the instruction of a row of
 //!   [`EHCI_ADDRESS_STORES`], while the asynchronous schedule is known
 //!   to be disabled. The register then holds the stored word;
@@ -37,9 +41,9 @@ use cellgov_mem::{
 use cellgov_ps3_abi::hw::ehci::{
     EhciSetupBitSet, EhciSetupStore, ASYNCLISTADDR, ASYNCLISTADDR_ZERO_BITS, EHCI_ADDRESS_STORES,
     EHCI_CONTROLLERS, EHCI_RESET_READERS, EHCI_SETUP_BIT_SETS, EHCI_SETUP_STORES, INSNREG01,
-    INSNREG02, INSNREG03, USBCMD, USBCMD_ASE, USBCMD_HCRESET, USBCMD_PARK_BITS, USBCMD_RESET_VALUE,
-    USBCMD_RS, USBINTR, USBINTR_RESET_VALUE, USBSTS, USBSTS_ASS, USBSTS_HCHALTED,
-    USBSTS_RESET_VALUE,
+    INSNREG02, INSNREG03, PERIODICLISTBASE, PERIODICLISTBASE_RESERVED_BITS, USBCMD, USBCMD_ASE,
+    USBCMD_HCRESET, USBCMD_PARK_BITS, USBCMD_PSE, USBCMD_RESET_VALUE, USBCMD_RS, USBINTR,
+    USBINTR_RESET_VALUE, USBSTS, USBSTS_ASS, USBSTS_HCHALTED, USBSTS_PSS, USBSTS_RESET_VALUE,
 };
 
 use super::mmio_real::{DeviceMmioError, MmioTables};
@@ -56,6 +60,10 @@ mod bit_set_rule_tests;
 #[path = "tests/ehci_async_list_rule_tests.rs"]
 mod async_list_rule_tests;
 
+#[cfg(test)]
+#[path = "tests/ehci_periodic_list_rule_tests.rs"]
+mod periodic_list_rule_tests;
+
 /// The index of each register in a controller's register file.
 const CMD: usize = 0;
 const STS: usize = 1;
@@ -64,9 +72,10 @@ const INSN01: usize = 3;
 const INSN03: usize = 4;
 const INSN02: usize = 5;
 const ASYNC: usize = 6;
+const PERIODIC: usize = 7;
 
 /// The number of words in a controller's register file.
-const WORDS: usize = 7;
+const WORDS: usize = 8;
 
 /// The offset of each register of the file from the operational base, in
 /// the order of the indexes.
@@ -78,6 +87,7 @@ const REGISTERS: [u64; WORDS] = [
     INSNREG03,
     INSNREG02,
     ASYNCLISTADDR,
+    PERIODICLISTBASE,
 ];
 
 /// The rule of each controller of [`EHCI_CONTROLLERS`], in the order of
@@ -237,8 +247,14 @@ fn apply_store(
         INSN01 | INSN03 => store_setup(firmware, setup, words, index, store),
         INSN02 => store_setup_bits(firmware, bit_sets, words, index, store),
         ASYNC => store_async_list(words, store),
+        PERIODIC => store_periodic_list(words, store),
         _ => false,
     }
+}
+
+/// Returns true when `bit` of `word` is known and 0.
+fn known_clear(word: RegisterWord, bit: u32) -> bool {
+    word.known & bit != 0 && word.value & bit == 0
 }
 
 /// A store to ASYNCLISTADDR: only while USBCMD holds a known 0
@@ -254,14 +270,48 @@ fn apply_store(
 /// [EHCI p:71 s:4.8] Software may write this register with defined results only when the schedule is disabled: Asynchronous Schedule Enable and Asynchronous Schedule Status are zero.
 /// [EHCI p:71 s:4.8] When Asynchronous Schedule Enable is zero, the host controller does not access the asynchronous schedule through ASYNCLISTADDR.
 fn store_async_list(words: &mut [RegisterWord; WORDS], store: RegisterStore) -> bool {
-    let disabled = |word: RegisterWord, bit: u32| word.known & bit != 0 && word.value & bit == 0;
     if store.own != u32::MAX
-        || !disabled(words[CMD], USBCMD_ASE)
-        || !disabled(words[STS], USBSTS_ASS)
+        || !known_clear(words[CMD], USBCMD_ASE)
+        || !known_clear(words[STS], USBSTS_ASS)
     {
         return false;
     }
     words[ASYNC] = RegisterWord::known(store.value & !ASYNCLISTADDR_ZERO_BITS);
+    true
+}
+
+/// A store to PERIODICLISTBASE: only while USBCMD holds a known 0
+/// Periodic Schedule Enable bit and USBSTS a known 0 Periodic Schedule
+/// Status bit.
+///
+/// The rule also refuses these stores:
+/// - a store with a bit that is not the code's own;
+/// - a store with a bit of 11:0 set, which software must write as 0.
+///
+/// The register then holds bits 31:12 of the stored word. Bits 11:0 stay
+/// unknown, because the specification gives no value for them. The
+/// controller does not read the frame list while the schedule is
+/// disabled. So the store changes no other word, and the run starts no
+/// transfer. The specification does not limit the stores to this
+/// register to a disabled schedule, as it does for ASYNCLISTADDR. The
+/// rule refuses a store while the schedule can run, because the run does
+/// not model a controller that reads the frame list.
+///
+/// [EHCI p:25 s:2.3.6] Software loads this register before the host controller starts the schedule. Bits 11:0 must be written as 0s, and during runtime their values are undefined.
+/// [EHCI p:66 s:4.6] When Periodic Schedule Enable is zero, the host controller does not access the periodic frame list through PERIODICLISTBASE.
+/// [EHCI p:21 s:2.3.2] When Periodic Schedule Status and Periodic Schedule Enable have the same value, the periodic schedule is enabled (1) or disabled (0).
+fn store_periodic_list(words: &mut [RegisterWord; WORDS], store: RegisterStore) -> bool {
+    if store.own != u32::MAX
+        || store.value & PERIODICLISTBASE_RESERVED_BITS != 0
+        || !known_clear(words[CMD], USBCMD_PSE)
+        || !known_clear(words[STS], USBSTS_PSS)
+    {
+        return false;
+    }
+    words[PERIODIC] = RegisterWord {
+        value: store.value,
+        known: !PERIODICLISTBASE_RESERVED_BITS,
+    };
     true
 }
 
@@ -376,6 +426,8 @@ fn store_usbcmd(words: &mut [RegisterWord; WORDS], store: RegisterStore) -> bool
         words[INTR] = RegisterWord::known(USBINTR_RESET_VALUE);
         // [EHCI p:71 s:4.8] The default value of ASYNCLISTADDR after reset is undefined.
         words[ASYNC] = RegisterWord::UNKNOWN;
+        // [EHCI p:53 s:4.1] Table 4-1 gives PERIODICLISTBASE an undefined value after reset.
+        words[PERIODIC] = RegisterWord::UNKNOWN;
         // Linux `drivers/usb/host/ehci-ps3.c`, `ps3_ehci_setup_insnreg`,
         // says that a host controller reset returns the setup registers
         // to their chip defaults. No source gives those defaults.
