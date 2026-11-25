@@ -8,12 +8,9 @@
 //! - [`cellgov_ps3_abi::lv1::uart::GAME_OS_DISPATCHER_REPLIES`], with the
 //!   status and the data bytes of its row;
 //! - [`cellgov_ps3_abi::lv1::uart::GAME_OS_RANDOM_DISPATCHER_REQUESTS`],
-//!   with the status of its row and [`SYNTHETIC_RANDOM_DATA`].
-//!
-//! CellGov refuses a request of
-//! [`cellgov_ps3_abi::lv1::uart::GAME_OS_IDENTITY_DISPATCHER_REQUESTS`]
-//! with [`IDENTITY_PART`], because no committed synthetic console identity
-//! gives its data bytes.
+//!   with the status of its row and [`SYNTHETIC_RANDOM_DATA`];
+//! - [`cellgov_ps3_abi::lv1::uart::GAME_OS_IDENTITY_DISPATCHER_REQUESTS`],
+//!   with the status of its row and the data bytes of a console identity.
 
 use cellgov_ps3_abi::lv1::uart::{
     dispatcher_header_reply_bytes, dispatcher_header_request_bytes, dispatcher_header_service,
@@ -26,6 +23,7 @@ use cellgov_ps3_abi::lv1::uart::{
 use super::request::{PendingRequest, REQUEST_PREFIX_BYTES};
 use super::write::refuse;
 use crate::answer::{HypercallDisposition, HypercallRefusal};
+use crate::identity::{ConsoleIdentity, SYNTHETIC_CONSOLE_IDENTITY};
 use crate::request::HypercallRequest;
 
 const HEADER: usize = DISPATCHER_HEADER_BYTES as usize;
@@ -44,15 +42,6 @@ pub(super) const REQUEST_PART: &str = "a reply of this service, which the dispat
 /// the reply that a source gives.
 pub(super) const SIZE_PART: &str = "a reply with these request and reply sizes";
 
-/// The part of the reply to a request whose data bytes an isolated SPU
-/// module of lv1 derives from data of the console.
-///
-/// CellGov may serve identity-derived bytes only from one committed
-/// synthetic console identity. CellGov commits no such identity.
-pub(super) const IDENTITY_PART: &str =
-    "the data bytes of this reply, which an isolated SPU module of lv1 derives from the \
-     console's identity";
-
 /// The random data bytes that CellGov gives in each reply to a request of
 /// [`cellgov_ps3_abi::lv1::uart::GAME_OS_RANDOM_DISPATCHER_REQUESTS`].
 ///
@@ -68,48 +57,43 @@ struct ServedReply {
     /// The status word at [`DISPATCHER_REPLY_STATUS_OFFSET`].
     status: u32,
     /// The data bytes at [`DISPATCHER_REPLY_DATA_OFFSET`].
-    data: &'static [u8],
+    data: Vec<u8>,
 }
 
 /// The reply that CellGov builds for request `request` of service
-/// `service` at `firmware`, or `None` when no table gives the request.
-fn served_reply(firmware: &str, service: u32, request: u64) -> Option<ServedReply> {
+/// `service` at `firmware`, with the data bytes of `identity` for a
+/// request of the identity table. The value is `None` when no table gives
+/// the request.
+fn served_reply(
+    firmware: &str,
+    identity: &ConsoleIdentity,
+    service: u32,
+    request: u64,
+) -> Option<ServedReply> {
     if let Some(random) = game_os_random_dispatcher_request(firmware, service, request) {
         return Some(ServedReply {
             bytes: random.bytes,
             status: random.status,
-            data: &SYNTHETIC_RANDOM_DATA,
+            data: SYNTHETIC_RANDOM_DATA.to_vec(),
+        });
+    }
+    if let Some(row) = game_os_identity_dispatcher_request(firmware, service, request) {
+        return Some(ServedReply {
+            bytes: row.bytes,
+            status: row.status,
+            data: identity.dispatcher_data().to_vec(),
         });
     }
     game_os_dispatcher_reply(firmware, service, request).map(|reply| ServedReply {
         bytes: reply.bytes,
         status: reply.status,
-        data: &reply.data,
+        data: reply.data.to_vec(),
     })
 }
 
-/// The part of the reply that no source gives, for request `request` of
-/// service `service` at `firmware` that no table serves.
-///
-/// A request of the identity table with `request_bytes` request bytes and
-/// `reply_bytes` reply bytes gets [`IDENTITY_PART`] when both counts are
-/// the counts of its row. With other counts, it gets [`SIZE_PART`].
-fn unserved_part(
-    firmware: &str,
-    service: u32,
-    request: Option<u64>,
-    request_bytes: usize,
-    reply_bytes: u32,
-) -> &'static str {
-    if let Some(row) =
-        request.and_then(|id| game_os_identity_dispatcher_request(firmware, service, id))
-    {
-        return if request_bytes == row.bytes as usize && reply_bytes == row.bytes {
-            IDENTITY_PART
-        } else {
-            SIZE_PART
-        };
-    }
+/// The part of the reply that no source gives, for a request of service
+/// `service` that no table serves.
+fn unserved_part(service: u32) -> &'static str {
     if service == GAME_OS_FIRST_DISPATCHER_SERVICE {
         SERVICE_REQUEST_PART
     } else {
@@ -183,7 +167,23 @@ impl NoReply {
 }
 
 /// The bytes that the dispatcher manager writes to its port when the
-/// partition's write of `last` completes `pending`.
+/// partition's write of `last` completes `pending`, with the data bytes
+/// of [`SYNTHETIC_CONSOLE_IDENTITY`]; see [`dispatcher_reply_with`].
+///
+/// # Errors
+///
+/// Returns the [`NoReply`] of [`dispatcher_reply_with`].
+pub(super) fn dispatcher_reply(
+    firmware: &str,
+    pending: &PendingRequest,
+    last: &[u8],
+) -> Result<Vec<u8>, NoReply> {
+    dispatcher_reply_with(firmware, &SYNTHETIC_CONSOLE_IDENTITY, pending, last)
+}
+
+/// The bytes that the dispatcher manager writes to its port when the
+/// partition's write of `last` completes `pending`, with the data bytes
+/// of `identity` in a reply to a request of the identity table.
 ///
 /// # Errors
 ///
@@ -194,10 +194,10 @@ impl NoReply {
 /// - `last` holds bytes past the end of the request;
 /// - no table that CellGov builds a reply from gives the header's service
 ///   and the request id at `firmware`;
-/// - the identity table gives them, so no source gives the data bytes;
 /// - the header's counts are not the counts of that reply.
-pub(super) fn dispatcher_reply(
+pub(super) fn dispatcher_reply_with(
     firmware: &str,
+    identity: &ConsoleIdentity,
     pending: &PendingRequest,
     last: &[u8],
 ) -> Result<Vec<u8>, NoReply> {
@@ -231,16 +231,8 @@ pub(super) fn dispatcher_reply(
     };
     let reply_bytes = dispatcher_header_reply_bytes(&header);
     let reply = id
-        .and_then(|id| served_reply(firmware, service, id))
-        .ok_or_else(|| {
-            unsourced(unserved_part(
-                firmware,
-                service,
-                id,
-                request_bytes,
-                reply_bytes,
-            ))
-        })?;
+        .and_then(|id| served_reply(firmware, identity, service, id))
+        .ok_or_else(|| unsourced(unserved_part(service)))?;
     if request_bytes != reply.bytes as usize || reply_bytes != reply.bytes {
         return Err(unsourced(SIZE_PART));
     }
@@ -252,7 +244,7 @@ pub(super) fn dispatcher_reply(
         .copy_from_slice(&reply.status.to_be_bytes());
     body.get_mut(data)
         .ok_or_else(|| unsourced(SIZE_PART))?
-        .copy_from_slice(reply.data);
+        .copy_from_slice(&reply.data);
     let tag = dispatcher_header_tag(&header);
     Ok([&dispatcher_reply_header(tag, reply_bytes)[..], &body].concat())
 }
@@ -272,3 +264,7 @@ mod random_tests;
 #[cfg(test)]
 #[path = "tests/reply_identity_tests.rs"]
 mod identity_tests;
+
+#[cfg(test)]
+#[path = "tests/reply_identity_served_tests.rs"]
+mod identity_served_tests;

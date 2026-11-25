@@ -11,6 +11,7 @@ fn request_0x19004_of_service_0x19000_has_identity_reply_data_at_4_93_with_0x30_
             service: 0x19000,
             request: 0x19004,
             bytes: 0x30,
+            status: 0,
         }
     );
 }

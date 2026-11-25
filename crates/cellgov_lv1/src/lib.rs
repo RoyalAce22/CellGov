@@ -48,6 +48,7 @@ mod cost;
 mod external;
 mod group;
 mod handlers;
+mod identity;
 mod interprocessor;
 mod mediated;
 mod request;

@@ -907,6 +907,35 @@ pub fn game_os_random_dispatcher_request(
 /// [OFW-4.93 lv1 a:0x56D964-0x56D970] [OFW-4.93 lv1 a:0x56DD6C-0x56DD78].
 pub const DISPATCHER_IDENTITY_DATA_BYTES: usize = 8;
 
+/// The offset in the identity data bytes of the product code, a
+/// big-endian halfword.
+///
+/// The kernel's checks compare this halfword with 0x81 and 0x82
+/// [OFW-4.93 lv2_kernel a:0x800000000022a10c-0x800000000022a118]
+/// [OFW-4.93 lv2_kernel a:0x800000000022a140-0x800000000022a154]. Its
+/// checks of the data of request 0x19002 compare data bytes 8 to 15, as
+/// one big-endian doubleword, with the same two codes
+/// [OFW-4.93 lv2_kernel a:0x8000000000229fb0-0x800000000022a008]
+/// [OFW-4.93 lv2_kernel a:0x800000000022a024-0x800000000022a07c]. One
+/// other kernel function compares this halfword with 0x85, 0x87, 0x89
+/// and 0x8C
+/// [OFW-4.93 lv2_kernel a:0x80000000000a1df4-0x80000000000a1e14].
+pub const IDENTITY_DATA_PRODUCT_CODE_OFFSET: usize = 2;
+
+/// The offset in the identity data bytes of the product sub code, a
+/// big-endian halfword.
+///
+/// The kernel compares this halfword with these values:
+/// - 9, when the product code is 0x81
+///   [OFW-4.93 lv2_kernel a:0x800000000022a120-0x800000000022a134];
+/// - 0x8F and 0x90, when the product code is 0x82
+///   [OFW-4.93 lv2_kernel a:0x800000000022a160-0x800000000022a170];
+/// - the range 1 to 12
+///   [OFW-4.93 lv2_kernel a:0x8000000000058a7c-0x8000000000058a88];
+/// - an unsigned bound of at most 0x12, then 0x8F and 0x90
+///   [OFW-4.93 lv2_kernel a:0x80000000000a1e7c-0x80000000000a1e94].
+pub const IDENTITY_DATA_PRODUCT_SUB_CODE_OFFSET: usize = 4;
+
 /// A request of the GameOS kernel whose reply data an isolated SPU module
 /// of lv1 derives from data of the console, at one firmware.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -920,6 +949,9 @@ pub struct GameOsIdentityDispatcherRequest {
     /// The count of request bytes and the count of reply bytes that the
     /// request header gives.
     pub bytes: u32,
+    /// The status word at [`DISPATCHER_REPLY_STATUS_OFFSET`] of a reply in
+    /// which lv1 writes the identity data bytes.
+    pub status: u32,
 }
 
 /// Each request whose reply data an lv1 image read shows to come from
@@ -931,17 +963,22 @@ pub struct GameOsIdentityDispatcherRequest {
 /// size function gives 0x30 as both counts
 /// [OFW-4.93 lv2_kernel a:0x8000000000229f34].
 ///
+/// The lv1 handler stores its worker's return value as the status
+/// [OFW-4.93 lv1 a:0x56D328-0x56D338]. The worker returns 0 only when
+/// each of its three steps returns 0
+/// [OFW-4.93 lv1 a:0x56D688-0x56D6E8] [OFW-4.93 lv1 a:0x56D70C]. Its
+/// last step returns 0 only when it copies the 8 data bytes
+/// [OFW-4.93 lv1 a:0x56D964-0x56D99C] [OFW-4.93 lv1 a:0x56DD50-0x56DD84].
+///
 /// An isolated SPU module of lv1 derives the data bytes from data of the
-/// console, so no image read gives them. CellGov may serve
-/// identity-derived bytes only from one committed synthetic console
-/// identity. CellGov commits no such identity, so it refuses each request
-/// in this table.
+/// console, so no image read gives them.
 pub const GAME_OS_IDENTITY_DISPATCHER_REQUESTS: &[GameOsIdentityDispatcherRequest] =
     &[GameOsIdentityDispatcherRequest {
         firmware: "4.93",
         service: 0x19000,
         request: 0x19004,
         bytes: 0x30,
+        status: 0,
     }];
 
 /// The request `request` of service `service` at the firmware version
