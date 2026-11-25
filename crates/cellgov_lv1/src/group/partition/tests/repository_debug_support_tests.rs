@@ -34,7 +34,7 @@ fn debug_support_read() -> HypercallRequest {
 fn a_debug_support_read_answers_all_ones_in_r4_and_r5_at_4_93() {
     assert_eq!(
         read_node(&debug_support_read(), Some("4.93")),
-        HypercallDisposition::Answered(HypercallAnswer::success(vec![
+        HypercallDisposition::Answered(HypercallAnswer::success([
             0xffff_ffff_ffff_ffff,
             0xffff_ffff_ffff_ffff,
         ]))

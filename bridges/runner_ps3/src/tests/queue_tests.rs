@@ -320,6 +320,18 @@ fn the_holder_text_masks_the_console_wherever_the_command_line_names_it() {
             "runner_ps3 status --host=<host>",
         ),
         (
+            "a --host value with spaces around it",
+            &["runner_ps3", "status", "--host", " ps3.local "],
+            "ps3.local",
+            "runner_ps3 status --host <host>",
+        ),
+        (
+            "a --host= value with spaces around it",
+            &["runner_ps3", "status", "--host= ps3.local "],
+            "ps3.local",
+            "runner_ps3 status --host=<host>",
+        ),
+        (
             "the host inside another word",
             &["cellgov", "ps3", "fetch", "--out", "192.0.2.2.bin"],
             "192.0.2.2",

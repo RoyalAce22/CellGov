@@ -22,7 +22,7 @@ fn request(thread: Option<u8>) -> HypercallRequest {
 /// [OFW-4.93 lv1 a:0x2E8FC4], and writes no other slot. The 4.93 boot
 /// record capture gives the id, 1.
 fn answered_id_1() -> HypercallDisposition {
-    HypercallDisposition::Answered(HypercallAnswer::lv1_status(0, vec![1, 0, 0, 0, 0, 0, 0]))
+    HypercallDisposition::Answered(HypercallAnswer::lv1_status(0, [1, 0, 0, 0, 0, 0, 0]))
 }
 
 #[test]

@@ -110,7 +110,7 @@ fn first_port() -> Held {
 }
 
 fn lv1_r3(r3: u64) -> HypercallDisposition {
-    HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, vec![0; 7]))
+    HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, [0; 7]))
 }
 
 /// The answer that connects `port` to `plug` of `key`, with a write of 0
@@ -122,7 +122,7 @@ fn connected(
     plug: u8,
     status: Option<u64>,
 ) -> HypercallDisposition {
-    let mut answer = HypercallAnswer::lv1_status(0, vec![0; 7]);
+    let mut answer = HypercallAnswer::lv1_status(0, [0; 7]);
     if let Some(address) = status {
         answer.effects.push(Effect::SharedWriteIntent {
             range: ByteRange::new(GuestAddr::new(address), 8).unwrap(),
@@ -277,7 +277,7 @@ fn a_plug_that_holds_a_port_leaves_the_plug_in_the_new_port_unconnected() {
     };
     let held = Held::boot(&[first, EventReceivePort::new(4)]);
     let r = with(&with(&request(), 6, 4), 5, 5);
-    let mut answer = HypercallAnswer::lv1_status(IRQ_PLUG_IN_USE_R3, vec![0; 7]);
+    let mut answer = HypercallAnswer::lv1_status(IRQ_PLUG_IN_USE_R3, [0; 7]);
     answer.push_change(InterruptChange::PlugConnect(EventReceivePort {
         id: 4,
         connection: None,

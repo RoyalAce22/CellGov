@@ -33,7 +33,6 @@ use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::group::memory::region as memory;
 use crate::request::HypercallRequest;
-use crate::vector;
 
 /// The hypercalls this module answers.
 pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
@@ -137,7 +136,7 @@ fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDispositio
 
 /// lv1's own r3 with r4 to r10 cleared.
 fn lv1_answer(r3: u64) -> HypercallDisposition {
-    HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, vector::cleared_outputs()))
+    HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, []))
 }
 
 /// The r3 of lv1's region checks for a bitmap at `address` in the real
@@ -243,8 +242,7 @@ pub(crate) fn configure_bitmap(
             "an interrupt state bitmap whose status doublewords CellGov holds no storage for",
         );
     };
-    let mut answer =
-        HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), vector::cleared_outputs());
+    let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []);
     answer.effects.push(Effect::SharedWriteIntent {
         range,
         bytes: WritePayload::new(vec![0; IRQ_STATUS_BYTES as usize]),

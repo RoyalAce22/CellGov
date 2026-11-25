@@ -71,12 +71,12 @@ fn storage() -> GuestMemory {
 }
 
 fn expected(first: u64) -> HypercallDisposition {
-    let entries: Vec<u64> = (first..first + 4).collect();
-    let mut outputs: Vec<u64> = entries.iter().map(|&i| doubleword0(i)).collect();
+    let entries: [u64; 4] = std::array::from_fn(|k| first + k as u64);
     let halfwords = entries
         .iter()
         .fold(0, |packed, &i| (packed << 16) | (doubleword1(i) & 0xFFFF));
-    outputs.extend([halfwords, 0, 0]);
+    let [e0, e1, e2, e3] = entries.map(doubleword0);
+    let outputs = [e0, e1, e2, e3, halfwords, 0, 0];
     HypercallDisposition::Answered(HypercallAnswer::lv1_status(0, outputs))
 }
 

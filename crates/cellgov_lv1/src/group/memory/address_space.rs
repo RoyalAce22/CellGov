@@ -21,7 +21,6 @@ use super::{page_table, ADDRESS_SPACE_SOURCE, SELECTED_ADDRESS_SPACE_SOURCE};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::request::HypercallRequest;
-use crate::vector;
 
 /// The hypercalls this module answers.
 pub(crate) const HYPERCALLS: &[Hypercall] = &[
@@ -224,10 +223,7 @@ pub(crate) fn construct(
         );
     };
     if let Some(r3) = lv1_argument_check(exp, count, shifts) {
-        return HypercallDisposition::Answered(HypercallAnswer::lv1_status(
-            r3,
-            vector::cleared_outputs(),
-        ));
+        return HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, []));
     }
     let htab_size_exp = match htab_size_exp(exp) {
         Some(HTAB_SIZE_EXP_MIN) => HTAB_SIZE_EXP_MIN,
@@ -253,9 +249,7 @@ pub(crate) fn construct(
             "an address space construction at a firmware whose boot vas id no source gives",
         );
     };
-    let mut outputs = vector::cleared_outputs();
-    outputs[0] = vas_id;
-    outputs[1] = htab_size(htab_size_exp);
+    let outputs = [vas_id, htab_size(htab_size_exp)];
     let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), outputs);
     answer.push_change(AddressSpaceChange::Constructed(AddressSpace {
         vas_id,
@@ -311,8 +305,7 @@ pub(crate) fn select(
             "a selection of an address space with no storage for its page table",
         );
     }
-    let mut answer =
-        HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), vector::cleared_outputs());
+    let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []);
     answer.push_change(AddressSpaceChange::Selected(vas_id));
     answer.page_table = Some(page_table::load(space));
     HypercallDisposition::Answered(answer)

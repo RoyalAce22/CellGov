@@ -41,7 +41,13 @@ fn vas_id_0_before_a_selection_answers_lv1_no_entry() {
     let spaces = unselected();
     let firmware = Some("4.93");
     let answers = [
-        write_entry(&request(WRITE_HTAB_ENTRY), firmware, &spaces, &storage),
+        write_entry(
+            &request(WRITE_HTAB_ENTRY),
+            firmware,
+            &spaces,
+            &LogicalSpeState::default(),
+            &storage,
+        ),
         read_entries(&request(READ_HTAB_ENTRIES), firmware, &spaces, &storage),
         map_table(
             &request(MAP_HTAB),

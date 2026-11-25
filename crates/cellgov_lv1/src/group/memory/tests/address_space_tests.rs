@@ -66,7 +66,7 @@ fn storage() -> GuestMemory {
 }
 
 fn lv1_answer(r3: u64) -> HypercallDisposition {
-    HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, vec![0; 7]))
+    HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, [0; 7]))
 }
 
 fn refused(disposition: &HypercallDisposition) -> bool {
@@ -80,7 +80,7 @@ fn refused(disposition: &HypercallDisposition) -> bool {
 fn the_kernel_call_answers_the_captured_vas_id_and_page_table_size() {
     let d = construct(&kernel_call(), Some("4.93"), &AddressSpaceState::default());
     let mut expected =
-        HypercallAnswer::lv1_status(0, vec![CAPTURED_VAS_ID, CAPTURED_HTAB_SIZE, 0, 0, 0, 0, 0]);
+        HypercallAnswer::lv1_status(0, [CAPTURED_VAS_ID, CAPTURED_HTAB_SIZE, 0, 0, 0, 0, 0]);
     expected.push_change(AddressSpaceChange::Constructed(boot_space()));
     assert_eq!(d, HypercallDisposition::Answered(expected));
 }
@@ -159,7 +159,7 @@ fn selecting_the_constructed_address_space_answers_with_outputs_cleared() {
         &constructed(),
         &storage(),
     );
-    let mut expected = HypercallAnswer::lv1_status(0, vec![0; 7]);
+    let mut expected = HypercallAnswer::lv1_status(0, [0; 7]);
     expected.push_change(AddressSpaceChange::Selected(CAPTURED_VAS_ID));
     expected.page_table = Some(page_table::load(&boot_space()));
     assert_eq!(d, HypercallDisposition::Answered(expected));

@@ -78,6 +78,6 @@ fn get_logical_partition_id_answers_lpar_2_in_r4() {
     let d = answer(&request(74), None);
     assert_eq!(
         d,
-        HypercallDisposition::Answered(HypercallAnswer::success(vec![2]))
+        HypercallDisposition::Answered(HypercallAnswer::success([2]))
     );
 }

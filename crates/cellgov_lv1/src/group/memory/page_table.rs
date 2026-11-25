@@ -35,8 +35,9 @@ use super::region as memory;
 use super::region::MemoryState;
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal, PageTableLoad};
 use crate::group::hypercall::Hypercall;
+use crate::group::spe::shadow::{region_page, SpeRegionPage};
+use crate::group::spe::LogicalSpeState;
 use crate::request::HypercallRequest;
-use crate::vector;
 
 /// The hypercalls this module answers.
 pub(crate) const HYPERCALLS: &[Hypercall] = &[
@@ -49,6 +50,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[
                 request,
                 input.firmware,
                 input.groups.memory().spaces(),
+                input.groups.spe().spes(),
                 input.storage,
             )
         },
@@ -127,7 +129,7 @@ fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDispositio
 
 /// lv1's own r3 with r4 to r10 cleared.
 pub(crate) fn lv1_answer(r3: u64) -> HypercallDisposition {
-    HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, vector::cleared_outputs()))
+    HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, []))
 }
 
 /// Why a page table call names no address space that the hypervisor
@@ -229,7 +231,7 @@ pub(crate) fn read_entries(
     let Some(bytes) = bytes else {
         return refuse(request, "a page table read with no storage for the table");
     };
-    let mut outputs = vector::cleared_outputs();
+    let mut outputs = [0u64; READ_HTAB_ENTRY_COUNT as usize + 1];
     let mut doubleword1 = [0u64; READ_HTAB_ENTRY_COUNT as usize];
     for (slot, entry) in bytes.chunks_exact(PTE_BYTES).enumerate() {
         outputs[slot] = read_u64(entry, 0);
@@ -333,23 +335,37 @@ fn duplicate(
     Some(in_own || in_other)
 }
 
-/// The real address of `page` for the firmware version `firmware`, or
-/// the reason for the refusal of a page that CellGov does not hold.
+/// Why a valid entry gets no real page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoRealPage {
+    /// lv1's translation of the page's region refuses the entry with this
+    /// r3. lv1 translates after its duplicate search.
+    Lv1(u64),
+    /// CellGov refuses the entry for this reason.
+    Refused(&'static str),
+}
+
+/// The real address of `page`, mapped by the doubleword 1 `doubleword1`,
+/// for the firmware version `firmware`, or why the entry gets none.
 ///
 /// lv1 looks the logical partition address up in the partition's memory
 /// regions and maps the page there [OFW-4.93 lv1 a:0x2D2510]
-/// [OFW-4.93 lv1 a:0x2D30C4]. CellGov models two kinds of region:
+/// [OFW-4.93 lv1 a:0x2D30C4]. CellGov models three kinds of region:
 /// - the mapping of a page table that `spaces` holds, whose page lies in
 ///   the page table storage at the same offset;
+/// - a region of a logical SPE in `spes`, as `region_page` of the logical
+///   SPE group answers it;
 /// - the real mode region, which CellGov holds at real address 0 below
 ///   the page table storage, so the real address is the logical
 ///   partition address.
 fn real_page(
     firmware: &str,
     spaces: &AddressSpaceState,
+    spes: &LogicalSpeState,
     storage: &GuestMemory,
     page: Page,
-) -> Result<u64, &'static str> {
+    doubleword1: u64,
+) -> Result<u64, NoRealPage> {
     let size = 1u64 << page.shift;
     let end = page.address.checked_add(size);
     let in_mapping = spaces.spaces().iter().find_map(|space| {
@@ -360,23 +376,36 @@ fn real_page(
     });
     let real = match in_mapping {
         Some(real) => real,
-        None => {
-            let Some(rm_size) = memory::real_mode_size(firmware) else {
-                return Err("a valid entry at a firmware whose real mode size no source gives");
-            };
-            let limit = rm_size.min(PAGE_TABLE_STORAGE_BASE);
-            if end.is_none_or(|end| end > limit) {
-                return Err(
-                    "a valid entry whose page lies outside the partition's real mode region",
-                );
-            }
-            page.address
-        }
+        None => match region_page(spes, page.address, page.shift, doubleword1) {
+            Some(SpeRegionPage::Shadow(real)) => real,
+            Some(SpeRegionPage::Lv1(r3)) => return Err(NoRealPage::Lv1(r3)),
+            Some(SpeRegionPage::Refused(what)) => return Err(NoRealPage::Refused(what)),
+            None => real_mode_page(firmware, page.address, end)?,
+        },
     };
     if !storage.holds(real, size) || real > STORED_MEMORY_LIMIT {
-        return Err("a valid entry whose page CellGov holds no storage for");
+        return Err(NoRealPage::Refused(
+            "a valid entry whose page CellGov holds no storage for",
+        ));
     }
     Ok(real)
+}
+
+/// The real address of a page at the logical partition address `address`
+/// that ends at `end` in the real mode region, or the refusal.
+fn real_mode_page(firmware: &str, address: u64, end: Option<u64>) -> Result<u64, NoRealPage> {
+    let Some(rm_size) = memory::real_mode_size(firmware) else {
+        return Err(NoRealPage::Refused(
+            "a valid entry at a firmware whose real mode size no source gives",
+        ));
+    };
+    let limit = rm_size.min(PAGE_TABLE_STORAGE_BASE);
+    if end.is_none_or(|end| end > limit) {
+        return Err(NoRealPage::Refused(
+            "a valid entry whose page lies outside the partition's real mode region",
+        ));
+    }
+    Ok(address)
 }
 
 /// Hypercall 1: writes the entry at the index in r4, from doubleword 0
@@ -389,16 +418,19 @@ fn real_page(
 /// A call that fails one of lv1's checks gets lv1's own r3, with r4 to
 /// r10 cleared. See [`WRITE_HTAB_INDEX_R3`] for the checks and their
 /// order. lv1 checks the address space first, and CellGov answers it
-/// only as [`named_space`] allows.
+/// only as [`named_space`] allows. The translation of a shadow page of
+/// a logical SPE in `spes` checks the entry after the duplicate search;
+/// see [`cellgov_ps3_abi::lv1::spe`].
 ///
 /// The call is a refusal in these cases:
 /// - [`named_space`] refuses it;
-/// - a valid entry maps a page that [`real_page`] does not give;
+/// - a valid entry maps a page that [`real_page`] refuses;
 /// - no storage holds the entry's two groups.
 pub(crate) fn write_entry(
     request: &HypercallRequest,
     firmware: Option<&str>,
     spaces: &AddressSpaceState,
+    spes: &LogicalSpeState,
     storage: &GuestMemory,
 ) -> HypercallDisposition {
     let space = match named_space(request, firmware, spaces) {
@@ -420,15 +452,20 @@ pub(crate) fn write_entry(
     if valid(doubleword0) {
         // named_space refuses a call with no firmware version.
         let firmware = firmware.unwrap_or_default();
-        real = match real_page(firmware, spaces, storage, page) {
-            Ok(real) => real,
-            Err(what) => return refuse(request, what),
+        let translated = match real_page(firmware, spaces, spes, storage, page, doubleword1) {
+            Ok(real) => Ok(real),
+            Err(NoRealPage::Lv1(r3)) => Err(r3),
+            Err(NoRealPage::Refused(what)) => return refuse(request, what),
         };
         match duplicate(storage, space, index, doubleword0) {
             Some(true) => return lv1_answer(WRITE_HTAB_DUPLICATE_R3),
             Some(false) => {}
             None => return refuse(request, "a page table write with no storage for the table"),
         }
+        real = match translated {
+            Ok(real) => real,
+            Err(r3) => return lv1_answer(r3),
+        };
     }
     let stored = stored_doubleword1(doubleword1, real, page.large_page_bits);
     let mut bytes = doubleword0.to_be_bytes().to_vec();
@@ -438,8 +475,7 @@ pub(crate) fn write_entry(
     else {
         return refuse(request, "a page table write with no storage for the table");
     };
-    let mut answer =
-        HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), vector::cleared_outputs());
+    let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []);
     answer.effects.push(Effect::SharedWriteIntent {
         range,
         bytes: WritePayload::new(bytes),
@@ -495,9 +531,7 @@ pub(crate) fn map_table(
             "a page table mapping whose address the encoding cannot hold",
         );
     };
-    let mut outputs = vector::cleared_outputs();
-    outputs[0] = lpar_address;
-    let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), outputs);
+    let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), [lpar_address]);
     answer.push_change(AddressSpaceChange::Mapped {
         vas_id: space.vas_id,
         lpar_address,
@@ -521,3 +555,7 @@ mod write_tests;
 #[cfg(test)]
 #[path = "tests/page_table_vas_tests.rs"]
 mod vas_tests;
+
+#[cfg(test)]
+#[path = "tests/page_table_spe_tests.rs"]
+mod spe_tests;

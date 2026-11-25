@@ -12,8 +12,9 @@
 //! - the caller's real address space, which holds the page table.
 //!
 //! It returns a [`HypercallDisposition`]:
-//! - an answer, which the runtime applies as effects: r3, the outputs
-//!   from r4, memory writes, and the page table registers of the caller;
+//! - an answer, which the runtime applies as effects: r3, the values
+//!   for r4 to r10, memory writes, and the page table registers of the
+//!   caller;
 //! - a typed refusal, which stops the run.
 //!
 //! No handler writes guest state. An answer carries a list of
@@ -48,7 +49,8 @@ mod state;
 mod vector;
 
 pub use answer::{
-    ConsoleWrite, HypercallAnswer, HypercallDisposition, HypercallRefusal, PageTableLoad,
+    ConsoleWrite, HypercallAnswer, HypercallDisposition, HypercallRefusal, OutputRegisters,
+    PageTableLoad,
 };
 pub use cost::cost;
 pub use group::device_bus::{DeviceBusChange, DeviceBusState};
@@ -67,7 +69,10 @@ pub use group::memory::{MemoryChange, MemoryGroupState};
 pub use group::network::{NetworkChange, NetworkState};
 pub use group::partition::repository::RepositoryRead;
 pub use group::partition::{PartitionChange, PartitionState};
-pub use group::spe::{LogicalSpe, LogicalSpeState, SpeChange, SpeState};
+pub use group::spe::{
+    shadow_storage, LogicalSpe, LogicalSpeState, SpeChange, SpeState, SHADOW_STORAGE_BASE,
+    SHADOW_STORAGE_PAGES,
+};
 pub use group::state::{GroupStates, StateChange};
 pub use group::storage::{StorageChange, StorageState};
 pub use group::uart::{UartChange, UartState};

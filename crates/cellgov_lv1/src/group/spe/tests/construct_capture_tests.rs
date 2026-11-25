@@ -98,6 +98,7 @@ fn the_kernels_boot_call_gets_the_captured_spe_id_and_shadow_page() {
         panic!("{d:?}");
     };
     assert_eq!(answer.r3, 0);
-    assert_eq!(answer.outputs[4], captured("shadow"), "r8");
-    assert_eq!(answer.outputs[5], captured("spe_id"), "r9");
+    let outputs = answer.outputs.expect("r4 to r10");
+    assert_eq!(outputs[4], captured("shadow"), "r8");
+    assert_eq!(outputs[5], captured("spe_id"), "r9");
 }

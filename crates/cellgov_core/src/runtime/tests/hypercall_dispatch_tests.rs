@@ -14,6 +14,9 @@ use cellgov_trace::{HostWriter, TraceReader, TraceRecord, TracedHypercallDisposi
 use crate::runtime::types::{RuntimeMode, StepError};
 use crate::runtime::Runtime;
 
+#[path = "hypercall_return_registers_tests.rs"]
+mod return_registers;
+
 /// The address of the scripted `sc`.
 const PC: u64 = 0x100;
 
@@ -127,7 +130,8 @@ fn an_answered_hypercall_hands_r3_and_its_outputs_to_the_callers_next_step() {
     let (mut rt, received) = runtime(74, [0; 8]);
     step(&mut rt).expect("the hypercall step");
     step(&mut rt).expect("the caller's next step");
-    assert_eq!(*received.borrow(), Some((Some(0), vec![(4, 2)])));
+    let writes = vec![(4, 2), (5, 0), (6, 0), (7, 0), (8, 0), (9, 0), (10, 0)];
+    assert_eq!(*received.borrow(), Some((Some(0), writes)));
     let unit = UnitId::new(0);
     assert_eq!(
         records(&rt),
@@ -145,7 +149,7 @@ fn an_answered_hypercall_hands_r3_and_its_outputs_to_the_callers_next_step() {
                 unit,
                 status: 0,
                 outputs: [2, 0, 0, 0, 0, 0, 0],
-                written: 1,
+                written: 7,
                 untimed: true,
                 time: GuestTicks::new(3),
             },
@@ -200,7 +204,8 @@ fn a_console_send_reaches_the_trace_and_the_sink_and_no_guest_memory() {
     step(&mut rt).expect("the hypercall step");
     assert_eq!(rt.memory().content_hash(), before);
     step(&mut rt).expect("the caller's next step");
-    assert_eq!(*received.borrow(), Some((Some(0), vec![(4, 5)])));
+    let writes = vec![(4, 5), (5, 0), (6, 0), (7, 0), (8, 0), (9, 0), (10, 0)];
+    assert_eq!(*received.borrow(), Some((Some(0), writes)));
     assert_eq!(rt.hypervisor().console_text(), b"lv2(0");
     let mut bytes = [0u8; 32];
     bytes[..5].copy_from_slice(b"lv2(0");

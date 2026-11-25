@@ -13,7 +13,6 @@ use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::request::HypercallRequest;
-use crate::vector;
 
 /// The hypercalls this module answers.
 pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
@@ -54,11 +53,9 @@ pub(crate) fn logical_ppe_id(
             "a logical PPE id call at a firmware whose logical PPE id no source gives",
         );
     };
-    let mut outputs = vector::cleared_outputs();
-    outputs[0] = id;
     HypercallDisposition::Answered(HypercallAnswer::lv1_status(
         zero_extended(LV1_SUCCESS),
-        outputs,
+        [id],
     ))
 }
 

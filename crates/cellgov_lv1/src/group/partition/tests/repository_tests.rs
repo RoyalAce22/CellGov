@@ -38,7 +38,7 @@ const DUMP_FW: Option<&str> = Some("1.50");
 fn a_read_of_bi_pun_in_lpar_2_answers_1_in_r4_and_0_in_r5() {
     assert_eq!(
         read_node(&read(2, b"pun", 0), DUMP_FW),
-        HypercallDisposition::Answered(HypercallAnswer::success(vec![1, 0]))
+        HypercallDisposition::Answered(HypercallAnswer::success([1, 0]))
     );
 }
 
@@ -64,7 +64,7 @@ fn a_read_with_no_firmware_or_an_unnamed_firmware_is_a_refusal_that_names_the_ke
 fn bi_pu_index_0_and_index_1_are_two_keys() {
     assert_eq!(
         read_node(&read(2, b"pu", 0), DUMP_FW),
-        HypercallDisposition::Answered(HypercallAnswer::success(vec![1, 0]))
+        HypercallDisposition::Answered(HypercallAnswer::success([1, 0]))
     );
     let r = read(2, b"pu", 1);
     assert_eq!(

@@ -22,7 +22,7 @@
 //! entries there with translation off [OFW-4.93 lv1 a:0x2D17E8] [OFW-4.93 lv1 a:0x2D2F40].
 
 use crate::hw::ppu_interrupt::doubleword_bit;
-use crate::hw::ppu_mmu::{PTES_PER_PTEG, PTE_BYTES, PTE_H, PTE_L, PTE_V, SMALL_PAGE_LOG2};
+use crate::hw::ppu_mmu::{PTES_PER_PTEG, PTE_BYTES, PTE_H, PTE_L, PTE_PP, PTE_V, SMALL_PAGE_LOG2};
 use crate::lv1::address_space::HTAB_SIZE_EXP_MIN;
 use crate::lv1::status::{zero_extended, LV1_DUPLICATE_ENTRY, LV1_RESOURCE_SHORTAGE};
 
@@ -272,6 +272,14 @@ pub const fn valid(doubleword0: u64) -> bool {
 /// Whether a doubleword 0 is a large page entry, L = 1 [OFW-4.93 lv1 a:0x2D369C].
 pub const fn large(doubleword0: u64) -> bool {
     doubleword0 & PTE_L != 0
+}
+
+/// Whether a doubleword 1 maps its page read only: PP = 0b11.
+///
+/// The writer gives this flag to the translation of the page's region
+/// [OFW-4.93 lv1 a:0x2D308C-0x2D30B0].
+pub const fn read_only(doubleword1: u64) -> bool {
+    doubleword1 & PTE_PP == PTE_PP
 }
 
 /// The r3 of `map_htab` when lv1 cannot allocate the mapping:

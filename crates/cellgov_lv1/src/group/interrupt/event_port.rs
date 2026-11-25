@@ -26,7 +26,6 @@ use super::{InterruptChange, EVENT_RECEIVE_PORT_SOURCE};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::request::HypercallRequest;
-use crate::vector;
 
 /// The hypercalls this module answers.
 pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
@@ -193,9 +192,7 @@ pub(crate) fn construct_port(
             "an event receive port call whose port id the hypervisor already holds",
         );
     }
-    let mut outputs = vector::cleared_outputs();
-    outputs[0] = id;
-    let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), outputs);
+    let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), [id]);
     answer.push_change(InterruptChange::PortConstructed(EventReceivePort::new(id)));
     HypercallDisposition::Answered(answer)
 }

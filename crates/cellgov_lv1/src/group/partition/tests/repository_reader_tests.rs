@@ -49,7 +49,7 @@ fn a_read_from_the_site_that_discards_the_unobserved_second_value_answers_the_fi
     let r = rgntotal_read_from(READ_WRAPPER_SC_4_93, RGNTOTAL_READER);
     assert_eq!(
         read_node(&r, Some("4.93")),
-        HypercallDisposition::Answered(HypercallAnswer::success(vec![0x0f9a_0000, 0]))
+        HypercallDisposition::Answered(HypercallAnswer::success([0x0f9a_0000, 0]))
     );
 }
 

@@ -30,7 +30,7 @@ fn request(inputs: [u64; 4]) -> HypercallRequest {
 }
 
 fn lv1_answer(r3: u64) -> HypercallDisposition {
-    HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, vec![0; 7]))
+    HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, [0; 7]))
 }
 
 fn dispatch_at(firmware: &str, inputs: [u64; 4]) -> (HypercallDisposition, Hypervisor) {

@@ -2,6 +2,7 @@
 //! of the SELF decryption path:
 //! - the handler of `construct_logical_spe` (hypercall 57) and its checks;
 //! - the areas that lv1 gives a type 1 SPE, and the regions they take;
+//! - the contents of the shadow page, and how `write_htab_entry` maps it;
 //! - the spe id of each call of the GameOS kernel's boot.
 //!
 //! The facts come from the 4.93 `lv1.self`, decrypted offline and read
@@ -86,6 +87,35 @@
 //! [OFW-4.93 lv1 a:0x2CED98-0x2CEDA8]; see [`super::memory`]. So the area
 //! takes a value of the partition's region counter, and the shadow page
 //! takes the next value.
+//!
+//! lv1 backs the shadow page with a page of its own memory. The page
+//! allocator fills the page with zeros [OFW-4.93 lv1 a:0x2FF5C4]
+//! [OFW-4.93 lv1 a:0x2C14F8-0x2C1508]. The region keeps the page's real
+//! address at +168 [OFW-4.93 lv1 a:0x2FF5D8]. The type 1 worker then
+//! writes 0 to the fields of Linux `struct spe_shadow`
+//! [OFW-4.93 lv1 a:0x315A1C-0x315A2C] [OFW-4.93 lv1 a:0x2FC250-0x2FC2EC].
+//! So after the call each byte of the shadow page is 0.
+//!
+//! `write_htab_entry` (hypercall 1) finds the region that holds an
+//! entry's page in the partition's regions [OFW-4.93 lv1 a:0x2D2510]
+//! [OFW-4.93 lv1 a:0x2D2614-0x2D262C]. It then asks the region's class
+//! for the real address [OFW-4.93 lv1 a:0x2D3084-0x2D30C4]. The class of
+//! the shadow page [OFW-4.93 lv1 a:0x2FF5B4-0x2FF5B8] translates at
+//! [OFW-4.93 lv1 a:0x2FF754], with these steps in this order:
+//! 1. It checks a byte of the region that the region constructor sets
+//!    to 0 [OFW-4.93 lv1 a:0x2FF384-0x2FF38C] [OFW-4.93 lv1 a:0x2CF4FC].
+//!    A live shadow page passes.
+//! 2. A page larger than the shadow page fails; see
+//!    [`WRITE_HTAB_SHADOW_PAGE_SIZE_R3`].
+//! 3. An entry that is not read only fails; see
+//!    [`WRITE_HTAB_SHADOW_WRITABLE_R3`].
+//! 4. The real address is the backing page's address plus the page's
+//!    offset in the region [OFW-4.93 lv1 a:0x2FF7E4-0x2FF7F0].
+//!
+//! The writer searches for a duplicate entry before it translates
+//! [OFW-4.93 lv1 a:0x2D2F20-0x2D3038].
+
+use crate::lv1::status::{zero_extended, LV1_ACCESS_VIOLATION};
 
 /// The handler of hypercall 57 in one firmware's lv1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,6 +160,29 @@ pub const LOGICAL_SPE_PROBLEM_OFFSET: u64 = 0x4_0000;
 
 /// The offset in the area of the priv2 area [OFW-4.93 lv1 a:0x315CD0].
 pub const LOGICAL_SPE_PRIV2_OFFSET: u64 = 0x6_0000;
+
+/// The r3 of `write_htab_entry` for a valid entry whose page lies in a
+/// shadow page and is larger than it: `LV1_ACCESS_VIOLATION` (-5), with
+/// r6 marked.
+///
+/// The translation compares the shadow page's shift at +184 with the
+/// page's [OFW-4.93 lv1 a:0x2FF7C0-0x2FF7D8], and returns the code
+/// 0x997997D2B58E3C02 [OFW-4.93 lv1 a:0x2FF824]. The handler gives this
+/// r3 for that code [OFW-4.93 lv1 a:0x2ED5C4-0x2ED5DC]
+/// [OFW-4.93 lv1 a:0x2ED60C-0x2ED618].
+pub const WRITE_HTAB_SHADOW_PAGE_SIZE_R3: u64 = 0x0000_0008_FFFF_FFFB;
+
+/// The r3 of `write_htab_entry` for a valid entry whose page lies in a
+/// shadow page and that is not read only:
+/// `LV1_ACCESS_VIOLATION` (-5), zero-extended.
+///
+/// The translation tests the writer's read only flag
+/// [OFW-4.93 lv1 a:0x2FF7C4] [OFW-4.93 lv1 a:0x2FF7E0], and returns the
+/// code 0x997997D2B58E3C03 for a flag of 0
+/// [OFW-4.93 lv1 a:0x2FF82C-0x2FF838]. The handler gives this r3 for that
+/// code [OFW-4.93 lv1 a:0x2ED5E0-0x2ED604]. See
+/// [`super::page_table::read_only`] for the flag.
+pub const WRITE_HTAB_SHADOW_WRITABLE_R3: u64 = zero_extended(LV1_ACCESS_VIOLATION);
 
 /// One `construct_logical_spe` call of the GameOS kernel, and the spe id
 /// that lv1 gave it on the console.

@@ -20,7 +20,6 @@ use super::{REGION_COUNTER_SOURCE, REGION_SOURCE};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::request::HypercallRequest;
-use crate::vector;
 
 /// The hypercalls this module answers.
 pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
@@ -218,10 +217,7 @@ pub(crate) fn allocate(
         );
     }
     if let Some(r3) = lv1_argument_check(size, exp, request.r(5), request.r(6)) {
-        return HypercallDisposition::Answered(HypercallAnswer::lv1_status(
-            r3,
-            vector::cleared_outputs(),
-        ));
+        return HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, []));
     }
     if request.r(5) != 0 {
         return refuse(request, "an allocation with r5 = 1");
@@ -260,7 +256,7 @@ pub(crate) fn allocate(
             "an allocation whose region address the encoding cannot hold",
         );
     };
-    let mut answer = HypercallAnswer::success(vec![lpar_address, ALLOCATE_MEMORY_UNIT_ID]);
+    let mut answer = HypercallAnswer::success([lpar_address, ALLOCATE_MEMORY_UNIT_ID]);
     answer.push_change(MemoryRegion {
         lpar_address,
         size,

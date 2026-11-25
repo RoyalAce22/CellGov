@@ -25,7 +25,6 @@ use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::group::memory::address_space::AddressSpaceState;
 use crate::request::HypercallRequest;
-use crate::vector;
 
 /// The hypercalls this module answers.
 pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
@@ -61,7 +60,7 @@ fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDispositio
 
 /// lv1's own r3 with r4 to r10 cleared.
 fn lv1_answer(r3: u64) -> HypercallDisposition {
-    HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, vector::cleared_outputs()))
+    HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, []))
 }
 
 /// The state that the hypervisor holds for a connect step.
@@ -153,15 +152,14 @@ pub(crate) fn connect_plug(
     }
     let key = IrqStateBitmapKey { ppe_id, thread };
     if state.ports.port_on_plug(key, plug).is_some() {
-        let mut answer = HypercallAnswer::lv1_status(IRQ_PLUG_IN_USE_R3, vector::cleared_outputs());
+        let mut answer = HypercallAnswer::lv1_status(IRQ_PLUG_IN_USE_R3, []);
         answer.push_change(InterruptChange::PlugConnect(EventReceivePort {
             plug,
             ..port
         }));
         return HypercallDisposition::Answered(answer);
     }
-    let mut answer =
-        HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), vector::cleared_outputs());
+    let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []);
     if let Some(bitmap) = state.bitmaps.bitmap(key) {
         let (doubleword, _) = plug_status_bit(plug);
         let Some(range) = bitmap

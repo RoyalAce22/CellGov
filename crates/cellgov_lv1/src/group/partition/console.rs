@@ -20,7 +20,6 @@ use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 use crate::answer::{ConsoleWrite, HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::request::HypercallRequest;
-use crate::vector;
 
 /// The hypercalls this module answers. The call table names each one
 /// only `undocumented_function_N`, so each takes the name psdevwiki
@@ -54,7 +53,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[
 
 /// Hypercall 105: the console exists, so the construct succeeds.
 pub(crate) fn construct() -> HypercallDisposition {
-    HypercallDisposition::Answered(HypercallAnswer::success(Vec::new()))
+    HypercallDisposition::Answered(HypercallAnswer::success([]))
 }
 
 /// Hypercall 107: the sink takes the first r4 bytes of r5 to r8, and the
@@ -74,7 +73,7 @@ pub(crate) fn send(request: &HypercallRequest) -> HypercallDisposition {
     for (chunk, reg) in data.chunks_exact_mut(8).zip(5..=8) {
         chunk.copy_from_slice(&request.r(reg).to_be_bytes());
     }
-    let mut answer = HypercallAnswer::success(vec![len]);
+    let mut answer = HypercallAnswer::success([len]);
     answer.console = Some(ConsoleWrite {
         console: request.r(3),
         data,
@@ -94,7 +93,7 @@ fn too_long(request: &HypercallRequest) -> HypercallDisposition {
 
 /// Hypercall 109: the console holds no bytes, so the flush succeeds.
 pub(crate) fn flush() -> HypercallDisposition {
-    HypercallDisposition::Answered(HypercallAnswer::success(Vec::new()))
+    HypercallDisposition::Answered(HypercallAnswer::success([]))
 }
 
 /// Hypercall 106: with the gate off, lv1 puts 0 in r3 for any console id
@@ -114,10 +113,7 @@ pub(crate) fn destruct(request: &HypercallRequest, firmware: Option<&str>) -> Hy
             what: "a console destruct at a firmware whose console gate no capture gives",
         });
     }
-    HypercallDisposition::Answered(HypercallAnswer::lv1_status(
-        zero_extended(LV1_SUCCESS),
-        vector::cleared_outputs(),
-    ))
+    HypercallDisposition::Answered(HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []))
 }
 
 #[cfg(test)]

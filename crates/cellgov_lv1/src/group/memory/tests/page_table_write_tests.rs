@@ -68,6 +68,7 @@ fn write(d0: u64, d1: u64, index: u64, storage: &GuestMemory) -> HypercallDispos
         &write_request(0, index, d0, d1),
         Some("4.93"),
         &spaces(),
+        &LogicalSpeState::default(),
         storage,
     )
 }
@@ -77,7 +78,7 @@ fn write(d0: u64, d1: u64, index: u64, storage: &GuestMemory) -> HypercallDispos
 fn written(index: u64, d0: u64, stored: u64) -> HypercallDisposition {
     let mut bytes = d0.to_be_bytes().to_vec();
     bytes.extend_from_slice(&stored.to_be_bytes());
-    let mut answer = HypercallAnswer::lv1_status(0, vec![0; 7]);
+    let mut answer = HypercallAnswer::lv1_status(0, [0; 7]);
     answer.effects.push(Effect::SharedWriteIntent {
         range: ByteRange::new(GuestAddr::new(entry_address(index)), 16).expect("range"),
         bytes: WritePayload::new(bytes),
@@ -226,7 +227,13 @@ fn a_write_with_no_address_space_or_storage_refuses() {
     assert_eq!(cases.len(), 3);
     for (spaces, vas_id, firmware) in cases {
         let r = write_request(vas_id, 0, D0, 0x1000);
-        let d = write_entry(&r, firmware, &spaces, &storage());
+        let d = write_entry(
+            &r,
+            firmware,
+            &spaces,
+            &LogicalSpeState::default(),
+            &storage(),
+        );
         assert!(
             refusal_what(&d).is_some(),
             "{firmware:?} vas id {vas_id}: {d:?}"

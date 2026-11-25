@@ -72,10 +72,10 @@ pub(crate) fn read_node(
     };
     match node.v2 {
         SecondValue::Given(v2) => {
-            HypercallDisposition::Answered(HypercallAnswer::success(vec![node.v1, v2]))
+            HypercallDisposition::Answered(HypercallAnswer::success([node.v1, v2]))
         }
         SecondValue::Unobserved { discarded_by } if discarded_by.contains(&site) => {
-            HypercallDisposition::Answered(HypercallAnswer::success(vec![node.v1, 0]))
+            HypercallDisposition::Answered(HypercallAnswer::success([node.v1, 0]))
         }
         SecondValue::Unobserved { .. } => {
             HypercallDisposition::Refused(HypercallRefusal::RepositorySecondValueUnobserved {
@@ -95,10 +95,7 @@ pub(crate) fn read_record(
     disposition: &HypercallDisposition,
 ) -> RepositoryRead {
     let values = match disposition {
-        HypercallDisposition::Answered(answer) => match answer.outputs.as_slice() {
-            [v1, v2] => Some((*v1, *v2)),
-            _ => None,
-        },
+        HypercallDisposition::Answered(answer) => answer.outputs.map(|[v1, v2, ..]| (v1, v2)),
         HypercallDisposition::Refused(_) => None,
     };
     RepositoryRead {

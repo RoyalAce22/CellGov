@@ -88,10 +88,17 @@ fn a_plan_refuses_what_a_peek_cannot_read() {
         ("too many reads", 1, vec![0x10], MAX_READS + 1, false),
     ];
     for (name, width, addresses, reads, ok) in cases {
-        let plan = PeekPlan::new(Space::Lv1, *width, addresses.clone(), *reads);
-        assert_eq!(plan.is_ok(), *ok, "{name}: {plan:?}");
-        if let Err(error) = plan {
-            assert!(matches!(error, RunnerPs3Error::Usage(_)), "{name}: {error}");
+        match PeekPlan::new(Space::Lv1, *width, addresses.clone(), *reads) {
+            Ok(plan) => {
+                assert!(ok, "{name}: accepted");
+                assert_eq!(
+                    (plan.space(), plan.width(), plan.addresses(), plan.reads()),
+                    (Space::Lv1, *width, addresses.as_slice(), *reads),
+                    "{name}"
+                );
+            }
+            Err(RunnerPs3Error::Usage(_)) => assert!(!ok, "{name}: refused"),
+            Err(other) => panic!("{name}: {other}"),
         }
     }
 }

@@ -223,12 +223,10 @@ fn a_console_that_does_not_answer_is_marked_down_for_every_waiter() {
             );
         } else {
             assert_eq!(mark, None, "{name}: marked down");
-            if let Err(failure) = result {
-                assert!(
-                    !matches!(failure.error, RunnerPs3Error::Queue(_)),
-                    "{name}: {}",
-                    failure.error
-                );
+            match result {
+                Ok(Report::Status(_)) => {}
+                Ok(other) => panic!("{name}: {other:?}"),
+                Err(failure) => panic!("{name}: {}", failure.error),
             }
         }
     }

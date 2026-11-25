@@ -24,7 +24,7 @@ fn request() -> HypercallRequest {
 }
 
 fn constructed(id: u64) -> HypercallDisposition {
-    let mut answer = HypercallAnswer::lv1_status(0, vec![id, 0, 0, 0, 0, 0, 0]);
+    let mut answer = HypercallAnswer::lv1_status(0, [id, 0, 0, 0, 0, 0, 0]);
     answer.push_change(InterruptChange::PortConstructed(EventReceivePort::new(id)));
     HypercallDisposition::Answered(answer)
 }

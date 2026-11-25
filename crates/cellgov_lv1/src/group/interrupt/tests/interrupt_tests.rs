@@ -52,7 +52,7 @@ fn fresh(r: &HypercallRequest) -> HypercallDisposition {
 }
 
 fn lv1_r3(r3: u64) -> HypercallDisposition {
-    HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, vec![0; 7]))
+    HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, [0; 7]))
 }
 
 fn refused(r: &HypercallRequest, what: &'static str) -> HypercallDisposition {
@@ -68,7 +68,7 @@ fn refused(r: &HypercallRequest, what: &'static str) -> HypercallDisposition {
 /// slot, and copies the
 /// thread's 32-byte status shadow, 0, to the bitmap [OFW-4.93 lv1 a:0x2C413C].
 fn registered(r: &HypercallRequest, thread: u8, bitmap: u64) -> HypercallDisposition {
-    let mut answer = HypercallAnswer::lv1_status(0, vec![0; 7]);
+    let mut answer = HypercallAnswer::lv1_status(0, [0; 7]);
     answer.effects.push(Effect::SharedWriteIntent {
         range: ByteRange::new(GuestAddr::new(bitmap), 32).expect("the status doublewords"),
         bytes: WritePayload::new(vec![0; 32]),

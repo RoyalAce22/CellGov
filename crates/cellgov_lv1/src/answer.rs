@@ -3,11 +3,14 @@
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::lv1::call::LOGICAL_CONSOLE_SEND_MAX;
+use cellgov_ps3_abi::lv1::call::{LOGICAL_CONSOLE_SEND_MAX, MAX_OUTPUTS};
 use cellgov_ps3_abi::lv1::repository::RepositoryKey;
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
 use crate::group::state::StateChange;
+
+/// The values for r4 to r10, in register order.
+pub type OutputRegisters = [u64; MAX_OUTPUTS as usize];
 
 /// Bytes a logical console send gave the console.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,8 +38,9 @@ pub struct HypercallAnswer {
     /// zero-extended status, or the argument mark of an
     /// `allocate_memory` refusal.
     pub r3: u64,
-    /// The values for r4 onward, in register order.
-    pub outputs: Vec<u64>,
+    /// The values for r4 to r10 that lv1's return path loads, or `None`
+    /// where lv1's return leaves r4 to r10 as the caller had them.
+    pub outputs: Option<OutputRegisters>,
     /// Memory writes, at real addresses.
     pub effects: Vec<Effect>,
     /// Bytes for the guest TTY sink.
@@ -60,14 +64,46 @@ pub struct PageTableLoad {
 }
 
 impl HypercallAnswer {
-    /// `LV1_SUCCESS` with `outputs` from r4.
-    pub fn success(outputs: Vec<u64>) -> Self {
+    /// `LV1_SUCCESS` with `outputs` from r4, as [`Self::lv1_status`]
+    /// returns them.
+    pub fn success<const N: usize>(outputs: [u64; N]) -> Self {
         Self::lv1_status(zero_extended(LV1_SUCCESS), outputs)
     }
 
     /// The exact `r3` and the `outputs` from r4 that lv1 returns, with no
     /// memory write.
-    pub fn lv1_status(r3: u64, outputs: Vec<u64>) -> Self {
+    ///
+    /// Each register after `outputs`, up to r10, gets 0:
+    /// - The vector's entry `dcbz` [OFW-4.93 lv1 a:0x0C00-0x0C08] zeroes
+    ///   the 128-byte block at HSPRG0 - 0x6A80, which holds the return
+    ///   slots of r3 to r10 where HSPRG0 is 128-byte aligned.
+    /// - The return path [OFW-4.93 lv1 a:0x1040-0x1068] loads r3 to r10
+    ///   from those slots.
+    /// - A handler that lv1 calls directly writes only the slots of its
+    ///   outputs, as hypercall 74 does [OFW-4.93 lv1 a:0x2EBDA8-0x2EBDC4].
+    ///
+    /// The `lv1_problem_state_sc` capture shows r4 to r10 at 0 after an
+    /// answer that writes only the r3 slot.
+    ///
+    /// lv1 sends some numbers to a service through its dispatcher. The
+    /// dispatcher copies seven reply words into the slots
+    /// [OFW-4.93 lv1 a:0x2C8B14-0x2C8B34]. A service that writes fewer
+    /// words leaves lv1's own stack data in the rest, and CellGov does not
+    /// model that data.
+    pub fn lv1_status<const N: usize>(r3: u64, outputs: [u64; N]) -> Self {
+        const { assert!(N <= MAX_OUTPUTS as usize, "more outputs than r4 to r10") };
+        let mut registers = OutputRegisters::default();
+        registers[..N].copy_from_slice(&outputs);
+        Self::with_outputs(r3, Some(registers))
+    }
+
+    /// The exact `r3`, with r4 to r10 as the caller had them and no memory
+    /// write.
+    pub(crate) fn r3_only(r3: u64) -> Self {
+        Self::with_outputs(r3, None)
+    }
+
+    fn with_outputs(r3: u64, outputs: Option<OutputRegisters>) -> Self {
         Self {
             r3,
             outputs,
@@ -183,3 +219,7 @@ pub enum HypercallDisposition {
     /// The run stops at the call.
     Refused(HypercallRefusal),
 }
+
+#[cfg(test)]
+#[path = "tests/answer_tests.rs"]
+mod tests;

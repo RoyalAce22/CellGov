@@ -29,7 +29,7 @@ fn request(number: u64, problem_state: bool) -> HypercallRequest {
     }
 }
 
-fn answered(r3: u64, outputs: Vec<u64>) -> HypercallDisposition {
+fn answered(r3: u64, outputs: Option<[u64; 7]>) -> HypercallDisposition {
     HypercallDisposition::Answered(HypercallAnswer {
         r3,
         outputs,
@@ -56,7 +56,7 @@ fn a_number_past_the_table_answers_not_implemented_at_each_site_firmware() {
             for problem_state in [false, true] {
                 assert_eq!(
                     vector_disposition(&request(number, problem_state), Some(site.firmware)),
-                    Some(answered(UNKNOWN_HYPERCALL_R3, Vec::new())),
+                    Some(answered(UNKNOWN_HYPERCALL_R3, None)),
                     "{} number {number} problem state {problem_state}",
                     site.firmware
                 );
@@ -90,7 +90,7 @@ fn every_problem_state_call_below_256_answers_no_privilege_at_4_93() {
                 &GroupStates::default(),
                 &GuestMemory::new(0)
             ),
-            answered(PROBLEM_STATE_DENIED_R3, vec![0; 7]),
+            answered(PROBLEM_STATE_DENIED_R3, Some([0; 7])),
             "number {number}"
         );
         checked += 1;
@@ -127,7 +127,7 @@ fn an_invalid_entry_answers_the_invalid_function_with_r4_to_r10_cleared_at_4_93(
     let r = request(14, false);
     assert_eq!(
         null_backend(&r, Some("4.93")),
-        answered(INVALID_HYPERCALL_R3, vec![0; 7])
+        answered(INVALID_HYPERCALL_R3, Some([0; 7]))
     );
 }
 
@@ -178,7 +178,7 @@ fn a_problem_state_call_to_an_answered_number_counts_no_witness() {
     let mut hv = Hypervisor::new();
     hv.set_firmware("4.93");
     let d = hv.dispatch(&request(74, true));
-    assert_eq!(d, answered(PROBLEM_STATE_DENIED_R3, vec![0; 7]));
+    assert_eq!(d, answered(PROBLEM_STATE_DENIED_R3, Some([0; 7])));
     assert!(hv.witnesses().is_empty());
 }
 

@@ -17,8 +17,15 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
     handler: |_, _| logical_partition_id(),
 }];
 
-/// The answer of `get_logical_partition_id`: `LV1_SUCCESS` and the
-/// GameOS partition's id in r4.
+/// The answer of `get_logical_partition_id`: `LV1_SUCCESS`, the GameOS
+/// partition's id in r4, and 0 in r5 to r10.
+///
+/// lv1's handler writes only the return slot of r4
+/// [OFW-4.93 lv1 a:0x2EBDA8-0x2EBDC4].
 fn logical_partition_id() -> HypercallDisposition {
-    HypercallDisposition::Answered(HypercallAnswer::success(vec![LPAR_ID_GAME_OS]))
+    HypercallDisposition::Answered(HypercallAnswer::success([LPAR_ID_GAME_OS]))
 }
+
+#[cfg(test)]
+#[path = "tests/partition_id_tests.rs"]
+mod tests;

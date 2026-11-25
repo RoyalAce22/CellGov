@@ -7,7 +7,7 @@
 use cellgov_core::{Runtime, RuntimeMode, StepError};
 use cellgov_effects::FaultKind;
 use cellgov_event::UnitId;
-use cellgov_lv1::{page_table_storage, HypercallRefusal, RepositoryRead};
+use cellgov_lv1::{page_table_storage, shadow_storage, HypercallRefusal, RepositoryRead};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, MemError, PageSize, Region};
 use cellgov_ppu::loader::checked_pt_loads;
 use cellgov_ppu::supervisor::SupervisorState;
@@ -190,7 +190,9 @@ fn drive(rt: &mut Runtime, kernel: UnitId) -> KernelRunStop {
 /// - one region at real address 0, [`KERNEL_SPAN_LIMIT`] bytes long,
 ///   that holds each segment of the kernel ELF `elf` at its real
 ///   address;
-/// - the storage of CellGov's hypervisor for its page table.
+/// - the storage of CellGov's hypervisor for its page table;
+/// - the storage of CellGov's hypervisor for the shadow pages of the
+///   logical SPEs.
 ///
 /// The caller has mapped `elf` with `map_kernel`, which checks the
 /// segments and bounds their span by [`KERNEL_SPAN_LIMIT`]. That span
@@ -201,6 +203,7 @@ fn real_mode_image(elf: &[u8]) -> Result<GuestMemory, KernelRunError> {
     let mut mem = GuestMemory::from_regions(vec![
         Region::new(0, KERNEL_SPAN_LIMIT as usize, "lv2 real", PageSize::Page64K),
         page_table_storage(),
+        shadow_storage(),
     ])
     .map_err(|source| KernelRunError::RealMode { source })?;
     for s in segments.iter().filter(|s| s.memsz != 0) {

@@ -9,6 +9,7 @@ fn spe(id: u64) -> LogicalSpe {
         vas_id: 2,
         area: 0x0000_4c00_0028_0000,
         shadow: 0x0000_3000_0000_6000,
+        shadow_real: 0x1100_0000,
     }
 }
 
@@ -37,6 +38,7 @@ fn logical_spe_sync_term_lane_vector_golden() {
         lane(3, 2),
         lane(4, 0x0000_4c00_0028_0000),
         lane(5, 0x0000_3000_0000_6000),
+        lane(6, 0x1100_0000),
     ]
     .into_iter()
     .fold(0u128, u128::wrapping_add);
@@ -66,8 +68,12 @@ fn each_spe_and_each_field_moves_the_term() {
             shadow: 0x0000_3000_0000_7000,
             ..spe(11)
         },
+        LogicalSpe {
+            shadow_real: 0x1100_1000,
+            ..spe(11)
+        },
     ];
-    assert_eq!(changed.len(), 5);
+    assert_eq!(changed.len(), 6);
     for other in changed {
         assert_ne!(spes(&[other]).sync_term(), one, "{other:?}");
     }

@@ -21,12 +21,12 @@ use cellgov_ps3_abi::lv1::spe::{
 };
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
+use super::shadow::shadow_page_real;
 use super::{SpeChange, LOGICAL_SPE_SOURCE};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::group::memory::{MemoryChange, MemoryGroupState};
 use crate::request::HypercallRequest;
-use crate::vector;
 
 /// The hypercalls this module answers.
 pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
@@ -47,6 +47,10 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
 /// to r7 [OFW-4.93 lv2_kernel a:0x800000000004f158-0x800000000004f168].
 const KERNEL_PAGE_SHIFT: u64 = 12;
 
+/// Log2 of the size of each shadow page: the page shift in r7 of the
+/// kernel's call, the only call that the construct answers.
+pub(super) const SHADOW_PAGE_SHIFT: u32 = KERNEL_PAGE_SHIFT as u32;
+
 /// One logical SPE that the hypervisor constructed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LogicalSpe {
@@ -64,10 +68,13 @@ pub struct LogicalSpe {
     /// The logical partition address of the shadow page, which the answer
     /// put in r8.
     pub shadow: u64,
+    /// The real address of the shadow page in CellGov's shadow page
+    /// storage.
+    pub shadow_real: u64,
 }
 
-/// Fields 1 to 5: the spe id, the SPE type, the vas id, the area's
-/// address and the shadow page's address.
+/// Fields 1 to 6: the spe id, the SPE type, the vas id, the area's
+/// address, the shadow page's address and its real address.
 impl LaneValue for LogicalSpe {
     fn lanes(&self, lanes: &mut ObjectLanes) {
         lanes.lane(1, 0, self.id);
@@ -75,6 +82,7 @@ impl LaneValue for LogicalSpe {
         lanes.lane(3, 0, self.vas_id);
         lanes.lane(4, 0, self.area);
         lanes.lane(5, 0, self.shadow);
+        lanes.lane(6, 0, self.shadow_real);
     }
 }
 
@@ -141,7 +149,8 @@ fn kernel_inputs(request: &HypercallRequest, spe_type: u64) -> bool {
 /// - r10: 0.
 ///
 /// The area takes the partition's next region counter value, and the
-/// shadow page takes the value after it. The answer carries the SPE and
+/// shadow page takes the value after it. The shadow page gets the next
+/// page of CellGov's shadow page storage. The answer carries the SPE and
 /// the shadow page's counter value, and the hypervisor keeps both.
 ///
 /// lv1 gives the SPE the first free id of the partition's object table.
@@ -154,6 +163,7 @@ fn kernel_inputs(request: &HypercallRequest, spe_type: u64) -> bool {
 /// - the call passes other inputs than the kernel's call at that address;
 /// - r8 names no address space that the hypervisor constructed;
 /// - the hypervisor already holds an SPE with that id;
+/// - the shadow page storage holds no page for one more SPE;
 /// - no source gives the region counter for `firmware`;
 /// - the address encoding cannot hold the area or the shadow page.
 pub(crate) fn construct(
@@ -193,6 +203,12 @@ pub(crate) fn construct(
             "a logical SPE construct whose spe id the hypervisor already holds",
         );
     }
+    let Some(shadow_real) = shadow_page_real(spes.spes().len() as u64) else {
+        return refuse(
+            request,
+            "a logical SPE construct past CellGov's shadow page storage",
+        );
+    };
     let Some(counter) = memory
         .regions()
         .next_counter()
@@ -206,19 +222,21 @@ pub(crate) fn construct(
     let shadow_counter = counter.saturating_add(1);
     let (Some(area), Some(shadow)) = (
         region_address(LOGICAL_SPE_AREA_SIZE, counter),
-        region_address(1 << KERNEL_PAGE_SHIFT, shadow_counter),
+        region_address(1 << SHADOW_PAGE_SHIFT, shadow_counter),
     ) else {
         return refuse(
             request,
             "a logical SPE construct whose region addresses the encoding cannot hold",
         );
     };
-    let mut outputs = vector::cleared_outputs();
-    outputs[0] = area + LOGICAL_SPE_PRIV2_OFFSET;
-    outputs[1] = area + LOGICAL_SPE_PROBLEM_OFFSET;
-    outputs[2] = area;
-    outputs[4] = shadow;
-    outputs[5] = call.id;
+    let outputs = [
+        area + LOGICAL_SPE_PRIV2_OFFSET,
+        area + LOGICAL_SPE_PROBLEM_OFFSET,
+        area,
+        0,
+        shadow,
+        call.id,
+    ];
     let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), outputs);
     answer.push_change(SpeChange::Constructed(LogicalSpe {
         id: call.id,
@@ -226,6 +244,7 @@ pub(crate) fn construct(
         vas_id,
         area,
         shadow,
+        shadow_real,
     }));
     answer.push_change(MemoryChange::CounterTaken(shadow_counter));
     HypercallDisposition::Answered(answer)
@@ -242,3 +261,7 @@ mod hash_tests;
 #[cfg(test)]
 #[path = "tests/construct_capture_tests.rs"]
 mod capture_tests;
+
+#[cfg(test)]
+#[path = "tests/construct_shadow_tests.rs"]
+mod shadow_tests;

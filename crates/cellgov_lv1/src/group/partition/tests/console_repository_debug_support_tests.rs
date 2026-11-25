@@ -83,5 +83,6 @@ fn the_debug_support_read_answers_status_0_and_the_captured_node_values() {
         HypercallDisposition::Refused(refusal) => panic!("{refusal}"),
     };
     assert_eq!(answer.r3, 0, "r3");
-    assert_eq!(answer.outputs, [hex(&row[9]), hex(&row[10])], "r4 and r5");
+    let outputs = answer.outputs.expect("r4 to r10");
+    assert_eq!(outputs[..2], [hex(&row[9]), hex(&row[10])], "r4 and r5");
 }

@@ -56,9 +56,11 @@ fn console_cases() -> Vec<(u64, [u64; 8])> {
         .collect()
 }
 
-/// CellGov's r3 to r10 after a 4.93 hypervisor answers case `case`: r3
-/// takes the answer's r3, r4 onward take its outputs, and every other
-/// register keeps its value, as the runtime applies an answer.
+/// CellGov's r3 to r10 after a 4.93 hypervisor answers case `case`, as
+/// the runtime applies an answer:
+/// - r3 takes the answer's r3;
+/// - r4 to r10 take the answer's values, or keep the marks where the
+///   answer gives none.
 fn cellgov_registers(case: usize) -> [u64; 8] {
     let inputs = std::array::from_fn(|r| mark(3 + r as u64, case as u64));
     let request = HypercallRequest {
@@ -79,8 +81,8 @@ fn cellgov_registers(case: usize) -> [u64; 8] {
     };
     let mut regs = inputs;
     regs[0] = answer.r3;
-    for (slot, value) in regs[1..].iter_mut().zip(&answer.outputs) {
-        *slot = *value;
+    if let Some(outputs) = answer.outputs {
+        regs[1..].copy_from_slice(&outputs);
     }
     regs
 }

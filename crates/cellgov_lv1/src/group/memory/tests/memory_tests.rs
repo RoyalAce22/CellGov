@@ -70,7 +70,7 @@ fn the_4_93_boot_allocations_answer_consecutive_counter_addresses_and_unit_id_1(
     let mut hv = hypervisor_4_93();
     let expected = |size: u64, exp: u8, counter: u64| {
         let lpar_address = region_address(size, counter).expect("an address");
-        let mut answer = HypercallAnswer::success(vec![lpar_address, ALLOCATE_MEMORY_UNIT_ID]);
+        let mut answer = HypercallAnswer::success([lpar_address, ALLOCATE_MEMORY_UNIT_ID]);
         answer.push_change(MemoryRegion {
             lpar_address,
             size,

@@ -14,28 +14,16 @@
 //! - Which entries are invalid, and which are problem-state callable,
 //!   is read only from the live 4.93 table.
 
-use cellgov_ps3_abi::lv1::call::MAX_OUTPUTS;
 use cellgov_ps3_abi::lv1::dispatch::{PROBLEM_STATE_DENIED_R3, UNKNOWN_HYPERCALL_R3};
 use cellgov_ps3_abi::lv1::table::{self, TableEntry, HYPERCALL_TABLE_ENTRIES};
 
 use super::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use super::request::HypercallRequest;
 
-/// An answer of `r3` and `outputs`, with no memory write.
-fn answered(r3: u64, outputs: Vec<u64>) -> HypercallDisposition {
-    HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, outputs))
-}
-
-/// r4 to r10 as lv1's `hrfid` return path leaves them when no handler
-/// writes them: 0.
-///
-/// The vector's entry `dcbz` [OFW-4.93 lv1 a:0x0C08] at HSPRG0 - 0x6A80
-/// zeroes the 128-byte
-/// block that holds the return slots of r3 to r10. The return path loads
-/// r4 to r10 from those slots. This assumes that HSPRG0 is 128-byte
-/// aligned.
-pub(super) fn cleared_outputs() -> Vec<u64> {
-    vec![0; usize::from(MAX_OUTPUTS)]
+/// An answer of `r3` with r4 to r10 at 0, as lv1's return path gives
+/// it, and no memory write.
+fn answered(r3: u64) -> HypercallDisposition {
+    HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, []))
 }
 
 /// The disposition the vector gives `request` from a hypervisor for the
@@ -44,7 +32,8 @@ pub(super) fn cleared_outputs() -> Vec<u64> {
 ///
 /// The vector's checks run in this order:
 /// 1. A number at or past [`HYPERCALL_TABLE_ENTRIES`] gets
-///    [`UNKNOWN_HYPERCALL_R3`], and r4 to r10 keep their values. CellGov
+///    [`UNKNOWN_HYPERCALL_R3`], and r4 to r10 keep their values: this
+///    return [OFW-4.93 lv1 a:0x0C44-0x0C58] does not load them. CellGov
 ///    answers it only at a firmware that shows the entry count.
 /// 2. A problem-state call gets [`PROBLEM_STATE_DENIED_R3`] with r4 to
 ///    r10 cleared, unless its entry is problem-state callable. At a
@@ -55,14 +44,16 @@ pub(super) fn vector_disposition(
 ) -> Option<HypercallDisposition> {
     let site = firmware.and_then(table::table_site);
     if request.number >= HYPERCALL_TABLE_ENTRIES && site.is_some() {
-        return Some(answered(UNKNOWN_HYPERCALL_R3, Vec::new()));
+        return Some(HypercallDisposition::Answered(HypercallAnswer::r3_only(
+            UNKNOWN_HYPERCALL_R3,
+        )));
     }
     if !request.problem_state {
         return None;
     }
     match firmware.and_then(|fw| table::table_entry(fw, request.number)) {
         Some(entry) if entry.problem_state_callable() => None,
-        Some(_) => Some(answered(PROBLEM_STATE_DENIED_R3, cleared_outputs())),
+        Some(_) => Some(answered(PROBLEM_STATE_DENIED_R3)),
         None => Some(HypercallDisposition::Refused(
             HypercallRefusal::ProblemState {
                 number: request.number,
@@ -85,7 +76,7 @@ pub(super) fn null_backend(
     firmware: Option<&str>,
 ) -> HypercallDisposition {
     match firmware.and_then(|fw| table::table_entry(fw, request.number)) {
-        Some(TableEntry::Invalid) => answered(table::INVALID_HYPERCALL_R3, cleared_outputs()),
+        Some(TableEntry::Invalid) => answered(table::INVALID_HYPERCALL_R3),
         Some(TableEntry::Handler(_)) | None => {
             HypercallDisposition::Refused(HypercallRefusal::Unmodelled {
                 number: request.number,

@@ -7,9 +7,9 @@
 //! - its memory writes land at dispatch time through
 //!   [`Runtime::host_write`];
 //! - a page table load reaches the caller at dispatch time;
-//! - the caller's next step gets the status in r3 and the outputs from
-//!   r4 onward as committed inputs, as with an LV2 call's return. The
-//!   thread then steps past `sc`.
+//! - the caller's next step gets the status in r3 and the values for r4
+//!   to r10 as committed inputs, as with an LV2 call's return. The thread
+//!   then steps past `sc`.
 //!
 //! A refusal answers nothing. The hypervisor keeps it, and the next
 //! [`Runtime::step`] stops the run with it.
@@ -98,24 +98,22 @@ impl Runtime {
         if let Some(load) = answer.page_table {
             self.load_page_table(unit, load);
         }
-        debug_assert!(
-            answer.outputs.len() <= usize::from(MAX_OUTPUTS),
-            "hypercall {} answered {} outputs",
-            request.number,
-            answer.outputs.len()
-        );
-        let mut outputs = [0u64; MAX_OUTPUTS as usize];
-        for (slot, (reg, value)) in outputs.iter_mut().zip((4u8..).zip(&answer.outputs)) {
-            *slot = *value;
-            self.registry.push_register_write(unit, reg, *value);
-        }
+        let written = match answer.outputs {
+            Some(outputs) => {
+                for (reg, value) in (4u8..).zip(outputs) {
+                    self.registry.push_register_write(unit, reg, value);
+                }
+                MAX_OUTPUTS
+            }
+            None => 0,
+        };
         let status = answer.r3;
         if tracing {
             self.trace.record(&TraceRecord::HypercallReturned {
                 unit,
                 status,
-                outputs,
-                written: answer.outputs.len().min(outputs.len()) as u8,
+                outputs: answer.outputs.unwrap_or_default(),
+                written,
                 untimed: cost(request.number).is_none(),
                 time: self.time,
             });

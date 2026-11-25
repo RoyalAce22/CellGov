@@ -22,7 +22,7 @@ fn request(number: u64, console: u64) -> HypercallRequest {
 }
 
 fn gate_off_answer() -> HypercallDisposition {
-    HypercallDisposition::Answered(HypercallAnswer::lv1_status(0, vec![0; 7]))
+    HypercallDisposition::Answered(HypercallAnswer::lv1_status(0, [0; 7]))
 }
 
 #[test]

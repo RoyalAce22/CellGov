@@ -52,7 +52,7 @@ fn boot_counter() -> u64 {
 
 fn mapped(counter: u64) -> HypercallDisposition {
     let lpar_address = region_address(TABLE_BYTES, counter).expect("address");
-    let mut answer = HypercallAnswer::lv1_status(0, vec![lpar_address, 0, 0, 0, 0, 0, 0]);
+    let mut answer = HypercallAnswer::lv1_status(0, [lpar_address, 0, 0, 0, 0, 0, 0]);
     answer.push_change(AddressSpaceChange::Mapped {
         vas_id: VAS_ID,
         lpar_address,
@@ -187,7 +187,7 @@ fn the_hypervisor_keeps_the_mapping_and_maps_its_pages_to_the_table_storage() {
         panic!("the allocation refused");
     };
     assert_eq!(
-        answer.outputs[0],
+        answer.outputs.expect("r4 to r10")[0],
         region_address(0x10_0000, boot_counter() + 1).expect("address")
     );
 }

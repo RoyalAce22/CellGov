@@ -314,3 +314,7 @@ fn ledger_ranges(ledger: &str) -> Result<Vec<StopRange>, LedgerError> {
 #[cfg(test)]
 #[path = "tests/ledger_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/ledger_shadow_window_tests.rs"]
+mod shadow_window_tests;

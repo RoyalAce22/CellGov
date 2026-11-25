@@ -1,5 +1,5 @@
 use super::*;
-use crate::{AddressSpace, AddressSpaceChange, Hypervisor};
+use crate::{AddressSpace, AddressSpaceChange, Hypervisor, SHADOW_STORAGE_BASE};
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::call::CONSTRUCT_VIRTUAL_ADDRESS_SPACE;
 use cellgov_time::GuestTicks;
@@ -59,7 +59,7 @@ fn refused(r: &HypercallRequest, what: &'static str) -> HypercallDisposition {
 }
 
 fn answered(outputs: [u64; 7], spe: LogicalSpe, last_counter: u64) -> HypercallDisposition {
-    let mut answer = HypercallAnswer::lv1_status(0, outputs.to_vec());
+    let mut answer = HypercallAnswer::lv1_status(0, outputs);
     answer.push_change(SpeChange::Constructed(spe));
     answer.push_change(MemoryChange::CounterTaken(last_counter));
     HypercallDisposition::Answered(answer)
@@ -90,6 +90,7 @@ fn the_kernels_boot_call_gets_the_area_the_shadow_page_and_the_captured_id() {
             vas_id: VAS_ID,
             area,
             shadow,
+            shadow_real: SHADOW_STORAGE_BASE,
         },
         6,
     );
@@ -125,6 +126,7 @@ fn with_no_region_yet_the_area_and_the_shadow_page_take_the_boot_counter_values(
             vas_id: VAS_ID,
             area,
             shadow,
+            shadow_real: SHADOW_STORAGE_BASE,
         },
         boot + 1,
     );
@@ -248,6 +250,7 @@ fn a_second_boot_call_is_refused() {
         vas_id: VAS_ID,
         area: 0,
         shadow: 0,
+        shadow_real: 0,
     });
     assert_eq!(
         construct(&r, Some("4.93"), &memory(Some(5)), &spes),
@@ -299,8 +302,9 @@ fn the_hypervisor_keeps_the_spe_and_moves_the_counter_past_the_shadow_page() {
             id: BOOT_SPE_ID,
             spe_type: 1,
             vas_id: VAS_ID,
-            area: answer.outputs[2],
-            shadow: answer.outputs[4],
+            area: answer.outputs.expect("r4 to r10")[2],
+            shadow: answer.outputs.expect("r4 to r10")[4],
+            shadow_real: SHADOW_STORAGE_BASE,
         })
     );
     assert_eq!(hv.memory().next_counter(), Some(boot + 2));

@@ -102,7 +102,14 @@ fn a_peek_whose_page_overlaps_a_listed_range_is_refused() {
 fn the_committed_ledger_and_stop_list_agree_and_refuse_the_page_table_window() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let list = StopList::load(&root).expect("the committed ledger and stop list agree");
-    assert_eq!(list.ranges().len(), 1);
+    assert_eq!(list.ranges().len(), 2);
+    let window = StopRange {
+        space: Space::Lv2,
+        first: 0x8000_0000_0f00_0000,
+        last: 0x8000_0000_0f03_ffff,
+        status: Status::Suspected,
+    };
+    assert_eq!(list.ranges().first(), Some(&window));
     let cases: &[(&str, Space, u64, bool)] = &[
         (
             "the page the crash read",
@@ -137,11 +144,14 @@ fn the_committed_ledger_and_stop_list_agree_and_refuse_the_page_table_window() {
         ),
     ];
     for (name, space, page, admitted) in cases {
-        assert_eq!(
-            list.admit(*space, *page, page + 0x1ff).is_ok(),
-            *admitted,
-            "{name}"
-        );
+        match list.admit(*space, *page, page + 0x1ff) {
+            Ok(()) => assert!(admitted, "{name}: admitted"),
+            Err(LedgerError::Listed { listed, .. }) => {
+                assert!(!admitted, "{name}: refused");
+                assert_eq!(listed, window, "{name}");
+            }
+            Err(other) => panic!("{name}: {other}"),
+        }
     }
 }
 
