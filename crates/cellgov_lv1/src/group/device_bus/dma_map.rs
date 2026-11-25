@@ -1,16 +1,17 @@
 //! Hypercall 176, `map_device_dma_region`: lv1 maps memory of the
 //! partition at bus addresses of a DMA region of a device.
 //!
-//! The handler answers the call for device 0 of bus 1, the network
-//! device; see [`cellgov_ps3_abi::lv1::device_bus`]. The state holds each
-//! mapping that lv1 made for the partition.
+//! The handler answers the call for devices 0, 1 and 2 of bus 1; see
+//! [`cellgov_ps3_abi::lv1::device_bus`]. The state holds each mapping
+//! that lv1 made for the partition.
 
 use cellgov_mem::lanes::{LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::call::MAP_DEVICE_DMA_REGION;
 use cellgov_ps3_abi::lv1::device_bus::{
-    dma_map_alignment_r3, dma_map_handler, dma_map_range_free, lv1_dma_region, DMA_MAP_BUSY_R3,
-    DMA_MAP_BUS_RANGE_R3, DMA_MAP_FLAGS_MASK, DMA_MAP_FLAGS_R3, DMA_MAP_LENGTH_R3,
-    DMA_MAP_NOT_OPEN_R3, DMA_MAP_NO_BUS_R3, DMA_MAP_NO_REGION_R3, OPEN_DEVICE_BUS_MAX,
+    dma_map_alignment_r3, dma_map_handler, dma_map_range_free, is_game_os_dma_mapping,
+    lv1_dma_region, DMA_MAP_BUSY_R3, DMA_MAP_BUS_RANGE_R3, DMA_MAP_DEVICES, DMA_MAP_FLAGS_MASK,
+    DMA_MAP_FLAGS_R3, DMA_MAP_LENGTH_R3, DMA_MAP_NOT_OPEN_R3, DMA_MAP_NO_BUS_R3,
+    DMA_MAP_NO_REGION_R3, OPEN_DEVICE_BUS_MAX,
 };
 use cellgov_ps3_abi::lv1::network::{STATUS_INDICATOR_BUS, STATUS_INDICATOR_DEVICE};
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
@@ -36,8 +37,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
     },
 }];
 
-/// The device whose map path CellGov read: device 0 of bus 1, the
-/// network device.
+/// Device 0 of bus 1, the network device.
 const NETWORK_DEVICE: OpenDevice = OpenDevice {
     bus: STATUS_INDICATOR_BUS,
     device: STATUS_INDICATOR_DEVICE,
@@ -83,10 +83,10 @@ const UNREAD_FIRMWARE: UnmodelledError =
 const OTHER_BUS: UnmodelledError =
     UnmodelledError::new("a map_device_dma_region for bus 2, 3 or 4, whose lv1 path is not read");
 
-/// The call for a device of bus 1 other than device 0.
+/// The call for a device of bus 1 other than devices 0, 1 and 2.
 const OTHER_DEVICE: UnmodelledError = UnmodelledError::new(
-    "a map_device_dma_region for a device of bus 1 other than device 0, whose lv1 path is not \
-     read",
+    "a map_device_dma_region for a device of bus 1 other than devices 0, 1 and 2, whose lv1 \
+     device no console capture gives",
 );
 
 /// A call in lv1's own region of the device past the length check.
@@ -100,6 +100,13 @@ const LV1_REGION: UnmodelledError = UnmodelledError::new(
 const OUTSIDE_MEMORY: UnmodelledError = UnmodelledError::new(
     "a map_device_dma_region whose memory is outside the partition memory that CellGov holds, \
      whose lv1 IOPTE path is not read",
+);
+
+/// A call of device 1 or 2 that passes lv1's checks and that no console
+/// capture shows lv1 completed.
+const UNCAPTURED_MAP: UnmodelledError = UnmodelledError::new(
+    "a map_device_dma_region for device 1 or 2 of bus 1 that no console capture shows, whose \
+     lv1 IOPTE writes read IOMMU state that no lv1 read or console capture gives",
 );
 
 /// The region that holds the bus address of a call.
@@ -121,14 +128,19 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
     HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, []))
 }
 
-/// The region of the network device that holds `bus_address`, or `None`
-/// when no region holds it.
+/// The region of `device` that holds `bus_address`, or `None` when no
+/// region holds it.
 ///
-/// The device's list holds lv1's own region and the regions that the
-/// partition allocated, as the capture shows.
-fn held_region(firmware: &str, state: &DeviceBusState, bus_address: u64) -> Option<HeldRegion> {
+/// The device's list holds lv1's own regions of the device and the
+/// regions that the partition allocated, as the captures show.
+fn held_region(
+    firmware: &str,
+    state: &DeviceBusState,
+    device: OpenDevice,
+    bus_address: u64,
+) -> Option<HeldRegion> {
     let partition = state
-        .regions_of(NETWORK_DEVICE)
+        .regions_of(device)
         .find(|region| region.address <= bus_address && bus_address - region.address < region.size);
     if let Some(region) = partition {
         return Some(HeldRegion {
@@ -138,13 +150,7 @@ fn held_region(firmware: &str, state: &DeviceBusState, bus_address: u64) -> Opti
             lv1: false,
         });
     }
-    lv1_dma_region(
-        firmware,
-        NETWORK_DEVICE.bus,
-        NETWORK_DEVICE.device,
-        bus_address,
-    )
-    .map(|region| HeldRegion {
+    lv1_dma_region(firmware, device.bus, device.device, bus_address).map(|region| HeldRegion {
         address: region.address,
         size: region.size,
         page_shift: region.page_shift,
@@ -185,22 +191,31 @@ fn in_partition_memory(
 /// their order. A call that passes them gets 0 in r3 and r4 to r10
 /// cleared, and the answer carries the mapping.
 ///
+/// lv1 runs the same checks for devices 0, 1 and 2 with each device's
+/// own regions and mappings. So two devices can map the same bus address.
+///
 /// The model makes these assumptions:
-/// - The device's region list holds lv1's own captured region and the
-///   regions that the partition allocated, and no other region.
+/// - The device's region list holds lv1's own captured regions of the
+///   device and the regions that the partition allocated, and no other
+///   region.
 /// - The device's entry at +120 gives each region an I/O address, as the
-///   capture of the word at +160 and the regions' bus addresses show.
-/// - lv1's IOPTE writes succeed for a range of a region that the
-///   partition allocated, when partition memory holds the range. The
+///   captures of the word at +160 and the regions' bus addresses show.
+/// - lv1's IOPTE writes succeed for a range of a region of device 0 that
+///   the partition allocated, when partition memory holds the range. The
 ///   console's record of the kernel's call shows this case.
+/// - lv1's IOPTE writes succeed for a call of device 1 or 2 that
+///   [`is_game_os_dma_mapping`] holds. The console's record of the
+///   kernel's calls shows each of them.
 /// - lv1's allocation of its 96-byte mapping object succeeds.
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
 /// - r3 is bus 2, 3 or 4;
-/// - r4 names a device of bus 1 other than device 0;
+/// - r4 names a device of bus 1 other than devices 0, 1 and 2;
 /// - r6 is in lv1's own region, and the call passes the length check;
-/// - the partition memory that CellGov holds does not hold the range.
+/// - the partition memory that CellGov holds does not hold the range;
+/// - r4 is device 1 or 2, and [`is_game_os_dma_mapping`] does not hold
+///   the call.
 pub(crate) fn map_region(
     request: &HypercallRequest,
     firmware: Option<&str>,
@@ -230,13 +245,14 @@ pub(crate) fn map_region(
     if bus != NETWORK_DEVICE.bus {
         return OTHER_BUS.refusal(request);
     }
-    if device != NETWORK_DEVICE.device {
+    if !DMA_MAP_DEVICES.contains(&device) {
         return OTHER_DEVICE.refusal(request);
     }
-    if !state.is_open(NETWORK_DEVICE) {
+    let open_device = OpenDevice { bus, device };
+    if !state.is_open(open_device) {
         return lv1_answer(DMA_MAP_NOT_OPEN_R3);
     }
-    let Some(region) = held_region(firmware, state, bus_address) else {
+    let Some(region) = held_region(firmware, state, open_device, bus_address) else {
         return lv1_answer(DMA_MAP_NO_REGION_R3);
     };
     if length == 0 || length > region.size {
@@ -246,7 +262,7 @@ pub(crate) fn map_region(
         return LV1_REGION.refusal(request);
     }
     let mappings = state
-        .mappings_of(NETWORK_DEVICE)
+        .mappings_of(open_device)
         .filter(|mapping| {
             mapping.bus_address >= region.address
                 && mapping.bus_address - region.address < region.size
@@ -260,6 +276,19 @@ pub(crate) fn map_region(
     }
     if !in_partition_memory(firmware, memory, lpar_address, length) {
         return OUTSIDE_MEMORY.refusal(request);
+    }
+    if device != NETWORK_DEVICE.device
+        && !is_game_os_dma_mapping(
+            firmware,
+            bus,
+            device,
+            bus_address,
+            lpar_address,
+            length,
+            flags,
+        )
+    {
+        return UNCAPTURED_MAP.refusal(request);
     }
     let mapping = DmaMapping {
         bus,
@@ -276,3 +305,11 @@ pub(crate) fn map_region(
 #[cfg(test)]
 #[path = "tests/dma_map_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/dma_map_slot_devices_tests.rs"]
+mod slot_devices_tests;
+
+#[cfg(test)]
+#[path = "tests/dma_map_uncaptured_tests.rs"]
+mod uncaptured_tests;

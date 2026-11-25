@@ -24,9 +24,10 @@
 //!    open the device gets [`DMA_MAP_NOT_OPEN_R3`]. The function
 //!    zero-extends the status and sets bit (mark + 31) for a mark other
 //!    than 0 [OFW-4.93 lv1 a:0x236D88] [OFW-4.93 lv1 a:0x236E1C-0x236E38].
-//! 2. The device lookup [OFW-4.93 lv1 a:0x236D90]. For bus 1 it finds
-//!    device 0. The function takes no path of its own for devices 1 and
-//!    2 of bus 1.
+//! 2. The device lookup with the bus id and the device id
+//!    [OFW-4.93 lv1 a:0x236D80-0x236D90]. The section on devices 1 and 2
+//!    below gives the device that it finds for bus 1. The function takes no path of its own for devices 1 and 2 of bus 1
+//!    [OFW-4.93 lv1 a:0x236D1C-0x236DB8].
 //! 3. The device's map function [OFW-4.93 lv1 a:0x227218], with the
 //!    device, the partition, the bus address, the logical partition
 //!    address, the length, the flags and a mark
@@ -89,6 +90,39 @@
 //! [OFW-4.93 lv1 a:0x225E78-0x225EB4]. It links the mapping into the
 //! region's list at +72 [OFW-4.93 lv1 a:0x225EB8-0x225F50].
 //!
+//! # `map_device_dma_region` for devices 1 and 2 of bus 1
+//!
+//! The device lookup sends bus 1 to the lookup of bus 1
+//! [OFW-4.93 lv1 a:0x236594-0x2365AC] [OFW-4.93 lv1 a:0x236648-0x236658].
+//! That lookup takes slot 0, 3 or 4 of the system bus object for device
+//! 0, 1 or 2 [OFW-4.93 lv1 a:0x235D88-0x235DE8]
+//! [OFW-4.93 lv1 a:0x22B838-0x22B844]. These are the devices of
+//! [`DMA_MAP_DEVICES`]. The map function then calls the device's map
+//! function with that device, as for device 0.
+//!
+//! The device's map function gets the device and no device id
+//! [OFW-4.93 lv1 a:0x236D94-0x236DB8]. So its checks and the entries
+//! that it calls come from the device and its method table. The captures
+//! read these facts of devices 1 and 2:
+//! - The method table is device 0's ([`DMA_SLOTS_CAPTURE`] and
+//!   [`MMIO_DEVICE_2_CAPTURE`]), so the checks and the entries are device
+//!   0's.
+//! - The region list holds only the regions of the game OS partition, so
+//!   lv1 holds no region of its own for the device.
+//! - The 32-bit word at +160 is 8 for device 1 and 9 for device 2
+//!   ([`DMA_MAPPINGS_CAPTURE`]). So the entry at +120 does not return
+//!   -17 for the word; see [`DMA_MAP_NO_IO_WORD`].
+//!
+//! For a bus address in [`DMA_MAP_IO_BUS_ADDRESSES`], the entry at +120
+//! gives the I/O address as the low 31 bits of the bus address plus the
+//! device's doublewords at +168 and +176
+//! [OFW-4.93 lv1 a:0x22D75C-0x22D778]. The capture
+//! [`DMA_MAPPINGS_CAPTURE`] reads 0x400000000 and 0 for device 1, and
+//! 0x500000000 and 0 for device 2. The IOPTE writes for these I/O
+//! addresses read lv1's IOMMU state, which CellGov does not model. The
+//! capture holds the mapping of each of the kernel's calls, so lv1's
+//! writes succeeded for them.
+//!
 //! # The 4.93 kernel's call of `map_device_dma_region`
 //!
 //! The kernel's caller gives its wrapper 0 as the flags word
@@ -105,10 +139,12 @@
 //!
 //! A status of -9 or -2 makes the wrapper unmap the pages that it mapped
 //! [OFW-4.93 lv2_kernel a:0x800000000007d6c4-0x800000000007d73c]. The
-//! capture [`DMA_MAP_CAPTURE`] gives lv1's record of the call; see
-//! [`GAME_OS_DMA_MAPPINGS`].
+//! captures [`DMA_MAP_CAPTURE`] and [`DMA_MAPPINGS_CAPTURE`] give lv1's
+//! record of the calls; see [`GAME_OS_DMA_MAPPINGS`].
 //!
 //! [`DMA_REGION_CAPTURE`]: super::DMA_REGION_CAPTURE
+//! [`DMA_SLOTS_CAPTURE`]: super::DMA_SLOTS_CAPTURE
+//! [`MMIO_DEVICE_2_CAPTURE`]: super::MMIO_DEVICE_2_CAPTURE
 //! [`OPEN_DEVICE_BUS_MAX`]: super::OPEN_DEVICE_BUS_MAX
 
 use std::ops::RangeInclusive;
@@ -199,6 +235,21 @@ pub const DMA_MAP_LPAR_ALIGNMENT_R3: u64 = 0x0000_0004_FFFF_FFEF;
 /// The bus addresses to which the device's entry at +120 gives an I/O
 /// address [OFW-4.93 lv1 a:0x22D71C-0x22D760].
 pub const DMA_MAP_IO_BUS_ADDRESSES: RangeInclusive<u64> = 0x8000_0000..=0xFFFF_FFFF;
+
+/// The value of the device's 32-bit word at +160 for which the entry at
+/// +120 gives no I/O address and returns -17
+/// [OFW-4.93 lv1 a:0x22D718-0x22D738].
+pub const DMA_MAP_NO_IO_WORD: u32 = 16;
+
+/// The devices of bus 1 whose map path the lookup of bus 1 reaches:
+/// devices 0, 1 and 2 [OFW-4.93 lv1 a:0x235D98-0x235DB8].
+///
+/// Device 3 takes a path of its own [OFW-4.93 lv1 a:0x235DBC-0x235DC0].
+/// Any other device id takes slot 14 of the system bus object, the
+/// doubleword at +144 [OFW-4.93 lv1 a:0x235DC4-0x235DE8]
+/// [OFW-4.93 lv1 a:0x22B838-0x22B844]. No capture reads the device that
+/// either path gives.
+pub const DMA_MAP_DEVICES: [u64; 3] = [0, 1, 2];
 
 /// Whether the range check passes the `length` bytes at `bus_address`
 /// in the region of `region_size` bytes at `region_address`.
@@ -339,20 +390,104 @@ pub struct GameOsDmaMapping {
     pub length: u64,
 }
 
-/// Each mapping of a kernel's boot call, by firmware.
+/// Each mapping of a kernel's boot calls, by firmware, in the order of
+/// the calls.
 ///
-/// The 4.93 row is the one mapping of the network device's region at
-/// 0xC0000000. The capture [`DMA_MAP_CAPTURE`] finds it in the region's
-/// list, with the offset 0 at +40, the address at +48 and the length at
-/// +56.
-pub const GAME_OS_DMA_MAPPINGS: &[GameOsDmaMapping] = &[GameOsDmaMapping {
-    firmware: "4.93",
-    bus: 1,
-    device: 0,
-    bus_address: 0xC000_0000,
-    lpar_address: 0x80_0000,
-    length: 0x10_0000,
-}];
+/// The 4.93 rows are these:
+/// - The one mapping of the network device's region at 0xC0000000. The
+///   capture [`DMA_MAP_CAPTURE`] finds it in the region's list, with the
+///   offset 0 at +40, the address at +48 and the length at +56.
+/// - The 64 KB pages of devices 1 and 2: seven pages in the region at
+///   0xC0080000 of each device, then two pages in the region at
+///   0xC0000000 of each device. The capture [`DMA_MAPPINGS_CAPTURE`] finds
+///   each of them in its region's list, with the same fields.
+///
+/// The mapping function keeps each region's list sorted by the offset at
+/// +16, highest first [OFW-4.93 lv1 a:0x225EB8-0x225F10]
+/// [OFW-4.93 lv1 a:0x225FBC-0x225FE0]. It writes that offset and the
+/// mapping's class [OFW-4.93 lv1 a:0x225E80-0x225EA4], whose entry at +16
+/// [OFW-4.93 lv1 a:0x35C548-0x35C54C] [OFW-4.93 lv1 a:0x32D108-0x32D10C]
+/// is the compare [OFW-4.93 lv1 a:0x225C88-0x225CA8]. So the order of a
+/// list gives no order of the calls.
+pub const GAME_OS_DMA_MAPPINGS: &[GameOsDmaMapping] = &[
+    GameOsDmaMapping {
+        firmware: "4.93",
+        bus: 1,
+        device: 0,
+        bus_address: 0xC000_0000,
+        lpar_address: 0x80_0000,
+        length: 0x10_0000,
+    },
+    kernel_page(1, 0xC008_0000, 0x5000_0032_0000),
+    kernel_page(1, 0xC009_0000, 0x5000_0033_0000),
+    kernel_page(1, 0xC00A_0000, 0x5000_0034_0000),
+    kernel_page(1, 0xC00B_0000, 0x5000_0035_0000),
+    kernel_page(1, 0xC00C_0000, 0x5000_0036_0000),
+    kernel_page(1, 0xC00D_0000, 0x5000_0037_0000),
+    kernel_page(1, 0xC00E_0000, 0x90_0000),
+    kernel_page(2, 0xC008_0000, 0x5000_0032_0000),
+    kernel_page(2, 0xC009_0000, 0x5000_0033_0000),
+    kernel_page(2, 0xC00A_0000, 0x5000_0034_0000),
+    kernel_page(2, 0xC00B_0000, 0x5000_0035_0000),
+    kernel_page(2, 0xC00C_0000, 0x5000_0036_0000),
+    kernel_page(2, 0xC00D_0000, 0x5000_0037_0000),
+    kernel_page(2, 0xC00E_0000, 0x90_0000),
+    kernel_page(1, 0xC000_0000, 0x92_0000),
+    kernel_page(1, 0xC001_0000, 0x93_0000),
+    kernel_page(2, 0xC000_0000, 0x92_0000),
+    kernel_page(2, 0xC001_0000, 0x93_0000),
+];
+
+/// The length of each page that the 4.93 kernel maps for devices 1 and 2.
+const KERNEL_PAGE: u64 = 0x1_0000;
+
+/// The 4.93 mapping of one 64 KB page of device `device` of bus 1.
+const fn kernel_page(device: u64, bus_address: u64, lpar_address: u64) -> GameOsDmaMapping {
+    GameOsDmaMapping {
+        firmware: "4.93",
+        bus: 1,
+        device,
+        bus_address,
+        lpar_address,
+        length: KERNEL_PAGE,
+    }
+}
+
+/// The IOPTE flags of each call that [`GAME_OS_DMA_MAPPINGS`] holds.
+///
+/// The kernel's wrapper builds them from a flags word of 0
+/// [OFW-4.93 lv2_kernel a:0x800000000007d50c-0x800000000007d5bc], and
+/// CellGov's boot of the 4.93 kernel sends each of the rows' calls with
+/// them.
+pub const GAME_OS_DMA_MAP_FLAGS: u64 = 0xE000_0000_0000_0000;
+
+/// Whether the call at `firmware` with these inputs is a row of
+/// [`GAME_OS_DMA_MAPPINGS`] sent with [`GAME_OS_DMA_MAP_FLAGS`].
+///
+/// A console capture holds the mapping that lv1 made for each row. The
+/// IOPTE writes of any other call read lv1's IOMMU state, which no lv1
+/// read or console capture gives.
+pub fn is_game_os_dma_mapping(
+    firmware: &str,
+    bus: u64,
+    device: u64,
+    bus_address: u64,
+    lpar_address: u64,
+    length: u64,
+    flags: u64,
+) -> bool {
+    flags == GAME_OS_DMA_MAP_FLAGS
+        && GAME_OS_DMA_MAPPINGS.iter().any(|row| {
+            row.firmware == firmware
+                && (
+                    row.bus,
+                    row.device,
+                    row.bus_address,
+                    row.lpar_address,
+                    row.length,
+                ) == (bus, device, bus_address, lpar_address, length)
+        })
+}
 
 /// The console capture of the mapping that lv1 holds in the network
 /// device's game OS region.
@@ -360,3 +495,10 @@ pub const GAME_OS_DMA_MAPPINGS: &[GameOsDmaMapping] = &[GameOsDmaMapping {
 /// The path is relative to the workspace root. Its README gives the
 /// method and the analysis.
 pub const DMA_MAP_CAPTURE: &str = "tests/micro/lv1_device_dma_map";
+
+/// The console capture of the mappings that lv1 holds in the DMA regions
+/// of devices 1 and 2 of bus 1.
+///
+/// The path is relative to the workspace root. Its README gives the
+/// method and the analysis.
+pub const DMA_MAPPINGS_CAPTURE: &str = "tests/micro/lv1_device_dma_mappings";

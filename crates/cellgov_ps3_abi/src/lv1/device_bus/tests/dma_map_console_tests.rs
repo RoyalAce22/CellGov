@@ -83,8 +83,12 @@ fn the_kernel_call_mapping_is_the_one_mapping_of_the_game_os_region() {
     assert_eq!(at(&maps, "mapping_1_region", mapping + 72), region);
     assert_eq!(at(&maps, "mapping_1_lpar_80", mapping + 80), lpar);
 
-    assert_eq!(GAME_OS_DMA_MAPPINGS.len(), 1);
-    let row = GAME_OS_DMA_MAPPINGS[0];
+    let network: Vec<_> = GAME_OS_DMA_MAPPINGS
+        .iter()
+        .filter(|row| row.device == 0)
+        .collect();
+    assert_eq!(network.len(), 1);
+    let row = *network[0];
     assert_eq!((row.firmware, row.bus, row.device), ("4.93", 1, 0));
     assert_eq!(
         (row.bus_address, row.lpar_address, row.length),

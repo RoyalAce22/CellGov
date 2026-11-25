@@ -332,7 +332,7 @@ fn a_call_for_another_bus_or_device_of_bus_1_is_a_refusal() {
             OTHER_BUS.what,
         ),
         (
-            request(1, 1, 0x80_0000, 0xC000_0000, 0x10_0000, 0),
+            request(1, 3, 0x80_0000, 0xC000_0000, 0x10_0000, 0),
             OTHER_DEVICE.what,
         ),
         (request(1, 1 << 32, 0, 0, 0, 0), OTHER_DEVICE.what),

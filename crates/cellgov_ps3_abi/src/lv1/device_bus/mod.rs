@@ -64,6 +64,10 @@ mod dma_map_tests;
 mod dma_map_console_tests;
 
 #[cfg(test)]
+#[path = "tests/dma_mappings_console_tests.rs"]
+mod dma_mappings_console_tests;
+
+#[cfg(test)]
 #[path = "tests/mmio_map_tests.rs"]
 mod mmio_map_tests;
 
