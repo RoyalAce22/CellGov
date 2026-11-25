@@ -28,3 +28,7 @@ mod faulted_reserve_count_tests;
 #[cfg(test)]
 #[path = "tests/unbacked_hit_trim_tests.rs"]
 mod unbacked_hit_trim_tests;
+
+#[cfg(test)]
+#[path = "tests/fused_pair_fetch_read_tests.rs"]
+mod fused_pair_fetch_read_tests;

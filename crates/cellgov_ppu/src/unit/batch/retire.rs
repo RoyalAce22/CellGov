@@ -29,7 +29,12 @@ impl PpuExecutionUnit {
 
         // The unit publishes a fetch once its instruction retires, so
         // a block that ends at a fault names no text it did not run.
+        // A fused pair fetches both of its words, so its block publishes
+        // the read of the same block run unfused.
         self.note_fetch(step_pc);
+        if attempt.pair {
+            self.note_fetch(step_pc + 4);
+        }
         self.timing.retire_instruction(step_pc, ops, self.state.pc);
 
         if self.profile_mode {
