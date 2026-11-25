@@ -52,8 +52,8 @@ fn after_next_word_links(code: &Code) -> impl Iterator<Item = u64> + '_ {
         .filter_map(|(address, _)| address.checked_add(4))
 }
 
-/// The address of the word after each call of `code`, where the `bclr`
-/// of its routine returns.
+/// The address of the word after each call of `code`, where its routine
+/// returns.
 ///
 /// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.
 fn after_calls(code: &Code) -> impl Iterator<Item = u64> + '_ {
@@ -661,8 +661,11 @@ impl StackAccess {
 /// - the next word, when the word can fall through;
 /// - each word at the real address of the target of a direct branch
 ///   that is not a call;
-/// - from a `bclr`, each word at the real address of the word after a
+/// - from a return, each word at the real address of the word after a
 ///   `b` or a `bc` that links to the next word.
+///
+/// A return is a `bclr` or a `bcctr` that does not link, as
+/// [`CtrFlow::returned`] gives.
 ///
 /// The flow does not follow CTR or a copy of it to these words:
 /// - the first word of the routine that a call runs;
@@ -674,8 +677,8 @@ impl StackAccess {
 /// the flow takes the handler to return with CTR unchanged.
 ///
 /// A `b` or a `bc` that links to the next word calls no routine, so the
-/// next word gets the CTR before the branch. A `bclr` can return there
-/// later with another CTR, so that word also gets what each `bclr`
+/// next word gets the CTR before the branch. A return can reach that
+/// word later with another CTR, so that word also gets what each return
 /// brings.
 ///
 /// The flow also follows each copy of CTR in a GPR on the same paths. An
@@ -689,7 +692,7 @@ impl StackAccess {
 /// - each copy before the call, because its routine can return the GPR
 ///   or the slot unchanged;
 /// - a copy of a CTR that the scan cannot prove, in each GPR and slot
-///   that holds a copy at a `bclr`, because its routine can make that
+///   that holds a copy at a return, because its routine can make that
 ///   copy. The slots can also include other slots of the same width
 ///   and residue, as [`CtrFlow::run`] gives.
 ///
@@ -745,15 +748,15 @@ impl<'a> CtrFlow<'a> {
     /// Steps from each word until no word changes, and returns the number
     /// of words that it stepped.
     ///
-    /// The flow joins what each `bclr` brings into one state. When that
+    /// The flow joins what each return brings into one state. When that
     /// state changes, the flow joins it into the word after each link to
-    /// the next word. So each `bclr` costs one join.
+    /// the next word. So each return costs one join.
     ///
     /// The flow also keeps the GPRs and the stack slots that hold a copy
-    /// at a `bclr`. When that set grows, the flow joins
+    /// at a return. When that set grows, the flow joins
     /// [`CtrState::lost_copies`] of it into the word after each call.
     ///
-    /// A move of r1 between the word after a call and a `bclr` brings the
+    /// A move of r1 between the word after a call and a return brings the
     /// injected slots back at new offsets, one move at a time. So the flow
     /// keeps the slots as [`SlotSet::widened`] gives them. The set grows at
     /// most 32 times for the GPRs, and at most four times for each width
@@ -862,14 +865,28 @@ impl<'a> CtrFlow<'a> {
         }
     }
 
-    /// The state that the word `raw` at `position` brings to the word
-    /// where LR points, or `None` when the word is not a `bclr`.
+    /// The state that the word `raw` at `position` brings when it returns
+    /// from a routine, or `None` when the word cannot return.
     ///
-    /// [PPC-Book1 p:25 s:2.4] `bclr` branches to LR 0:61 || 0b00.
+    /// These words can return:
+    /// - a `bclr`;
+    /// - a `bcctr` that does not link, because a routine can copy LR into
+    ///   CTR and branch there.
+    ///
+    /// The flow cannot tell which `bcctr` holds a return point in CTR, so
+    /// it takes each one that does not link as a return.
+    ///
+    /// [PPC-Book1 p:25 s:2.4] `bclr` branches to LR 0:61 || 0b00, and `bcctr` branches to CTR 0:61 || 0b00.
     /// [PPC-Book1 p:24 s:2.4] A `bc` with BO bit 2 at 0 decrements CTR.
     fn returned(&self, position: (usize, usize), raw: u32) -> Option<CtrState> {
-        let Ok(PpuInstruction::Bclr { bo, .. }) = crate::decode::decode(raw) else {
-            return None;
+        let bo = match crate::decode::decode(raw) {
+            Ok(
+                PpuInstruction::Bclr { bo, .. }
+                | PpuInstruction::Bcctr {
+                    bo, link: false, ..
+                },
+            ) => bo,
+            _ => return None,
         };
         let (index, word) = position;
         let state = &self.at[index][word];
