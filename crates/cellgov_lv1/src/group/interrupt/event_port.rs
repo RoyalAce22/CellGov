@@ -251,3 +251,7 @@ mod spe_tests;
 #[cfg(test)]
 #[path = "tests/event_port_outlet_hash_tests.rs"]
 mod outlet_hash_tests;
+
+#[cfg(test)]
+#[path = "tests/event_port_record_start_tests.rs"]
+mod record_start_tests;

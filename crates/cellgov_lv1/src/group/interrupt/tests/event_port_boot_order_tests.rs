@@ -24,8 +24,8 @@ const START: [u64; 3] = [
 ];
 
 /// The `sc` of a later call of hypercall 18 in the kernel, whose port id
-/// the capture does not read [OFW-4.93 lv2_kernel a:0x8000000000027d20].
-const UNCAPTURED: u64 = 0x8000_0000_0002_7d20;
+/// no capture reads [OFW-4.93 lv2_kernel a:0x80000000000363d4].
+const UNCAPTURED: u64 = 0x8000_0000_0003_63d4;
 
 /// The port id of the call at `pc` on `thread`, from the abi row that the
 /// console test holds to the capture.

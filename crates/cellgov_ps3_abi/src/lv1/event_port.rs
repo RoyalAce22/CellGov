@@ -130,6 +130,16 @@ const START_C_SC: u64 = 0x8000_0000_0026_5840;
 /// The call in the kernel's create function of its boot logical SPE
 /// [OFW-4.93 lv2_kernel a:0x800000000004f218].
 const SPE_SC: u64 = 0x8000_0000_0004_f218;
+/// The call in the kernel's function that a thread's start calls with
+/// the thread's record [OFW-4.93 lv2_kernel a:0x8000000000027d20].
+const RECORD_START_SC: u64 = 0x8000_0000_0002_7d20;
+
+/// The console capture of the port id that the kernel keeps at +0x38 of
+/// each thread's record.
+///
+/// The path is relative to the workspace root. Its README gives the
+/// method and the analysis.
+pub const RECORD_PORT_CAPTURE: &str = "tests/micro/lv2_record_port_ids";
 
 const fn call(thread: u8, sc: u64, id: u64) -> GameOsPortCall {
     GameOsPortCall { thread, sc, id }
@@ -159,6 +169,13 @@ const fn call(thread: u8, sc: u64, id: u64) -> GameOsPortCall {
 /// [`super::spe::LOGICAL_SPE_OBJECT_CAPTURE`] reads that id at +88 of the
 /// SPE object, where the kernel stores it
 /// [OFW-4.93 lv2_kernel a:0x800000000004f21c-0x800000000004f224].
+///
+/// Each thread's start then gives the thread's record to a function that
+/// makes one more call [OFW-4.93 lv2_kernel a:0x8000000000265920-0x8000000000265928].
+/// Thread 0 makes that call after the setup of its boot logical SPE
+/// [OFW-4.93 lv2_kernel a:0x80000000002659c0]. The capture
+/// [`RECORD_PORT_CAPTURE`] reads its id at +0x38 of each record, where
+/// the kernel stores it [OFW-4.93 lv2_kernel a:0x8000000000027d44].
 pub const GAME_OS_PORT_CALLS: &[GameOsPortCalls] = &[GameOsPortCalls {
     firmware: "4.93",
     calls: &[
@@ -170,7 +187,9 @@ pub const GAME_OS_PORT_CALLS: &[GameOsPortCalls] = &[GameOsPortCalls {
         call(0, START_A_SC, 8),
         call(0, START_B_SC, 9),
         call(0, START_C_SC, 10),
+        call(1, RECORD_START_SC, 12),
         call(0, SPE_SC, 16),
+        call(0, RECORD_START_SC, 17),
     ],
 }];
 
@@ -210,3 +229,7 @@ mod ids_console_tests;
 #[cfg(test)]
 #[path = "tests/event_port_spe_console_tests.rs"]
 mod spe_console_tests;
+
+#[cfg(test)]
+#[path = "tests/event_port_record_console_tests.rs"]
+mod record_console_tests;
