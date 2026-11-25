@@ -31,14 +31,14 @@ fn the_4_93_handlers_are_the_live_table_entries_of_1_and_95() {
     assert_eq!(page_table_handlers("4.92"), None);
 }
 
+/// Hypercall 0 is `allocate_memory` in Linux `lv1call.h`.
 #[test]
-fn the_4_93_map_htab_entry_is_the_memory_call_thunk() {
+fn the_4_93_map_htab_and_allocate_memory_entries_share_the_memory_call_thunk() {
     assert_eq!(
         table_entry("4.93", 122),
         Some(TableEntry::Handler(0x2C89CC))
     );
     assert_eq!(table_entry("4.93", 0), Some(TableEntry::Handler(0x2C89CC)));
-    assert_eq!(MAP_HTAB_RESOURCE_SHORTAGE_R3, 0x0000_0000_FFFF_FFFE);
 }
 
 #[test]
@@ -51,13 +51,31 @@ fn each_status_marks_the_argument_its_check_reads() {
     assert_eq!(WRITE_HTAB_DOUBLEWORD1_R3, marked(0b1000, illegal));
     assert_eq!(WRITE_HTAB_PAGE_SIZE_R3, marked(0b1000, LV1_NO_ENTRY));
     assert_eq!(WRITE_HTAB_ALIGNMENT_R3, marked(0b1000, LV1_ALIGNMENT_ERROR));
+}
+
+/// `LV1_DUPLICATE_ENTRY` is -7 and `LV1_RESOURCE_SHORTAGE` is -2 in Linux
+/// `asm/ps3.h`.
+#[test]
+fn the_duplicate_and_map_htab_shortage_statuses_are_zero_extended() {
     assert_eq!(WRITE_HTAB_DUPLICATE_R3, 0x0000_0000_FFFF_FFF9);
+    assert_eq!(MAP_HTAB_RESOURCE_SHORTAGE_R3, 0x0000_0000_FFFF_FFFE);
 }
 
 #[test]
 fn the_doubleword_1_refusal_covers_both_reserved_fields() {
     let reserved = doubleword_bit(0) | doubleword_bit(1) | doubleword_bit(52) | doubleword_bit(53);
     assert_eq!(WRITE_HTAB_DOUBLEWORD1_RESERVED, reserved);
+}
+
+/// [CBE-Handbook p:86 s:4.2.6.2] Table 4-2: PTE bits 0:14 are reserved.
+#[test]
+fn the_doubleword_0_refusal_covers_bits_0_to_14() {
+    let mut reserved = 0;
+    for bit in 0..=14 {
+        reserved |= doubleword_bit(bit);
+    }
+    assert_eq!(reserved.count_ones(), 15);
+    assert_eq!(WRITE_HTAB_DOUBLEWORD0_RESERVED, reserved);
 }
 
 #[test]
@@ -131,5 +149,12 @@ fn the_kernel_page_shifts_select_64k_pages_for_lp_0_and_1m_pages_for_lp_1() {
 fn a_page_size_past_the_count_gives_lb_field_00() {
     assert_eq!(select_hid6_lb(0, KERNEL_PAGE_SHIFTS), 0);
     assert_eq!(select_hid6_lb(1, KERNEL_PAGE_SHIFTS), 0b1000);
-    assert_eq!(select_hid6_lb(2, 0x1810_0000_0000_0000), 0b0010);
+}
+
+#[test]
+fn a_page_shift_of_24_gives_lb_field_00() {
+    let lb = select_hid6_lb(2, 0x1810_0000_0000_0000);
+    assert_eq!(lb, 0b0010);
+    assert_eq!(large_page_log2(lb >> 2), Some(24));
+    assert_eq!(large_page_log2(lb), Some(16));
 }

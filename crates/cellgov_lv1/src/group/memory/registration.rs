@@ -81,6 +81,7 @@ impl MemoryGroupState {
     pub(crate) fn apply(&mut self, change: MemoryChange) {
         match change {
             MemoryChange::Region(region) => self.regions.create(region),
+            MemoryChange::CounterTaken(counter) => self.regions.take_counter(counter),
             MemoryChange::AddressSpace(change) => {
                 if let AddressSpaceChange::Mapped { counter, .. } = change {
                     self.regions.take_counter(counter);
@@ -103,6 +104,9 @@ impl MemoryGroupState {
 pub enum MemoryChange {
     /// The call created this memory region.
     Region(MemoryRegion),
+    /// A call of another group created regions, and this is the last
+    /// value of the region counter that they took.
+    CounterTaken(u64),
     /// The call changed the virtual address spaces.
     AddressSpace(AddressSpaceChange),
 }

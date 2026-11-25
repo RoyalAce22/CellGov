@@ -1,3 +1,190 @@
 //! The facts of the logical SPE hypercalls, with the isolated SPE calls
-//! of the SELF decryption path. CellGov answers no call of the group
-//! yet.
+//! of the SELF decryption path:
+//! - the handler of `construct_logical_spe` (hypercall 57) and its checks;
+//! - the areas that lv1 gives a type 1 SPE, and the regions they take;
+//! - the spe id of each call of the GameOS kernel's boot.
+//!
+//! The facts come from the 4.93 `lv1.self`, decrypted offline and read
+//! with `cellgov dev disasm`. No byte of lv1 is committed; these facts
+//! are.
+//!
+//! The handler [OFW-4.93 lv1 a:0x31AB6C] gives r3 to r9 and the
+//! addresses of six stack slots to the worker [OFW-4.93 lv1 a:0x31AC64].
+//! It then copies the six slots to the return slots of r4 to r9
+//! [OFW-4.93 lv1 a:0x31AC68-0x31ACA4], and returns the worker's r3
+//! [OFW-4.93 lv1 a:0x31AD08]. It copies the slots on each path, and a
+//! failing path leaves some slots unwritten. So r4 to r9 of a failed call
+//! are stack values that no source gives. The handler writes no return
+//! slot of r10, and the vector's entry zeroes the slots
+//! [OFW-4.93 lv1 a:0x0C08]. So r10 returns 0.
+//!
+//! The worker [OFW-4.93 lv1 a:0x31A34C] makes these checks in this order:
+//! 1. Each page shift in r3 to r7 is 12 to 61. The first that is not
+//!    returns `LV1_ILLEGAL_PARAMETER_VALUE` (-17), marked with bit 0 to 4
+//!    of the high word for r3 to r7
+//!    [OFW-4.93 lv1 a:0x31A35C-0x31A3E0] [OFW-4.93 lv1 a:0x31A5D4-0x31A634].
+//! 2. Each page shift is 48 or less. A larger one returns
+//!    `LV1_RESOURCE_SHORTAGE` (-2), zero-extended
+//!    [OFW-4.93 lv1 a:0x31A3E4-0x31A45C].
+//! 3. r8 names a virtual address space in the partition's object table.
+//!    A failed lookup returns `LV1_NO_ENTRY` (-6), marked with bit 5
+//!    [OFW-4.93 lv1 a:0x31A460-0x31A598] [OFW-4.93 lv1 a:0x31A668-0x31A674].
+//! 4. It stores 0 in the slot of r7 [OFW-4.93 lv1 a:0x31A688-0x31A68C].
+//! 5. It selects a worker by the SPE type in r9: type 0
+//!    [OFW-4.93 lv1 a:0x31A7EC], type 1 [OFW-4.93 lv1 a:0x31A72C] or
+//!    type 2 [OFW-4.93 lv1 a:0x31A790]. Another type returns
+//!    `LV1_ILLEGAL_PARAMETER_VALUE`, marked with bit 6
+//!    [OFW-4.93 lv1 a:0x31A6A4-0x31A6B4].
+//!
+//! Before the type 1 and type 2 workers, the worker returns a nonzero
+//! status of the function [OFW-4.93 lv1 a:0x31D7D8]
+//! [OFW-4.93 lv1 a:0x31A678-0x31A680] [OFW-4.93 lv1 a:0x31A6B8-0x31A6BC]
+//! [OFW-4.93 lv1 a:0x31A730-0x31A734].
+//! Type 1 also needs a flag of lv1's, else it returns
+//! `LV1_CONDITION_NOT_SATISFIED` (-16), zero-extended
+//! [OFW-4.93 lv1 a:0x31A6C0-0x31A6D0] [OFW-4.93 lv1 a:0x31A7F0-0x31A7F8].
+//! The worker gives the type worker the partition, r8, the page shift of
+//! r7 and five of the slots [OFW-4.93 lv1 a:0x31A6D4-0x31A72C].
+//!
+//! The type 1 worker [OFW-4.93 lv1 a:0x31588C] does these steps:
+//! 1. It returns `LV1_DENIED_BY_POLICY` (-4), zero-extended, when a flag
+//!    of lv1's is 0
+//!    [OFW-4.93 lv1 a:0x3158F8-0x315904] [OFW-4.93 lv1 a:0x315BF8-0x315C04].
+//! 2. It allocates a 592-byte SPE object [OFW-4.93 lv1 a:0x31590C-0x315924]
+//!    and constructs it [OFW-4.93 lv1 a:0x315948]. The constructor calls
+//!    the object constructor [OFW-4.93 lv1 a:0x2FA650]. So the object's
+//!    id at +72 is the first free id of the partition's object table;
+//!    see [`super::event_port`].
+//! 3. It creates the SPE's area [OFW-4.93 lv1 a:0x3159EC]: a region of
+//!    [`LOGICAL_SPE_AREA_SIZE`] bytes in 4 KB pages
+//!    [OFW-4.93 lv1 a:0x2FED4C-0x2FED58].
+//! 4. It creates the shadow page [OFW-4.93 lv1 a:0x3159F8-0x3159FC]: a
+//!    region of 2^p bytes in 2^p-byte pages, where p is the page shift of
+//!    r7 [OFW-4.93 lv1 a:0x2FF554-0x2FF580].
+//! 5. It writes the slots and returns 0
+//!    [OFW-4.93 lv1 a:0x315CB0-0x315CE4] [OFW-4.93 lv1 a:0x315D3C]:
+//!    - r4 is the area's address plus [`LOGICAL_SPE_PRIV2_OFFSET`];
+//!    - r5 is the area's address plus [`LOGICAL_SPE_PROBLEM_OFFSET`];
+//!    - r6 is the area's address: the local store;
+//!    - r8 is the shadow page's address;
+//!    - r9 is the object's id.
+//!
+//! A failed allocation in the type 1 worker returns
+//! `LV1_RESOURCE_SHORTAGE`, zero-extended [OFW-4.93 lv1 a:0x315B28-0x315B30].
+//! A nonzero status of the constructor [OFW-4.93 lv1 a:0x3159D4-0x3159E4]
+//! and a region that lv1 cannot create [OFW-4.93 lv1 a:0x315A00-0x315A14]
+//! [OFW-4.93 lv1 a:0x315C14-0x315C1C] return it too.
+//!
+//! Both regions take their address from the region function
+//! [OFW-4.93 lv1 a:0x2CEC78], with the partition's region context
+//! [OFW-4.93 lv1 a:0x2FED24-0x2FED48] [OFW-4.93 lv1 a:0x2FF540-0x2FF56C].
+//! `allocate_memory` uses the same function and context
+//! [OFW-4.93 lv1 a:0x2DEA68-0x2DEA94]. The function takes the size
+//! exponent of the region [OFW-4.93 lv1 a:0x2CED34-0x2CED48]. It
+//! increments the context's counter [OFW-4.93 lv1 a:0x2CED84-0x2CED94],
+//! and encodes the old value in the address
+//! [OFW-4.93 lv1 a:0x2CED98-0x2CEDA8]; see [`super::memory`]. So the area
+//! takes a value of the partition's region counter, and the shadow page
+//! takes the next value.
+
+/// The handler of hypercall 57 in one firmware's lv1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConstructLogicalSpeHandler {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The address of the `construct_logical_spe` handler.
+    pub handler: u32,
+}
+
+/// Each firmware whose lv1 image shows the handler, ascending.
+///
+/// The address is the entry of hypercall 57 in the live 4.93 hypercall
+/// table ([`super::table::LIVE_TABLE_HANDLERS`]).
+pub const CONSTRUCT_LOGICAL_SPE_HANDLERS: &[ConstructLogicalSpeHandler] =
+    &[ConstructLogicalSpeHandler {
+        firmware: "4.93",
+        handler: 0x31AB6C,
+    }];
+
+/// The handler of the firmware version `firmware`, or `None` when no lv1
+/// image read shows it.
+pub fn construct_logical_spe_handler(
+    firmware: &str,
+) -> Option<&'static ConstructLogicalSpeHandler> {
+    CONSTRUCT_LOGICAL_SPE_HANDLERS
+        .iter()
+        .find(|handler| handler.firmware == firmware)
+}
+
+/// The SPE type whose worker is read: the type 1 worker
+/// [OFW-4.93 lv1 a:0x31588C].
+pub const LOGICAL_SPE_TYPE_1: u64 = 1;
+
+/// The size in bytes of the area that lv1 creates for a type 1 SPE
+/// [OFW-4.93 lv1 a:0x2FED4C]: 512 KB.
+pub const LOGICAL_SPE_AREA_SIZE: u64 = 0x8_0000;
+
+/// The offset in the area of the problem state area
+/// [OFW-4.93 lv1 a:0x315CC4].
+pub const LOGICAL_SPE_PROBLEM_OFFSET: u64 = 0x4_0000;
+
+/// The offset in the area of the priv2 area [OFW-4.93 lv1 a:0x315CD0].
+pub const LOGICAL_SPE_PRIV2_OFFSET: u64 = 0x6_0000;
+
+/// One `construct_logical_spe` call of the GameOS kernel, and the spe id
+/// that lv1 gave it on the console.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameOsSpeCall {
+    /// The address of the call's `sc`.
+    pub sc: u64,
+    /// The SPE type that the call passes in r9.
+    pub spe_type: u64,
+    /// The spe id in r9 of lv1's answer.
+    pub id: u64,
+}
+
+/// The `construct_logical_spe` calls of the GameOS kernel's boot at one
+/// firmware.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameOsSpeCalls {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// Each call.
+    pub calls: &'static [GameOsSpeCall],
+}
+
+/// The console capture of the 4.93 kernel's boot logical SPE object,
+/// relative to the workspace root. Its README gives the method and the
+/// kernel addresses.
+pub const LOGICAL_SPE_OBJECT_CAPTURE: &str = "tests/micro/lv2_logical_spe_object";
+
+/// The spe id of each `construct_logical_spe` call of the GameOS kernel's
+/// boot, for each firmware that a source gives the ids for.
+///
+/// The partition's other objects decide each id, so no image read gives
+/// it. The capture [`LOGICAL_SPE_OBJECT_CAPTURE`] reads the id of the
+/// 4.93 kernel's boot call [OFW-4.93 lv2_kernel a:0x800000000004f188],
+/// which passes type 1.
+pub const GAME_OS_SPE_CALLS: &[GameOsSpeCalls] = &[GameOsSpeCalls {
+    firmware: "4.93",
+    calls: &[GameOsSpeCall {
+        sc: 0x8000_0000_0004_f188,
+        spe_type: LOGICAL_SPE_TYPE_1,
+        id: 11,
+    }],
+}];
+
+/// The kernel's call at the `sc` address `sc` at the firmware version
+/// `firmware`, or `None` when no source gives its spe id.
+pub fn game_os_spe_call(firmware: &str, sc: u64) -> Option<&'static GameOsSpeCall> {
+    GAME_OS_SPE_CALLS
+        .iter()
+        .find(|calls| calls.firmware == firmware)?
+        .calls
+        .iter()
+        .find(|call| call.sc == sc)
+}
+
+#[cfg(test)]
+#[path = "tests/spe_tests.rs"]
+mod tests;

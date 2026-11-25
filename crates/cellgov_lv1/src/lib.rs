@@ -67,7 +67,7 @@ pub use group::memory::{MemoryChange, MemoryGroupState};
 pub use group::network::{NetworkChange, NetworkState};
 pub use group::partition::repository::RepositoryRead;
 pub use group::partition::{PartitionChange, PartitionState};
-pub use group::spe::{SpeChange, SpeState};
+pub use group::spe::{LogicalSpe, LogicalSpeState, SpeChange, SpeState};
 pub use group::state::{GroupStates, StateChange};
 pub use group::storage::{StorageChange, StorageState};
 pub use group::uart::{UartChange, UartState};

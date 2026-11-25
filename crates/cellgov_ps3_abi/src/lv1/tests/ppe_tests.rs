@@ -1,6 +1,14 @@
 use super::*;
+use crate::lv1::boot_record_capture::captured_doubleword;
 use crate::lv1::call::{self, CallSource, GET_LOGICAL_PPE_ID};
+use crate::lv1::repository::BOOT_RECORD_4_93;
 use crate::lv1::table::{table_entry, TableEntry};
+
+/// The offset of `bi.pu` in the 4.93 boot record. The README of the
+/// capture gives the offsets.
+const BOOT_RECORD_PU: u64 = 0x18;
+/// The offset of `bi.pu.<id>.rm_size` in the 4.93 boot record.
+const BOOT_RECORD_RM_SIZE: u64 = 0x38;
 
 /// The row is the `LV1_CALL` row of Linux `lv1call.h` for 69.
 #[test]
@@ -37,12 +45,14 @@ fn the_pu_id_node_is_bi_pu_at_index_0_of_the_game_os_partition() {
     assert_eq!((GAME_OS_PU_ID_NODE.n3, GAME_OS_PU_ID_NODE.n4), (0, 0));
 }
 
-/// The 4.93 boot record capture holds `bi.pu` = 1 at offset 0x18, and
-/// the repository dump [PS3DEVWIKI-REPO s:3.41_GameOS] gives the same
-/// value.
+/// At 4.93 the source is the boot record capture. Before 4.93 it is the
+/// repository dump [PS3DEVWIKI-REPO s:3.41_GameOS], which gives 1.
 #[test]
-fn the_game_os_logical_ppe_id_is_1_where_a_source_gives_bi_pu() {
-    assert_eq!(game_os_logical_ppe_id("4.93"), Some(1));
+fn the_game_os_logical_ppe_id_is_bi_pu_where_a_source_gives_it() {
+    assert_eq!(
+        game_os_logical_ppe_id("4.93"),
+        Some(captured_doubleword(BOOT_RECORD_4_93 + BOOT_RECORD_PU))
+    );
     assert_eq!(game_os_logical_ppe_id("3.70"), Some(1));
     assert_eq!(game_os_logical_ppe_id("4.92"), None);
     assert_eq!(game_os_logical_ppe_id(""), None);
@@ -60,6 +70,6 @@ fn the_repository_holds_the_real_mode_size_of_the_4_93_logical_ppe() {
     };
     assert_eq!(
         lookup(&rm_size, "4.93").map(|node| node.v1),
-        Some(0x0800_0000)
+        Some(captured_doubleword(BOOT_RECORD_4_93 + BOOT_RECORD_RM_SIZE))
     );
 }

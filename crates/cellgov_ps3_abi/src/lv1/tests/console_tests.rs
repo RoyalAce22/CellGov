@@ -5,7 +5,8 @@ use super::*;
 use crate::lv1::call::{lookup, LOGICAL_CONSOLE_DESTRUCT};
 use crate::lv1::table::{table_entry, TableEntry, LIVE_TABLE_CAPTURE};
 
-/// The memory call thunk, the live 4.93 table entry of each memory call.
+/// The memory call thunk [OFW-4.93 lv1 a:0x2C89CC], the live 4.93 table
+/// entry of each memory call.
 const MEMORY_CALL_THUNK: u32 = 0x2C89CC;
 
 /// The rows of the capture file `file` below `capture`, after its header

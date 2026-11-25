@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::lv1::boot_record_capture::captured_doubleword_in;
+use crate::lv1::interrupt::THREADS_PER_LOGICAL_PPE;
 
 /// The reads of the capture's frame: three locator words, the record
 /// count and 13 words of each of the two records.
@@ -31,16 +32,16 @@ fn record(index: u64, offset: u64) -> u64 {
 }
 
 #[test]
-fn the_capture_reads_the_two_records_the_kernel_function_set_up() {
-    assert_eq!(captured(COUNT), 2);
-    for index in 0..2 {
+fn the_kernel_set_up_one_record_for_each_hardware_thread_of_the_logical_ppe() {
+    assert_eq!(captured(COUNT), THREADS_PER_LOGICAL_PPE);
+    for index in 0..THREADS_PER_LOGICAL_PPE {
         assert_eq!(record(index, INDEX), index, "record {index}");
     }
 }
 
 #[test]
 fn the_4_93_logical_ppe_id_is_the_one_each_hardware_thread_kept() {
-    for index in 0..2 {
+    for index in 0..THREADS_PER_LOGICAL_PPE {
         assert_eq!(
             game_os_logical_ppe_id("4.93"),
             Some(record(index, LOGICAL_PPE_ID)),

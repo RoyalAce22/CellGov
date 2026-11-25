@@ -36,7 +36,7 @@ fn the_device_ids_run_from_0_to_6_and_the_notification_device_is_minus_1() {
 }
 
 #[test]
-fn a_flash_write_aligns_to_512_sectors() {
+fn the_flash_device_is_type_14_and_aligns_to_512_sectors() {
     assert_eq!(STORAGE_FLASH_DEVICE_TYPE, 14);
     assert_eq!(STORAGE_FLASH_ALIGNMENT_MASK + 1, 512);
 }

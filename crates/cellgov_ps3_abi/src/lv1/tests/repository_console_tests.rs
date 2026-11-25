@@ -1,5 +1,6 @@
 use super::*;
 use crate::hw::ppu::CELL_PPU_TIMEBASE_HZ;
+use crate::lv1::boot_record_capture::captured_doubleword;
 use crate::lv1::partition::{LPAR_ID_GAME_OS, LPAR_ID_PME};
 
 const FLOORS: [&str; 3] = ["1.50", "1.94", "3.70"];
@@ -53,22 +54,27 @@ fn bi(second: &[u8]) -> RepositoryKey {
     )
 }
 
-/// The values and boot record offsets come from the console capture
-/// `tests/micro/lv2_repository_boot_nodes/ps3/cech20-cex-493`.
+/// The boot record offsets come from the console capture
+/// `tests/micro/lv2_repository_boot_nodes/ps3/cech20-cex-493`. The
+/// values are the doublewords its frame holds at those offsets.
 #[test]
 fn the_4_93_boot_nodes_answer_the_captured_values_cited_to_the_capture() {
     let expected = [
-        (bi(b"pun"), 1, 0x10),
-        (bi(b"pu"), 1, 0x18),
-        (rm(b"rm_addr"), 0, 0x30),
-        (rgntotal(), 0x0f9a_0000, 0x68),
-        (rm_size(), 0x0800_0000, 0x38),
-        (plat_id(), 0x436f_6b47_3131_0000, 0xa8),
-        (be_0_clock(), 0x04c1_a6c0, 0xb0),
+        (bi(b"pun"), 0x10),
+        (bi(b"pu"), 0x18),
+        (rm(b"rm_addr"), 0x30),
+        (rgntotal(), 0x68),
+        (rm_size(), 0x38),
+        (plat_id(), 0xa8),
+        (be_0_clock(), 0xb0),
     ];
-    for (key, v1, offset) in expected {
+    for (key, offset) in expected {
         let node = lookup(&key, "4.93").unwrap_or_else(|| panic!("no 4.93 row for {key}"));
-        assert_eq!(node.v1, v1, "{key}");
+        assert_eq!(
+            node.v1,
+            captured_doubleword(BOOT_RECORD_4_93 + offset),
+            "{key}"
+        );
         assert_eq!(
             node.source,
             NodeSource::ConsoleCapture {
@@ -93,7 +99,7 @@ fn a_floor_read_of_a_node_only_the_4_93_capture_gives_is_refused() {
 
 /// The repository dump [PS3DEVWIKI-REPO s:3.41_GameOS] gives
 /// `bi.pu.1.rm_size` = 0x01000000; the 4.93 console capture gives
-/// 0x08000000.
+/// the doubleword at offset 0x38 of the boot record.
 #[test]
 fn the_floors_keep_the_dump_real_mode_size_and_4_93_takes_the_captured_one() {
     for fw in FLOORS {
@@ -101,13 +107,15 @@ fn the_floors_keep_the_dump_real_mode_size_and_4_93_takes_the_captured_one() {
         assert_eq!((node.v1, node.source.class()), (0x0100_0000, "psdevwiki"));
     }
     let node = lookup(&rm_size(), "4.93").expect("rm_size at 4.93");
-    assert_eq!((node.v1, node.source.class()), (0x0800_0000, "console"));
+    let captured = captured_doubleword(BOOT_RECORD_4_93 + 0x38);
+    assert_ne!(captured, 0x0100_0000);
+    assert_eq!((node.v1, node.source.class()), (captured, "console"));
 }
 
 /// The dump [PS3DEVWIKI-REPO s:3.41_GameOS] and the 4.93 console capture
 /// give the same values for these three nodes.
 #[test]
-fn the_pu_count_pu_id_and_real_mode_base_cite_the_dump_at_the_floors_and_the_capture_at_4_93() {
+fn the_pu_count_pu_id_and_rm_base_keep_one_value_cited_to_the_dump_then_the_4_93_capture() {
     for key in [bi(b"pun"), bi(b"pu"), rm(b"rm_addr")] {
         for fw in FLOORS {
             let node = lookup(&key, fw).unwrap_or_else(|| panic!("no {key} at {fw}"));
@@ -126,7 +134,7 @@ fn the_captured_time_base_frequency_is_the_cell_time_base_frequency() {
 }
 
 #[test]
-fn the_be_clock_key_renders_with_its_0_word() {
+fn the_be_clock_key_keeps_its_inner_0_word_and_plat_id_drops_its_trailing_ones() {
     assert_eq!(be_0_clock().path(), "be.0.clock");
     assert_eq!(plat_id().path(), "plat.id");
 }

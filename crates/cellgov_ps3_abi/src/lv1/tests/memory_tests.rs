@@ -42,7 +42,7 @@ fn the_size_exponent_rounds_up_between_powers_of_two() {
 }
 
 #[test]
-fn a_region_with_no_size_or_a_counter_that_reaches_the_exponent_bits_has_no_address() {
+fn a_region_with_no_size_an_exponent_of_42_or_a_counter_that_reaches_bit_42_has_no_address() {
     assert_eq!(region_address(0, 2), None);
     // 2^20-byte regions: counter values below 2^22 fit below bit 42.
     assert_eq!(

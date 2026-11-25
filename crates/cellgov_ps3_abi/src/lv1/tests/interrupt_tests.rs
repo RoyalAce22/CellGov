@@ -62,6 +62,10 @@ fn each_check_result_marks_its_argument_over_the_status_lv1_builds() {
 fn a_bitmap_is_64_bytes_of_which_the_first_32_are_status() {
     assert_eq!(IRQ_STATE_BITMAP_BYTES, 64);
     assert_eq!(IRQ_STATUS_BYTES, 32);
+}
+
+#[test]
+fn the_handler_takes_an_8_byte_aligned_bitmap_for_one_of_2_threads() {
     assert_eq!(IRQ_STATE_BITMAP_ALIGN, 8);
     assert_eq!(THREADS_PER_LOGICAL_PPE, 2);
 }
