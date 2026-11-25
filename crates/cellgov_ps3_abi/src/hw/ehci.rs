@@ -37,6 +37,16 @@ pub const USBSTS: u64 = 0x4;
 /// The offset of USBINTR from the operational base.
 pub const USBINTR: u64 = 0x8;
 
+/// The offset of ASYNCLISTADDR from the operational base.
+///
+/// [EHCI p:25 s:2.3.7] ASYNCLISTADDR is at operational base + 18h and holds the address of the next asynchronous queue head. Its default value is undefined.
+pub const ASYNCLISTADDR: u64 = 0x18;
+
+/// The bits of ASYNCLISTADDR that always read as 0.
+///
+/// [EHCI p:25 s:2.3.7] System software cannot modify bits 4:0, and they always read as zero.
+pub const ASYNCLISTADDR_ZERO_BITS: u32 = 0x1F;
+
 /// The offset of the first PS3 setup register from the operational base.
 ///
 /// The EHCI specification gives no register at this offset. Linux
@@ -82,6 +92,16 @@ pub const USBCMD_RS: u32 = 1 << 0;
 ///
 /// [EHCI p:20 s:2.3.1] Bit 1 is HCRESET. The controller clears it when the reset is complete, and the reset sets every operational register to its initial value.
 pub const USBCMD_HCRESET: u32 = 1 << 1;
+
+/// The Asynchronous Schedule Enable bit of USBCMD.
+///
+/// [EHCI p:19 s:2.3.1] Bit 5 is Asynchronous Schedule Enable, default 0. At 0 the controller does not process the asynchronous schedule.
+pub const USBCMD_ASE: u32 = 1 << 5;
+
+/// The Asynchronous Schedule Status bit of USBSTS.
+///
+/// [EHCI p:21 s:2.3.2] Bit 15 is Asynchronous Schedule Status, default 0. At 0 the asynchronous schedule is disabled.
+pub const USBSTS_ASS: u32 = 1 << 15;
 
 /// The HCHalted bit of USBSTS.
 ///
@@ -316,9 +336,52 @@ pub const EHCI_SETUP_BIT_SETS: &[EhciSetupBitSet] = &[EhciSetupBitSet {
     bits: INSNREG02_KERNEL_BIT,
 }];
 
+/// A store of the bus address of a schedule to a schedule address
+/// register by one kernel instruction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EhciAddressStore {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The offset of the register from the operational base.
+    pub register: u64,
+    /// The effective address of the store instruction.
+    pub store: u64,
+}
+
+/// The stores of a schedule address that the kernel makes after its
+/// controller reset, at each controller of [`EHCI_CONTROLLERS`].
+///
+/// The kernel does these steps:
+/// 1. It builds two queue heads and links each one to the other
+///    [OFW-4.93 lv2_kernel a:0x8000000000245C5C-0x8000000000245CDC].
+/// 2. It calls the function at [OFW-4.93 lv2_kernel a:0x80000000002400E0]
+///    with the first queue head. With r5 = 0, that function returns the
+///    queue head's offset in its DMA pool plus the pool's bus address
+///    [OFW-4.93 lv2_kernel a:0x8000000000240104-0x8000000000240130].
+/// 3. It stores the returned word to ASYNCLISTADDR
+///    [OFW-4.93 lv2_kernel a:0x8000000000245CEC].
+///
+/// The kernel computes the stored word from its own state. Linux
+/// `drivers/usb/host/ehci-hcd.c`, `ehci_run`, also writes the DMA
+/// address of the first queue head of the asynchronous list to this
+/// register.
+pub const EHCI_ADDRESS_STORES: &[EhciAddressStore] = &[EhciAddressStore {
+    firmware: "4.93",
+    register: ASYNCLISTADDR,
+    // [OFW-4.93 lv2_kernel a:0x8000000000245CEC] stw r3,24(r28). The
+    // ld at [OFW-4.93 lv2_kernel a:0x8000000000245CC4] loads r28 from
+    // +128 of the kernel's state, which holds the operational base
+    // [OFW-4.93 lv2_kernel a:0x8000000000245914-0x8000000000245924].
+    store: 0x8000_0000_0024_5CEC,
+}];
+
 #[cfg(test)]
 #[path = "tests/ehci_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/ehci_address_store_tests.rs"]
+mod address_store_tests;
 
 #[cfg(test)]
 #[path = "tests/ehci_setup_tests.rs"]

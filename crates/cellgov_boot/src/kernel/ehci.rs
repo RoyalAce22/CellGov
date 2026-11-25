@@ -3,7 +3,7 @@
 //!
 //! The run models these registers of each controller of
 //! [`EHCI_CONTROLLERS`] as register words:
-//! - USBCMD, USBSTS and USBINTR;
+//! - USBCMD, USBSTS, USBINTR and ASYNCLISTADDR;
 //! - the PS3 setup registers `insnreg01`, `insnreg02` and `insnreg03`.
 //!
 //! No source gives their state when the kernel starts, so each word
@@ -14,7 +14,11 @@
 //!   store, so USBSTS gets HCHalted = 1;
 //! - a store to USBCMD that sets HCRESET while HCHalted is 1: the reset
 //!   ends at the store. It sets USBCMD, USBSTS and USBINTR to their
-//!   initial values, and the setup registers to unknown values;
+//!   initial values, and ASYNCLISTADDR and the setup registers to
+//!   unknown values;
+//! - a store to ASYNCLISTADDR by the instruction of a row of
+//!   [`EHCI_ADDRESS_STORES`], while the asynchronous schedule is known
+//!   to be disabled. The register then holds the stored word;
 //! - a store to a setup register of the word that a row of
 //!   [`EHCI_SETUP_STORES`] at the controller's firmware gives for it.
 //!   The setup register then holds that word. The run declares the store
@@ -31,9 +35,10 @@ use cellgov_mem::{
     GuestMemory, MemError, RegisterPassBack, RegisterRule, RegisterStore, RegisterWord,
 };
 use cellgov_ps3_abi::hw::ehci::{
-    EhciSetupBitSet, EhciSetupStore, EHCI_CONTROLLERS, EHCI_RESET_READERS, EHCI_SETUP_BIT_SETS,
-    EHCI_SETUP_STORES, INSNREG01, INSNREG02, INSNREG03, USBCMD, USBCMD_HCRESET, USBCMD_PARK_BITS,
-    USBCMD_RESET_VALUE, USBCMD_RS, USBINTR, USBINTR_RESET_VALUE, USBSTS, USBSTS_HCHALTED,
+    EhciSetupBitSet, EhciSetupStore, ASYNCLISTADDR, ASYNCLISTADDR_ZERO_BITS, EHCI_ADDRESS_STORES,
+    EHCI_CONTROLLERS, EHCI_RESET_READERS, EHCI_SETUP_BIT_SETS, EHCI_SETUP_STORES, INSNREG01,
+    INSNREG02, INSNREG03, USBCMD, USBCMD_ASE, USBCMD_HCRESET, USBCMD_PARK_BITS, USBCMD_RESET_VALUE,
+    USBCMD_RS, USBINTR, USBINTR_RESET_VALUE, USBSTS, USBSTS_ASS, USBSTS_HCHALTED,
     USBSTS_RESET_VALUE,
 };
 
@@ -47,6 +52,10 @@ mod firmware_rule_tests;
 #[path = "tests/ehci_bit_set_rule_tests.rs"]
 mod bit_set_rule_tests;
 
+#[cfg(test)]
+#[path = "tests/ehci_async_list_rule_tests.rs"]
+mod async_list_rule_tests;
+
 /// The index of each register in a controller's register file.
 const CMD: usize = 0;
 const STS: usize = 1;
@@ -54,13 +63,22 @@ const INTR: usize = 2;
 const INSN01: usize = 3;
 const INSN03: usize = 4;
 const INSN02: usize = 5;
+const ASYNC: usize = 6;
 
 /// The number of words in a controller's register file.
-const WORDS: usize = 6;
+const WORDS: usize = 7;
 
 /// The offset of each register of the file from the operational base, in
 /// the order of the indexes.
-const REGISTERS: [u64; WORDS] = [USBCMD, USBSTS, USBINTR, INSNREG01, INSNREG03, INSNREG02];
+const REGISTERS: [u64; WORDS] = [
+    USBCMD,
+    USBSTS,
+    USBINTR,
+    INSNREG01,
+    INSNREG03,
+    INSNREG02,
+    ASYNCLISTADDR,
+];
 
 /// The rule of each controller of [`EHCI_CONTROLLERS`], in the order of
 /// the table. The array has the length of the table, so a new controller
@@ -124,7 +142,9 @@ fn rule_of(firmware: &str) -> Option<RegisterRule> {
 ///   `firmware`, as a writer of its setup register;
 /// - for each row of [`EHCI_SETUP_BIT_SETS`] at `firmware`, its load as
 ///   a reader that keeps no bit, and its store as the writer that passes
-///   back each bit outside the row's bits.
+///   back each bit outside the row's bits;
+/// - the store instruction of each row of [`EHCI_ADDRESS_STORES`] at
+///   `firmware`, as a writer of its register.
 ///
 /// # Errors
 ///
@@ -164,6 +184,12 @@ pub(super) fn declare_ehci(
             };
             mem.declare_register_reader(real, set.reader, 0, Some(pass_back))?;
             mem.declare_register_writer(real, set.store)?;
+        }
+        let addresses = EHCI_ADDRESS_STORES
+            .iter()
+            .filter(|s| s.firmware == firmware);
+        for address in addresses {
+            mem.declare_register_writer(base + address.register, address.store)?;
         }
     }
     Ok(())
@@ -210,8 +236,33 @@ fn apply_store(
         INTR => store_usbintr(words, store),
         INSN01 | INSN03 => store_setup(firmware, setup, words, index, store),
         INSN02 => store_setup_bits(firmware, bit_sets, words, index, store),
+        ASYNC => store_async_list(words, store),
         _ => false,
     }
+}
+
+/// A store to ASYNCLISTADDR: only while USBCMD holds a known 0
+/// Asynchronous Schedule Enable bit and USBSTS a known 0 Asynchronous
+/// Schedule Status bit.
+///
+/// The register then holds the stored word with bits 4:0 at 0. The
+/// controller does not read the schedule while it is disabled. So the
+/// store changes no other word, and the run starts no transfer. The rule
+/// refuses a store with a bit that is not the code's own, because the
+/// register would then hold an unknown bit as known.
+///
+/// [EHCI p:71 s:4.8] Software may write this register with defined results only when the schedule is disabled: Asynchronous Schedule Enable and Asynchronous Schedule Status are zero.
+/// [EHCI p:71 s:4.8] When Asynchronous Schedule Enable is zero, the host controller does not access the asynchronous schedule through ASYNCLISTADDR.
+fn store_async_list(words: &mut [RegisterWord; WORDS], store: RegisterStore) -> bool {
+    let disabled = |word: RegisterWord, bit: u32| word.known & bit != 0 && word.value & bit == 0;
+    if store.own != u32::MAX
+        || !disabled(words[CMD], USBCMD_ASE)
+        || !disabled(words[STS], USBSTS_ASS)
+    {
+        return false;
+    }
+    words[ASYNC] = RegisterWord::known(store.value & !ASYNCLISTADDR_ZERO_BITS);
+    true
 }
 
 /// A store to a setup register that writes the word back with the bits
@@ -323,6 +374,8 @@ fn store_usbcmd(words: &mut [RegisterWord; WORDS], store: RegisterStore) -> bool
         };
         words[STS] = RegisterWord::known(USBSTS_RESET_VALUE);
         words[INTR] = RegisterWord::known(USBINTR_RESET_VALUE);
+        // [EHCI p:71 s:4.8] The default value of ASYNCLISTADDR after reset is undefined.
+        words[ASYNC] = RegisterWord::UNKNOWN;
         // Linux `drivers/usb/host/ehci-ps3.c`, `ps3_ehci_setup_insnreg`,
         // says that a host controller reset returns the setup registers
         // to their chip defaults. No source gives those defaults.
