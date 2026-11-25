@@ -203,6 +203,31 @@ number with its site count in the newest of them, and the state:
 `answered` ({{hypercall_answered}} numbers) or `null_backend`, where the
 call stops the run.
 
+## Hypervisor repository
+
+`tables/repository_read.tsv` logs the repository reads, hypercall 91,
+that each logged firmware's kernel makes when it boots from its entry
+under CellGov's hypervisor: {{repository_logged_firmware}}. Each row is
+one key of one boot: the partition and the four raw key words, the key
+as text, the position of the boot's first read of it, and whether the
+hypervisor answered or refused it. In the text, a named word's index
+follows a `+` and a numeric word reads in hex, so `bi.pu+1` and
+`bi.pu.0x1` are two keys. A refused read stops the boot, so it is the
+boot's last; the refused nodes are {{repository_refused}}.
+
+`cellgov dev repository-census` writes one kernel's rows.
+`{{repository_regenerate}}` boots every logged firmware's stored kernel
+and rewrites the table; without that flag the same test fails when a
+re-extraction differs. `{{repository_gate}}` checks the logged set, the
+text of each key, the order of each boot's reads and the source of each
+served node without reading external data.
+
+`tables/repository.tsv` has {{repository_nodes}} rows, one per node that
+`cellgov_ps3_abi::lv1::repository::NODES` serves: its key, its two
+values, the firmware whose logged boot reads it and its source. A node
+no logged boot reads, or a logged read the table no longer agrees with,
+fails the generator.
+
 ## Handling
 
 `tables/route.tsv` has one row per LV2 syscall slot, and `tables/arm.tsv` one row

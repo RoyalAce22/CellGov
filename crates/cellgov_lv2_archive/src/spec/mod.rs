@@ -7,6 +7,7 @@ mod handling;
 mod hypercall;
 mod naming;
 mod registry;
+mod repository;
 mod schema;
 
 pub use caller::*;
@@ -16,6 +17,7 @@ pub use handling::*;
 pub use hypercall::*;
 pub use naming::*;
 pub use registry::*;
+pub use repository::*;
 pub use schema::*;
 
 #[cfg(test)]

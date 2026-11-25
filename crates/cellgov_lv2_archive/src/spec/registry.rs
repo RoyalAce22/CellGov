@@ -9,6 +9,7 @@ use super::firmware::{FIRMWARE, PUP};
 use super::handling::{ARM, BEHAVIOR, ROUTE};
 use super::hypercall::{HYPERCALL, HYPERCALL_SITE, HYPERCALL_UNRESOLVED};
 use super::naming::{CONFLICTS, NAME, PRIORITY};
+use super::repository::{REPOSITORY, REPOSITORY_READ};
 use super::schema::{OwnerClass, TableSpec, View, GATE, REGENERATE};
 
 /// Every table, a referenced table before the table that references it.
@@ -31,6 +32,8 @@ pub const TABLES: &[TableSpec] = &[
     HYPERCALL_SITE,
     HYPERCALL_UNRESOLVED,
     HYPERCALL,
+    REPOSITORY_READ,
+    REPOSITORY,
     BEHAVIOR,
     NAME,
     CONFLICTS,

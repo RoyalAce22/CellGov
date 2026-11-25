@@ -109,6 +109,10 @@ name = "lv2_kernel_of_record"
 required-features = ["installed-firmware-tests"]
 
 [[test]]
+name = "repository_census_firmware"
+required-features = ["installed-firmware-tests"]
+
+[[test]]
 name = "ps3autotests"
 required-features = ["ps3autotests"]
 

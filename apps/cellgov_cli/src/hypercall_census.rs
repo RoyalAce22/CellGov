@@ -9,10 +9,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use cellgov_install::manifest::{sha256_of, Sha256};
 use cellgov_lv2_archive::{
     self as archive, ExtractionError, HypercallCensus, HypercallSiteRow, HypercallUnresolvedRow,
-    HYPERCALL_SITE, HYPERCALL_UNRESOLVED, KERNEL,
+    HYPERCALL_SITE, HYPERCALL_UNRESOLVED,
 };
 use cellgov_ppu::caller_census::{scan_hypercalls, CallerScanError, CallerSite};
 use cellgov_ps3_abi::hw::ppu_mmu::REAL_MODE_IGNORED_EA;
@@ -20,13 +19,7 @@ use cellgov_ps3_abi::hw::ppu_mmu::REAL_MODE_IGNORED_EA;
 use crate::cli::exit::CommandError;
 use crate::cli::parse::HypercallCensusArgs;
 use crate::cli::self_load::{decrypt_ppu_self, load_file};
-
-/// The committed `kernel.tsv`, which holds the SHA-256 of each PUP's
-/// decrypted kernel ELF.
-const KERNEL_TSV: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/lv2/tables/kernel.tsv"
-));
+use crate::lv2_tables::{check_committed_kernel, CommittedKernelError};
 
 #[derive(Debug, thiserror::Error)]
 enum HypercallCensusError {
@@ -34,22 +27,8 @@ enum HypercallCensusError {
     PupTable(#[from] crate::lv2_tables::CommittedPupError),
     #[error(transparent)]
     Extraction(#[from] ExtractionError),
-    #[error("parse compiled kernel.tsv: {source}")]
-    KernelTable {
-        #[source]
-        source: archive::ArchiveError,
-    },
-    #[error("PUP {pup_sha256} has no kernel.tsv row; run lv2-census for it first")]
-    NoKernelRow { pup_sha256: String },
-    #[error(
-        "kernel ELF SHA-256 {found} is not the kernel {expected} that kernel.tsv names for PUP \
-         {pup_sha256}"
-    )]
-    KernelMismatch {
-        pup_sha256: String,
-        expected: String,
-        found: String,
-    },
+    #[error(transparent)]
+    Kernel(#[from] CommittedKernelError),
     #[error("scan kernel: {0}")]
     Scan(#[from] CallerScanError),
     #[error(
@@ -118,33 +97,8 @@ struct EmitSummary {
 fn emit(args: &HypercallCensusArgs, elf: &[u8]) -> Result<EmitSummary, HypercallCensusError> {
     let pups = crate::lv2_tables::committed_pup_rows()?;
     archive::select_pup(&pups, &args.pup_sha256, &args.fw)?;
-    check_kernel(&args.pup_sha256, elf)?;
+    check_committed_kernel(&args.pup_sha256, elf)?;
     write_census(args, elf)
-}
-
-/// Refuses `elf` unless `kernel.tsv` names it as the kernel of
-/// `pup_sha256`.
-///
-/// This keeps a PUP's rows to the sites of its own kernel.
-fn check_kernel(pup_sha256: &str, elf: &[u8]) -> Result<(), HypercallCensusError> {
-    let table = archive::parse(&KERNEL, KERNEL_TSV)
-        .map_err(|source| HypercallCensusError::KernelTable { source })?;
-    let expected = archive::kernel_rows(&table)
-        .into_iter()
-        .find(|row| row.pup_sha256 == pup_sha256)
-        .ok_or_else(|| HypercallCensusError::NoKernelRow {
-            pup_sha256: pup_sha256.to_string(),
-        })?
-        .kernel_elf_sha256;
-    let found = Sha256(sha256_of(elf)).to_hex();
-    if found != expected {
-        return Err(HypercallCensusError::KernelMismatch {
-            pup_sha256: pup_sha256.to_string(),
-            expected,
-            found,
-        });
-    }
-    Ok(())
 }
 
 /// Scans `elf` and writes its rows over the PUP's rows in the output

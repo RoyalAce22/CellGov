@@ -22,5 +22,6 @@ mod state;
 pub use answer::{ConsoleWrite, HypercallAnswer, HypercallDisposition, HypercallRefusal};
 pub use cost::cost;
 pub use handlers::{answer, answers, ANSWERED};
+pub use repository::RepositoryRead;
 pub use request::HypercallRequest;
 pub use state::{HypercallWitness, Hypervisor};

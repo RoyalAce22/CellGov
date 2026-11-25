@@ -73,17 +73,17 @@ pub const GET_LOGICAL_PARTITION_ID: u64 = 74;
 /// r7. On success, r4 and r5 hold the node's two values.
 pub const READ_REPOSITORY_NODE: u64 = 91;
 
-/// `lv1_comm_dev_logical_console_construct`, by the name psdevwiki's
-/// "HV Syscalls" page gives 105 (Wayback snapshot 2026-09-14). The
-/// headers call it `undocumented_function_105`.
+/// `lv1_comm_dev_logical_console_construct`, by the name psdevwiki
+/// gives 105 [PS3DEVWIKI-HV-SYSCALLS s:HV_Syscalls]. The headers call it
+/// `undocumented_function_105`.
 ///
 /// Firmware reading: the 4.93 kernel's wrapper passes the console id in
 /// r3, and reads r3 alone after the call.
 pub const LOGICAL_CONSOLE_CONSTRUCT: u64 = 105;
 
-/// `lv1_comm_dev_logical_console_send`, by the name psdevwiki's "HV
-/// Syscalls" page gives 107 (Wayback snapshot 2026-09-14). The headers
-/// call it `undocumented_function_107`.
+/// `lv1_comm_dev_logical_console_send`, by the name psdevwiki gives 107
+/// [PS3DEVWIKI-HV-SYSCALLS s:HV_Syscalls]. The headers call it
+/// `undocumented_function_107`.
 ///
 /// Firmware reading: the 4.93 kernel's send wrappers put the console id
 /// in r3, the byte count in r4 and up to [`LOGICAL_CONSOLE_SEND_MAX`]
@@ -91,9 +91,9 @@ pub const LOGICAL_CONSOLE_CONSTRUCT: u64 = 105;
 /// from its count of unsent bytes, so r4 is the count the console took.
 pub const LOGICAL_CONSOLE_SEND: u64 = 107;
 
-/// `lv1_comm_dev_logical_console_flush`, by the name psdevwiki's "HV
-/// Syscalls" page gives 109 (Wayback snapshot 2026-09-14). The headers
-/// call it `undocumented_function_109`.
+/// `lv1_comm_dev_logical_console_flush`, by the name psdevwiki gives 109
+/// [PS3DEVWIKI-HV-SYSCALLS s:HV_Syscalls]. The headers call it
+/// `undocumented_function_109`.
 ///
 /// Firmware reading: the 4.93 kernel's wrapper passes the console id in
 /// r3, and reads r3 alone after the call.

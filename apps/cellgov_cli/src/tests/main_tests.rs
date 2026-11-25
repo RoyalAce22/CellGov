@@ -83,6 +83,7 @@ const DISPATCHED: &[&str] = &[
     "dev lv2-discover",
     "dev lv2-census",
     "dev hypercall-census",
+    "dev repository-census",
     #[cfg(feature = "decrypt")]
     "dev lv2-extract",
     #[cfg(feature = "decrypt")]

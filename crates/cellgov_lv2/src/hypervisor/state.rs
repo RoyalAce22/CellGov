@@ -1,12 +1,14 @@
 //! The hypervisor's own records: the null-backend witnesses, the guest
-//! TTY sink and the refusal that stopped the run.
+//! TTY sink, the repository reads and the refusal that stopped the run.
 
 use std::collections::BTreeMap;
 
+use cellgov_ps3_abi::lv1::call::READ_REPOSITORY_NODE;
 use cellgov_time::GuestTicks;
 
 use super::answer::{HypercallDisposition, HypercallRefusal};
 use super::handlers::answer;
+use super::repository::{read_record, RepositoryRead};
 use super::request::HypercallRequest;
 
 /// How often the null backend saw one hypercall number.
@@ -25,6 +27,7 @@ pub struct HypercallWitness {
 pub struct Hypervisor {
     witnesses: BTreeMap<u64, HypercallWitness>,
     console: Vec<u8>,
+    repository_reads: Vec<RepositoryRead>,
     refusal: Option<HypercallRefusal>,
 }
 
@@ -36,10 +39,15 @@ impl Hypervisor {
 
     /// The disposition of `request`, after the records note it:
     /// - a console write appends its bytes to the TTY sink;
+    /// - a repository read appends its record, answered or refused;
     /// - a number with no handler counts toward its witness;
     /// - the first refusal is kept.
     pub fn dispatch(&mut self, request: &HypercallRequest) -> HypercallDisposition {
         let disposition = answer(request);
+        if request.number == READ_REPOSITORY_NODE {
+            self.repository_reads
+                .push(read_record(request, &disposition));
+        }
         match &disposition {
             HypercallDisposition::Answered(answer) => {
                 if let Some(write) = &answer.console {
@@ -72,6 +80,11 @@ impl Hypervisor {
         &self.console
     }
 
+    /// Every repository read, in the order the kernel made them.
+    pub fn repository_reads(&self) -> &[RepositoryRead] {
+        &self.repository_reads
+    }
+
     /// The first refusal, which stops the run.
     pub fn refusal(&self) -> Option<HypercallRefusal> {
         self.refusal
@@ -81,3 +94,7 @@ impl Hypervisor {
 #[cfg(test)]
 #[path = "tests/state_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/repository_log_tests.rs"]
+mod repository_log_tests;

@@ -11,8 +11,9 @@ fn bi(second: &[u8], n3: u64, lpar: u64) -> RepositoryKey {
     }
 }
 
-/// The raw words are those of psdevwiki's 3.41 GameOS dump,
-/// `00 00 00 00 62 69 00 00` and `70 75 6e 00 00 00 00 00`.
+/// The raw words are those of the repository dump
+/// [PS3DEVWIKI-REPO s:3.41_GameOS], `00 00 00 00 62 69 00 00` and
+/// `70 75 6e 00 00 00 00 00`.
 #[test]
 fn the_key_words_pack_text_from_the_high_byte() {
     assert_eq!(first_field(b"bi", 0), 0x6269_0000);
@@ -36,19 +37,49 @@ fn an_index_adds_to_the_key_word() {
 
 #[test]
 fn the_nodes_ascend_by_key() {
-    assert_eq!(NODES.len(), 2);
+    assert_eq!(NODES.len(), 4);
     for pair in NODES.windows(2) {
         assert!(pair[0].key < pair[1].key, "{pair:?}");
     }
 }
 
-/// [`NODES`] holds `bi.pun` = 1 and `bi.pu` = 1, from psdevwiki's 3.41
-/// GameOS dump.
+/// [`NODES`] holds `bi.pun` = 1 and `bi.pu` = 1, from the repository
+/// dump [PS3DEVWIKI-REPO s:3.41_GameOS].
 #[test]
 fn lookup_answers_the_game_os_pu_count_and_pu_id() {
     let value = |k: RepositoryKey| lookup(&k).map(|n| (n.v1, n.v2));
     assert_eq!(value(bi(b"pun", 0, LPAR_ID_GAME_OS)), Some((1, 0)));
     assert_eq!(value(bi(b"pu", 0, LPAR_ID_GAME_OS)), Some((1, 0)));
+}
+
+/// The repository dump [PS3DEVWIKI-REPO s:3.41_GameOS] gives
+/// `bi.pu.1.rm_addr` = 0 and `bi.pu.1.rm_size` = 0x01000000. PU id 1 is the third key word, as
+/// Linux `ps3_repository_read_rm_size` passes the PPE id.
+#[test]
+fn lookup_answers_the_real_mode_base_and_size_of_pu_1() {
+    let rm = |name: &[u8]| RepositoryKey {
+        n4: field(name, 0),
+        ..bi(b"pu", 1, LPAR_ID_GAME_OS)
+    };
+    let value = |k: RepositoryKey| lookup(&k).map(|n| (n.v1, n.v2));
+    assert_eq!(value(rm(b"rm_addr")), Some((0, 0)));
+    assert_eq!(value(rm(b"rm_size")), Some((0x0100_0000, 0)));
+    assert_eq!(
+        value(RepositoryKey {
+            n3: 0,
+            ..rm(b"rm_size")
+        }),
+        None
+    );
+}
+
+#[test]
+fn every_node_cites_the_3_41_game_os_dump_by_its_alias() {
+    for node in NODES {
+        assert_eq!(node.source.class(), "psdevwiki");
+        assert_eq!(node.source.citation(), "PS3DEVWIKI-REPO");
+        assert_eq!(node.source.section(), Some("3.41_GameOS"));
+    }
 }
 
 #[test]

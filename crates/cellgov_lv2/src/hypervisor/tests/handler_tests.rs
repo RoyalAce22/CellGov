@@ -57,8 +57,8 @@ fn no_answered_number_takes_the_null_backend() {
     }
 }
 
-/// psdevwiki's "Hypervisor Reverse Engineering" page puts GameOS in
-/// LPAR 2.
+/// The system manager enables a device interface for GameOS through the
+/// bit of LPAR 2 [PS3DEVWIKI-HV-RE s:Enabling_WLAN_Gelic_On_FAT].
 #[test]
 fn get_logical_partition_id_answers_lpar_2_in_r4() {
     let d = answer(&request(74));

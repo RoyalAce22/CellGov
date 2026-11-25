@@ -5,6 +5,11 @@
 //! one of the documents below and the page follows that document's
 //! own page-identifier grammar, so a reviewer can resolve any tag to
 //! its printed page without guessing which book "p:34" means.
+//!
+//! A web page is cited as `[WEB-KEY s:SECTION]`. The key names one of
+//! the web sources below, which holds the page's archived snapshot.
+//! The snapshot URL lives only in that table: a raw psdevwiki or
+//! Wayback link anywhere else in the scanned files is a fault.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -107,6 +112,38 @@ const DOCUMENTS: &[(&str, PageGrammar)] = &[
     ("Kistler2006", PageGrammar::Integer),
 ];
 
+/// The web pages a citation may name, each by its alias and its one
+/// archived snapshot. The 14-digit stamp in each URL is the snapshot's
+/// date and time.
+///
+/// The two LV2 pages hold the snapshots closest before the archive took
+/// its rows from them on 2026-09-18.
+const WEB_SOURCES: &[(&str, &str)] = &[
+    (
+        "PS3DEVWIKI-HV-RE",
+        "https://web.archive.org/web/20260512043631/https://www.psdevwiki.com/ps3/Hypervisor_Reverse_Engineering",
+    ),
+    (
+        "PS3DEVWIKI-HV-SYSCALLS",
+        "https://web.archive.org/web/20260914175021/https://www.psdevwiki.com/ps3/HV_Syscalls",
+    ),
+    (
+        "PS3DEVWIKI-LV2-SYSCALLS",
+        "https://web.archive.org/web/20260818233001/https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls",
+    ),
+    (
+        "PS3DEVWIKI-LV2-SYSCALLS-TALK",
+        "https://web.archive.org/web/20260304161811/https://www.psdevwiki.com/ps3/Talk:LV2_Functions_and_Syscalls",
+    ),
+    (
+        "PS3DEVWIKI-REPO",
+        "https://web.archive.org/web/20251220062231/https://www.psdevwiki.com/ps3/Repository_Nodes",
+    ),
+];
+
+/// The hosts a raw link may not name outside [`WEB_SOURCES`].
+const ALIASED_HOSTS: &[&str] = &["psdevwiki.com", "web.archive.org"];
+
 /// Floor on the population the guard validates. The tree carries
 /// several hundred citations; a collapse below this means the scanner
 /// stopped recognising the tag.
@@ -161,12 +198,21 @@ enum Fault {
     NoPage(String),
     BadPage { key: String, page: String },
     DeprecatedForm(String),
+    NoSection(String),
+    RawWebLink(String),
 }
 
 /// A tag's fault, or `None` for a well-formed one.
 fn check_tag(body: &str) -> Option<Fault> {
     let mut words = body.split_whitespace();
     let key = words.next().unwrap_or_default();
+    if WEB_SOURCES.iter().any(|(name, _)| *name == key) {
+        let section = words.next().and_then(|w| w.strip_prefix("s:"));
+        return match section {
+            Some(section) if !section.is_empty() => None,
+            _ => Some(Fault::NoSection(body.to_string())),
+        };
+    }
     let known = DOCUMENTS.iter().find(|(name, _)| *name == key);
     let Some((_, grammar)) = known else {
         return Some(Fault::UnknownKey(key.to_string()));
@@ -189,11 +235,14 @@ fn check_tag(body: &str) -> Option<Fault> {
 }
 
 /// Whether a bracket body looks like a citation attempt: its first word
-/// names a document, or a later word is a `p:` page.
+/// names a document or carries the web-source alias prefix, or a later
+/// word is a `p:` page.
 fn looks_like_citation(body: &str) -> bool {
     let mut words = body.split_whitespace();
     let first = words.next().unwrap_or_default();
     DOCUMENTS.iter().any(|(name, _)| *name == first)
+        || WEB_SOURCES.iter().any(|(name, _)| *name == first)
+        || first.starts_with("PS3DEVWIKI-")
         || body.split_whitespace().skip(1).any(|w| w.starts_with("p:"))
 }
 
@@ -229,6 +278,9 @@ fn scan_line(line: &str) -> (usize, Vec<Fault>) {
     let mut faults = Vec::new();
     if let Some(form) = deprecated_prose(line) {
         faults.push(Fault::DeprecatedForm(form));
+    }
+    if let Some(host) = ALIASED_HOSTS.iter().find(|host| line.contains(*host)) {
+        faults.push(Fault::RawWebLink((*host).to_string()));
     }
     let mut rest = line;
     while let Some(open) = rest.find('[') {
@@ -632,6 +684,62 @@ fn the_scanner_separates_well_formed_tags_from_each_fault() {
 }
 
 #[test]
+fn a_web_source_tag_names_a_section_and_a_raw_link_is_a_fault() {
+    let (valid, faults) = scan_line("/// the node [PS3DEVWIKI-REPO s:3.41_GameOS] gives 1");
+    assert_eq!((valid, faults.len()), (1, 0));
+
+    let (_, faults) = scan_line("/// the node [PS3DEVWIKI-REPO] gives 1");
+    assert_eq!(
+        faults,
+        vec![Fault::NoSection("PS3DEVWIKI-REPO".to_string())]
+    );
+
+    let (_, faults) = scan_line("/// [PS3DEVWIKI-REPO p:3] a page where a section belongs");
+    assert_eq!(
+        faults,
+        vec![Fault::NoSection("PS3DEVWIKI-REPO p:3".to_string())]
+    );
+
+    let (_, faults) = scan_line("/// the node [PS3DEVWIKI-REPOS s:3.41_GameOS] gives 1");
+    assert_eq!(
+        faults,
+        vec![Fault::UnknownKey("PS3DEVWIKI-REPOS".to_string())]
+    );
+
+    let (_, faults) = scan_line("/// see https://www.psdevwiki.com/ps3/Repository_Nodes");
+    assert_eq!(faults, vec![Fault::RawWebLink("psdevwiki.com".to_string())]);
+
+    let (_, faults) = scan_line("// \"https://web.archive.org/web/20251220062231/x\"");
+    assert_eq!(
+        faults,
+        vec![Fault::RawWebLink("web.archive.org".to_string())]
+    );
+
+    let (valid, faults) = scan_line("/// psdevwiki's page, cited by alias");
+    assert_eq!((valid, faults.len()), (0, 0));
+}
+
+#[test]
+fn every_web_source_holds_one_dated_wayback_snapshot_of_a_psdevwiki_page() {
+    assert!(!WEB_SOURCES.is_empty());
+    for (alias, url) in WEB_SOURCES {
+        assert!(alias.starts_with("PS3DEVWIKI-"), "{alias}");
+        let stamp = url
+            .strip_prefix("https://web.archive.org/web/")
+            .and_then(|rest| rest.split_once("/https://www.psdevwiki.com/ps3/"))
+            .map(|(stamp, _)| stamp);
+        assert!(
+            stamp.is_some_and(|s| s.len() == 14 && s.bytes().all(|b| b.is_ascii_digit())),
+            "{alias} holds {url}, which is no dated Wayback snapshot of a psdevwiki page"
+        );
+    }
+    let mut aliases: Vec<&str> = WEB_SOURCES.iter().map(|(alias, _)| *alias).collect();
+    aliases.sort_unstable();
+    aliases.dedup();
+    assert_eq!(aliases.len(), WEB_SOURCES.len(), "an alias repeats");
+}
+
+#[test]
 fn a_tag_whose_section_text_wraps_past_the_line_is_still_checked() {
     let (valid, faults) = scan_line("//! walk per [CBE-Handbook p:398 s:14.3.1.3 Figure 14-3");
     assert_eq!((valid, faults.len()), (1, 0));
@@ -700,7 +808,9 @@ fn every_citation_names_a_known_document_and_a_page_in_its_grammar() {
         violations.is_empty(),
         "{} citation(s) do not follow `[DOC-KEY p:PAGE s:SECTION]` with a known key and that \
          document's page grammar (integer; Roman or integer for the PPC books; chapter-page \
-         for the AltiVec manuals; I/II/III/App-prefixed for the Power ISA):\n{}",
+         for the AltiVec manuals; I/II/III/App-prefixed for the Power ISA), or \
+         `[WEB-KEY s:SECTION]` with a web source alias in place of a raw psdevwiki or \
+         Wayback link:\n{}",
         violations.len(),
         violations.concat()
     );

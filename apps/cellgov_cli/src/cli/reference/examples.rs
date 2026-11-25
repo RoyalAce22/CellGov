@@ -314,6 +314,13 @@ pub(crate) const EXAMPLES: &[Examples] = &[
             "cellgov dev hypercall-census ../cellgov-output/lv2_kernel-3.55.elf --fw 3.55 --pup-sha256 334e60a4ef5843a688c1c6aebf0951c3259429233c7a5aca5a24f0edad78a192 --output-dir ../hypercall-census",
         ],
     },
+    Examples {
+        path: "dev repository-census",
+        lines: &[
+            "cellgov dev repository-census ../cellgov-output/lv2_kernel-3.55.elf --fw 3.55 --pup-sha256 334e60a4ef5843a688c1c6aebf0951c3259429233c7a5aca5a24f0edad78a192",
+            "cellgov dev repository-census ../cellgov-output/lv2_kernel-3.55.elf --fw 3.55 --pup-sha256 334e60a4ef5843a688c1c6aebf0951c3259429233c7a5aca5a24f0edad78a192 --output-dir ../repository-census --max-steps 200000",
+        ],
+    },
     #[cfg(feature = "decrypt")]
     Examples {
         path: "dev lv2-extract",

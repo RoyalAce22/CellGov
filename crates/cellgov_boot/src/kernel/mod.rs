@@ -6,9 +6,11 @@
 //! [`KernelUnavailable`] that says why, and the boot keeps the Rust LV2.
 
 mod acquire;
+mod from_entry;
 mod map;
 
 pub use acquire::{kernel_of_record, KernelUnavailable, LoadedKernel};
+pub use from_entry::{run_kernel_from_entry, KernelRun, KernelRunError, KernelRunStop};
 pub use map::{KernelImage, KernelMapError};
 
 #[cfg(test)]
@@ -18,3 +20,7 @@ mod map_tests;
 #[cfg(test)]
 #[path = "tests/acquire_tests.rs"]
 mod acquire_tests;
+
+#[cfg(test)]
+#[path = "tests/from_entry_tests.rs"]
+mod from_entry_tests;

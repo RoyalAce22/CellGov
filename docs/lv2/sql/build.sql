@@ -133,6 +133,20 @@ SELECT CAST("number" AS INTEGER), NULLIF("name", 'none'), CAST(NULLIF("inputs", 
 FROM staging_hypercall;
 DROP TABLE staging_hypercall;
 
+CREATE TEMP TABLE staging_repository_read ("pup_sha256" TEXT, "lpar" TEXT, "n1" TEXT, "n2" TEXT, "n3" TEXT, "n4" TEXT, "node" TEXT, "first" TEXT, "state" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/repository_read.tsv staging_repository_read
+INSERT INTO repository_read ("pup_sha256", "lpar", "n1", "n2", "n3", "n4", "node", "first", "state")
+SELECT "pup_sha256", CAST("lpar" AS INTEGER), "n1", "n2", "n3", "n4", "node", CAST("first" AS INTEGER), "state"
+FROM staging_repository_read;
+DROP TABLE staging_repository_read;
+
+CREATE TEMP TABLE staging_repository ("lpar" TEXT, "n1" TEXT, "n2" TEXT, "n3" TEXT, "n4" TEXT, "node" TEXT, "v1" TEXT, "v2" TEXT, "fw" TEXT, "source" TEXT, "citation" TEXT, "section" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/repository.tsv staging_repository
+INSERT INTO repository ("lpar", "n1", "n2", "n3", "n4", "node", "v1", "v2", "fw", "source", "citation", "section")
+SELECT CAST("lpar" AS INTEGER), "n1", "n2", "n3", "n4", "node", "v1", "v2", "fw", "source", "citation", NULLIF("section", 'none')
+FROM staging_repository;
+DROP TABLE staging_repository;
+
 CREATE TEMP TABLE staging_behavior ("ordinal" TEXT, "packet" TEXT, "same_as" TEXT, "selector_slot" TEXT, "provenance_kind" TEXT, "provenance_ref" TEXT, "witness" TEXT, "exception" TEXT, "arm_source" TEXT);
 .import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/behavior.tsv staging_behavior
 INSERT INTO behavior ("ordinal", "packet", "same_as", "selector_slot", "provenance_kind", "provenance_ref", "witness", "exception", "arm_source")

@@ -36,6 +36,7 @@ mod oracle_gap;
 mod paths;
 mod ppu_census;
 mod progress;
+mod repository_census;
 mod spu_census;
 mod spu_disasm;
 mod title_images;
@@ -208,6 +209,10 @@ fn dispatch_dev(
         }
         DevCommand::HypercallCensus(args) => {
             hypercall_census::run(args, vfs_flag)?;
+            Ok(CommandExitCode::SUCCESS)
+        }
+        DevCommand::RepositoryCensus(args) => {
+            repository_census::run(args, vfs_flag)?;
             Ok(CommandExitCode::SUCCESS)
         }
         #[cfg(feature = "decrypt")]

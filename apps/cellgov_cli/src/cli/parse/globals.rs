@@ -80,11 +80,11 @@ fn names_its_own_store_root(command: &Command) -> bool {
 const VFS_ROOT_READERS: &str = if cfg!(feature = "decrypt") {
     "the commands that read or write the store, or open a guest image: status, firmware, title, \
      keys, self, boot, explore title, and dev disasm / prx-imports / funcs / lv2-discover / lv2-census / \
-     hypercall-census / lv2-extract / caller-census / fixture-gen / gen-manifest"
+     hypercall-census / repository-census / lv2-extract / caller-census / fixture-gen / gen-manifest"
 } else {
     "the commands that read or write the store, or open a guest image: status, firmware, title, \
      keys, self, boot, explore title, and dev disasm / prx-imports / funcs / lv2-discover / lv2-census / \
-     hypercall-census / fixture-gen / gen-manifest"
+     hypercall-census / repository-census / fixture-gen / gen-manifest"
 };
 
 /// The commands [`reads_format`] answers for, as help text.
@@ -172,6 +172,7 @@ pub(super) fn reads_vfs_root(command: &Command) -> bool {
             | DevCommand::Lv2Discover(_)
             | DevCommand::Lv2Census(_)
             | DevCommand::HypercallCensus(_)
+            | DevCommand::RepositoryCensus(_)
             | DevCommand::FixtureGen(_)
             | DevCommand::GenManifest(_) => true,
             #[cfg(feature = "decrypt")]

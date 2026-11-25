@@ -25,8 +25,11 @@ use cellgov_lv2_archive::{
     StubRow, SubentryRow, CALLER, CALLER_GATE, CALLER_UNRESOLVED, CAPABILITY_GATE, CENSUS,
     CENSUS_GATE, FIRMWARE, FIRMWARE_GATE, GATE, HYPERCALL, HYPERCALL_GATE, HYPERCALL_REGENERATE,
     HYPERCALL_SITE, HYPERCALL_UNRESOLVED, KERNEL, NAME, NAME_GATE, NAME_REGENERATE, PRIORITY, PUP,
-    PUP_GATE, REACH, REGENERATE, SCHEMA_VERSION, STUB, SUBENTRY, SUBENTRY_ATTRIBUTION, TABLES,
+    PUP_GATE, REACH, REGENERATE, REPOSITORY, REPOSITORY_GATE, REPOSITORY_LOGGED_FIRMWARE,
+    REPOSITORY_READ, REPOSITORY_REGENERATE, SCHEMA_VERSION, STUB, SUBENTRY, SUBENTRY_ATTRIBUTION,
+    TABLES,
 };
+use cellgov_ps3_abi::lv1::repository::NODES;
 use cellgov_ps3_abi::lv2::census::{lookup, PupCensusClass};
 use cellgov_ps3_abi::lv2::syscall::SYSCALL_TABLE_SLOTS;
 use sha2::Digest as _;
@@ -82,6 +85,18 @@ fn committed_hypercall_sites() -> Vec<archive::HypercallSiteRow> {
     let text = read(&archive_dir().join(HYPERCALL_SITE.file()));
     let table = archive::parse(&HYPERCALL_SITE, &text).unwrap_or_else(|e| panic!("{e}"));
     archive::hypercall_site_rows(&table)
+}
+
+fn committed_repository_reads() -> Vec<archive::RepositoryReadRow> {
+    let text = read(&archive_dir().join(REPOSITORY_READ.file()));
+    let table = archive::parse(&REPOSITORY_READ, &text).unwrap_or_else(|e| panic!("{e}"));
+    let rerendered = archive::render(&REPOSITORY_READ, &table.rows)
+        .unwrap_or_else(|e| panic!("repository_read.tsv: {e}"));
+    assert_eq!(
+        rerendered, text,
+        "repository_read.tsv is not byte-canonical"
+    );
+    archive::repository_read_rows(&table)
 }
 
 fn committed_stubs() -> Vec<StubRow> {
@@ -493,6 +508,8 @@ struct ReadmeData<'a> {
     coverage_rows: usize,
     census_files: &'a [String],
     hypercalls: &'a [archive::HypercallRow],
+    repository: &'a [archive::RepositoryRow],
+    repository_reads: &'a [archive::RepositoryReadRow],
 }
 
 fn readme(data: ReadmeData<'_>) -> String {
@@ -632,6 +649,24 @@ fn readme(data: ReadmeData<'_>) -> String {
             ),
             ("hypercall_gate", HYPERCALL_GATE.to_string()),
             ("hypercall_regenerate", HYPERCALL_REGENERATE.to_string()),
+            ("repository_nodes", data.repository.len().to_string()),
+            (
+                "repository_logged_firmware",
+                REPOSITORY_LOGGED_FIRMWARE.join(", "),
+            ),
+            (
+                "repository_refused",
+                data.repository_reads
+                    .iter()
+                    .filter(|row| !row.answered)
+                    .map(|row| format!("`{}`", row.node))
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+            ("repository_gate", REPOSITORY_GATE.to_string()),
+            ("repository_regenerate", REPOSITORY_REGENERATE.to_string()),
         ],
     )
 }
@@ -656,6 +691,9 @@ fn rendered() -> BTreeMap<String, String> {
     let priority = generated_priority();
     let hypercalls = archive::hypercall_rows(&committed_hypercall_sites(), &pups)
         .expect("every committed hypercall site row names a committed PUP");
+    let repository_reads = committed_repository_reads();
+    let repository = archive::repository_rows(NODES, &repository_reads, &pups)
+        .unwrap_or_else(|e| panic!("{e}; regenerate with:\n  {REPOSITORY_REGENERATE}"));
     let mut files = BTreeMap::new();
     files.insert(
         "README.md".to_string(),
@@ -674,11 +712,17 @@ fn rendered() -> BTreeMap<String, String> {
             coverage_rows: coverage.len(),
             census_files: &census_files,
             hypercalls: &hypercalls,
+            repository: &repository,
+            repository_reads: &repository_reads,
         }),
     );
     files.insert(
         HYPERCALL.file(),
         archive::hypercall_tsv(&hypercalls).unwrap_or_else(|e| panic!("hypercall.tsv: {e}")),
+    );
+    files.insert(
+        REPOSITORY.file(),
+        archive::repository_tsv(&repository).unwrap_or_else(|e| panic!("repository.tsv: {e}")),
     );
     files.insert("sql/schema.sql".to_string(), archive::schema_sql());
     files.insert(

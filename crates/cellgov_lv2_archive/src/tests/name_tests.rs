@@ -95,7 +95,7 @@ fn a_row_fits_its_source_or_is_refused() {
         1,
         "sys_process_getpid",
         NameSource::Psdevwiki,
-        Some("https://www.psdevwiki.com/ps3/Talk:LV2_Functions_and_Syscalls")
+        Some("PS3DEVWIKI-LV2-SYSCALLS-TALK")
     )
     .fits_source());
 

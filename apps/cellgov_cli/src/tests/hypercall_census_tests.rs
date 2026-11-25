@@ -95,7 +95,8 @@ fn the_emitter_refuses_a_pup_missing_from_the_archive_before_scanning() {
 
 #[test]
 fn the_emitter_refuses_an_elf_that_is_not_its_pups_committed_kernel() {
-    let table = archive::parse(&archive::KERNEL, KERNEL_TSV).expect("compiled kernel table");
+    let table = archive::parse(&archive::KERNEL, crate::lv2_tables::KERNEL_TSV)
+        .expect("compiled kernel table");
     let kernel = archive::kernel_rows(&table)
         .into_iter()
         .next()
@@ -115,8 +116,11 @@ fn the_emitter_refuses_an_elf_that_is_not_its_pups_committed_kernel() {
     let elf = kernel_elf(&[li_r11(74), SC_1]);
     assert!(matches!(
         emit(&args, &elf),
-        Err(HypercallCensusError::KernelMismatch { pup_sha256, expected, .. })
-            if pup_sha256 == kernel.pup_sha256 && expected == kernel.kernel_elf_sha256
+        Err(HypercallCensusError::Kernel(CommittedKernelError::KernelMismatch {
+            pup_sha256,
+            expected,
+            ..
+        })) if pup_sha256 == kernel.pup_sha256 && expected == kernel.kernel_elf_sha256
     ));
     assert!(
         !output.join(HYPERCALL_SITE.file()).exists(),

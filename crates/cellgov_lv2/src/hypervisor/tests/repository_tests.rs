@@ -27,7 +27,8 @@ fn read(lpar: u64, second: &[u8], index: u64) -> HypercallRequest {
     }
 }
 
-/// psdevwiki's 3.41 GameOS dump gives `bi.pun` = 1.
+/// The repository dump [PS3DEVWIKI-REPO s:3.41_GameOS] gives
+/// `bi.pun` = 1.
 #[test]
 fn a_read_of_bi_pun_in_lpar_2_answers_1_in_r4_and_0_in_r5() {
     assert_eq!(

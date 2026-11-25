@@ -14,8 +14,9 @@ use cellgov_ps3_abi::lv2::syscall::{
 use super::spec::{CONFLICTS, NAME};
 use super::table::{render, ArchiveError, Table, NONE};
 
-/// The psdevwiki page every `psdevwiki` row refers to.
-pub const PSDEVWIKI_PAGE: &str = "https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls";
+/// The citation alias of the psdevwiki page every `psdevwiki` row refers
+/// to, [PS3DEVWIKI-LV2-SYSCALLS s:LV2_Syscalls].
+pub const PSDEVWIKI_PAGE: &str = "PS3DEVWIKI-LV2-SYSCALLS";
 
 /// The PSL1GHT header every `psl1ght` row refers to, by the path
 /// under the toolchain's PPU include root.

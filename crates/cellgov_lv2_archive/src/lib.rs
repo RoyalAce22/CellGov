@@ -32,6 +32,7 @@ mod hypercall;
 mod name;
 mod oracle_gap;
 mod pup;
+mod repository;
 mod spec;
 mod sql;
 mod table;
@@ -83,6 +84,10 @@ pub use oracle_gap::{
     OVERLAY_REVISION_KEY,
 };
 pub use pup::{check_pup_rows, checked_pup_rows, pup_rows, PupRow, PupTableError, PupTsvError};
+pub use repository::{
+    replace_repository_reads, repository_read_rows, repository_read_rows_of, repository_read_tsv,
+    repository_rows, repository_tsv, RepositoryReadRow, RepositoryRow, RepositoryTableError,
+};
 pub use spec::{
     files, manifest, Column, ColumnKind, ManifestRow, OwnerClass, TableSpec, View, ARM, BEHAVIOR,
     BEHAVIOR_GATE, CALLER, CALLER_GATE, CALLER_REGENERATE, CALLER_UNRESOLVED, CAPABILITY_GATE,
@@ -92,8 +97,10 @@ pub use spec::{
     GATE_STATES, HYPERCALL, HYPERCALL_FAMILIES, HYPERCALL_GATE, HYPERCALL_LEAVES,
     HYPERCALL_REGENERATE, HYPERCALL_SITE, HYPERCALL_STATES, HYPERCALL_UNRESOLVED, KERNEL, NAME,
     NAME_GATE, NAME_REGENERATE, NAME_SOURCES, PRESENCE, PRIMARY_LABELS, PRIORITY, PROVENANCE_KINDS,
-    PUP, PUP_GATE, REACH, REGENERATE, ROUTE, ROUTE_LABELS, SCHEMA_VERSION, SELECTOR_SLOTS, STUB,
-    SUBENTRY, SUBENTRY_ATTRIBUTION, SUBENTRY_SOURCES, TABLES, TRANSITIONS, TRANSITION_KINDS, VIEWS,
+    PUP, PUP_GATE, REACH, REGENERATE, REPOSITORY, REPOSITORY_GATE, REPOSITORY_LOGGED_FIRMWARE,
+    REPOSITORY_READ, REPOSITORY_READ_STATES, REPOSITORY_REGENERATE, REPOSITORY_SOURCES, ROUTE,
+    ROUTE_LABELS, SCHEMA_VERSION, SELECTOR_SLOTS, STUB, SUBENTRY, SUBENTRY_ATTRIBUTION,
+    SUBENTRY_SOURCES, TABLES, TRANSITIONS, TRANSITION_KINDS, VIEWS,
 };
 pub use sql::{build_sql, schema_sql, SQLITE_VERSION};
 pub use table::{check_references, parse, render, ArchiveError, Table, NONE};
