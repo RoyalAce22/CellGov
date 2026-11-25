@@ -15,10 +15,9 @@
 //! - an entry of a relative jump table: a 32-bit offset from a named
 //!   address, or from the word after a `bcctr`.
 //!
-//! An indirect branch ignores bits 62 and 63 of its target. So for a
-//! doubleword or a built constant, the bound holds the word at the
-//! address with those bits at 0. A jump-table entry adds its target only
-//! when that target is itself the address of a word.
+//! An indirect branch ignores bits 62 and 63 of its target. So for each
+//! named address, the bound holds the word at the address with those
+//! bits at 0.
 //!
 //! A function reaches each word that control can get to from its first
 //! word with r2 unchanged. On each word that a function reaches, r2 can
@@ -840,9 +839,13 @@ impl Bound<'_> {
     ///
     /// A table starts at a named address or at the word after a `bcctr`
     /// that does not link. Each entry is a 32-bit offset from the
-    /// table's start. The run of entries ends at the first offset that:
-    /// - reaches no word of the code; or
-    /// - reaches back into the run itself.
+    /// table's start, and its target is the word at the start plus the
+    /// offset, with bits 62 and 63 at 0. The run of entries ends at the
+    /// first entry whose target:
+    /// - is no word of the code; or
+    /// - is in the run itself.
+    ///
+    /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
     fn jump_tables(&mut self) -> Result<(), CallerScanError> {
         let tables = std::mem::take(&mut self.tables);
         for start in tables {
@@ -862,7 +865,8 @@ impl Bound<'_> {
                 .iter()
                 .filter_map(|file| file.read::<4>(at))
                 .map(|bytes| start.wrapping_add_signed(i64::from(i32::from_be_bytes(bytes))))
-                .filter(|target| !(start..=at).contains(target) && self.code.holds(*target))
+                .map(|target| target & !0b11)
+                .filter(|word| !(start..=at).contains(word) && self.code.holds(*word))
                 .collect();
             if targets.is_empty() {
                 return Ok(());
