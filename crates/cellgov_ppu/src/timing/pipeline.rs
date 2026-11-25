@@ -56,6 +56,9 @@ mod preempted_call_tests;
 #[cfg(test)]
 #[path = "tests/resumed_call_tests.rs"]
 mod resumed_call_tests;
+#[cfg(test)]
+#[path = "tests/sized_call_tests.rs"]
+mod sized_call_tests;
 
 /// The length of the ring of latest issue cycles that the fetch-ahead
 /// bound reads.
@@ -251,6 +254,8 @@ struct PendingSyscall {
     issue: u64,
     /// The syscall number.
     number: u64,
+    /// The low words of r3 and r4 at the `sc`.
+    args: [u32; 2],
     /// The code the call returned, once the runtime commits it.
     code: Option<u64>,
     /// The thread left the PPE before the call returned: it blocked, or
@@ -1045,10 +1050,12 @@ impl PpeTiming {
             // it when it resumes ([`PpeTiming::charge_syscall`]).
             Kind::Syscall {
                 number: Some(number),
+                args,
             } => {
                 self.core.syscall = Some(PendingSyscall {
                     issue: t,
                     number,
+                    args,
                     code: None,
                     resumed: false,
                     preempted: false,
@@ -1056,7 +1063,7 @@ impl PpeTiming {
                 self.end_block(t + 1);
                 return t;
             }
-            Kind::Syscall { number: None } => {
+            Kind::Syscall { number: None, .. } => {
                 self.return_from_call(t + k::PPU_SYSCALL_UNTIMED_ROUND_TRIP_CYCLES);
                 return t;
             }
@@ -1100,8 +1107,7 @@ impl PpeTiming {
     /// `sc`. The first of these that applies selects the round trip:
     /// - the resumed round trip, if the thread left the PPE before the call
     ///   returned;
-    /// - the round trip of the committed return;
-    /// - the round trip of the success path, if no return is committed.
+    /// - the round trip of its committed return and arguments.
     ///
     /// A runnable sibling adds [`Self::sibling_call_cycles`] to the round trip.
     pub(crate) fn charge_syscall(&mut self) {
@@ -1111,12 +1117,17 @@ impl PpeTiming {
         let Some(call) = self.core.syscall.take() else {
             return;
         };
-        let trip = match call.code {
-            _ if call.resumed => {
-                k::ppu_syscall_resumed_round_trip_cycles(call.number, call.code, call.preempted)
-            }
-            Some(code) => k::ppu_syscall_outcome_round_trip_cycles(call.number, code),
-            None => k::ppu_syscall_round_trip_cycles(call.number),
+        let [r3, r4] = call.args.map(u64::from);
+        let trip = if call.resumed {
+            k::ppu_syscall_resumed_call_round_trip_cycles(
+                call.number,
+                call.code,
+                call.preempted,
+                r3,
+                r4,
+            )
+        } else {
+            k::ppu_syscall_call_round_trip_cycles(call.number, call.code, r3, r4)
         };
         let trip = trip + self.sibling_call_cycles(trip);
         let c = &mut self.core;

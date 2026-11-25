@@ -15,7 +15,7 @@
 //! replays the loops of both probes through the issue model. The
 //! documented values carry the page that states them.
 
-use crate::lv2::{errno, syscall};
+use crate::lv2::{errno, memory, syscall};
 
 /// PPE core cycles per time-base tick.
 ///
@@ -328,6 +328,25 @@ pub const PPU_SYSCALL_UNTIMED_ROUND_TRIP_CYCLES: u64 = 6040;
 /// | `_sys_prx_start_module`, second phase | 31929 |
 /// | `_sys_prx_stop_module`, first phase | 31209 |
 /// | `_sys_prx_stop_module`, second phase | 1155449 |
+///
+/// The `ppu_lv2_call_sizes` capture times the module calls on five
+/// modules of 16526 to 973170 bytes, the same way. The calls do not follow
+/// the module's size:
+///
+/// - A load takes 67172649 to 248357809 cycles. The smallest module,
+///   libfiber.sprx, takes 116098049. libadec.sprx takes 2.5 times its
+///   `ppu_lv2_call_heavy` load. That capture loads no other module
+///   between its loads.
+/// - A first start phase takes 284209 to 1749529 cycles, and a second
+///   stop phase 189049 to 1238849. libadec.sprx is the slowest in both.
+///
+/// The table keeps the libadec.sprx entries.
+///
+/// The capture also times `sys_memory_free` on blocks of 64 KiB to
+/// 16 MiB: 41129 to 601929 cycles, more as the block has more pages. The
+/// call names only the block's address, so its entry is the 1 MiB block's.
+/// [`ppu_syscall_success_round_trip_cycles`] times a successful
+/// `sys_memory_allocate` by its size. A refused one keeps the 1 MiB entry.
 pub const PPU_SYSCALL_ROUND_TRIPS: [(u64, u64); 43] = [
     (syscall::PROCESS_GETPID, 1129),
     (syscall::MEMORY_GET_PAGE_ATTRIBUTE, 8506),
@@ -385,6 +404,72 @@ pub const fn ppu_syscall_round_trip_cycles(number: u64) -> u64 {
         i += 1;
     }
     PPU_SYSCALL_UNTIMED_ROUND_TRIP_CYCLES
+}
+
+/// The round trip of `sys_memory_allocate` with 1 MiB pages, as
+/// `(cycles for any size, cycles for each MiB)`.
+///
+/// The `ppu_lv2_call_sizes` capture times allocations of 1, 4 and 16 MiB,
+/// 16 rounds each, as the `ppu_lv2_call_heavy` capture times a call. The
+/// lower median samples, less the 2431 cycles the cheapest call's median
+/// sample takes over its round trip, are 1493689, 6036369 and 23168529
+/// cycles. The line runs through the 1 MiB and 16 MiB samples and gives
+/// the 4 MiB one 3.4% short.
+pub const PPU_MEMORY_ALLOCATE_1M_PAGE_CYCLES: (u64, u64) = (48700, 1_444_989);
+
+/// The round trip of `sys_memory_allocate` with 64 KiB pages, as
+/// `(cycles for any size, cycles for each MiB)`.
+///
+/// The `ppu_lv2_call_sizes` capture times allocations of 64 KiB, 1 MiB and
+/// 4 MiB the same way as [`PPU_MEMORY_ALLOCATE_1M_PAGE_CYCLES`]: 196409,
+/// 1966809 and 7349929 cycles. The line runs through the 64 KiB and 4 MiB
+/// samples and gives the 1 MiB one 3.4% short.
+pub const PPU_MEMORY_ALLOCATE_64K_PAGE_CYCLES: (u64, u64) = (82861, 1_816_767);
+
+/// The round trip of the call `number` on its success path, with `r3` and
+/// `r4` its first two arguments.
+///
+/// `sys_memory_allocate` takes the round trip of its size `r3` from
+/// [`PPU_MEMORY_ALLOCATE_64K_PAGE_CYCLES`] when `r4` names 64 KiB pages,
+/// and from [`PPU_MEMORY_ALLOCATE_1M_PAGE_CYCLES`] otherwise. Every other
+/// call takes [`ppu_syscall_round_trip_cycles`].
+pub const fn ppu_syscall_success_round_trip_cycles(number: u64, r3: u64, r4: u64) -> u64 {
+    if number != syscall::MEMORY_ALLOCATE {
+        return ppu_syscall_round_trip_cycles(number);
+    }
+    // The page size the LV2 allocate handler accepts for these flags.
+    let (base, per_mib) =
+        if memory::page_size::granule_from_flags(r4) == memory::page_size::GRANULE_64K {
+            PPU_MEMORY_ALLOCATE_64K_PAGE_CYCLES
+        } else {
+            PPU_MEMORY_ALLOCATE_1M_PAGE_CYCLES
+        };
+    // The size is a 32-bit `size_t`.
+    base + per_mib * (r3 & 0xFFFF_FFFF) / (1 << 20)
+}
+
+/// The round trip of the call `number` with `r3` and `r4` its first two
+/// arguments and `code` its committed return, if any.
+///
+/// A return other than 0 takes [`ppu_syscall_outcome_round_trip_cycles`].
+/// A return of 0, or no committed return, takes
+/// [`ppu_syscall_success_round_trip_cycles`]. The check compares the low
+/// 32 bits of `code`.
+pub fn ppu_syscall_call_round_trip_cycles(number: u64, code: Option<u64>, r3: u64, r4: u64) -> u64 {
+    returned_round_trip(
+        number,
+        code,
+        ppu_syscall_success_round_trip_cycles(number, r3, r4),
+    )
+}
+
+/// The round trip of the call `number` that returned `code`, with
+/// `success` its round trip on the success path.
+fn returned_round_trip(number: u64, code: Option<u64>, success: u64) -> u64 {
+    match code {
+        Some(code) if code as u32 != 0 => ppu_syscall_outcome_round_trip_cycles(number, code),
+        _ => success,
+    }
 }
 
 /// The round trip of each timed wait that blocks, as `(syscall number, cycles)`.
@@ -463,8 +548,9 @@ pub const PPU_SYSCALL_CANCELLED_ROUND_TRIPS: [(u64, u64); 1] = [(syscall::EVENT_
 /// when the thread left only for a higher-priority thread. The round
 /// trip is the first of these that applies:
 /// - [`PPU_SYSCALL_SWITCHED_YIELD_ROUND_TRIP_CYCLES`] for a yield;
-/// - for a preempted call, the round trip of its return `code`, or of
-///   its success path with no `code`, plus [`PPU_PREEMPTED_RESUME_CYCLES`];
+/// - for a preempted call, the round trip of a return `code` other than
+///   0, or [`ppu_syscall_round_trip_cycles`] otherwise, plus
+///   [`PPU_PREEMPTED_RESUME_CYCLES`];
 /// - the call's entry in [`PPU_SYSCALL_CANCELLED_ROUND_TRIPS`] when it
 ///   returns `CELL_ECANCELED`;
 /// - the call's entry in [`PPU_SYSCALL_WOKEN_ROUND_TRIPS`];
@@ -476,15 +562,39 @@ pub fn ppu_syscall_resumed_round_trip_cycles(
     code: Option<u64>,
     preempted: bool,
 ) -> u64 {
+    resumed_round_trip(
+        number,
+        code,
+        preempted,
+        ppu_syscall_round_trip_cycles(number),
+    )
+}
+
+/// [`ppu_syscall_resumed_round_trip_cycles`] for a call with `r3` and `r4`
+/// its first two arguments.
+///
+/// A preempted call that returns 0, or has no committed return, takes
+/// [`ppu_syscall_success_round_trip_cycles`] for its arguments as its own
+/// round trip.
+pub fn ppu_syscall_resumed_call_round_trip_cycles(
+    number: u64,
+    code: Option<u64>,
+    preempted: bool,
+    r3: u64,
+    r4: u64,
+) -> u64 {
+    let success = ppu_syscall_success_round_trip_cycles(number, r3, r4);
+    resumed_round_trip(number, code, preempted, success)
+}
+
+/// The resumed round trip, with `success` the call's round trip on its
+/// success path.
+fn resumed_round_trip(number: u64, code: Option<u64>, preempted: bool, success: u64) -> u64 {
     if number == syscall::PPU_THREAD_YIELD {
         return PPU_SYSCALL_SWITCHED_YIELD_ROUND_TRIP_CYCLES;
     }
     if preempted {
-        let trip = code.map_or_else(
-            || ppu_syscall_round_trip_cycles(number),
-            |code| ppu_syscall_outcome_round_trip_cycles(number, code),
-        );
-        return trip + PPU_PREEMPTED_RESUME_CYCLES;
+        return returned_round_trip(number, code, success) + PPU_PREEMPTED_RESUME_CYCLES;
     }
     let cancelled = code.is_some_and(|code| code as u32 == errno::CELL_ECANCELED.code);
     PPU_SYSCALL_CANCELLED_ROUND_TRIPS

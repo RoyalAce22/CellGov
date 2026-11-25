@@ -40,9 +40,9 @@ Column definitions:
 | --- | --- | --- | --- | ---: | ---: | --- | --- |
 | [VSH](titles/VSH.md) | PS3 System Software (vsh) | fw 1.50 | -- | -- | -- | -- | -- |
 | [VSH](titles/VSH.md) | PS3 System Software (vsh) | fw 1.94 | -- | -- | -- | -- | -- |
-| [VSH](titles/VSH.md) | PS3 System Software (vsh) | fw 2.76 | ProcessExit -> MaxSteps | 389,757 | 99,777,792 | -- | -- |
+| [VSH](titles/VSH.md) | PS3 System Software (vsh) | fw 2.76 | ProcessExit -> MaxSteps | 389,760 | 99,778,560 | -- | -- |
 | [VSH](titles/VSH.md) | PS3 System Software (vsh) | fw 3.70 | ProcessExit -> MaxSteps | 389,453 | 99,699,968 | -- | -- |
-| [VSH](titles/VSH.md) | PS3 System Software (vsh) | fw 4.93 | ProcessExit -> MaxSteps | 389,454 | 99,700,224 | -- | -- |
+| [VSH](titles/VSH.md) | PS3 System Software (vsh) | fw 4.93 | ProcessExit -> MaxSteps | 389,450 | 99,699,200 | -- | -- |
 
 Coverage: 1 firmware-shipped title(s), 5 firmware(s), 5 declared cell(s), 3 recorded.
 

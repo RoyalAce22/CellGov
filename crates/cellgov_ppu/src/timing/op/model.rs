@@ -127,8 +127,8 @@ pub(crate) enum Kind {
     /// instructions for `PPU_MTVSCR_YOUNGER_VSU_CYCLES`.
     VscrWrite,
     /// An `sc`. `number` is r11 before the `sc` executes, or `None`
-    /// for a hypervisor call.
-    Syscall { number: Option<u64> },
+    /// for a hypervisor call. `args` holds the low words of r3 and r4.
+    Syscall { number: Option<u64>, args: [u32; 2] },
 }
 
 /// One instruction as the issue model sees it.

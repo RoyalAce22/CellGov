@@ -682,6 +682,7 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
         I::Dss { .. } => one(Op::on(unit::LSU)),
         I::Sc { lev } => one(Op::on(0).kind(Kind::Syscall {
             number: (lev == 0).then_some(state.gpr[11]),
+            args: [state.gpr[3] as u32, state.gpr[4] as u32],
         })),
         I::Sync { l: 1 } => one(Op::on(unit::LSU).kind(Kind::Barrier(Barrier::Lwsync))),
         I::Sync { .. } => one(Op::on(unit::LSU).kind(Kind::Barrier(Barrier::Sync))),
