@@ -67,11 +67,16 @@ impl PpuExecutionUnit {
     /// What `attempt`, which faulted with `exit`, does next after a
     /// translation miss: run again, end the batch, or stop.
     ///
-    /// A fault that is not a miss stops at `exit`. A misaligned store that
-    /// stops at the alignment interrupt keeps no R or C write and no group
-    /// read of the table searches of its attempts. A store that takes the
-    /// interrupt in caching-inhibited storage at any alignment keeps them
-    /// (`refused_at_any_alignment`).
+    /// A fault that is not a miss stops at `exit`. When a store stops, the
+    /// unit drops these parts of the table searches of its attempts:
+    /// - at the alignment interrupt, when misaligned
+    ///   (`refused_at_any_alignment` is false): the R and C writes and the
+    ///   group reads;
+    /// - at the data storage or data segment interrupt: the C writes.
+    ///
+    /// When the batch ends ahead of the instruction, the unit drops the C
+    /// writes of its attempts. The next batch runs the instruction again,
+    /// and it writes C again when the page table permits the store.
     ///
     /// [CBE-Handbook p:90 s:4.2.6.8] Footnote 4: a misaligned caching-inhibited store is speculative, so its table lookup is not performed when it takes the alignment interrupt.
     #[inline]
@@ -85,20 +90,43 @@ impl PpuExecutionUnit {
         exit: FaultExit,
     ) -> MissStep {
         let step = self.refill_step(mem, effects, regions, translating, attempt, exit);
-        if let MissStep::Stop(FaultExit::Verdict(PpuFault::Interrupt(PpuInterrupt::Alignment {
-            store: true,
-            ..
-        }))) = &step
-        {
-            if !refused_at_any_alignment(&attempt.insn) {
+        let exit = match &step {
+            MissStep::Stop(exit) => exit,
+            // [CBE-Handbook p:90 s:4.2.6.8] The MMU does not update C when the store takes a storage exception.
+            // The store can still take a storage exception on a later
+            // page when it runs again, so its C writes do not publish
+            // with this batch.
+            MissStep::EndBatch => {
+                self.drop_change_writes(attempt.searches_before.0);
+                return step;
+            }
+            MissStep::Rerun => return step,
+        };
+        match stop_interrupt(exit) {
+            Some(PpuInterrupt::Alignment { store: true, .. })
+                if !refused_at_any_alignment(&attempt.insn) =>
+            {
                 self.drop_searches(attempt.searches_before);
             }
+            // [CBE-Handbook p:90 s:4.2.6.8] The MMU does not update C when the store takes a storage exception.
+            // [PPC-Book3 p:26 s:4.2.1] A storage exception is one that causes, among others, a Data Storage or a Data Segment interrupt.
+            // [PPC-Book3 p:43 s:4.9] The part of a crossing operand in each page is a separate access for R and C, and C may be set for a permitted store that is not performed.
+            // The unit reads the handbook's storage access as the whole
+            // store, so a page whose part of the operand the table
+            // permitted keeps no C write either.
+            Some(
+                PpuInterrupt::DataStorage { store: true, .. }
+                | PpuInterrupt::DataSegment { store: true, .. },
+            ) => {
+                self.drop_change_writes(attempt.searches_before.0);
+            }
+            _ => {}
         }
         step
     }
 
     /// [`Self::miss_step`] before it drops the searches of a store that
-    /// takes the alignment interrupt.
+    /// stops at an interrupt.
     #[inline]
     fn refill_step<'m>(
         &mut self,
@@ -287,6 +315,19 @@ fn refused_at_any_alignment(insn: &instruction::PpuInstruction) -> bool {
             | I::Stvrx { .. }
             | I::Stvrxl { .. }
     )
+}
+
+/// The interrupt that the stop `exit` takes, or `None` for a stop that
+/// takes no interrupt.
+///
+/// A memory fault takes the data storage interrupt that
+/// [`PpuInterrupt::data_storage`] gives it.
+fn stop_interrupt(exit: &FaultExit) -> Option<PpuInterrupt> {
+    match exit {
+        FaultExit::Verdict(PpuFault::Interrupt(interrupt)) => Some(*interrupt),
+        FaultExit::Verdict(_) => None,
+        FaultExit::Mem(refused, store) => PpuInterrupt::data_storage(refused, *store),
+    }
 }
 
 /// Whether a view of `views` holds the byte at `ea`.

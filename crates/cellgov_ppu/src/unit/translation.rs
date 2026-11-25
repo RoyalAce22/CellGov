@@ -424,9 +424,11 @@ impl PpuExecutionUnit {
     ///
     /// The search writes R = 1 to the entry it matches, even when the
     /// access takes an interrupt. A store writes C later, when it meets a
-    /// [`CHANGE_UNSET`] view ([`Self::refill_change`]). A misaligned store
-    /// that takes the alignment interrupt drops both writes
-    /// ([`Self::drop_searches`]).
+    /// [`CHANGE_UNSET`] view ([`Self::refill_change`]). The unit drops both
+    /// writes and the group reads for a misaligned store that takes the
+    /// alignment interrupt ([`Self::drop_searches`]). It drops the C writes
+    /// for a store that takes the data storage or data segment interrupt
+    /// ([`Self::drop_change_writes`]).
     ///
     /// # Errors
     ///
@@ -581,6 +583,27 @@ impl PpuExecutionUnit {
     pub(super) fn drop_searches(&mut self, (writes, reads): (usize, usize)) {
         self.table_writes.truncate(writes);
         self.table_reads.truncate(reads);
+    }
+
+    /// Drop the C writes that the block's searches added after the count
+    /// `writes`. The R writes and the group reads stay.
+    ///
+    /// The unit drops them for a store that takes the data storage or data
+    /// segment interrupt. The PPE then sets C for no page of the store.
+    /// This includes a page whose part of the operand the PPE permitted.
+    ///
+    /// The unit also drops them for an instruction whose batch ends ahead
+    /// of it. The instruction runs again in the next batch and writes C
+    /// again.
+    ///
+    /// [CBE-Handbook p:90 s:4.2.6.8] The MMU does not update C when the store takes a storage exception, and it sets R regardless of storage interrupts.
+    pub(super) fn drop_change_writes(&mut self, writes: usize) {
+        let mut index = 0;
+        self.table_writes.retain(|(range, _)| {
+            let kept = index < writes || !EntryHit::is_change_write(range.start().raw());
+            index += 1;
+            kept
+        });
     }
 
     /// Publish the R and C writes the block's searches made, ahead of the

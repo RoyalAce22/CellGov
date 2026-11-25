@@ -68,6 +68,10 @@ mod inhibited_vector_edge_reference_tests;
 mod inhibited_store_reference_tests;
 
 #[cfg(test)]
+#[path = "tests/crossing_store_change_tests.rs"]
+mod crossing_store_change_tests;
+
+#[cfg(test)]
 #[path = "tests/entry_write_range_tests.rs"]
 mod entry_write_range_tests;
 

@@ -76,6 +76,14 @@ impl EntryHit {
         self.bit_write(PTE_C, PTE_C_BYTE, PTE_C_BYTE_MASK)
     }
 
+    /// Whether an entry byte write at real address `ra` is a C write, as
+    /// [`Self::change_write`] gives, and not an R write.
+    ///
+    /// [PPC-Book3 p:38 s:4.5.3] A PTEG's real address ends in seven 0 bits, so each 16-byte entry starts on a 16-byte boundary.
+    pub fn is_change_write(ra: u64) -> bool {
+        ra % PTE_BYTES as u64 == PTE_C_BYTE as u64
+    }
+
     /// The write of byte `byte` of the entry with `mask` set, or `None`
     /// when `bit` of doubleword 1 is set.
     fn bit_write(&self, bit: u64, byte: usize, mask: u8) -> Option<(u64, u8)> {
