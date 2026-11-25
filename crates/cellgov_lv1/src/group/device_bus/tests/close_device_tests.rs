@@ -31,7 +31,6 @@ const MAPPING: DmaMapping = DmaMapping {
     length: 0x10_0000,
 };
 
-/// The call for device `device` of bus `bus`.
 fn request(bus: u64, device: u64) -> HypercallRequest {
     let mut inputs = [0; 8];
     inputs[0] = bus;
@@ -157,7 +156,7 @@ fn a_second_close_gets_wrong_state() {
 
 /// The handler [OFW-4.93 lv1 a:0x30701C-0x30702C] and the access check
 /// [OFW-4.93 lv1 a:0x236420-0x236428] [OFW-4.93 lv1 a:0x236554-0x236558]
-/// answer these calls before any state is read.
+/// answer these calls before they read any state.
 #[test]
 fn each_check_that_reads_no_state_gets_its_marked_status() {
     let open = state_with(&[DeviceBusChange::Opened(NETWORK_DEVICE)]);

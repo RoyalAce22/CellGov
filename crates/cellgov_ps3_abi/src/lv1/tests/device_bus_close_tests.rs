@@ -16,7 +16,8 @@ fn the_4_93_close_device_handler_is_the_live_table_entry_of_171() {
 }
 
 #[test]
-fn no_other_firmware_has_a_close_device_handler() {
+fn no_close_device_handler_row_exists_for_a_firmware_whose_lv1_is_not_read() {
+    assert_eq!(CLOSE_DEVICE_HANDLERS.len(), 1);
     for firmware in ["4.92", "4.91", "3.55", "1.00", ""] {
         assert_eq!(close_device_handler(firmware), None, "{firmware}");
     }

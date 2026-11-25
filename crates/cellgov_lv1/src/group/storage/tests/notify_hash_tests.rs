@@ -10,19 +10,20 @@ fn requested(tag: u8, completion: Option<u64>) -> StorageState {
     state
 }
 
-/// The list holds every nonzero lane of a state with one completed
-/// request.
+/// The list holds every nonzero lane of a state with one request,
+/// completed or waiting. An empty state has no lane.
 #[test]
 fn notify_request_sync_term_lane_vector_golden() {
-    let lane = |field, value| contribution(LaneIndex::new(208, 1, field, 0), value);
-    let sum = [lane(0, 1), lane(1, 1), lane(2, 1)]
+    let lane = |field, value| contribution(LaneIndex::new(208, 3, field, 0), value);
+    let sum = [lane(0, 1), lane(1, 3), lane(2, 1), lane(3, 5)]
         .into_iter()
         .fold(0u128, u128::wrapping_add);
-    assert_eq!(requested(1, Some(0)).sync_term(), sum);
-    let waiting = [lane(0, 1), lane(1, 1)]
+    assert_eq!(requested(3, Some(5)).sync_term(), sum);
+    let waiting = [lane(0, 1), lane(1, 3)]
         .into_iter()
         .fold(0u128, u128::wrapping_add);
-    assert_eq!(requested(1, None).sync_term(), waiting);
+    assert_eq!(requested(3, None).sync_term(), waiting);
+    assert_eq!(StorageState::default().sync_term(), 0);
 }
 
 /// The list holds every nonzero lane of a state with an event mask.
@@ -60,19 +61,17 @@ fn each_request_holds_its_tag_bit() {
     }));
     assert_eq!(state.held_tags(), (1 << 1) | (1 << 15));
     assert_eq!(state.notify_requests().count(), 2);
-    assert_eq!(StorageState::default().sync_term(), 0);
 }
 
 #[test]
-fn the_storage_surfaces_are_pending_on_their_own_sources() {
+fn each_storage_lane_source_has_one_hashed_surface() {
     for source in [NOTIFY_REQUEST_SOURCE, NOTIFY_EVENT_MASK_SOURCE] {
-        let surfaces: Vec<_> = GROUP
+        let surfaces = GROUP
             .hashed_surfaces
             .iter()
             .filter(|surface| surface.source == Some(source))
-            .collect();
-        assert_eq!(surfaces.len(), 1, "source {source}");
-        assert_eq!(surfaces[0].stamp, Stamp::Pending, "source {source}");
+            .count();
+        assert_eq!(surfaces, 1, "source {source}");
     }
     assert_eq!(
         (NOTIFY_REQUEST_SOURCE, NOTIFY_EVENT_MASK_SOURCE),

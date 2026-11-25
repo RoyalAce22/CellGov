@@ -13,20 +13,21 @@
 //!    zero-extended [OFW-4.93 lv1 a:0x3094C8]. The vector's entry zeroes
 //!    the other slots [OFW-4.93 lv1 a:0x0C08], so r6 to r10 return 0.
 //! 2. The core [OFW-4.93 lv1 a:0x251E9C] reads the storage bus object
-//!    from the global at 0x368388, as the write core does. It returns
-//!    [`ASYNC_STATUS_NO_DEVICE_STATUS`] for a device id above 6 other
-//!    than -1, and for a device whose object pointer is null
-//!    [OFW-4.93 lv1 a:0x251EAC-0x251EF0] [OFW-4.93 lv1 a:0x251F54-0x251F58].
-//!    For device -1 it uses the bus object as the device
-//!    [OFW-4.93 lv1 a:0x251FC0-0x251FC4].
-//! 3. The core asks the device's ready method, slot 6 of its method
+//!    from the global at 0x368388, as the write core does. For device -1
+//!    it uses the bus object as the device
+//!    [OFW-4.93 lv1 a:0x251FC0-0x251FC4]. It returns
+//!    [`ASYNC_STATUS_NO_DEVICE_STATUS`] in these cases
+//!    [OFW-4.93 lv1 a:0x251EAC-0x251EF0] [OFW-4.93 lv1 a:0x251F54-0x251F58]:
+//!    - a device id above 6, other than -1;
+//!    - a device whose object pointer is null.
+//! 3. The core asks the device's ready method, slot 6 of its virtual
 //!    table. A false answer gives [`ASYNC_STATUS_NOT_READY_STATUS`]
 //!    [OFW-4.93 lv1 a:0x251EF4-0x251F30]. For the bus object, slot 6 of
 //!    its virtual table [OFW-4.93 lv1 a:0x35DD60-0x35DD64] is the method
 //!    at [OFW-4.93 lv1 a:0x25477C] [OFW-4.93 lv1 a:0x338778-0x33877C].
 //!    The storage write's ready check asks the same slot
 //!    [OFW-4.93 lv1 a:0x2513B8-0x2513CC].
-//! 4. Otherwise the core calls slot 35 of the method table with the
+//! 4. Otherwise the core calls slot 35 of the virtual table with the
 //!    device, the partition, the two slot addresses and the kind
 //!    [`ASYNC_STATUS_KIND`]. It returns that method's r3
 //!    [OFW-4.93 lv1 a:0x251F0C-0x251F24] [OFW-4.93 lv1 a:0x251F80-0x251FA4].
@@ -61,12 +62,15 @@
 //! the open slot at +2544 and then the one at +2608 for the caller's
 //! partition [OFW-4.93 lv1 a:0x255FCC-0x256008]. The slots are the two
 //! slots of the open; see the storage bus section of
-//! [`super::device_bus`]. For a slot whose used byte is set and whose
-//! open r5 sets [`ASYNC_STATUS_SLOT_WORD_FLAG`], it takes the doubleword
-//! at +56 of the slot and leaves 0 there. A nonzero word gives r3 = 0,
-//! r4 = -1 and r5 = the word [OFW-4.93 lv1 a:0x256054-0x25609C]
-//! [OFW-4.93 lv1 a:0x2560A0-0x2560D8]. When the first slot gives no
-//! word, the method goes on to test the second slot. Every other case gives
+//! [`super::device_bus`]. For a slot with these properties, the method
+//! takes the doubleword at +56 of the slot and leaves 0 there:
+//! - the slot's used byte is set;
+//! - the slot's open r5 sets [`ASYNC_STATUS_SLOT_WORD_FLAG`].
+//!
+//! A nonzero word gives r3 = 0, r4 = -1 and r5 = the word
+//! [OFW-4.93 lv1 a:0x256054-0x25609C] [OFW-4.93 lv1 a:0x2560A0-0x2560D8].
+//! When the first slot gives no word, the method then tests the second
+//! slot. In every other case the method returns
 //! [`ASYNC_STATUS_NONE_STATUS`] and writes no slot
 //! [OFW-4.93 lv1 a:0x25600C-0x256028].
 //!

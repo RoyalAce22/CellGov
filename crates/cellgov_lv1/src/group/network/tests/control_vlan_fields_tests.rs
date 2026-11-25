@@ -1,5 +1,6 @@
 use super::*;
 use crate::group::device_bus::DeviceBusChange;
+use crate::group::network::indicator::NETWORK_DEVICE;
 use crate::Hypervisor;
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::call::OPEN_DEVICE;
@@ -31,6 +32,7 @@ fn control(r: &HypercallRequest, fields: VlanFields) -> HypercallDisposition {
         r,
         Some("4.93"),
         &devices,
+        &NetworkState::default(),
         &SYNTHETIC_CONSOLE_IDENTITY,
         fields,
     )

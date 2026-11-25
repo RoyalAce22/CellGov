@@ -11,8 +11,8 @@
 //! - the bus ids that the handler's checks refuse.
 //!
 //! lv1 finds each other device of buses 1 to 3, and devices 0 to 6 of
-//! bus 4, through state that CellGov does not model, so a call for one is
-//! a refusal.
+//! bus 4, through state that CellGov does not model. A call for one of
+//! these devices is a refusal.
 
 use cellgov_mem::lanes::{LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::call::OPEN_DEVICE;
@@ -23,9 +23,11 @@ use cellgov_ps3_abi::lv1::device_bus::{
 };
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
+use super::close::NETWORK_DEVICE;
 use super::{DeviceBusChange, DeviceBusState};
 use crate::answer::{HypercallAnswer, HypercallDisposition, UnmodelledError};
 use crate::group::hypercall::Hypercall;
+use crate::group::network::NetworkChange;
 use crate::request::HypercallRequest;
 
 /// The hypercalls this module answers.
@@ -92,13 +94,19 @@ const UNREAD_FIRMWARE: UnmodelledError =
 /// - the r3 of a failed bus check, from [`open_device_bus_r3`];
 /// - for device 0, 1 or 2 of bus 1 that is open, [`OPEN_DEVICE_BUSY_R3`];
 /// - for device 0, 1 or 2 of bus 1 that is not open, 0, and the answer
-///   opens the device;
+///   opens the device. For device 0 the answer also carries the setup of
+///   the network device, as lv1's open hook stores 2 in its state word
+///   [OFW-4.93 lv1 a:0x23E1C8-0x23E1D4];
 /// - for the storage bus, the r3 of [`open_storage_bus`];
 /// - for a device of bus 4 above 6, other than -1,
 ///   [`OPEN_DEVICE_NO_DEVICE_R3`], and the answer changes no state.
 ///
 /// lv1 reads no r5 on the paths of bus 1 and on the path of an absent
 /// device.
+///
+/// The model assumes that the open hook of device 0 succeeds. When the
+/// hook fails, lv1 closes the device again and returns the hook's status
+/// [OFW-4.93 lv1 a:0x2377B4-0x2377D8].
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
@@ -138,6 +146,9 @@ pub(crate) fn open_device(
     }
     let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []);
     answer.push_change(DeviceBusChange::Opened(device));
+    if device == NETWORK_DEVICE {
+        answer.push_change(NetworkChange::SetUp);
+    }
     HypercallDisposition::Answered(answer)
 }
 

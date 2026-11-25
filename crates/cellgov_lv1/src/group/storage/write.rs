@@ -73,7 +73,7 @@ const UNREAD_FIRMWARE: UnmodelledError =
 /// The call for a device from 0 to 6.
 ///
 /// lv1 calls the write method of the device's object
-/// [OFW-4.93 lv1 a:0x2513A4-0x251484], and CellGov models no storage
+/// [OFW-4.93 lv1 a:0x2513A4-0x251484]. CellGov models no storage
 /// device object.
 const DEVICE_OBJECT: UnmodelledError = UnmodelledError::new(
     "a storage_write to a device from 0 to 6, whose device object CellGov does not model",
@@ -81,15 +81,18 @@ const DEVICE_OBJECT: UnmodelledError = UnmodelledError::new(
 
 /// The notification write whose buffer CellGov holds no storage for.
 ///
-/// lv1's translation of the buffer [OFW-4.93 lv1 a:0x254484-0x2545A0]
-/// refuses some of these buffers with statuses that no read of the
-/// translation's region lookup settles:
+/// The refusal covers these buffers:
 /// - a real mode buffer that ends past the real mode region;
-/// - a buffer in a region that gets no storage;
+/// - a real mode buffer at a firmware whose real mode size no source
+///   gives;
 /// - a buffer above the real mode region and outside every allocated
 ///   region;
-/// - a real mode buffer at a firmware whose real mode size no source
-///   gives.
+/// - a buffer in a region that gets no storage;
+/// - a buffer whose bytes the caller's memory does not hold in full.
+///
+/// lv1's translation of the buffer [OFW-4.93 lv1 a:0x254484-0x2545A0]
+/// refuses some of these buffers. No read of its region lookup settles
+/// their statuses.
 const BUFFER: UnmodelledError = UnmodelledError::new(
     "a notification storage_write whose 512-byte buffer CellGov holds no storage for",
 );
@@ -118,13 +121,16 @@ enum BufferPlace {
 /// end in the region [OFW-4.93 lv1 a:0x254520-0x254538], and adds the
 /// offset to the page's address [OFW-4.93 lv1 a:0x25453C-0x25457C].
 /// CellGov keeps the pages of an allocated region in one range of
-/// storage. An address outside every allocated region is a real mode
-/// address, which CellGov keeps at the same real address. The real mode
-/// region holds the `real_mode_size` bytes from address 0, so a buffer
-/// outside every allocated region that does not end in it is unheld.
-/// A `real_mode_size` of `None` makes each such buffer unheld. Bytes
-/// that end past their allocated region get
-/// [`NOTIFY_WRITE_BUFFER_PAST_REGION_STATUS`].
+/// storage. It keeps a real mode address at the same real address.
+///
+/// The place is one of these:
+/// - [`BufferPlace::Lv1`] with [`NOTIFY_WRITE_BUFFER_PAST_REGION_STATUS`]
+///   for bytes that end past their allocated region;
+/// - [`BufferPlace::Real`] for bytes in an allocated region with
+///   storage, or for bytes outside every allocated region that end in
+///   the `real_mode_size` bytes from address 0;
+/// - [`BufferPlace::Unheld`] for each other buffer, and for each buffer
+///   outside every allocated region when `real_mode_size` is `None`.
 fn buffer_real(regions: &MemoryState, real_mode_size: Option<u64>, address: u64) -> BufferPlace {
     let Some(end) = address.checked_add(NOTIFY_BUFFER_BYTES) else {
         return BufferPlace::Unheld;
@@ -192,9 +198,9 @@ fn read_buffer(memory: &GuestMemory, address: u64) -> Option<(u64, u64)> {
 ///   bus, when the partition connected one.
 ///
 /// The model makes these assumptions:
-/// - The storage bus is in the state that completes a request in the
-///   call, and gives a new request no memory object, as the capture
-///   shows after boot.
+/// - The storage bus completes a request in the call and gives a new
+///   request no memory object. The capture shows the bus in this state
+///   after boot.
 /// - Partition 1 holds the tags [`OTHER_PARTITION_NOTIFY_TAGS`].
 /// - The partition's open record is in the bus's list, because its open
 ///   made the record. So lv1's second ready check and its walk of the

@@ -11,10 +11,10 @@
 //! - the bus ids that the handler's checks refuse.
 //!
 //! lv1 finds each other device of buses 1 to 3, and devices 0 to 6 of
-//! bus 4, through state that CellGov does not model, so a call for one is
-//! a refusal. lv1's close of the storage bus reads the state of the
-//! storage devices, so a close of a storage bus that the partition holds
-//! open is a refusal.
+//! bus 4, through state that CellGov does not model. A call for one of
+//! these devices is a refusal. lv1's close of the storage bus reads the
+//! state of the storage devices. So a close of a storage bus that the
+//! partition holds open is a refusal.
 
 use cellgov_ps3_abi::lv1::call::CLOSE_DEVICE;
 use cellgov_ps3_abi::lv1::device_bus::{
@@ -39,7 +39,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
 }];
 
 /// The network device: device 0 of bus 1.
-const NETWORK_DEVICE: OpenDevice = OpenDevice {
+pub(super) const NETWORK_DEVICE: OpenDevice = OpenDevice {
     bus: STATUS_INDICATOR_BUS,
     device: STATUS_INDICATOR_DEVICE,
 };
@@ -77,11 +77,11 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 ///   closes the device.
 ///
 /// The close of a device removes the device's DMA mappings and frees its
-/// DMA regions. The close of device 0 also clears the network device's
-/// indicator, interrupt port and interrupt mask.
+/// DMA regions. The close of device 0 also carries the teardown of the
+/// network device, which [`NetworkChange::TornDown`] describes.
 ///
 /// The model makes these assumptions about device 0:
-/// - The open's hook gave the global object its object at +16, as the
+/// - The open hook gave the global object its object at +16, as the
 ///   capture of the open device shows.
 /// - That object's flag byte at +0 is set, as the capture of the open
 ///   network device reads, so the teardown disconnects the port.

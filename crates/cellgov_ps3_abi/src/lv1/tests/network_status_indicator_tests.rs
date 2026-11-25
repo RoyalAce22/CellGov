@@ -1,7 +1,7 @@
 use super::*;
 use crate::lv1::call::{self, CallSource, NET_SET_INTERRUPT_STATUS_INDICATOR};
 use crate::lv1::status::{
-    zero_extended, LV1_DUPLICATE_ENTRY, LV1_ILLEGAL_PARAMETER_VALUE, LV1_NO_ENTRY,
+    zero_extended, LV1_DUPLICATE_ENTRY, LV1_ILLEGAL_PARAMETER_VALUE, LV1_NO_ENTRY, LV1_WRONG_STATE,
 };
 use crate::lv1::table::{table_entry, TableEntry};
 
@@ -56,6 +56,7 @@ fn no_status_indicator_handler_row_exists_for_a_firmware_whose_lv1_is_not_read()
 /// - [OFW-4.93 lv1 a:0x3083D4-0x3083E0] `li 8; sldi 32; oris 0xffff; ori 0xffef`.
 /// - [OFW-4.93 lv1 a:0x308408-0x308414] `li 4; sldi 32; oris 0xffff; ori 0xffef`.
 /// - [OFW-4.93 lv1 a:0x3084A0-0x3084A8] `li 0; oris 0xffff; ori 0xfff9`.
+/// - [OFW-4.93 lv1 a:0x308300-0x308308] `li 0; oris 0xffff; ori 0xfff5`.
 #[test]
 fn each_check_r3_marks_the_argument_it_reads_over_its_status() {
     let cases = [
@@ -89,8 +90,13 @@ fn each_check_r3_marks_the_argument_it_reads_over_its_status() {
             marked(0, LV1_DUPLICATE_ENTRY),
             built(0, 0xffff, 0xfff9),
         ),
+        (
+            STATUS_INDICATOR_WRONG_STATE_R3,
+            marked(0, LV1_WRONG_STATE),
+            built(0, 0xffff, 0xfff5),
+        ),
     ];
-    assert_eq!(cases.len(), 6);
+    assert_eq!(cases.len(), 7);
     for (r3, expected, instructions) in cases {
         assert_eq!(r3, expected, "0x{expected:016X}");
         assert_eq!(r3, instructions, "0x{instructions:016X}");

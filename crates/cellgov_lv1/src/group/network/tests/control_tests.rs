@@ -1,6 +1,7 @@
 use super::*;
 use crate::answer::HypercallRefusal;
 use crate::group::device_bus::{DeviceBusChange, OpenDevice};
+use crate::group::network::indicator::NETWORK_DEVICE;
 use crate::{answered_numbers, Hypervisor};
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::call::OPEN_DEVICE;
@@ -52,6 +53,7 @@ fn control(r: &HypercallRequest, devices: &DeviceBusState) -> HypercallDispositi
         r,
         Some("4.93"),
         devices,
+        &NetworkState::default(),
         &SYNTHETIC_CONSOLE_IDENTITY,
         CONSOLE_VLAN_FIELDS,
     )
@@ -96,6 +98,7 @@ fn request_1_gives_the_mac_address_of_the_identity_that_the_hypervisor_serves() 
             &kernel_call(),
             Some("4.93"),
             &open(),
+            &NetworkState::default(),
             &other,
             CONSOLE_VLAN_FIELDS
         ),
@@ -235,6 +238,7 @@ fn a_call_at_a_firmware_whose_handler_is_not_read_is_a_refusal() {
                 &call,
                 firmware,
                 &open(),
+                &NetworkState::default(),
                 &SYNTHETIC_CONSOLE_IDENTITY,
                 CONSOLE_VLAN_FIELDS
             ),

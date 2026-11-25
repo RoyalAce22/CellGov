@@ -85,9 +85,10 @@ fn answered(disposition: HypercallDisposition) -> HypercallAnswer {
     }
 }
 
-/// lv1's `status`, zero-extended, with r4 to r10 cleared.
+/// lv1's `status` in r3, zero-extended as the handler returns it
+/// [OFW-4.93 lv1 a:0x308B58], with r4 to r10 cleared.
 fn status(status: i64) -> HypercallDisposition {
-    lv1_answer(status)
+    HypercallDisposition::Answered(HypercallAnswer::lv1_status(zero_extended(status), []))
 }
 
 #[test]
@@ -113,7 +114,7 @@ fn a_notify_write_with_no_port_takes_tag_1_and_keeps_the_mask_and_the_completed_
 }
 
 #[test]
-fn each_notify_write_takes_the_lowest_free_tag_until_every_tag_is_held() {
+fn each_notify_write_takes_the_lowest_free_tag_and_one_with_no_tag_free_gets_busy_with_the_mask() {
     let mut hv = hypervisor(true);
     let memory = kernel_memory();
     for tag in 1..NOTIFY_REQUEST_TAGS {
@@ -266,13 +267,40 @@ fn allocated(offset: u64) -> (Hypervisor, u64, GuestMemory) {
 
 #[test]
 fn a_buffer_in_an_allocated_region_is_read_from_the_region_storage() {
-    let (mut hv, lpar, memory) = allocated(0x100);
+    for offset in [0, 0x100] {
+        let (mut hv, lpar, memory) = allocated(offset);
+        let mut inputs = KERNEL_INPUTS;
+        inputs[5] = lpar + offset;
+        let answer = answered(hv.dispatch_with(&write(&inputs), &memory));
+        assert_eq!(answer.r3, 0, "offset {offset:#x}");
+        assert_eq!(
+            answer.outputs().map(|o| o[0]),
+            Some(1),
+            "offset {offset:#x}"
+        );
+        assert_eq!(
+            hv.groups().storage().notify_event_mask(),
+            Some(KERNEL_MASK),
+            "offset {offset:#x}"
+        );
+    }
+}
+
+/// The first address past the allocated region lies in no region of the
+/// partition and above the real mode region. The region storage just past
+/// the region's range holds a buffer, so a lookup that takes the address
+/// into the region gets an answer.
+#[test]
+fn a_buffer_that_starts_at_its_allocated_region_end_is_a_refusal() {
+    let (mut hv, lpar, memory) = allocated(REGION_SIZE);
     let mut inputs = KERNEL_INPUTS;
-    inputs[5] = lpar + 0x100;
-    let answer = answered(hv.dispatch_with(&write(&inputs), &memory));
-    assert_eq!(answer.r3, 0);
-    assert_eq!(answer.outputs().map(|o| o[0]), Some(1));
-    assert_eq!(hv.groups().storage().notify_event_mask(), Some(KERNEL_MASK));
+    inputs[5] = lpar + REGION_SIZE;
+    let request = write(&inputs);
+    assert_eq!(
+        hv.dispatch_with(&request, &memory),
+        BUFFER.refusal(&request)
+    );
+    assert_eq!(hv.groups().storage().notify_event_mask(), None);
 }
 
 #[test]

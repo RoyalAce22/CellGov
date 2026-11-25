@@ -78,6 +78,9 @@ fn an_open_of_the_held_storage_bus_gets_busy_and_no_change() {
     }
 }
 
+/// The bus 4 lookup reads devices 0 to 6 from the storage bus object's
+/// device table [OFW-4.93 lv1 a:0x2365E4-0x2365EC]
+/// [OFW-4.93 lv1 a:0x236604-0x23661C].
 #[test]
 fn device_minus_1_of_another_bus_and_bus_4_table_devices_stay_refusals() {
     let what = "an open of a device of buses 1 to 3 other than devices 0, 1 and 2 of bus 1, or \

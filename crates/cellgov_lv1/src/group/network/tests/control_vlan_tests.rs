@@ -1,5 +1,6 @@
 use super::*;
 use crate::group::device_bus::DeviceBusChange;
+use crate::group::network::indicator::NETWORK_DEVICE;
 use cellgov_event::UnitId;
 use cellgov_time::GuestTicks;
 
@@ -46,6 +47,7 @@ fn control(r: &HypercallRequest) -> HypercallDisposition {
         r,
         Some("4.93"),
         &open(),
+        &NetworkState::default(),
         &SYNTHETIC_CONSOLE_IDENTITY,
         TABLE_FIELDS,
     )

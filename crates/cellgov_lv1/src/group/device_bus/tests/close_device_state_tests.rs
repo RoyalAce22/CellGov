@@ -106,19 +106,34 @@ fn the_close_of_a_device_with_nothing_held_leaves_a_state_with_no_term() {
     assert_eq!(state.sync_term(), 0);
 }
 
+/// [OFW-4.93 lv1 a:0x23E048-0x23E060] stores 0 in the mask and -1 in the
+/// indicator; [OFW-4.93 lv1 a:0x23E0F8-0x23E108] stores 3 in the state
+/// word. The reopen's setup stores only the state word 2 and +24
+/// [OFW-4.93 lv1 a:0x23E1C8-0x23E1D4] [OFW-4.93 lv1 a:0x23E1F4].
 #[test]
-fn the_teardown_clears_the_indicator_the_port_and_the_mask() {
+fn the_teardown_clears_indicator_and_port_stores_mask_0_and_state_word_3_and_setup_keeps_mask_0() {
     let mut network = NetworkState::default();
+    network.apply(NetworkChange::SetUp);
+    assert_eq!(network, NetworkState::default());
     network.apply(NetworkChange::StatusIndicatorSet(KERNEL_INDICATOR));
     network.apply(NetworkChange::InterruptPortConnected(19));
     network.apply(NetworkChange::InterruptMaskSet(KERNEL_MASK));
-    assert_ne!(network.sync_term(), 0);
     network.apply(NetworkChange::TornDown);
     assert_eq!(network.status_indicator(), None);
     assert_eq!(network.interrupt_port(), None);
-    assert_eq!(network.interrupt_mask(), None);
-    assert_eq!(network, NetworkState::default());
-    assert_eq!(network.sync_term(), 0);
+    assert_eq!(network.interrupt_mask(), Some(0));
+    assert!(network.torn_down());
+    let torn_down = network.clone();
+    network.apply(NetworkChange::TornDown);
+    assert_eq!(network, torn_down);
+
+    network.apply(NetworkChange::SetUp);
+    assert!(!network.torn_down());
+    assert_eq!(network.interrupt_mask(), Some(0));
+    assert_eq!(network.status_indicator(), None);
+    let mut mask_0 = NetworkState::default();
+    mask_0.apply(NetworkChange::InterruptMaskSet(0));
+    assert_eq!(network, mask_0);
 }
 
 /// The call `number` with `registers` as r3 onward.
@@ -199,8 +214,14 @@ fn construct_port(hv: &mut Hypervisor) -> u64 {
     }
 }
 
+/// [OFW-4.93 lv1 a:0x306F98] returns the close function's r3 and
+/// [OFW-4.93 lv1 a:0x0C08] zeroes r4 to r10; a second close gets -11,
+/// zero-extended [OFW-4.93 lv1 a:0x236534-0x236538]
+/// [OFW-4.93 lv1 a:0x237520-0x23752C]; the teardown stores 0 in the mask
+/// and 3 in the state word [OFW-4.93 lv1 a:0x23E048-0x23E060]
+/// [OFW-4.93 lv1 a:0x23E0F8-0x23E108].
 #[test]
-fn the_hypervisor_close_returns_the_state_to_before_the_open_and_a_reopen_works_again() {
+fn the_hypervisor_close_tears_the_network_device_down_and_a_reopen_works_again() {
     assert!(answered_numbers().contains(&CLOSE_DEVICE));
     let mut hv = Hypervisor::new();
     hv.set_firmware("4.93");
@@ -216,9 +237,13 @@ fn the_hypervisor_close_returns_the_state_to_before_the_open_and_a_reopen_works_
     };
     assert_eq!(closed.outputs(), Some([0; 7]));
     assert_eq!(*hv.groups().device_bus(), DeviceBusState::default());
-    assert_eq!(*hv.groups().network(), NetworkState::default());
-    assert_eq!(hv, before_open);
-    assert_eq!(hv.sync_term(), before_open.sync_term());
+    let mut torn_down = NetworkState::default();
+    torn_down.apply(NetworkChange::TornDown);
+    assert_eq!(*hv.groups().network(), torn_down);
+    assert!(hv.groups().network().torn_down());
+    assert_eq!(hv.groups().network().interrupt_mask(), Some(0));
+    assert_ne!(hv, before_open);
+    assert_ne!(hv.sync_term(), before_open.sync_term());
 
     let after_close = hv.clone();
     assert_eq!(
@@ -236,4 +261,6 @@ fn the_hypervisor_close_returns_the_state_to_before_the_open_and_a_reopen_works_
         hv.groups().network().status_indicator(),
         Some(KERNEL_INDICATOR)
     );
+    assert_eq!(hv.groups().network().interrupt_mask(), Some(KERNEL_MASK));
+    assert!(!hv.groups().network().torn_down());
 }

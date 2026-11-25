@@ -232,13 +232,13 @@
 //!    r10 return 0.
 //!
 //! The close function does these steps. The first failure is the answer:
-//! 1. The access check [OFW-4.93 lv1 a:0x2363E0]
+//! 1. It runs the access check [OFW-4.93 lv1 a:0x2363E0]
 //!    [OFW-4.93 lv1 a:0x2373E4-0x2373EC], which
 //!    [`network`](super::network) describes. The function zero-extends a
 //!    failed status and sets bit (mark + 31) for a mark other than 0
 //!    [OFW-4.93 lv1 a:0x237520-0x237540]. See [`close_device_check_r3`].
-//! 2. The device lookup [OFW-4.93 lv1 a:0x2373F0-0x237408]. It finds the
-//!    device that the access check found.
+//! 2. It looks up the device [OFW-4.93 lv1 a:0x2373F0-0x237408]. The
+//!    lookup finds the device that the access check found.
 //! 3. Bus 1 takes a path of its own for each of the devices 0, 1 and 2
 //!    [OFW-4.93 lv1 a:0x23740C-0x237410] [OFW-4.93 lv1 a:0x237458-0x23745C]
 //!    [OFW-4.93 lv1 a:0x2374F8-0x237504]. For each other device, the
@@ -273,8 +273,8 @@
 //!
 //! The teardown does these steps on the object:
 //! 1. It calls a stop function [OFW-4.93 lv1 a:0x23DFA8-0x23DFD8]. That
-//!    function fails with -24 only when a poll of a hardware register gives
-//!    up after 1000 tries [OFW-4.93 lv1 a:0x243924-0x243968]
+//!    function fails with -24 only when a poll of a hardware register stops
+//!    after 1000 tries [OFW-4.93 lv1 a:0x243924-0x243968]
 //!    [OFW-4.93 lv1 a:0x2439C4]. On that failure the teardown returns the
 //!    status, and the state word stays 2 [OFW-4.93 lv1 a:0x23DFDC-0x23E00C].
 //! 2. It stops the device's register block [OFW-4.93 lv1 a:0x23E010-0x23E014].
@@ -342,8 +342,8 @@
 //!   [OFW-4.93 lv1 a:0x2276C8-0x227768].
 //!
 //! The entry at +120 gave each mapping of the partition its I/O address
-//! when `map_device_dma_region` made the mapping, from the same bus
-//! address and the same device word at +160. The mapping function stores
+//! when `map_device_dma_region` made the mapping. It used the same bus
+//! address and the same device word at +160 then. The mapping function stores
 //! 0 at +88, as the capture [`DMA_MAP_CAPTURE`] reads. So the unmap step
 //! removes each mapping of the partition, and the free step then frees
 //! each region of the partition.
@@ -372,9 +372,9 @@
 //! After a close, the controller's next open writes the controller's
 //! registers before it sets the state word to 2
 //! [OFW-4.93 lv1 a:0x23DD2C-0x23DD94]. Those registers are in the
-//! controller's register block, outside partition memory. The open's -5
-//! answer stays out of reach: the open's entry at +16 opens the device
-//! for the caller right before its entry at +48 checks the open.
+//! controller's register block, outside partition memory. That open
+//! cannot get -5, for the reason that the section on device 1 of bus 1
+//! gives.
 //!
 //! ## The storage bus
 //!
@@ -383,9 +383,9 @@
 //! [OFW-4.93 lv1 a:0x335640-0x335644]. Its gate calls the object's method
 //! at +48, and then its methods at +232 and +240, which read the state of
 //! the storage devices [OFW-4.93 lv1 a:0x253FA0-0x254050]. The method
-//! then calls a method of the partition's record through the record's own
-//! table
-//! [OFW-4.93 lv1 a:0x259CC0-0x259CD4]. CellGov does not model that state.
+//! then calls a method of the partition's record through the record's
+//! own table [OFW-4.93 lv1 a:0x259CC0-0x259CD4]. CellGov does not model
+//! that state.
 //!
 //! # The 4.93 kernel's calls of `close_device`
 //!

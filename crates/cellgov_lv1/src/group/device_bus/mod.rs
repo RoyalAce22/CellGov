@@ -3,8 +3,10 @@
 //!
 //! The group answers these calls:
 //! - `open_device` for devices 0, 1 and 2 of bus 1, the first devices
-//!   that the 4.93 kernel opens, and for the storage bus;
-//! - `close_device` for devices 0, 1 and 2 of bus 1;
+//!   that the 4.93 kernel opens, for the storage bus, and for each bus 4
+//!   device that lv1 finds absent;
+//! - `close_device` for the same devices, other than a storage bus that
+//!   the partition holds open;
 //! - `allocate_device_dma_region` and `map_device_dma_region` for device
 //!   0 of bus 1.
 //!

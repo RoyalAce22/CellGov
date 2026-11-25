@@ -5,6 +5,7 @@ use crate::Hypervisor;
 use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_ps3_abi::lv1::call::{OPEN_DEVICE, STORAGE_WRITE};
+use cellgov_ps3_abi::lv1::storage::NOTIFY_COMPLETION_STATUS;
 use cellgov_time::GuestTicks;
 
 /// The `sc` of the kernel's `open_device` of the storage bus
@@ -95,13 +96,19 @@ fn answered(disposition: HypercallDisposition) -> HypercallAnswer {
     }
 }
 
+/// lv1 stores the tag in r4 and the status in r5
+/// [OFW-4.93 lv1 a:0x255E9C-0x255EAC], and frees the entry
+/// [OFW-4.93 lv1 a:0x255EB4-0x255F00].
 #[test]
 fn the_kernels_status_call_takes_the_completed_request_of_tag_1_and_frees_the_tag() {
     let mut hv = hypervisor(Some(0), 1);
     assert_eq!(hv.groups().storage().held_tags(), 0b10);
     let answer = answered(hv.dispatch(&get_status(NOTIFICATION_DEVICE)));
     assert_eq!(answer.r3, 0);
-    assert_eq!(answer.outputs(), Some([1, 0, 0, 0, 0, 0, 0]));
+    assert_eq!(
+        answer.outputs(),
+        Some([1, NOTIFY_COMPLETION_STATUS, 0, 0, 0, 0, 0])
+    );
     assert_eq!(
         answer.changes,
         vec![StateChange::from(StorageChange::NotifyRequestTaken(1))]
@@ -123,6 +130,8 @@ fn the_kernels_next_status_call_with_no_completed_request_gets_no_entry() {
     assert_eq!(answer.changes, vec![]);
 }
 
+/// lv1 walks the request entries from tag 0
+/// [OFW-4.93 lv1 a:0x255E48-0x255E70].
 #[test]
 fn each_status_call_takes_the_lowest_completed_tag_first() {
     let mut hv = hypervisor(Some(0), 3);
@@ -144,6 +153,8 @@ fn a_freed_tag_is_the_next_notification_writes_tag() {
     assert_eq!(written.outputs().map(|o| o[0]), Some(1));
 }
 
+/// lv1 takes only an entry whose completed byte is set
+/// [OFW-4.93 lv1 a:0x255E74-0x255E7C].
 #[test]
 fn a_waiting_request_is_not_taken() {
     let hv = hypervisor(Some(0), 0);
@@ -160,7 +171,7 @@ fn a_waiting_request_is_not_taken() {
 }
 
 #[test]
-fn a_completed_request_keeps_its_status_in_r5() {
+fn the_completed_request_past_a_waiting_one_gives_its_tag_and_status() {
     let hv = hypervisor(Some(0), 0);
     let mut requests = StorageState::default();
     for (tag, completion) in [(2, None), (5, Some(0x1234))] {
@@ -179,18 +190,34 @@ fn a_completed_request_keeps_its_status_in_r5() {
     assert_eq!(answer.outputs(), Some([5, 0x1234, 0, 0, 0, 0, 0]));
 }
 
+/// lv1 asks the ready method before the status method
+/// [OFW-4.93 lv1 a:0x251EF4-0x251F30], so a completed request does not
+/// change the answer.
 #[test]
 fn a_partition_that_did_not_open_the_bus_gets_wrong_state() {
     let mut hv = hypervisor(None, 0);
+    let request = get_status(NOTIFICATION_DEVICE);
     assert_eq!(
-        hv.dispatch(&get_status(NOTIFICATION_DEVICE)),
+        hv.dispatch(&request),
+        lv1_answer(ASYNC_STATUS_NOT_READY_STATUS)
+    );
+    let mut requests = StorageState::default();
+    requests.apply(StorageChange::NotifyRequested(NotifyRequest {
+        tag: 1,
+        completion: Some(NOTIFY_COMPLETION_STATUS),
+    }));
+    assert_eq!(
+        storage_get_async_status(&request, Some("4.93"), &requests, hv.groups().device_bus()),
         lv1_answer(ASYNC_STATUS_NOT_READY_STATUS)
     );
 }
 
 /// lv1 compares the whole doubleword of the device id: unsigned with 6
 /// [OFW-4.93 lv1 a:0x251EAC] and signed with -1 [OFW-4.93 lv1 a:0x251EB8].
-/// So a low word of -1 and the sign bit alone are devices above 6.
+/// So a low word of -1 and the sign bit alone are devices above 6. The
+/// compares come before the ready check
+/// [OFW-4.93 lv1 a:0x251EF4-0x251F30], so a partition that did not open
+/// the bus gets the same answer.
 #[test]
 fn a_device_above_6_other_than_minus_1_gets_no_entry() {
     let mut hv = hypervisor(Some(0), 1);
@@ -207,6 +234,10 @@ fn a_device_above_6_other_than_minus_1_gets_no_entry() {
         );
     }
     assert_eq!(hv.groups().storage().held_tags(), 0b10);
+    assert_eq!(
+        hypervisor(None, 0).dispatch(&get_status(STORAGE_DEVICE_ID_MAX + 1)),
+        lv1_answer(ASYNC_STATUS_NO_DEVICE_STATUS)
+    );
 }
 
 #[test]

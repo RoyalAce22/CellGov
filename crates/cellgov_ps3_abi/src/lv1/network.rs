@@ -29,7 +29,7 @@
 //! For device 0 of bus 1, the handler takes the lock at +40 of a global
 //! object, and reads the object at +16 of it
 //! [OFW-4.93 lv1 a:0x3082B4-0x3082F0]. A state word at +8 of that object
-//! other than 2 gives `LV1_WRONG_STATE` (-11), zero-extended
+//! other than 2 gives [`STATUS_INDICATOR_WRONG_STATE_R3`]
 //! [OFW-4.93 lv1 a:0x3082F4-0x308308].
 //!
 //! `open_device` for device 0 of bus 1 sets that state word to 2:
@@ -49,6 +49,41 @@
 //!   returns the hook's status [OFW-4.93 lv1 a:0x2377B4-0x2377D8].
 //!
 //! So a device 0 of bus 1 that `open_device` opened has the state word 2.
+//!
+//! `close_device` of an open device 0 of bus 1 runs the teardown on the
+//! object at +16; see the `close_device` section of
+//! [`super::device_bus`]. The teardown does these stores
+//! [OFW-4.93 lv1 a:0x23E048-0x23E060] [OFW-4.93 lv1 a:0x23E0F8-0x23E108]:
+//! - 0 in the mask at +32;
+//! - -1 in the indicator at +48;
+//! - [`TORN_DOWN_STATE_WORD`] in the state word.
+//!
+//! It destroys only the object at +24 of that object
+//! [OFW-4.93 lv1 a:0x23E024-0x23E044]. The close hook reads the doubleword
+//! at +16 of the global object and writes no field of the global object
+//! [OFW-4.93 lv1 a:0x23E240-0x23E2F4]. So after a close, the object at +16
+//! stays. Each of these calls then reads the state word 3 and gets its
+//! wrong state r3:
+//! - `net_set_interrupt_status_indicator`;
+//! - `net_control`;
+//! - `net_set_interrupt_mask`.
+//!
+//! A later `open_device` of the device runs the open hook. The hook
+//! refuses only the state word 2 [OFW-4.93 lv1 a:0x23E33C-0x23E348], so it
+//! reaches the setup [OFW-4.93 lv1 a:0x23E34C-0x23E370]. The reopen does
+//! these steps on the object at +16:
+//! - The setup stores a new object at +24 and the state word 2
+//!   [OFW-4.93 lv1 a:0x23E1C8-0x23E1D4] [OFW-4.93 lv1 a:0x23E1F4].
+//! - The setup's callee keeps the object at +16 only as a pointer in the
+//!   new object [OFW-4.93 lv1 a:0x242874].
+//! - On one path the hook first calls [OFW-4.93 lv1 a:0x2482BC]. That
+//!   function reads only r3, the object that the doubleword at 0x368328
+//!   points to [OFW-4.93 lv1 a:0x23E3A0-0x23E3A8]
+//!   [OFW-4.93 lv1 a:0x353D20-0x353D24]. The global object is at the
+//!   doubleword 0x3682B0.
+//!
+//! So no step of the reopen stores the mask at +32 or the indicator at
+//! +48. After the reopen the mask stays 0 and no indicator is set.
 //!
 //! # The address
 //!
@@ -220,8 +255,8 @@
 //! 4. The storage connect [OFW-4.93 lv1 a:0x255254], with the device and
 //!    r5 [OFW-4.93 lv1 a:0x23699C-0x2369BC]. Its -6 gives
 //!    [`STORAGE_PORT_NO_PORT_R3`], and its -9 gives
-//!    [`STORAGE_PORT_BUSY_R3`]. It returns any other status zero-extended
-//!    [OFW-4.93 lv1 a:0x2369CC-0x2369F4].
+//!    [`STORAGE_PORT_BUSY_R3`]. The connect function returns any other
+//!    status zero-extended [OFW-4.93 lv1 a:0x2369CC-0x2369F4].
 //!
 //! For device -1, the device is the storage bus object. The object's
 //! method at +48 [OFW-4.93 lv1 a:0x35DD60-0x35DD64]
@@ -235,12 +270,14 @@
 //! The storage connect holds the same lock
 //! [OFW-4.93 lv1 a:0x255280-0x2552A4] and does these steps:
 //! 1. It looks up r5 in the calling partition's object table at +88
-//!    [OFW-4.93 lv1 a:0x2552A8-0x2553B8]. A free id
-//!    [OFW-4.93 lv1 a:0x255300-0x255314] [OFW-4.93 lv1 a:0x2C9DB4-0x2C9E40],
-//!    an empty slot or an object of another class gets -6
-//!    [OFW-4.93 lv1 a:0x2553B8-0x2553D0]. The port class is the word that
+//!    [OFW-4.93 lv1 a:0x2552A8-0x2553B8]. The port class is the word that
 //!    the TOC slot r2 - 23160 holds, 0x329310
-//!    [OFW-4.93 lv1 a:0x3545C0-0x3545C4].
+//!    [OFW-4.93 lv1 a:0x3545C0-0x3545C4]. Each of these gets -6
+//!    [OFW-4.93 lv1 a:0x2553B8-0x2553D0]:
+//!    - a free id
+//!      [OFW-4.93 lv1 a:0x255300-0x255314] [OFW-4.93 lv1 a:0x2C9DB4-0x2C9E40];
+//!    - an empty slot;
+//!    - an object of another class.
 //! 2. A port whose byte at +148 is 0 gets -6
 //!    [OFW-4.93 lv1 a:0x2554B8-0x2554E4].
 //! 3. It tests again the flag that is 1 only when the lookup gave a null
@@ -250,8 +287,9 @@
 //!    with an id at or above [`STORAGE_PORT_ID_LIMIT`], outside segment 0,
 //!    passes.
 //! 4. It takes slot 0 when slot 0 is used and holds the caller's
-//!    partition. Otherwise it takes slot 1 when slot 1 does. Otherwise it
-//!    returns -6 [OFW-4.93 lv1 a:0x2554F0-0x25551C]
+//!    partition. Otherwise it takes slot 1 when slot 1 is used and holds
+//!    the caller's partition. Otherwise it returns -6
+//!    [OFW-4.93 lv1 a:0x2554F0-0x25551C]
 //!    [OFW-4.93 lv1 a:0x2555F8-0x255608].
 //! 5. The slot's handle is at +2568 + 64 x slot. When the handle holds a
 //!    port with a reference, it returns -9
@@ -272,7 +310,7 @@
 //! - r5: the port id that `construct_event_receive_port` gave it;
 //! - r6: the interrupt id 0.
 //!
-//! The setup goes on only when r3 is 0
+//! The setup continues only when r3 is 0
 //! [OFW-4.93 lv2_kernel a:0x80000000000964D0-0x80000000000964DC]. The
 //! capture [`STORAGE_PORT_CAPTURE`] shows the port with that id at +16 of
 //! slot 1's handle after the boot. The capture
@@ -533,6 +571,15 @@ pub const STATUS_INDICATOR_NO_BUS_R3: u64 = 0x0000_0001_FFFF_FFFA;
 /// [`STATUS_INDICATOR_BUS`]: `LV1_NO_ENTRY` (-6), with r4 marked
 /// [OFW-4.93 lv1 a:0x308334-0x308340].
 pub const STATUS_INDICATOR_NO_DEVICE_R3: u64 = 0x0000_0002_FFFF_FFFA;
+
+/// The r3 for a network device whose state word is not 2:
+/// `LV1_WRONG_STATE` (-11), zero-extended
+/// [OFW-4.93 lv1 a:0x308300-0x308308].
+pub const STATUS_INDICATOR_WRONG_STATE_R3: u64 = zero_extended(LV1_WRONG_STATE);
+
+/// The state word that lv1's teardown stores in the network device's
+/// object [OFW-4.93 lv1 a:0x23E0F8-0x23E108].
+pub const TORN_DOWN_STATE_WORD: u32 = 3;
 
 /// The r3 for an r6 other than 0: `LV1_ILLEGAL_PARAMETER_VALUE` (-17),
 /// with r6 marked [OFW-4.93 lv1 a:0x3083CC-0x3083E0].

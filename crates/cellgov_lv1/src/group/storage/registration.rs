@@ -19,12 +19,12 @@ pub(crate) const GROUP: Group = Group {
         HashedSurface {
             name: "the notification requests that lv1 holds for the partition",
             source: Some(NOTIFY_REQUEST_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(33),
         },
         HashedSurface {
             name: "the event mask of the partition's storage bus open",
             source: Some(NOTIFY_EVENT_MASK_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(33),
         },
     ],
 };
@@ -106,7 +106,7 @@ impl StorageState {
 
     /// The sum of the sync-state terms of the group's hashed surfaces.
     ///
-    /// A state that holds no value adds no term.
+    /// A state with no request and no event mask gives 0.
     pub fn sync_term(&self) -> u128 {
         let requests = self.notify_requests().fold(0u128, |sum, request| {
             sum.wrapping_add(lanes::value_term(

@@ -21,7 +21,7 @@ const ID_OFFSET: u64 = 72;
 const PORT_CLASS: u64 = 0x32_9310;
 
 /// The word that `construct_event_receive_port` gives the port
-/// constructor for +136, from the TOC slot r2 - 7896
+/// constructor for +136, from the TOC slot at r2 - 7896
 /// [OFW-4.93 lv1 a:0x358160].
 const PORT_WORD: u64 = 0x32_98d2;
 

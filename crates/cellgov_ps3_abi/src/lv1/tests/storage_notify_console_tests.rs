@@ -30,7 +30,7 @@ pub(crate) const ENTRY_BYTES: u64 = 48;
 const PARTITION_1: u64 = 1;
 
 /// The value of the doubleword at `address` in the capture's file
-/// `name`. Both reads of the doubleword must agree.
+/// `name`. Panics when the two reads of the doubleword disagree.
 pub(crate) fn captured(name: &str, address: u64) -> u64 {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")

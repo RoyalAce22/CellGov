@@ -34,7 +34,7 @@
 //! For device -1 the core and the notification write method do these
 //! steps. The first failure is the answer:
 //! 1. The core asks the storage bus object's ready method, slot 6
-//!    [OFW-4.93 lv1 a:0x2513B8-0x2513CC]. The method is true when one of
+//!    [OFW-4.93 lv1 a:0x2513B8-0x2513CC]. The method returns true when one of
 //!    the bus's two open slots holds the caller's partition and has its
 //!    used byte set [OFW-4.93 lv1 a:0x25477C-0x2547FC]. A partition that
 //!    did not open the bus gets [`STORAGE_WRITE_NOT_READY_STATUS`].
@@ -62,7 +62,7 @@
 //!    [OFW-4.93 lv1 a:0x25A7B0].
 //! 6. Its request function gives the request the lowest of
 //!    [`NOTIFY_REQUEST_TAGS`] tags that no request holds, and stores the
-//!    tag in the return slot of r4. When every tag is held, it returns
+//!    tag in the return slot of r4. When requests hold every tag, it returns
 //!    [`NOTIFY_REQUESTS_FULL_STATUS`]
 //!    [OFW-4.93 lv1 a:0x25398C-0x253A04].
 //! 7. Its completion function completes the request with status
@@ -75,8 +75,15 @@
 //! 8. The method returns 0.
 //!
 //! The 4.93 kernel's call [OFW-4.93 lv2_kernel a:0x80000000000ae250]
-//! passes r3 = -1, r4 = 0, r5 = 0, r6 = 1, r7 = 0 and a buffer with 0 at
-//! +0 and 2 at +8 [OFW-4.93 lv2_kernel a:0x80000000000ae1dc-0x80000000000ae24c].
+//! passes these inputs
+//! [OFW-4.93 lv2_kernel a:0x80000000000ae1dc-0x80000000000ae24c]:
+//! - r3 = -1;
+//! - r4 = 0;
+//! - r5 = 0;
+//! - r6 = 1;
+//! - r7 = 0;
+//! - a buffer with 0 at +0 and 2 at +8.
+//!
 //! On r3 = 0 it keeps r4 as the request's tag
 //! [OFW-4.93 lv2_kernel a:0x80000000000ae254-0x80000000000ae278].
 
@@ -123,8 +130,8 @@ pub const NOTIFY_REQUEST_CAPTURE: &str = "tests/micro/lv1_storage_notify_request
 ///
 /// [PS3DEVWIKI-HV-RE s:Storage_bus_subsystem] The storage bus object holds a table of pointers to at most 7 storage device objects at offset 0xEE8.
 ///
-/// The lookup for the storage bus reads the table up to this id, compared
-/// unsigned [OFW-4.93 lv1 a:0x2365E4-0x2365EC]
+/// The lookup for the storage bus reads the table up to this id, with an
+/// unsigned compare [OFW-4.93 lv1 a:0x2365E4-0x2365EC]
 /// [OFW-4.93 lv1 a:0x236604-0x23661C].
 pub const STORAGE_DEVICE_ID_MAX: u64 = 6;
 
@@ -268,7 +275,7 @@ pub const NOTIFY_EVENT_MASK_OFFSET: u64 = 8;
 /// tag is from 0 to 15 [OFW-4.93 lv1 a:0x25398C-0x2539CC].
 pub const NOTIFY_REQUEST_TAGS: u8 = 16;
 
-/// The status of a notification request when every tag is held:
+/// The status of a notification request when requests hold every tag:
 /// `LV1_BUSY` (-9) [OFW-4.93 lv1 a:0x2539C8].
 pub const NOTIFY_REQUESTS_FULL_STATUS: i64 = LV1_BUSY;
 

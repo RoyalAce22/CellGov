@@ -3,16 +3,18 @@
 //!
 //! The handler answers the call for the network device; see
 //! [`cellgov_ps3_abi::lv1::network`]. lv1 keeps the mask that the last
-//! call set, and the state holds it.
+//! call set, or the 0 that the close of the device stored, and the state
+//! holds it.
 
 use cellgov_ps3_abi::lv1::call::NET_SET_INTERRUPT_MASK;
 use cellgov_ps3_abi::lv1::network::{
     interrupt_mask_device_r3, interrupt_mask_handler, INTERRUPT_MASK_R6_R3,
+    INTERRUPT_MASK_WRONG_STATE_R3,
 };
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
-use super::indicator::NETWORK_DEVICE;
-use super::NetworkChange;
+use super::state_word::{state_word, StateWord};
+use super::{NetworkChange, NetworkState};
 use crate::answer::{HypercallAnswer, HypercallDisposition, UnmodelledError};
 use crate::group::device_bus::DeviceBusState;
 use crate::group::hypercall::Hypercall;
@@ -24,7 +26,12 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
     name: "net_set_interrupt_mask",
     cost: None,
     handler: |request, input| {
-        set_interrupt_mask(request, input.firmware, input.groups.device_bus())
+        set_interrupt_mask(
+            request,
+            input.firmware,
+            input.groups.device_bus(),
+            input.groups.network(),
+        )
     },
 }];
 
@@ -32,7 +39,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
 const UNREAD_FIRMWARE: UnmodelledError =
     UnmodelledError::new("a net_set_interrupt_mask at a firmware whose lv1 handler is not read");
 
-/// The call before the partition opened the network device.
+/// The call before the partition ever opened the network device.
 const DEVICE_NOT_OPEN: UnmodelledError = UnmodelledError::new(
     "a net_set_interrupt_mask before the partition opened the network device, whose state word \
      lv1's init sets",
@@ -53,13 +60,17 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// The model assumes that an open network device has the state word 2,
 /// because the open sets it.
 ///
+/// After a close of the device, the state word is 3, so the call gets
+/// [`INTERRUPT_MASK_WRONG_STATE_R3`] and changes no state.
+///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
-/// - the partition did not open the network device.
+/// - the partition never opened the network device.
 pub(crate) fn set_interrupt_mask(
     request: &HypercallRequest,
     firmware: Option<&str>,
     devices: &DeviceBusState,
+    network: &NetworkState,
 ) -> HypercallDisposition {
     if firmware.and_then(interrupt_mask_handler).is_none() {
         return UNREAD_FIRMWARE.refusal(request);
@@ -67,8 +78,10 @@ pub(crate) fn set_interrupt_mask(
     if let Some(r3) = interrupt_mask_device_r3(request.r(3), request.r(4)) {
         return lv1_answer(r3);
     }
-    if !devices.is_open(NETWORK_DEVICE) {
-        return DEVICE_NOT_OPEN.refusal(request);
+    match state_word(devices, network) {
+        StateWord::Set => {}
+        StateWord::TornDown => return lv1_answer(INTERRUPT_MASK_WRONG_STATE_R3),
+        StateWord::Unread => return DEVICE_NOT_OPEN.refusal(request),
     }
     if request.r(6) != 0 {
         return lv1_answer(INTERRUPT_MASK_R6_R3);

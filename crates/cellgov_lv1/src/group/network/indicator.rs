@@ -9,10 +9,11 @@ use cellgov_ps3_abi::lv1::interrupt::region_lookup_base;
 use cellgov_ps3_abi::lv1::network::{
     status_indicator_device_r3, status_indicator_handler, STATUS_INDICATOR_ADDRESS_R3,
     STATUS_INDICATOR_ALIGN, STATUS_INDICATOR_BUS, STATUS_INDICATOR_DEVICE, STATUS_INDICATOR_R6_R3,
-    STATUS_INDICATOR_SET_R3,
+    STATUS_INDICATOR_SET_R3, STATUS_INDICATOR_WRONG_STATE_R3,
 };
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
+use super::state_word::{state_word, StateWord};
 use super::{NetworkChange, NetworkState};
 use crate::answer::{HypercallAnswer, HypercallDisposition, UnmodelledError};
 use crate::group::device_bus::{DeviceBusState, OpenDevice};
@@ -46,7 +47,7 @@ const UNREAD_FIRMWARE: UnmodelledError = UnmodelledError::new(
     "a net_set_interrupt_status_indicator at a firmware whose lv1 handler is not read",
 );
 
-/// The call before the partition opened the network device.
+/// The call before the partition ever opened the network device.
 const DEVICE_NOT_OPEN: UnmodelledError = UnmodelledError::new(
     "a net_set_interrupt_status_indicator before the partition opened the network device, whose \
      state word lv1's init sets",
@@ -75,6 +76,9 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// checks and their order. A call that passes them gets 0, and the
 /// answer carries the indicator's address.
 ///
+/// After a close of the network device, the state word is 3, so the call
+/// gets [`STATUS_INDICATOR_WRONG_STATE_R3`] and changes no state.
+///
 /// The model treats the real mode region as a region that passes lv1's
 /// class check and its page object check. The kernel closes the network
 /// device when this call fails. The network device of the reference
@@ -82,7 +86,7 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
-/// - the partition did not open the network device;
+/// - the partition never opened the network device;
 /// - no source gives the real mode size for `firmware`;
 /// - r5 is outside the real mode region.
 pub(crate) fn set_status_indicator(
@@ -97,8 +101,10 @@ pub(crate) fn set_status_indicator(
     if let Some(r3) = status_indicator_device_r3(request.r(3), request.r(4)) {
         return lv1_answer(r3);
     }
-    if !devices.is_open(NETWORK_DEVICE) {
-        return DEVICE_NOT_OPEN.refusal(request);
+    match state_word(devices, network) {
+        StateWord::Set => {}
+        StateWord::TornDown => return lv1_answer(STATUS_INDICATOR_WRONG_STATE_R3),
+        StateWord::Unread => return DEVICE_NOT_OPEN.refusal(request),
     }
     if request.r(6) != 0 {
         return lv1_answer(STATUS_INDICATOR_R6_R3);

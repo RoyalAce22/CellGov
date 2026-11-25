@@ -12,11 +12,12 @@ use cellgov_ps3_abi::lv1::call::NET_CONTROL;
 use cellgov_ps3_abi::lv1::network::{
     net_control_device_r3, net_control_handler, net_control_request_range_r3, net_control_vlan_id,
     VlanAnswer, VlanFields, CONSOLE_VLAN_FIELDS, NET_CONTROL_GET_MAC_ADDRESS,
-    NET_CONTROL_GET_VLAN_ID,
+    NET_CONTROL_GET_VLAN_ID, NET_CONTROL_WRONG_STATE_R3,
 };
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
-use super::indicator::NETWORK_DEVICE;
+use super::state_word::{state_word, StateWord};
+use super::NetworkState;
 use crate::answer::{HypercallAnswer, HypercallDisposition, UnmodelledError};
 use crate::group::device_bus::DeviceBusState;
 use crate::group::hypercall::Hypercall;
@@ -33,6 +34,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
             request,
             input.firmware,
             input.groups.device_bus(),
+            input.groups.network(),
             &SYNTHETIC_CONSOLE_IDENTITY,
             CONSOLE_VLAN_FIELDS,
         )
@@ -43,7 +45,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
 const UNREAD_FIRMWARE: UnmodelledError =
     UnmodelledError::new("a net_control at a firmware whose lv1 handler is not read");
 
-/// The call before the partition opened the network device.
+/// The call before the partition ever opened the network device.
 const DEVICE_NOT_OPEN: UnmodelledError = UnmodelledError::new(
     "a net_control before the partition opened the network device, whose state word lv1's init \
      sets",
@@ -77,6 +79,10 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 ///   in r6 and `vlan_fields`. An id is r4, with 0 in r3 and in r5 to r10.
 ///   A failure is r3, with r4 to r10 cleared.
 ///
+/// After a close of the network device, the state word is 3, so the call
+/// gets [`NET_CONTROL_WRONG_STATE_R3`] with r4 to r10 cleared, and changes
+/// no state.
+///
 /// The model makes these assumptions:
 /// - An open network device has the state word 2, because the open sets
 ///   it.
@@ -90,13 +96,14 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
-/// - the partition did not open the network device;
+/// - the partition never opened the network device;
 /// - r5 is a code that only the privilege bit passes;
 /// - r5 is a code from 2 to 11 other than 4.
 pub(crate) fn net_control(
     request: &HypercallRequest,
     firmware: Option<&str>,
     devices: &DeviceBusState,
+    network: &NetworkState,
     identity: &ConsoleIdentity,
     vlan_fields: VlanFields,
 ) -> HypercallDisposition {
@@ -106,8 +113,10 @@ pub(crate) fn net_control(
     if let Some(r3) = net_control_device_r3(request.r(3), request.r(4)) {
         return lv1_answer(r3);
     }
-    if !devices.is_open(NETWORK_DEVICE) {
-        return DEVICE_NOT_OPEN.refusal(request);
+    match state_word(devices, network) {
+        StateWord::Set => {}
+        StateWord::TornDown => return lv1_answer(NET_CONTROL_WRONG_STATE_R3),
+        StateWord::Unread => return DEVICE_NOT_OPEN.refusal(request),
     }
     let code = request.r(5);
     if let Some(r3) = net_control_request_range_r3(code, true) {

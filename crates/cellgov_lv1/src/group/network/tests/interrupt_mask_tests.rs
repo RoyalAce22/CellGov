@@ -1,6 +1,7 @@
 use super::*;
 use crate::answer::HypercallRefusal;
 use crate::group::device_bus::{DeviceBusChange, OpenDevice};
+use crate::group::network::indicator::NETWORK_DEVICE;
 use crate::{answered_numbers, Hypervisor};
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::call::OPEN_DEVICE;
@@ -47,7 +48,7 @@ fn open() -> DeviceBusState {
 }
 
 fn set_mask(r: &HypercallRequest, devices: &DeviceBusState) -> HypercallDisposition {
-    set_interrupt_mask(r, Some("4.93"), devices)
+    set_interrupt_mask(r, Some("4.93"), devices, &NetworkState::default())
 }
 
 fn answered(r3: u64) -> HypercallDisposition {
@@ -172,7 +173,7 @@ fn a_call_at_a_firmware_whose_handler_is_not_read_is_a_refusal_before_any_check(
     for firmware in [None, Some("3.70"), Some("4.92")] {
         for call in &calls {
             assert_eq!(
-                set_interrupt_mask(call, firmware, &open()),
+                set_interrupt_mask(call, firmware, &open(), &NetworkState::default()),
                 refused(call, UNREAD_FIRMWARE.what),
                 "{firmware:?} bus {:#x}",
                 call.r(3)
@@ -180,7 +181,12 @@ fn a_call_at_a_firmware_whose_handler_is_not_read_is_a_refusal_before_any_check(
         }
         let call = kernel_call();
         assert_eq!(
-            set_interrupt_mask(&call, firmware, &DeviceBusState::default()),
+            set_interrupt_mask(
+                &call,
+                firmware,
+                &DeviceBusState::default(),
+                &NetworkState::default()
+            ),
             refused(&call, UNREAD_FIRMWARE.what),
             "{firmware:?} before the open"
         );

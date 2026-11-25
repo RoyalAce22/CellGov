@@ -216,17 +216,18 @@ const fn call(thread: u8, sc: u64, id: u64) -> GameOsPortCall {
 /// the storage bus, and its id. The id is the lowest free id
 /// [OFW-4.93 lv1 a:0x2CA258], the id after the network device's port.
 ///
-/// The port setup serves each interrupt object of type 2. So the row
-/// gives the id of the first call at that address on thread 0. A later
-/// call there finds the id held, and the hypervisor refuses it.
+/// The port setup serves each interrupt object of type 2. Two other
+/// kernel functions register an interrupt object through it:
+/// - one sets up type 2 for a device it opens
+///   [OFW-4.93 lv2_kernel a:0x80000000000ac158-0x80000000000ac164]
+///   [OFW-4.93 lv2_kernel a:0x80000000000ac1ec];
+/// - one passes its caller's type
+///   [OFW-4.93 lv2_kernel a:0x8000000000094580-0x80000000000945bc].
 ///
-/// Two other kernel functions register an interrupt object through the
-/// same port setup: one sets up type 2 for a device it opens
-/// [OFW-4.93 lv2_kernel a:0x80000000000ac158-0x80000000000ac164]
-/// [OFW-4.93 lv2_kernel a:0x80000000000ac1ec], and one passes its
-/// caller's type [OFW-4.93 lv2_kernel a:0x8000000000094580-0x80000000000945bc].
-/// The row keys only the thread and the address, so it is true only while
-/// the storage bus function makes the first call there on thread 0.
+/// The row keys only the thread and the address. So it gives the id of
+/// the first call there on thread 0, and it is true only while the
+/// storage bus function makes that call. A later call there finds the id
+/// held, and the hypervisor refuses it.
 pub const GAME_OS_PORT_CALLS: &[GameOsPortCalls] = &[GameOsPortCalls {
     firmware: "4.93",
     calls: &[

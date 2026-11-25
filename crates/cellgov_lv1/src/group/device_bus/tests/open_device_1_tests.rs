@@ -40,9 +40,15 @@ fn opened(devices: &[OpenDevice]) -> DeviceBusState {
     state
 }
 
+/// The answer that opens `device`. For device 0 the open hook's setup also
+/// stores 2 in the network device's state word
+/// [OFW-4.93 lv1 a:0x23E1C8-0x23E1D4].
 fn opens(device: OpenDevice) -> HypercallDisposition {
     let mut answer = HypercallAnswer::lv1_status(0, [0; 7]);
     answer.push_change(DeviceBusChange::Opened(device));
+    if device == BUS_1_DEVICE_0 {
+        answer.push_change(NetworkChange::SetUp);
+    }
     HypercallDisposition::Answered(answer)
 }
 

@@ -33,13 +33,12 @@ fn the_port_id_moves_the_term_and_adds_to_the_storage_bus_open_term() {
 }
 
 #[test]
-fn the_storage_bus_port_surface_is_pending_on_its_own_source() {
+fn the_storage_bus_port_surface_is_on_its_own_source() {
     let surfaces: Vec<_> = GROUP
         .hashed_surfaces
         .iter()
         .filter(|surface| surface.source == Some(STORAGE_BUS_PORT_SOURCE))
         .collect();
     assert_eq!(surfaces.len(), 1);
-    assert_eq!(surfaces[0].stamp, Stamp::Pending);
     assert_eq!(STORAGE_BUS_PORT_SOURCE, 180);
 }

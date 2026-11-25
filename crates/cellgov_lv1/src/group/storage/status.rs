@@ -41,7 +41,7 @@ const UNREAD_FIRMWARE: UnmodelledError =
 /// The call for a device from 0 to 6.
 ///
 /// lv1 calls the status method of the device's object
-/// [OFW-4.93 lv1 a:0x251EE0-0x251F94], and CellGov models no storage
+/// [OFW-4.93 lv1 a:0x251EE0-0x251F94]. CellGov models no storage
 /// device object.
 const DEVICE_OBJECT: UnmodelledError = UnmodelledError::new(
     "a storage_get_async_status for a device from 0 to 6, whose device object CellGov does not model",
@@ -51,7 +51,8 @@ const DEVICE_OBJECT: UnmodelledError = UnmodelledError::new(
 /// read the slot word.
 ///
 /// lv1 takes the doubleword at +56 of the partition's open slot
-/// [OFW-4.93 lv1 a:0x25606C-0x25609C], and CellGov does not model it.
+/// [OFW-4.93 lv1 a:0x25606C-0x25609C]. CellGov does not model the
+/// doubleword.
 const SLOT_WORD: UnmodelledError = UnmodelledError::new(
     "a storage_get_async_status of the notification device that reads the open slot's word",
 );
@@ -59,10 +60,10 @@ const SLOT_WORD: UnmodelledError = UnmodelledError::new(
 /// Hypercall 249: the status of a completed request of the storage
 /// device r3.
 ///
-/// For device -1 the answer is the completed request of the lowest tag
-/// that the partition holds: r3 = 0, r4 = the tag and r5 = the request's
-/// status, with r6 to r10 cleared. The answer carries the change that
-/// removes the request and frees its tag. Other calls get lv1's own r3,
+/// For device -1, the answer gives the completed request of the lowest
+/// tag. It sets r3 = 0, r4 = the tag and r5 = the request's status, and
+/// clears r6 to r10. The answer carries the change that removes the
+/// request and frees its tag. Other calls get lv1's own r3,
 /// zero-extended, with r4 to r10 cleared, in lv1's order:
 /// 1. a device id above 6, other than -1, gets
 ///    [`ASYNC_STATUS_NO_DEVICE_STATUS`];
@@ -72,9 +73,9 @@ const SLOT_WORD: UnmodelledError = UnmodelledError::new(
 ///    [`ASYNC_STATUS_NONE_STATUS`].
 ///
 /// The model makes these assumptions:
-/// - Each request that the model holds is the game OS partition's, with
-///   the kind 0, no memory object and 0 at +32, as the notification
-///   write makes it.
+/// - Each request that the model holds is the game OS partition's. The
+///   notification write gives it the kind 0, no memory object and 0 at
+///   +32.
 /// - The game OS partition's open slot holds the r5 of its open.
 ///
 /// The call is a refusal in these cases:

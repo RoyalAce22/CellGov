@@ -63,11 +63,13 @@ fn r3_of(disposition: &HypercallDisposition) -> Option<u64> {
 }
 
 /// [OFW-4.93 lv1 a:0x2280B0-0x2280BC] sets the open flag and returns 0;
-/// [OFW-4.93 lv1 a:0x2377A8] returns 0 after the hook.
+/// [OFW-4.93 lv1 a:0x2377A8] returns 0 after the hook, whose setup stores
+/// 2 in the network device's state word [OFW-4.93 lv1 a:0x23E1C8-0x23E1D4].
 #[test]
-fn the_kernel_call_gets_r3_0_with_r4_to_r10_cleared_and_opens_bus_1_device_0() {
+fn the_kernel_call_gets_r3_0_with_r4_to_r10_cleared_and_opens_and_sets_up_bus_1_device_0() {
     let mut expected = HypercallAnswer::lv1_status(0, [0; 7]);
     expected.push_change(DeviceBusChange::Opened(BUS_1_DEVICE_0));
+    expected.push_change(NetworkChange::SetUp);
     assert_eq!(
         open_device(&kernel_call(), Some("4.93"), &DeviceBusState::default()),
         HypercallDisposition::Answered(expected)
@@ -91,6 +93,7 @@ fn the_answer_ignores_r5() {
     let open = opened(BUS_1_DEVICE_0);
     let mut opens = HypercallAnswer::lv1_status(0, [0; 7]);
     opens.push_change(DeviceBusChange::Opened(BUS_1_DEVICE_0));
+    opens.push_change(NetworkChange::SetUp);
     let expected = (
         HypercallDisposition::Answered(opens),
         answered(0x0000_0000_FFFF_FFF7),
@@ -140,6 +143,10 @@ fn each_failed_bus_check_gets_its_marked_status_for_any_device() {
     }
 }
 
+/// The bus 4 lookup reads devices 0 to 6 from the storage bus object's
+/// device table [OFW-4.93 lv1 a:0x2365E4-0x2365EC]
+/// [OFW-4.93 lv1 a:0x236604-0x23661C], so device 6 is the largest bus 4
+/// device whose answer reads that state.
 #[test]
 fn an_open_of_another_device_on_a_bus_that_passes_the_checks_is_a_refusal() {
     let what = "an open of a device of buses 1 to 3 other than devices 0, 1 and 2 of bus 1, or \

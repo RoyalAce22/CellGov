@@ -47,7 +47,7 @@ pub(crate) const GROUP: Group = Group {
         HashedSurface {
             name: "the event receive port that lv1 connected to the storage bus",
             source: Some(STORAGE_BUS_PORT_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(33),
         },
     ],
 };
@@ -69,7 +69,7 @@ pub(crate) const DMA_MAPPING_SOURCE: u8 = 178;
 pub(crate) const STORAGE_BUS_OPEN_SOURCE: u8 = 179;
 
 /// The lane source of the event receive port that lv1 connected to the
-/// storage bus: one object, whose field 1 holds the port id.
+/// storage bus: object 0, whose field 1 holds the port id.
 pub(crate) const STORAGE_BUS_PORT_SOURCE: u8 = 180;
 
 /// The device bus group's state.

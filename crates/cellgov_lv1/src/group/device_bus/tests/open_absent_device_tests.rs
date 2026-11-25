@@ -29,8 +29,10 @@ const ABSENT_DEVICES: [u64; 6] = [
     u64::MAX - 1,
 ];
 
-/// The device bus states that the answer must not read: empty, the
-/// storage bus held, and device 0 of bus 1 open.
+/// The device bus states that the answer does not read:
+/// - the empty state;
+/// - the state that holds the storage bus;
+/// - the state with device 0 of bus 1 open.
 fn states() -> [DeviceBusState; 3] {
     let mut held = DeviceBusState::default();
     held.apply(DeviceBusChange::StorageBusOpened(StorageBusOpen { r5: 0 }));
