@@ -94,7 +94,7 @@ fn request_at(port: u64, param: u64, pc: u64) -> HypercallRequest {
 }
 
 fn at_4_93(r: &HypercallRequest) -> HypercallDisposition {
-    get_param(r, Some("4.93"))
+    get_param(r, Some("4.93"), &UartState::default())
 }
 
 /// lv1 returns 0 with the value in r4, and the vector's entry zeroes r5
@@ -167,9 +167,9 @@ fn a_port_that_no_source_gives_is_a_refusal() {
 }
 
 #[test]
-fn a_parameter_other_than_a_buffer_size_is_a_refusal() {
-    let what = "a virtual UART parameter other than a buffer size";
-    for param in [0, 1, 2, 4, 6, 7] {
+fn a_parameter_other_than_a_buffer_size_or_the_interrupt_status_is_a_refusal() {
+    let what = "a virtual UART parameter other than a buffer size or the interrupt status";
+    for param in [0, 1, 2, 4, 6] {
         let r = request(0, param);
         assert_eq!(at_4_93(&r), refused(&r, what), "param {param}");
     }
@@ -223,7 +223,11 @@ fn a_param_call_at_a_firmware_whose_handler_is_not_read_is_a_refusal() {
     let r = request(0, 3);
     let what = "a virtual UART parameter call at a firmware whose lv1 handler is not read";
     for firmware in [None, Some("4.92")] {
-        assert_eq!(get_param(&r, firmware), refused(&r, what), "{firmware:?}");
+        assert_eq!(
+            get_param(&r, firmware, &UartState::default()),
+            refused(&r, what),
+            "{firmware:?}"
+        );
     }
 }
 

@@ -1,7 +1,8 @@
 //! The interrupt status that lv1 computes for a port after each call of
 //! `set_virtual_uart_param`, each `read_virtual_uart` or
 //! `write_virtual_uart` that moves a byte, and each reply of a service,
-//! and the mask bit that raises the port's interrupt.
+//! and the mask bit that raises the port's interrupt. `get_virtual_uart_param`
+//! gives the same status for parameter 7.
 //!
 //! lv1 sets the port's bit in the virtual UART's shadow while the status
 //! and the mask share a bit, and clears it otherwise; see
@@ -17,7 +18,7 @@ use cellgov_ps3_abi::lv1::uart::{
     VIRTUAL_UART_STATUS_RX, VIRTUAL_UART_STATUS_TX,
 };
 
-use super::VirtualUartPortParams;
+use super::{UartState, VirtualUartPortParams};
 use crate::answer::UnmodelledError;
 
 /// What lv1's status function does to a port's bit in the virtual UART's
@@ -122,6 +123,47 @@ fn service_port_traffic(firmware: &str, port: u64, received: u64) -> Option<Virt
         buffer_count: received,
         peer_count: Some(0),
     })
+}
+
+/// The interrupt status that `get_virtual_uart_param` gives for port
+/// `port` in `uart`.
+///
+/// The status reads the traffic of [`service_port_traffic`], with one
+/// change: the peer holds the bytes of the request that is not complete
+/// on the port, or a lower count. The service reads those bytes at a time
+/// that no image read gives. The transmit bit is set when the peer's count
+/// is not above the transmit trigger, so the status is known when the two
+/// ends of that range give the same status.
+///
+/// # Errors
+///
+/// Returns the case that the model does not cover in these cases:
+/// - `port` is not a service port, so CellGov does not hold its traffic;
+/// - the two ends of the peer's range give two statuses.
+pub(super) fn port_status(
+    firmware: &str,
+    uart: &UartState,
+    port: u64,
+) -> Result<u64, UnmodelledError> {
+    let params = uart.port_params(port);
+    let received = uart.received(port).len() as u64;
+    let Some(traffic) = service_port_traffic(firmware, port, received) else {
+        return Err(UnmodelledError::new(
+            "the interrupt status of a virtual UART port whose peer and traffic no source gives",
+        ));
+    };
+    let unread = VirtualUartTraffic {
+        peer_count: Some(uart.pending_request(port).sent),
+        ..traffic
+    };
+    let status = virtual_uart_status(traffic, params.tx_trigger, params.rx_trigger);
+    if virtual_uart_status(unread, params.tx_trigger, params.rx_trigger) != status {
+        return Err(UnmodelledError::new(
+            "the interrupt status of a virtual UART port whose peer can hold more bytes than the \
+             transmit trigger",
+        ));
+    }
+    Ok(status)
 }
 
 /// The lowest set bit of `bits`, or 0 when `bits` is 0.

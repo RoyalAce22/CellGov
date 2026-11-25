@@ -1,20 +1,24 @@
 //! Hypercall 165, `get_virtual_uart_param`: the call reads one parameter
 //! of a port of the partition's virtual UART.
 //!
-//! The answer reads no hypervisor state and carries no change. A console
-//! capture gives lv1's answers to the GameOS kernel's calls for the
-//! buffer sizes of its ports. lv1's own code can change those sizes while
-//! the partition runs, so CellGov gives them only at those calls; see
-//! [`cellgov_ps3_abi::lv1::uart`].
+//! The answer carries no change. A console capture gives lv1's answers to
+//! the GameOS kernel's calls for the buffer sizes of its ports. lv1's own
+//! code can change those sizes while the partition runs, so CellGov gives
+//! them only at those calls; see [`cellgov_ps3_abi::lv1::uart`]. The
+//! interrupt status of a service port comes from the group's state; see
+//! [`super::status`].
 
 use cellgov_ps3_abi::lv1::call::GET_VIRTUAL_UART_PARAM;
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 use cellgov_ps3_abi::lv1::uart::{
     game_os_virtual_uart_port, is_game_os_virtual_uart_param_call, virtual_uart_param_handler,
-    GET_VIRTUAL_UART_PARAM_NO_PARAM_R3, GET_VIRTUAL_UART_PARAM_NO_PORT_R3, VIRTUAL_UART_PARAM_MAX,
-    VIRTUAL_UART_PARAM_RX_BUFFER_SIZE, VIRTUAL_UART_PARAM_TX_BUFFER_SIZE, VIRTUAL_UART_PORT_MAX,
+    GET_VIRTUAL_UART_PARAM_NO_PARAM_R3, GET_VIRTUAL_UART_PARAM_NO_PORT_R3,
+    VIRTUAL_UART_PARAM_INTERRUPT_STATUS, VIRTUAL_UART_PARAM_MAX, VIRTUAL_UART_PARAM_RX_BUFFER_SIZE,
+    VIRTUAL_UART_PARAM_TX_BUFFER_SIZE, VIRTUAL_UART_PORT_MAX,
 };
 
+use super::status;
+use super::UartState;
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::request::HypercallRequest;
@@ -24,7 +28,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
     number: GET_VIRTUAL_UART_PARAM,
     name: "get_virtual_uart_param",
     cost: None,
-    handler: |request, input| get_param(request, input.firmware),
+    handler: |request, input| get_param(request, input.firmware, input.groups.uart()),
 }];
 
 fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDisposition {
@@ -57,16 +61,18 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
 /// - no source gives the port r3 at `firmware`;
-/// - r4 is a parameter other than the two buffer sizes, because no
-///   capture gives lv1's value of another parameter. lv1 reads the
-///   triggers and the mask from the port's endpoint, but its own code can
-///   put a new endpoint, whose values are 0, in the port's slot at a time
-///   that no image read shows;
+/// - r4 is a parameter other than the two buffer sizes and the interrupt
+///   status. No capture gives lv1's value of another parameter. lv1 reads
+///   the triggers and the mask from the port's endpoint, but its own code
+///   can put a new endpoint, whose values are 0, in the port's slot at a
+///   time that no image read shows;
 /// - the call is not the GameOS kernel's call for that buffer size, at
-///   its `sc` address, because no source gives the size at another time.
+///   its `sc` address, because no source gives the size at another time;
+/// - [`status::port_status`] refuses the interrupt status.
 pub(crate) fn get_param(
     request: &HypercallRequest,
     firmware: Option<&str>,
+    uart: &UartState,
 ) -> HypercallDisposition {
     let Some(firmware) = firmware.filter(|fw| virtual_uart_param_handler(fw).is_some()) else {
         return refuse(
@@ -90,7 +96,18 @@ pub(crate) fn get_param(
     let value = match param {
         VIRTUAL_UART_PARAM_RX_BUFFER_SIZE => row.rx_buffer_size,
         VIRTUAL_UART_PARAM_TX_BUFFER_SIZE => row.tx_buffer_size,
-        _ => return refuse(request, "a virtual UART parameter other than a buffer size"),
+        VIRTUAL_UART_PARAM_INTERRUPT_STATUS => {
+            return match status::port_status(firmware, uart, port) {
+                Ok(status) => success(status),
+                Err(e) => e.refusal(request),
+            };
+        }
+        _ => {
+            return refuse(
+                request,
+                "a virtual UART parameter other than a buffer size or the interrupt status",
+            )
+        }
     };
     if !is_game_os_virtual_uart_param_call(firmware, request.pc, param) {
         return refuse(
@@ -98,6 +115,11 @@ pub(crate) fn get_param(
             "a virtual UART buffer size call other than the GameOS kernel's",
         );
     }
+    success(value)
+}
+
+/// lv1's r3 = 0, with `value` in r4 and r5 to r10 cleared.
+fn success(value: u64) -> HypercallDisposition {
     HypercallDisposition::Answered(HypercallAnswer::lv1_status(
         zero_extended(LV1_SUCCESS),
         [value],
@@ -107,3 +129,7 @@ pub(crate) fn get_param(
 #[cfg(test)]
 #[path = "tests/param_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/param_status_tests.rs"]
+mod status_tests;

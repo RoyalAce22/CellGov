@@ -135,7 +135,8 @@
 //!    [OFW-4.93 lv1 a:0x2F35C4-0x2F35D8].
 //! 4. It reads the parameter through a table of eight entries
 //!    [OFW-4.93 lv1 a:0x2F35F0-0x2F3628], stores it in the slot, and
-//!    returns 0.
+//!    returns 0. The entry for 7 computes the port's interrupt status;
+//!    see [`VIRTUAL_UART_PARAM_INTERRUPT_STATUS`].
 //!
 //! The endpoint's init function stores its buffer size at +112
 //! [OFW-4.93 lv1 a:0x2EF650] [OFW-4.93 lv1 a:0x2EF68C].
@@ -805,6 +806,19 @@ pub const VIRTUAL_UART_PARAM_RX_BUFFER_SIZE: u64 = 3;
 /// [OFW-4.93 lv1 a:0x2F37BC-0x2F3828] [OFW-4.93 lv1 a:0x2F399C-0x2F39A0].
 /// So the value changes when lv1 links the port to another peer.
 pub const VIRTUAL_UART_PARAM_TX_BUFFER_SIZE: u64 = 5;
+
+/// The parameter id of the port's interrupt status,
+/// `PARAM_INTERRUPT_STATUS` in Linux `drivers/ps3/ps3-vuart.c`.
+///
+/// The worker's entry for 7 locks the endpoint at +80. It then gives the
+/// endpoint to the function [OFW-4.93 lv1 a:0x2F0CC4], and stores that
+/// function's r3 as the value [OFW-4.93 lv1 a:0x2F3900-0x2F3954]
+/// [OFW-4.93 lv1 a:0x2F367C-0x2F36A0]. That function computes the bits of
+/// [`virtual_uart_status`] from the endpoint and its peer
+/// [OFW-4.93 lv1 a:0x2F0D00-0x2F0D7C]. It gives 0 when the byte at +128 of
+/// the endpoint is not 0 [OFW-4.93 lv1 a:0x2F0CC8-0x2F0CD4]. So the value
+/// changes with the port's traffic and its triggers.
+pub const VIRTUAL_UART_PARAM_INTERRUPT_STATUS: u64 = 7;
 
 /// The r3 of `get_virtual_uart_param` for a port that lv1 does not hold:
 /// `LV1_NO_ENTRY` (-6), with r3 marked in the high word
