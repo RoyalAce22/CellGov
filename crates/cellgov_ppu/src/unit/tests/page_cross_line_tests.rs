@@ -12,6 +12,7 @@ use crate::state::PpuState;
 use crate::timing::{classify, Kind, PpeTiming, Tail};
 use crate::PpuExecutionUnit;
 use cellgov_event::UnitId;
+use cellgov_ps3_abi::hw::ppu_issue as k;
 
 /// The page where each crossing access starts, and its real address.
 const PAGE_EA: u64 = 0xC000_4000;
@@ -130,15 +131,27 @@ const fn uses(rn: u8) -> I {
     }
 }
 
+/// `addi r9,r9,1`.
+const fn add_to_r9() -> I {
+    I::Addi {
+        rt: 9,
+        ra: 9,
+        imm: 1,
+    }
+}
+
+/// The length of an [`add_to_r9`] chain that outlasts the hold a reload
+/// from memory puts on its L1 set. A load after the chain waits for no
+/// set.
+const DRAIN: usize = (k::PPU_MEMORY_LOAD_USE_CYCLES + k::PPU_LOAD_MISS_ENTRY_REUSE_CYCLES) as usize;
+
 /// The cycles from the crossing `load` at `at` to a use of `rn`, after
-/// loads of [`LAST_LINE_EA`] and `second` fill their lines.
+/// loads of [`LAST_LINE_EA`] and `second` fill their lines and their
+/// reloads free their L1 sets.
 fn load_gap(next_ra: u64, load: I, at: u64, rn: u8, second: u64) -> u64 {
-    let steps = [
-        (warm(), LAST_LINE_EA),
-        (warm(), second),
-        (load, at),
-        (uses(rn), 0),
-    ];
+    let mut steps = vec![(warm(), LAST_LINE_EA), (warm(), second)];
+    steps.extend(std::iter::repeat_n((add_to_r9(), 0), DRAIN));
+    steps.extend([(load, at), (uses(rn), 0)]);
     last_gap(&unit(next_ra), &steps)
 }
 

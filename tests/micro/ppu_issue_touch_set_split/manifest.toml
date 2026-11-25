@@ -1,0 +1,20 @@
+[test]
+name = "ppu_issue_touch_set_split"
+
+# A hardware probe of whether an integer load across a 32-byte sector
+# that waits for an L1 set that touch reloads hold holds the
+# instructions after it for that wait, timed with mftb. The console
+# capture is the answer; ppu/main.c's header lists the loops and the
+# payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 96 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 96 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

@@ -1,0 +1,19 @@
+[test]
+name = "ppu_issue_touch_set_forms"
+
+# A hardware probe of whether a load that misses the L1, an ldarx, and
+# an integer load across a 32-byte sector wait for or hold an L1 set
+# that touch reloads hold, timed with mftb. The console capture is the
+# answer; ppu/main.c's header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 192 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 192 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

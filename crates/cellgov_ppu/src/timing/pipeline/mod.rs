@@ -1263,6 +1263,7 @@ impl PpeTiming {
     /// Sets the ready cycles of a load's targets from:
     /// - the level where the load found its line;
     /// - a touch of the line still on its way;
+    /// - the reloads that the L1 set of a missed line holds;
     /// - a flush or store-back still busy with the line;
     /// - a store to the same bytes still in the store queue.
     ///
@@ -1271,14 +1272,16 @@ impl PpeTiming {
     /// the real address.
     fn load(&mut self, t: u64, op: &Op, at: Operand, class: LoadClass) {
         let tables = &mut *self.tables;
-        let level = tables.caches.load(at, class == LoadClass::Reserve);
+        let (level, queued) = tables
+            .caches
+            .load_queued(t, at, class == LoadClass::Reserve);
         let arrival = match level {
             Level::Memory => 0,
             Level::L1 | Level::L2 => tables.caches.arrival(t, at),
         };
-        // The load starts when a flush or store-back still busy with its
-        // lines finishes.
-        let start = t.max(tables.caches.busy(t, at));
+        // The load starts when its L1 set can take its reload, and when a
+        // flush or store-back still busy with its lines finishes.
+        let start = t.max(queued).max(tables.caches.busy(t, at));
         let Operand { ra, len, .. } = at;
         let hit_lat = match class {
             LoadClass::Fixed | LoadClass::Reserve => k::PPU_LOAD_FX_USE_CYCLES,
@@ -1334,6 +1337,11 @@ impl PpeTiming {
         // [CBE-Handbook p:730 s:A.1.3.2] an integer load across a 32-byte
         // sector is flushed, refetched and split into microcode, so the
         // instructions after it issue again behind it.
+        //
+        // The flush comes after the load's wait for its L1 set. In the
+        // `ppu_issue_touch_set_split` capture the sector costs a load
+        // behind 2 touches of its set 85 cycles more than it costs one
+        // that waits for no set.
         let split = sector_split_cycles(op, ra, len, class);
         if split != 0 && start + split > c.floor {
             c.floor = start + split;
@@ -1359,7 +1367,8 @@ impl PpeTiming {
         };
         // The load can find a touched line in the cache before the line
         // arrives from memory. The load then waits for the line, but no
-        // longer than its own trip to memory.
+        // longer than its own trip to memory. That trip starts no earlier
+        // than the touch's request when the touch waited for its L1 set.
         //
         // [CBE-Handbook p:146 s:6.1.6.2] by default, data prefetch has the
         // lowest priority of any queue in the load subunit.

@@ -138,7 +138,9 @@ pub(super) fn weigh_over(share: u32, w: u64, counts: bool, window: u64) -> u32 {
 /// - each result and each outstanding load miss;
 /// - each unit's release;
 /// - each queued store's write into the cache;
-/// - each touched line's arrival.
+/// - each touched line's arrival;
+/// - the cycle a touched line's L1 set let its request go;
+/// - each L1 set's next free reload.
 ///
 /// These times do not move:
 /// - the cycle a slot of the store queue is free again;

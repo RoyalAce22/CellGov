@@ -14,6 +14,9 @@ use cellgov_ps3_abi::hw::ppu_mmu::SMALL_PAGE_LOG2;
 #[cfg(test)]
 #[path = "tests/cancelled_touch_tests.rs"]
 mod cancelled_touch_tests;
+#[cfg(test)]
+#[path = "tests/reload_queue_tests.rs"]
+mod reload_queue_tests;
 
 /// Where a load found its line. A later variant is farther from the core.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -384,6 +387,35 @@ pub(crate) struct Caches {
     touched: LineCycles,
     /// The first cycle the next touch can send its request.
     touch_free: u64,
+    /// The first cycle each L1 set can take the next reload.
+    ///
+    /// A touch that reloads a line holds its L1 set until its trip ends,
+    /// plus [`k::PPU_LOAD_MISS_ENTRY_REUSE_CYCLES`]. CellGov takes the
+    /// trip as the cycle the reload's last beat returns. The evidence is
+    /// the `ppu_issue_touch_set_pressure` capture, in cycles a load:
+    /// - 1, 2, 4 and 8 touches of L2-held lines in the load's L1 set add
+    ///   49, 96, 190 and 370 to a chase through memory;
+    /// - 8 such touches spread over 8 sets add 70.
+    ///
+    /// The same capture has 6 touches in the set add 367, about what 8
+    /// add. One hold for each touch gives 6 touches about 290. CellGov does not
+    /// model why 6 cost as much as 8.
+    ///
+    /// A load that misses the L1, an `ldarx` included, waits for its set
+    /// and then holds it the same way. In cycles a load of the chase:
+    /// - `ppu_issue_touch_set_forms`: a load of an L2-held line in the
+    ///   chase's set adds what one touch there adds, and a load and then
+    ///   a touch add what two touches add. An `ldarx` after 4 touches in
+    ///   its set takes 182 more than one after none.
+    /// - `ppu_issue_touch_set_holds`: a load of a line from memory in the
+    ///   chase's set adds 408, and an `ldarx` of an L2-held line there
+    ///   adds 77. A load from memory in another set adds 410, which
+    ///   CellGov does not model, so the 408 does not tell the set's hold
+    ///   from that wait.
+    reload_free: [u64; k::PPU_L1D_SETS],
+    /// The cycle each touched real line's L1 set let its request go, for
+    /// a touch that waited for its set.
+    held: LineCycles,
     /// The cycle each flush or store-back finishes with its real line.
     busy: LineCycles,
 }
@@ -395,6 +427,8 @@ impl Caches {
             l2: Tags::new(),
             touched: LineCycles::new(),
             touch_free: 0,
+            reload_free: [0; k::PPU_L1D_SETS],
+            held: LineCycles::new(),
             busy: LineCycles::new(),
         }
     }
@@ -445,30 +479,55 @@ impl Caches {
         }
     }
 
-    /// A load of the bytes of `at`, and the level of the farthest line it
-    /// reads. `skip_l1` misses the L1 and leaves it as it was.
+    /// A load at cycle `t` of the bytes of `at`. It returns:
+    /// - the level of the farthest line it reads;
+    /// - the first cycle its L1 misses can go to the L2, or 0.
+    ///
+    /// `skip_l1` misses the L1 and leaves it as it was.
     ///
     /// In the `ppu_issue_line_cross` capture, an `ld` or `lmw` whose bytes
     /// reach a flushed line waits for that line from memory. With the
     /// second line in the L1, an `lmw` across two lines costs what it
     /// costs on one line.
-    pub(crate) fn load(&mut self, at: Operand, skip_l1: bool) -> Level {
+    pub(crate) fn load_queued(&mut self, t: u64, at: Operand, skip_l1: bool) -> (Level, u64) {
         let (first, last) = Self::lines(at);
-        let level = self.load_line(first, skip_l1);
+        let (level, queued) = self.load_line(t, first, skip_l1);
         if last == first {
-            level
+            (level, queued)
         } else {
-            level.max(self.load_line(last, skip_l1))
+            let (last_level, last_queued) = self.load_line(t, last, skip_l1);
+            (level.max(last_level), queued.max(last_queued))
         }
     }
 
-    /// A load of `line`. A copy of the line in the L1 set of another
-    /// effective line is no hit. The L2 then gives the line, because it
-    /// includes the L1.
-    fn load_line(&mut self, line: Line, skip_l1: bool) -> Level {
+    /// A load at cycle `t` of `line`, and the first cycle its L1 miss can
+    /// go to the L2.
+    ///
+    /// A copy of the line in the L1 set of another effective line is no
+    /// hit. The L2 then gives the line, because it includes the L1.
+    ///
+    /// The first of these that applies gives the cycle:
+    /// - a load of a line that a touch still brings starts no earlier
+    ///   than that touch's request;
+    /// - an L1 hit waits for no set;
+    /// - an L1 miss, or a load that skips the L1, waits for the reloads
+    ///   that its L1 set holds, and then holds the set as a touch does.
+    fn load_line(&mut self, t: u64, line: Line, skip_l1: bool) -> (Level, u64) {
+        let in_flight = !skip_l1 && self.touched.after(t, line.real) > t;
+        let held = if in_flight {
+            self.held.after(t, line.real)
+        } else {
+            0
+        };
         if !skip_l1 && self.l1.lookup(line) {
-            return Level::L1;
+            return (Level::L1, held);
         }
+        let set = L1::set_of(line);
+        let queued = if in_flight {
+            held
+        } else {
+            self.reload_free[set]
+        };
         let level = if self.l2.lookup(line.real) {
             Level::L2
         } else {
@@ -476,12 +535,20 @@ impl Caches {
             // [CBE-Handbook p:146 s:6.1.6.3] the L2 ends a prefetch when a
             // demand load of the same address is ahead of it.
             self.touched.forget(line.real);
+            self.held.forget(line.real);
             Level::Memory
         };
+        if !in_flight {
+            let trip = match level {
+                Level::Memory => k::PPU_MEMORY_LOAD_USE_CYCLES,
+                Level::L1 | Level::L2 => k::PPU_L2_LOAD_USE_CYCLES,
+            };
+            self.reload_free[set] = t.max(queued) + trip + k::PPU_LOAD_MISS_ENTRY_REUSE_CYCLES;
+        }
         if !skip_l1 {
             self.l1.fill(line);
         }
-        level
+        (level, queued)
     }
 
     /// A store of the bytes of `at`: the L1 keeps its copy of each line
@@ -545,6 +612,10 @@ impl Caches {
     ///
     /// [CBE-Handbook p:146 s:6.1.6.2] one cache line is requested at a
     /// time, from the L2 or from memory.
+    ///
+    /// The touch's request waits for the reloads that the L1 set of `ea`
+    /// holds, and its own reload then holds that set. A touch of a line
+    /// that an earlier touch still brings waits for no set and holds none.
     pub(crate) fn touch(&mut self, t: u64, ea: u64, ra: Option<u64>) {
         let Some(ra) = ra else {
             return;
@@ -553,16 +624,28 @@ impl Caches {
         if self.l1.lookup(line) {
             return;
         }
-        let sent = t.max(self.touch_free);
+        let slot = t.max(self.touch_free);
         let (interval, trip) = if self.l2.lookup(line.real) {
             (k::PPU_TOUCH_L2_INTERVAL_CYCLES, k::PPU_L2_LOAD_USE_CYCLES)
         } else {
             self.fill_l2(line.real);
             (k::PPU_TOUCH_INTERVAL_CYCLES, k::PPU_MEMORY_LOAD_USE_CYCLES)
         };
-        self.touch_free = sent + interval;
+        self.touch_free = slot + interval;
+        let earlier = self.touched.after(t, line.real);
+        let set = L1::set_of(line);
+        let sent = if earlier > t {
+            slot
+        } else {
+            let sent = slot.max(self.reload_free[set]);
+            self.reload_free[set] = sent + trip + k::PPU_LOAD_MISS_ENTRY_REUSE_CYCLES;
+            if sent > slot {
+                self.held.record(t, line.real, sent);
+            }
+            sent
+        };
         // [CBE-Handbook p:138 s:6.1.3.10] A copy in the other congruence class is reloaded from the L2, so it arrives no earlier than an earlier touch brings the line there.
-        let arrival = (sent + trip).max(self.touched.after(t, line.real));
+        let arrival = (sent + trip).max(earlier);
         self.l1.fill(line);
         self.touched.record(t, line.real, arrival);
     }
@@ -593,10 +676,18 @@ impl Caches {
             .max(self.busy.after(t, last.real))
     }
 
-    /// Delays each touched line's arrival later than `began` by
-    /// `stalled`.
+    /// Delays by `stalled` each cycle later than `began` of:
+    /// - a touched line's arrival;
+    /// - the cycle a touched line's L1 set let its request go;
+    /// - an L1 set's next free reload.
     pub(crate) fn stretch_touches(&mut self, began: u64, stalled: u64) {
         self.touched.stretch(began, stalled);
+        self.held.stretch(began, stalled);
+        for free in &mut self.reload_free {
+            if *free > began {
+                *free += stalled;
+            }
+        }
     }
 
     /// A `dcbf` at cycle `t`: drop the line at real address `ra` from the
@@ -614,6 +705,7 @@ impl Caches {
         self.l1.invalidate(line);
         self.l2.invalidate(line);
         self.touched.forget(line);
+        self.held.forget(line);
         self.busy.record(t, line, t + cycles);
     }
 
@@ -647,5 +739,16 @@ impl Caches {
     /// The first cycle the next touch can send its request.
     pub(crate) fn touch_free(&self) -> u64 {
         self.touch_free
+    }
+
+    /// [`Self::load_queued`] at cycle 0, without the cycle its misses can
+    /// start.
+    pub(crate) fn load(&mut self, at: Operand, skip_l1: bool) -> Level {
+        self.load_queued(0, at, skip_l1).0
+    }
+
+    /// The first cycle the L1 set of `ea`'s line can take the next reload.
+    pub(crate) fn reload_free(&self, ea: u64) -> u64 {
+        self.reload_free[L1::set_of(Line::of(ea, ea))]
     }
 }

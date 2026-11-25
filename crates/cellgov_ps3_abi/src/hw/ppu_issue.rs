@@ -104,6 +104,12 @@ pub const PPU_TOUCH_INTERVAL_CYCLES: u64 = 70;
 /// chase alone takes [`PPU_L2_LOAD_USE_CYCLES`].
 pub const PPU_TOUCH_L2_INTERVAL_CYCLES: u64 = 9;
 
+/// The cycles after the last beat of a reload before its load-miss queue
+/// entry can take another request.
+///
+/// [CBE-Handbook p:137 s:6.1.3.7] a load-miss queue entry takes a new request 7 cycles after the final data beat of its reload comes back from the L2.
+pub const PPU_LOAD_MISS_ENTRY_REUSE_CYCLES: u64 = 7;
+
 /// The cycles from a `dcbf` to a load of the same line that can start.
 ///
 /// [CBE-Handbook p:147 s:6.1.6.5] `dcbf` can complete before the

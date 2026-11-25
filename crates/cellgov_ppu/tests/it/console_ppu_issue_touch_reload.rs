@@ -13,9 +13,18 @@
 //! L2 tag the first touch filled, and its line arrives no earlier than
 //! the first touch brings it.
 //!
-//! The tests do not assert loops 1 and 3. On the console, a load after
-//! the eight touches takes about 200 cycles more than CellGov gives it,
-//! and in loop 1 it gets no help from the touch still in flight.
+//! The tests do not assert loops 1 and 3:
+//! - Loop 3: each touch reload holds the L1 set (the
+//!   `ppu_issue_touch_set_pressure` capture). All eight touched lines miss
+//!   CellGov's L1 on each pass, so CellGov gives about 830 cycles. The
+//!   console's 643 matches about five misses. The touched lines are the
+//!   same eight on each pass, and how many of them the console's L1 keeps
+//!   is not known.
+//! - Loop 1: the console's load waits for the eight touches and gets no
+//!   help from the touch of its line. CellGov's load waits for that touch
+//!   alone. In the `ppu_issue_touch_set_pressure` capture, a load after a
+//!   touch of its line waits for 3 or 4 later touches in its set, and
+//!   not for 7 or 8. The rule that decides between the two is not known.
 
 use crate::console_ppu_issue_timing::{replay, Replay, Seed};
 use cellgov_ps3_abi::hw::ppu_issue::PPU_CYCLES_PER_TB_TICK;

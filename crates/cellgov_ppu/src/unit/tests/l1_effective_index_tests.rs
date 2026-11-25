@@ -201,6 +201,11 @@ const fn add_to_r9() -> I {
 /// before the chain ends.
 const SPACER: usize = 2 * k::PPU_L2_LOAD_USE_CYCLES as usize;
 
+/// The length of an [`add_to_r9`] chain that outlasts the hold a reload
+/// from memory puts on its L1 set. A load after the chain waits for no
+/// set.
+const DRAIN: usize = (k::PPU_MEMORY_LOAD_USE_CYCLES + k::PPU_LOAD_MISS_ENTRY_REUSE_CYCLES) as usize;
+
 /// The cycles from an `ld` of `last` to a use of its result, after
 /// `before`.
 ///
@@ -326,6 +331,7 @@ fn a_second_touch_through_the_other_l1_set_arrives_no_earlier_than_the_first() {
 fn an_l2_eviction_drops_the_line_from_the_l1_set_of_its_effective_line() {
     let mut before = vec![(warm(), SKEW_EA)];
     before.extend((1..=EVICTORS).map(|n| (warm(), evictor(n).0)));
+    before.extend(std::iter::repeat_n((add_to_r9(), 0), DRAIN));
     let evicted = reload_gap(ADJACENT_RA, &before, SKEW_EA);
     let cold = reload_gap(ADJACENT_RA, &before, COLD_EA);
     assert_eq!(evicted, cold);
