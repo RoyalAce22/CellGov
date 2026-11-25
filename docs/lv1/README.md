@@ -158,7 +158,7 @@ re-extraction differs. `repository_rows_are_well_formed` checks the logged set, 
 text of each key, the order of each boot's reads and the source of each
 served node without reading external data.
 
-`tables/repository.tsv` has 19 rows, one per node that
+`tables/repository.tsv` has 22 rows, one per node that
 `cellgov_ps3_abi::lv1::repository::NODES` serves: its key, its two
 values, the firmware CellGov serves its values to and its source. The
 source can be of another firmware: the psdevwiki dump is of 3.41. A read at a
