@@ -78,11 +78,12 @@ pub(crate) struct IndirectBound {
     /// The words that control can enter other than by a direct branch or
     /// a fall-through, with the real-mode entries.
     pub(crate) entries: BTreeSet<u64>,
-    /// Each word at the real address of a constant that the code builds.
+    /// Each word at the real address of a doubleword of the file bytes or
+    /// of a constant that the code builds.
     ///
     /// A `bcctr` or a `bclr` in real mode can reach these words with a
     /// CTR or LR that the scan does not record. A branch in virtual mode
-    /// reaches only the word at the constant itself.
+    /// reaches only the word at the named address itself.
     pub(crate) real_named: BTreeSet<u64>,
     /// The address of each word that writes a constant into CTR or LR,
     /// with each address that an indirect branch reaches from it.
@@ -237,10 +238,19 @@ impl Bound<'_> {
         }
     }
 
-    /// Records an address that the image names: an indirect branch can
-    /// reach it, and a relative jump table can start at it.
+    /// Records a named address: a doubleword of the file bytes, or a
+    /// constant that the code builds. For this address:
+    /// - an indirect branch can reach it;
+    /// - an indirect branch in real mode can reach each word at its real
+    ///   address, also when no segment holds the address itself;
+    /// - a relative jump table can start at it.
+    ///
+    /// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00, and `bcctr` reaches CTR0:61 || 0b00.
+    /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
     fn name(&mut self, address: u64) {
         self.enter(address);
+        let code = self.code;
+        self.real_named.extend(code.real_aliases(address & !0b11));
         if address.is_multiple_of(4)
             && self
                 .files
@@ -249,18 +259,6 @@ impl Bound<'_> {
         {
             self.tables.insert(address);
         }
-    }
-
-    /// Records a constant that the code builds. It is a named address,
-    /// and an indirect branch in real mode reaches each word at its real
-    /// address.
-    ///
-    /// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00, and `bcctr` reaches CTR0:61 || 0b00.
-    /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
-    fn name_constant(&mut self, constant: u64) {
-        self.name(constant);
-        let code = self.code;
-        self.real_named.extend(code.real_aliases(constant & !0b11));
     }
 
     /// Names each constant that the code of `segment` builds in a GPR,
@@ -302,7 +300,7 @@ impl Bound<'_> {
                 .iter()
                 .flat_map(Value::constants)
             {
-                self.name_constant(constant);
+                self.name(constant);
             }
         }
     }

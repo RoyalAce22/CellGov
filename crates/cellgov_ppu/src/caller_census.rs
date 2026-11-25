@@ -816,3 +816,7 @@ mod hypercall_ctr_stack_copy_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_real_alias_constant_tests.rs"]
 mod hypercall_real_alias_constant_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_real_alias_named_tests.rs"]
+mod hypercall_real_alias_named_tests;
