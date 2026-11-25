@@ -29,6 +29,7 @@ impl PpuExecutionUnit {
             lr: Some(self.state.lr()),
             syscall_lev: None,
             faulting_ea: None,
+            faulting_ra: None,
             fault_regs: Some(self.capture_regs()),
             data_access: None,
             interrupt: None,

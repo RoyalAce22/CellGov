@@ -27,6 +27,7 @@ use cellgov_ps3_abi::hw::ppu_spr::{
 use cellgov_ps3_abi::hw::ppu_supervisor::MSR_SF;
 use cellgov_time::Budget;
 
+use super::device_mmio::{declare_device_mmio, device_access, DeviceMmioAccess};
 use super::map::{map_kernel, KernelMapError};
 use crate::diag::is_hypercall;
 
@@ -73,6 +74,9 @@ pub enum KernelRunStop {
         /// The address of the faulting instruction, when the unit named it.
         pc: Option<u64>,
     },
+    /// A hardware thread accessed the MMIO of a device. The console
+    /// performs the access, and CellGov does not model the device.
+    DeviceMmio(DeviceMmioAccess),
     /// lv1 paused every hardware thread, and no wake came.
     ///
     /// On the console, one of these wakes a paused thread:
@@ -303,7 +307,7 @@ pub fn run_kernel_from_entry(
 ) -> Result<KernelRun, KernelRunError> {
     let entry = map_kernel(elf)?.entry;
     let partition = kernel_partition(firmware)?;
-    let mem = real_mode_image(elf, partition.rm_limit())?;
+    let mem = real_mode_image(elf, partition.rm_limit(), firmware)?;
     let mut rt = Runtime::new(mem, Budget::new(STEP_BUDGET), step_cap);
     rt.set_mode(RuntimeMode::FaultDriven);
     rt.set_hypervisor_firmware(firmware);
@@ -312,7 +316,7 @@ pub fn run_kernel_from_entry(
         register_thread(&mut rt, 1, VECTOR_SYSTEM_RESET_THREAD1, partition),
     ]);
     let mut trails = [KernelTrail::default(), KernelTrail::default()];
-    let stop = drive(&mut rt, threads, &mut trails);
+    let stop = drive(&mut rt, firmware, threads, &mut trails);
     let hypercall_sites = trails
         .each_mut()
         .map(|t| std::mem::take(&mut t.hypercall_sites));
@@ -409,10 +413,16 @@ fn ppu_unit(rt: &Runtime, id: UnitId) -> Option<&PpuExecutionUnit> {
 }
 
 /// Steps `rt` until it stops, and says why. Each step of the unit of
-/// hardware thread `t` goes into `trails[t]`.
+/// hardware thread `t` goes into `trails[t]`. A fault at the MMIO of a
+/// device at `firmware` stops the run as [`KernelRunStop::DeviceMmio`].
 ///
 /// The loop has no bound of its own: the runtime's step cap ends it.
-fn drive(rt: &mut Runtime, threads: Threads, trails: &mut [KernelTrail; 2]) -> KernelRunStop {
+fn drive(
+    rt: &mut Runtime,
+    firmware: &str,
+    threads: Threads,
+    trails: &mut [KernelTrail; 2],
+) -> KernelRunStop {
     loop {
         let mut step = match rt.step() {
             Ok(step) => step,
@@ -424,11 +434,12 @@ fn drive(rt: &mut Runtime, threads: Threads, trails: &mut [KernelTrail; 2]) -> K
             trail.push_hypercall(call);
         }
         let pc = step.result.local_diagnostics.pc;
-        let fault = step
-            .result
-            .fault
-            .zip(thread)
-            .map(|(fault, thread)| KernelRunStop::Fault { thread, fault, pc });
+        let fault = step.result.fault.zip(thread).map(|(fault, thread)| {
+            match device_access(firmware, thread, fault, &step.result) {
+                Some(access) => KernelRunStop::DeviceMmio(access),
+                None => KernelRunStop::Fault { thread, fault, pc },
+            }
+        });
         if let Err(error) = rt.commit_step(&mut step) {
             return KernelRunStop::Commit(error.to_string());
         }
@@ -491,7 +502,9 @@ fn hypercall_of(result: &ExecutionStepResult, step: usize) -> Option<KernelHyper
 /// - the storage of CellGov's hypervisor for the shadow pages of the
 ///   logical SPEs;
 /// - the storage of CellGov's hypervisor for the pages of the regions
-///   that `allocate_memory` creates.
+///   that `allocate_memory` creates;
+/// - an unmodelled span over each MMIO region of the devices at
+///   `firmware`.
 ///
 /// `rm_size` is the partition's real mode size, so each real-mode access
 /// that the partition admits finds memory.
@@ -501,7 +514,11 @@ fn hypercall_of(result: &ExecutionStepResult, step: usize) -> Option<KernelHyper
 /// [`KERNEL_SPAN_LIMIT`](super::map::KERNEL_SPAN_LIMIT). That span
 /// starts at the lowest segment, so this function checks that each
 /// segment ends inside the region.
-fn real_mode_image(elf: &[u8], rm_size: u64) -> Result<GuestMemory, KernelRunError> {
+fn real_mode_image(
+    elf: &[u8],
+    rm_size: u64,
+    firmware: &str,
+) -> Result<GuestMemory, KernelRunError> {
     let segments = checked_pt_loads(elf).map_err(|source| KernelMapError::Elf { source })?;
     let mut mem = GuestMemory::from_regions(vec![
         Region::new(0, rm_size as usize, "lv2 real", PageSize::Page64K),
@@ -510,6 +527,8 @@ fn real_mode_image(elf: &[u8], rm_size: u64) -> Result<GuestMemory, KernelRunErr
         allocated_storage(),
     ])
     .map_err(|source| KernelRunError::RealMode { source })?;
+    declare_device_mmio(&mut mem, firmware)
+        .map_err(|source| KernelRunError::RealMode { source })?;
     for s in segments.iter().filter(|s| s.memsz != 0) {
         // [PPC-Book3 p:29 s:4.2.6] Real addressing ignores EA bit 1, and EA bit 0 picks the mechanism that forms the real address.
         let real = s.vaddr & !REAL_MODE_IGNORED_EA;

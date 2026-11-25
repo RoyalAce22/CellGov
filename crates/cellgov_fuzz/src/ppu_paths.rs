@@ -737,6 +737,7 @@ fn fault_diagnostics(state: &PpuState, pc: u64) -> LocalDiagnostics {
         lr: Some(fields.lr),
         syscall_lev: None,
         faulting_ea: None,
+        faulting_ra: None,
         fault_regs: Some(FaultRegisterDump {
             gprs: fields.gpr,
             lr: fields.lr,

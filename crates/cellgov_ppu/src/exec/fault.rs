@@ -10,7 +10,8 @@ use crate::fault_codes::{
     kind_index, PpuFaultClass, FAULT_ALIGNMENT, FAULT_CHECKSTOP, FAULT_DATA_SEGMENT,
     FAULT_DATA_STORAGE, FAULT_DEBUG_BREAK, FAULT_FP_UNAVAILABLE, FAULT_INSTRUCTION_SEGMENT,
     FAULT_INSTRUCTION_STORAGE, FAULT_INTERNAL, FAULT_MACHINE_CHECK, FAULT_PROGRAM,
-    FAULT_SYSTEM_CALL, FAULT_UNIMPLEMENTED_INSN, FAULT_UNMODELLED, FAULT_VXU_UNAVAILABLE,
+    FAULT_SYSTEM_CALL, FAULT_UNIMPLEMENTED_INSN, FAULT_UNMODELLED, FAULT_UNMODELLED_STORAGE,
+    FAULT_VXU_UNAVAILABLE,
 };
 use crate::instruction::PpuInstructionKind;
 
@@ -37,8 +38,8 @@ pub enum PpuFault {
     #[error("PPU internal stop: {0}")]
     Internal(&'static str),
     /// The processor enters the checkstop state: an access reaches a real
-    /// address no storage holds, and the access is not a caching-inhibited
-    /// load with MSR\[ME\] = 1.
+    /// address that no region or unmodelled span holds, and the access is
+    /// not a caching-inhibited load with MSR\[ME\] = 1.
     ///
     /// [PPC-Book3 p:66 s:5.5.2] With MSR\[ME\] = 0 a machine check enters the checkstop state, which suspends instruction processing, and an access to a storage location that does not exist may also enter it.
     /// [CBE-Handbook p:247 s:9.5.2] The PPE's one machine check source is a data error on a caching-inhibited load.
@@ -48,6 +49,19 @@ pub enum PpuFault {
     /// names it.
     #[error("PPU state CellGov does not model: {0}")]
     Unmodelled(&'static str),
+    /// An access reaches a real address whose storage the machine has
+    /// and CellGov does not model, such as a device's MMIO registers.
+    /// The memory declares that storage
+    /// ([`cellgov_mem::GuestMemory::is_unmodelled`]). The PPE performs the
+    /// access, so it takes neither the checkstop nor the machine check.
+    #[error("PPU access to storage CellGov does not model: EA 0x{ea:016x}, real 0x{ra:x}")]
+    UnmodelledStorage {
+        /// The effective address of the first byte that the access
+        /// reaches in that storage.
+        ea: u64,
+        /// The real address of that byte.
+        ra: u64,
+    },
 }
 
 /// A PPE interrupt that a PPU thread's instruction causes, with its cause
@@ -59,9 +73,9 @@ pub enum PpuFault {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum PpuInterrupt {
     /// A caching-inhibited load, with MSR\[ME\] = 1, whose translation
-    /// reaches a real address no storage holds. Only a thread with
-    /// supervisor registers translates. Every other access to such an
-    /// address is a [`PpuFault::Checkstop`].
+    /// reaches a real address that no region or unmodelled span holds.
+    /// Only a thread with supervisor registers translates. Every other
+    /// access to such an address is a [`PpuFault::Checkstop`].
     ///
     /// A thread with supervisor registers also stops, because the 4.93
     /// kernel's machine check vector loops on itself.
@@ -396,9 +410,16 @@ impl PpuFault {
     }
 
     /// Fills the fault fields of `diag` for this fault at `pc`: the EA
-    /// of the fault, the refused access and the interrupt registers. A
-    /// CellGov stop fills none.
+    /// of the fault, the refused access and the interrupt registers.
+    ///
+    /// A CellGov stop fills only the EA and the real address of an
+    /// access to unmodelled storage.
     pub fn annotate(&self, pc: u64, diag: &mut LocalDiagnostics) {
+        if let Self::UnmodelledStorage { ea, ra } = *self {
+            diag.faulting_ea = Some(ea);
+            diag.faulting_ra = Some(ra);
+            return;
+        }
         let Some(interrupt) = self.interrupt() else {
             return;
         };
@@ -426,7 +447,7 @@ impl PpuFault {
             Self::DebugBreak => PpuFaultClass::DebugBreak,
             Self::Internal(_) => PpuFaultClass::Internal,
             Self::Checkstop => PpuFaultClass::Checkstop,
-            Self::Unmodelled(_) => PpuFaultClass::Unmodelled,
+            Self::Unmodelled(_) | Self::UnmodelledStorage { .. } => PpuFaultClass::Unmodelled,
         }
     }
 
@@ -441,6 +462,7 @@ impl PpuFault {
             Self::Internal(_) => FAULT_INTERNAL,
             Self::Checkstop => FAULT_CHECKSTOP,
             Self::Unmodelled(_) => FAULT_UNMODELLED,
+            Self::UnmodelledStorage { .. } => FAULT_UNMODELLED_STORAGE,
         }
     }
 }

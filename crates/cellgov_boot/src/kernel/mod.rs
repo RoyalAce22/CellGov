@@ -6,10 +6,12 @@
 //! [`KernelUnavailable`] that says why, and the boot keeps the Rust LV2.
 
 mod acquire;
+mod device_mmio;
 mod from_entry;
 mod map;
 
 pub use acquire::{kernel_of_record, KernelUnavailable, LoadedKernel};
+pub use device_mmio::DeviceMmioAccess;
 pub use from_entry::{
     kernel_partition, run_kernel_from_entry, KernelHypercall, KernelHypercallSite, KernelPosition,
     KernelRun, KernelRunError, KernelRunStop, RECENT_PCS,

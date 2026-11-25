@@ -164,6 +164,7 @@ fn clone_preserves_heavy_fields() {
             lr: Some(0x1000_0004),
             syscall_lev: Some(0),
             faulting_ea: None,
+            faulting_ra: None,
             fault_regs: Some(regs),
             data_access: None,
             interrupt: None,

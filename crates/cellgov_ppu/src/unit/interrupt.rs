@@ -443,6 +443,7 @@ impl PpuExecutionUnit {
                 lr: Some(self.state.lr()),
                 syscall_lev: None,
                 faulting_ea: None,
+                faulting_ra: None,
                 fault_regs: None,
                 data_access: None,
                 interrupt: Some(record),

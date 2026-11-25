@@ -436,6 +436,9 @@ pub struct GuestMemory {
     /// When set, the memory refuses a fetch outside `code_spans`; see
     /// [`Self::restrict_fetch`].
     fetch_restricted: bool,
+    /// Unmodelled spans `[start, end)`, sorted, none overlapping another;
+    /// see [`Self::declare_unmodelled`].
+    unmodelled_spans: Vec<(u64, u64)>,
 }
 
 /// Diagnostic context for an out-of-region access.
@@ -573,6 +576,7 @@ impl GuestMemory {
             unmapped_below: 0,
             code_spans: Vec::new(),
             fetch_restricted: false,
+            unmodelled_spans: Vec::new(),
         })
     }
 
@@ -581,8 +585,8 @@ impl GuestMemory {
     /// # Errors
     ///
     /// Returns [`MemError::OverlappingRegions`] if the new range overlaps any
-    /// existing region, or [`MemError::RegionOverflow`] if it runs past the
-    /// end of the address space.
+    /// existing region or unmodelled span, or [`MemError::RegionOverflow`]
+    /// if it runs past the end of the address space.
     pub fn install_region(
         &mut self,
         base: u64,
@@ -625,6 +629,14 @@ impl GuestMemory {
             if new_end > next.base() as u128 {
                 return Err(MemError::OverlappingRegions);
             }
+        }
+        // An unmodelled span holds no bytes, so no region may give it some.
+        let spanned = self
+            .unmodelled_spans
+            .iter()
+            .any(|&(lo, hi)| u128::from(lo) < new_end && base < hi);
+        if spanned {
+            return Err(MemError::OverlappingRegions);
         }
         self.regions.insert(
             insertion,
@@ -1133,6 +1145,13 @@ mod window;
 #[path = "guest_fetch.rs"]
 mod fetch;
 pub use fetch::{FetchCode, FetchRefusal};
+
+#[path = "guest_unmodelled.rs"]
+mod unmodelled;
+
+#[cfg(test)]
+#[path = "tests/unmodelled_tests.rs"]
+mod unmodelled_tests;
 
 #[cfg(test)]
 #[path = "tests/fetch_tests.rs"]

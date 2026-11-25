@@ -29,6 +29,10 @@ mod page_cross_line_tests;
 #[path = "tests/l1_effective_index_tests.rs"]
 mod l1_effective_index_tests;
 
+#[cfg(test)]
+#[path = "tests/unmodelled_storage_tests.rs"]
+mod unmodelled_storage_tests;
+
 /// The region label a view gives when it refuses a store to a read-only
 /// page.
 pub(super) const PAGE_PROTECTION: &str = "page protection";
@@ -255,6 +259,9 @@ impl PpuExecutionUnit {
     ///   - the page-protection data storage interrupt;
     ///   - for an operand in caching-inhibited storage that runs into
     ///     the next page, the interrupt of that page's translation.
+    /// - An access whose real address an unmodelled span of `mem` holds:
+    ///   the unmodelled stop at that address. The machine has the
+    ///   storage, so the PPE performs the access.
     /// - A caching-inhibited load with MSR\[ME\] = 1: the machine check.
     /// - Any other access to a real address no storage holds: the
     ///   checkstop.
@@ -284,6 +291,12 @@ impl PpuExecutionUnit {
             if let Some(step) = self.unperformed_refusal(insn, mem, views, &t, ea, access) {
                 return step;
             }
+        }
+        let unmodelled = held
+            .and_then(|t| t.real(ea))
+            .filter(|&ra| mem.is_unmodelled(ra));
+        if let Some(ra) = unmodelled {
+            return MissStep::Stop(FaultExit::Verdict(PpuFault::UnmodelledStorage { ea, ra }));
         }
         let inhibited = held.is_some_and(|t| t.inhibited);
         let checks = self
@@ -1141,6 +1154,8 @@ impl PpuExecutionUnit {
     /// - the interrupt or the unmodelled stop that translation gives;
     /// - the instruction storage interrupt of a word that runs past the
     ///   translation's end, or of a region that holds no code;
+    /// - the unmodelled stop of a real address that an unmodelled span
+    ///   holds;
     /// - the checkstop of a real address no storage holds;
     /// - the unmodelled stop of the last word of the effective space.
     pub(super) fn translated_fetch<'m>(
@@ -1179,9 +1194,13 @@ impl PpuExecutionUnit {
             ));
         }
         // A fetch from a real address no storage holds checkstops: only a
-        // caching-inhibited load takes the machine check. A region that
-        // holds no code keeps its no-execute refusal.
+        // caching-inhibited load takes the machine check. A fetch from an
+        // unmodelled span stops there. A region that holds no code keeps
+        // its no-execute refusal.
         let ((start, last), (base, bytes)) = fetch_window(mem, ra).map_err(|f| match f {
+            PpuFault::Interrupt(PpuInterrupt::InstructionStorage {
+                no_execute: false, ..
+            }) if mem.is_unmodelled(ra) => PpuFault::UnmodelledStorage { ea: pc, ra },
             PpuFault::Interrupt(PpuInterrupt::InstructionStorage {
                 no_execute: false, ..
             }) => PpuFault::Checkstop,

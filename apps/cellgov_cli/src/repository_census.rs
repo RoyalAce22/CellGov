@@ -11,7 +11,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use cellgov_boot::kernel::{
-    run_kernel_from_entry, KernelPosition, KernelRun, KernelRunError, KernelRunStop,
+    run_kernel_from_entry, DeviceMmioAccess, KernelPosition, KernelRun, KernelRunError,
+    KernelRunStop,
 };
 use cellgov_lv1::HypercallRefusal;
 use cellgov_lv1_archive::{self as lv1_archive, RepositoryReadRow, REPOSITORY_READ};
@@ -108,6 +109,29 @@ pub(crate) fn run(
     Ok(())
 }
 
+/// One clause that names the device, the region and the addresses of an
+/// access to a device's MMIO, and where the access was made.
+fn device_mmio_text(access: &DeviceMmioAccess) -> String {
+    let region = &access.region;
+    let at = match access.pc {
+        Some(pc) => format!(" at pc 0x{pc:016x}"),
+        None => String::new(),
+    };
+    format!(
+        "an access to the MMIO of bus {} device {} region 0x{:x} (slot {}) at bus address \
+         0x{:x}, real address 0x{:x} and EA 0x{:016x} by hardware thread {}{at}, which CellGov \
+         does not model",
+        region.bus,
+        region.device,
+        region.address,
+        region.slot,
+        access.bus_address,
+        access.real,
+        access.ea,
+        access.thread
+    )
+}
+
 /// One line that names where a kernel boot stopped.
 fn stop_text(stop: &KernelRunStop) -> String {
     match stop {
@@ -127,6 +151,7 @@ fn stop_text(stop: &KernelRunStop) -> String {
             fault,
             pc: None,
         } => format!("a fault {fault:?} of hardware thread {thread}"),
+        KernelRunStop::DeviceMmio(access) => device_mmio_text(access),
         KernelRunStop::NoWake { paused } => {
             let threads = paused
                 .iter()
@@ -279,3 +304,7 @@ mod position_tests;
 #[cfg(test)]
 #[path = "tests/repository_census_stop_tests.rs"]
 mod stop_tests;
+
+#[cfg(test)]
+#[path = "tests/repository_census_device_stop_tests.rs"]
+mod device_stop_tests;

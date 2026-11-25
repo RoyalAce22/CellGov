@@ -37,8 +37,13 @@ pub const FAULT_INTERNAL: u32 = 0x0114_0000;
 pub const FAULT_MACHINE_CHECK: u32 = 0x0115_0000;
 /// CellGov stop: the processor entered the checkstop state.
 pub const FAULT_CHECKSTOP: u32 = 0x0116_0000;
-/// CellGov stop: a state the PPE runs that CellGov does not model.
+/// CellGov stop: a state the PPE runs that CellGov does not model. The
+/// detail half is 0, or 1 for [`FAULT_UNMODELLED_STORAGE`].
 pub const FAULT_UNMODELLED: u32 = 0x0117_0000;
+/// CellGov stop: an access reaches storage that the machine has and
+/// CellGov does not model. The step's diagnostics hold the access's
+/// effective and real addresses.
+pub const FAULT_UNMODELLED_STORAGE: u32 = FAULT_UNMODELLED | 1;
 
 /// The class half of a fault code.
 const CLASS_MASK: u32 = 0xFFFF_0000;

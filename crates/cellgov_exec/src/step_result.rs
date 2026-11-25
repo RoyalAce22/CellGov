@@ -37,6 +37,10 @@ pub struct LocalDiagnostics {
     /// local-store access carries the local-store address here, whole:
     /// the fault code's detail half cannot hold one.
     pub faulting_ea: Option<u64>,
+    /// Real address of the faulting access. A PPU unit sets it only on
+    /// an access to storage that the machine has and CellGov does not
+    /// model, such as a device's MMIO registers.
+    pub faulting_ra: Option<u64>,
     /// Register snapshot at fault time. PPU units populate it on every
     /// fault. SPU units and synthetic units leave it `None`.
     pub fault_regs: Option<FaultRegisterDump>,
@@ -119,6 +123,7 @@ impl LocalDiagnostics {
             lr: None,
             syscall_lev: None,
             faulting_ea: None,
+            faulting_ra: None,
             fault_regs: None,
             data_access: None,
             interrupt: None,
@@ -133,6 +138,7 @@ impl LocalDiagnostics {
             lr: None,
             syscall_lev: None,
             faulting_ea: None,
+            faulting_ra: None,
             fault_regs: None,
             data_access: None,
             interrupt: None,
@@ -147,6 +153,7 @@ impl LocalDiagnostics {
             lr: None,
             syscall_lev: None,
             faulting_ea: Some(ea),
+            faulting_ra: None,
             fault_regs: None,
             data_access: None,
             interrupt: None,
@@ -161,6 +168,7 @@ impl LocalDiagnostics {
             lr: Some(lr),
             syscall_lev: None,
             faulting_ea: None,
+            faulting_ra: None,
             fault_regs: None,
             data_access: None,
             interrupt: None,
@@ -175,6 +183,7 @@ impl LocalDiagnostics {
             lr: Some(lr),
             syscall_lev: Some(syscall_lev),
             faulting_ea: None,
+            faulting_ra: None,
             fault_regs: None,
             data_access: None,
             interrupt: None,
@@ -189,6 +198,7 @@ impl LocalDiagnostics {
             lr: None,
             syscall_lev: None,
             faulting_ea: Some(ea),
+            faulting_ra: None,
             fault_regs: Some(regs),
             data_access: None,
             interrupt: None,
