@@ -11,6 +11,7 @@
 //! - the checks and effects of the interrupt state bitmap call
 //! - the event receive port and the call that constructs it
 //! - the checks and effects of the call that connects a port to a plug
+//! - the logical console's gate and the call that destructs a console
 //! - the statuses of a refused storage write
 //!
 //! A hypercall is `sc` with LEV = 1 from supervisor state. r11 holds
@@ -19,6 +20,7 @@
 
 pub mod address_space;
 pub mod call;
+pub mod console;
 pub mod dispatch;
 pub mod event_port;
 pub mod interrupt;

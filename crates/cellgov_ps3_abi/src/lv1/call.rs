@@ -189,6 +189,15 @@ pub const MAP_HTAB: u64 = 122;
 /// the console id in r3, and reads r3 alone after the call.
 pub const LOGICAL_CONSOLE_CONSTRUCT: u64 = 105;
 
+/// `lv1_comm_dev_logical_console_destruct`, by the name psdevwiki gives
+/// 106 [PS3DEVWIKI-HV-SYSCALLS s:HV_Syscalls]. The headers call it
+/// `undocumented_function_106`.
+///
+/// The kernel's wrapper [OFW-4.93 lv2_kernel a:0x80000000000104a8]
+/// passes the console id in r3, and reads r3 alone after the call; see
+/// [`super::console`].
+pub const LOGICAL_CONSOLE_DESTRUCT: u64 = 106;
+
 /// `lv1_comm_dev_logical_console_send`, by the name psdevwiki gives 107
 /// [PS3DEVWIKI-HV-SYSCALLS s:HV_Syscalls]. The headers call it
 /// `undocumented_function_107`.

@@ -44,7 +44,7 @@ fn each_family_takes_its_numbers_and_its_owning_work_item() {
     assert_eq!(family(170), "device", "open_device");
     assert_eq!(family(69), "partition", "get_logical_ppe_id");
     assert_eq!(family(67), "logical_spe", "get_spe_interrupt_status");
-    for console in [105, 107, 109] {
+    for console in [105, 106, 107, 109] {
         assert_eq!(family(console), "console");
         assert_eq!(leaf(console), "dispatch");
     }
@@ -73,7 +73,7 @@ fn a_number_row_joins_the_call_table_the_kernels_and_the_hypervisor() {
     let numbers: Vec<u64> = rows.iter().map(|r| r.number).collect();
     assert_eq!(
         numbers,
-        [0, 1, 2, 5, 7, 11, 12, 18, 69, 74, 91, 95, 105, 107, 109, 122],
+        [0, 1, 2, 5, 7, 11, 12, 18, 69, 74, 91, 95, 105, 106, 107, 109, 122],
         "each called number and each answered one"
     );
     let row = |number: u64| &rows[numbers.iter().position(|n| *n == number).expect("a row")];

@@ -4,9 +4,9 @@ use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::lv1::call::{
     ALLOCATE_MEMORY, CONFIGURE_IRQ_STATE_BITMAP, CONNECT_IRQ_PLUG_EXT,
     CONSTRUCT_EVENT_RECEIVE_PORT, CONSTRUCT_VIRTUAL_ADDRESS_SPACE, GET_LOGICAL_PARTITION_ID,
-    GET_LOGICAL_PPE_ID, LOGICAL_CONSOLE_CONSTRUCT, LOGICAL_CONSOLE_FLUSH, LOGICAL_CONSOLE_SEND,
-    MAP_HTAB, READ_HTAB_ENTRIES, READ_REPOSITORY_NODE, SELECT_VIRTUAL_ADDRESS_SPACE,
-    WRITE_HTAB_ENTRY,
+    GET_LOGICAL_PPE_ID, LOGICAL_CONSOLE_CONSTRUCT, LOGICAL_CONSOLE_DESTRUCT, LOGICAL_CONSOLE_FLUSH,
+    LOGICAL_CONSOLE_SEND, MAP_HTAB, READ_HTAB_ENTRIES, READ_REPOSITORY_NODE,
+    SELECT_VIRTUAL_ADDRESS_SPACE, WRITE_HTAB_ENTRY,
 };
 use cellgov_ps3_abi::lv1::partition::LPAR_ID_GAME_OS;
 
@@ -37,6 +37,7 @@ pub const ANSWERED: &[u64] = &[
     READ_REPOSITORY_NODE,
     READ_HTAB_ENTRIES,
     LOGICAL_CONSOLE_CONSTRUCT,
+    LOGICAL_CONSOLE_DESTRUCT,
     LOGICAL_CONSOLE_SEND,
     LOGICAL_CONSOLE_FLUSH,
     MAP_HTAB,
@@ -99,6 +100,7 @@ pub fn answer(
         READ_REPOSITORY_NODE => repository::read_node(request, firmware),
         READ_HTAB_ENTRIES => page_table::read_entries(request, firmware, spaces, storage),
         LOGICAL_CONSOLE_CONSTRUCT => console::construct(),
+        LOGICAL_CONSOLE_DESTRUCT => console::destruct(request, firmware),
         LOGICAL_CONSOLE_SEND => console::send(request),
         LOGICAL_CONSOLE_FLUSH => console::flush(),
         MAP_HTAB => page_table::map_table(request, firmware, spaces, memory),

@@ -5,7 +5,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use cellgov_ps3_abi::lv1::call::{
-    self, LOGICAL_CONSOLE_CONSTRUCT, LOGICAL_CONSOLE_FLUSH, LOGICAL_CONSOLE_SEND,
+    self, LOGICAL_CONSOLE_CONSTRUCT, LOGICAL_CONSOLE_DESTRUCT, LOGICAL_CONSOLE_FLUSH,
+    LOGICAL_CONSOLE_SEND,
 };
 use cellgov_ps3_abi::lv1::table::{self as lv1_table, TableEntry};
 
@@ -143,12 +144,13 @@ pub struct HypercallRow {
 /// The family and owning work item of hypercall `number`.
 ///
 /// The family is CellGov's grouping, read from the name `lv1call.h`
-/// gives the number. The headers name 105, 107 and 109 only
+/// gives the number. The headers name 105 to 107 and 109 only
 /// `undocumented_function_N`; `cellgov_ps3_abi` names them the logical
 /// console calls, so they form the console family.
 pub fn hypercall_family(number: u64) -> (&'static str, &'static str) {
     if [
         LOGICAL_CONSOLE_CONSTRUCT,
+        LOGICAL_CONSOLE_DESTRUCT,
         LOGICAL_CONSOLE_SEND,
         LOGICAL_CONSOLE_FLUSH,
     ]
