@@ -2,7 +2,8 @@
 //!
 //! The verbs live in the library's `verbs` module. This binary reads
 //! the command line and the two variables, names the hot-marker
-//! directory and the lease holder, supplies the real console, sleep and clock, and prints the report. A
+//! directory, the lease holder and the host-wide console queue, supplies
+//! the real console, sleep and clock, and prints the report. A
 //! failure prints what the verb produced, then its message, and exits
 //! with its class's code.
 
@@ -20,6 +21,7 @@ use runner_ps3::cli;
 use runner_ps3::env;
 use runner_ps3::load;
 use runner_ps3::provenance;
+use runner_ps3::queue::Queue;
 use runner_ps3::run::WebmanConsole;
 use runner_ps3::transport::Endpoint;
 use runner_ps3::verbs::{self, Context, Failure};
@@ -43,6 +45,10 @@ fn main() -> ProcessExit {
                 who: env::who(var),
                 workspace_root: Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."),
                 invocation: INVOCATION.to_string(),
+                queue: Queue::host_wide(),
+                command_line: std::env::args_os()
+                    .map(|arg| arg.to_string_lossy().into_owned())
+                    .collect(),
             };
             verbs::execute(
                 &command,

@@ -10,7 +10,7 @@ fn target() -> Target {
     Target::new("CGOV00001", "cgov_spu_fixed_value.bin")
 }
 
-const CLEAR: &str = "runner_ps3 cleanup --host 10.77.0.2";
+const CLEAR: &str = "runner_ps3 cleanup --host 192.0.2.2";
 
 /// A reclaim question answered yes.
 fn yes(_: &Reclaim) -> Result<bool, RunnerPs3Error> {

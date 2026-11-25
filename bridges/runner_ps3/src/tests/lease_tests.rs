@@ -6,7 +6,7 @@ use super::*;
 use crate::memory_console::MemoryConsole;
 use crate::run::RESULT_ROOT;
 
-const HOST: &str = "10.77.0.2";
+const HOST: &str = "192.0.2.2";
 
 fn take(console: &mut MemoryConsole, who: &str, test: &str) -> Result<Lease, LeaseError> {
     Lease::acquire(
@@ -50,7 +50,7 @@ fn a_second_runner_on_any_machine_is_refused_with_the_holder_and_the_command_tha
     }
     assert!(
         err.to_string()
-            .ends_with("clear it with `cellgov ps3 unlock --host 10.77.0.2`"),
+            .ends_with("clear it with `cellgov ps3 unlock --host 192.0.2.2`"),
         "{err}"
     );
     first

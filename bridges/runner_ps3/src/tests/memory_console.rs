@@ -124,6 +124,23 @@ pub(crate) fn package_on_disk(root: &std::path::Path) -> std::path::PathBuf {
     manifest
 }
 
+/// The committed crash ledger and its stop list, written under `root`
+/// where a verb's workspace root reads them.
+pub(crate) fn ledger_on_disk(root: &std::path::Path) {
+    let micro = root.join("tests").join("micro");
+    std::fs::create_dir_all(&micro).expect("micro dir");
+    std::fs::write(
+        root.join(crate::ledger::LEDGER),
+        include_str!("../../../../tests/micro/console_crashes.md"),
+    )
+    .expect("ledger");
+    std::fs::write(
+        root.join(crate::ledger::STOP_LIST),
+        include_str!("../../../../tests/micro/console_crashes.tsv"),
+    )
+    .expect("stop list");
+}
+
 /// The refusal a stubborn path answers with.
 pub(crate) fn refused(path: &str) -> TransportError {
     TransportError::UnexpectedReply {

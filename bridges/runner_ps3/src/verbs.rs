@@ -21,9 +21,20 @@ use crate::console::{self, StatusReport};
 use crate::deploy::{self, Package};
 use crate::error::RunnerPs3Error;
 use crate::lease::{self, Lease, LeaseError};
+use crate::ledger::StopList;
 use crate::load::{self, Interlock};
+use crate::peek::{self, PAGE};
+use crate::queue::{self, Queue, Turn};
 use crate::run::{self, ConsoleOps, Reclaim, Target};
 use crate::transcript::Transcript;
+use crate::transport::TransportError;
+
+/// The reads of the status page before the runner marks the console
+/// down.
+const HEALTH_TRIES: u32 = 3;
+
+/// The wait between two reads of a status page that did not answer.
+const HEALTH_PAUSE: Duration = Duration::from_secs(2);
 
 /// What a front end resolves before a verb runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +55,12 @@ pub struct Context {
     /// The words that run this front end, such as `runner_ps3`. Every
     /// remedy the runner names starts with them.
     pub invocation: String,
+    /// The host-wide queue every verb that talks to the console waits
+    /// in.
+    pub queue: Queue,
+    /// The process's command line. The queue shows it, with the console's
+    /// host masked, to every runner that waits behind this one.
+    pub command_line: Vec<String>,
 }
 
 /// A capture the runner wrote.
@@ -79,6 +96,13 @@ pub enum Report {
         /// `--out`; `None` when the JSON is the report.
         out: Option<PathBuf>,
     },
+    /// `peek`: the TSV of the words read, and the file it went to.
+    Peek {
+        /// The TSV.
+        tsv: String,
+        /// `--out`; `None` when the TSV is the report.
+        out: Option<PathBuf>,
+    },
     /// `status`: the facts, the claim and its verdict, and every other
     /// profile the console satisfies.
     Status(Box<StatusReport>),
@@ -105,7 +129,8 @@ impl Report {
                 removed: false,
             } => vec![format!("no lease on {host}")],
             Self::Convert { json, out: None } => vec![json.clone()],
-            Self::Convert { out: Some(_), .. } => Vec::new(),
+            Self::Convert { out: Some(_), .. } | Self::Peek { out: Some(_), .. } => Vec::new(),
+            Self::Peek { tsv, out: None } => tsv.lines().map(str::to_string).collect(),
             Self::Status(report) => report.lines(),
             Self::Console {
                 capture,
@@ -171,9 +196,13 @@ impl From<RunnerPs3Error> for Box<Failure> {
 }
 
 /// Run `command`'s verb. `connect` opens the console a host names, and
-/// runs at most once; `sleep` waits between polls; `now` stamps a
-/// capture; `may_reclaim` answers whether `--reclaim` may empty an
-/// occupied game directory, shown the directory and what it holds.
+/// runs at most once; `sleep` waits between polls and between looks at
+/// the console queue; `now` stamps a capture; `may_reclaim` answers
+/// whether `--reclaim` may empty an occupied game directory, shown the
+/// directory and what it holds.
+///
+/// Every verb but `convert` loads the crash ledger's stop list and
+/// waits for its turn in [`Context::queue`] before it sends a request.
 ///
 /// # Errors
 ///
@@ -188,18 +217,125 @@ pub fn execute<C: ConsoleOps>(
     may_reclaim: &mut dyn FnMut(&Reclaim) -> Result<bool, RunnerPs3Error>,
 ) -> Result<Report, Box<Failure>> {
     match command.verb()? {
-        Verb::Unlock => {
-            let host = command.host(context.host_env.as_deref())?;
-            let mut console = connect(&host);
-            let mut transcript = Transcript::new();
-            let removed = lease::unlock(&mut console, &mut transcript);
-            console.end_session(&mut transcript);
-            let removed = removed.map_err(RunnerPs3Error::from)?;
-            Ok(Report::Unlock { host, removed })
-        }
+        Verb::Unlock => Ok(unlock(command, context, connect, sleep)?),
+        Verb::Peek => Ok(peek(command, context, connect, sleep)?),
         Verb::Convert => Ok(convert(command, context)?),
         verb => on_console(verb, command, context, connect, sleep, now, may_reclaim),
     }
+}
+
+/// Wait for this runner's turn in the host-wide queue, then read the
+/// console's status page. A page that does not answer
+/// [`HEALTH_TRIES`] reads marks the console down, so every waiter stops
+/// waiting.
+///
+/// # Errors
+///
+/// [`RunnerPs3Error::Queue`] when the turn does not come or the console
+/// is down, and any other failure of the status page.
+fn take_console<C: ConsoleOps>(
+    context: &Context,
+    host: &str,
+    console: &mut C,
+    sleep: &mut dyn FnMut(Duration),
+    transcript: &mut Transcript,
+) -> Result<(Turn, String), RunnerPs3Error> {
+    let holder = queue::holder_text(
+        &context.who,
+        &queue::masked_command_line(&context.command_line, host),
+    );
+    let turn = context.queue.join(&holder, sleep)?;
+    let mut tries_left = HEALTH_TRIES;
+    loop {
+        tries_left -= 1;
+        match load::status_page(console, transcript) {
+            Ok(html) => {
+                turn.console_up()?;
+                return Ok((turn, html));
+            }
+            Err(RunnerPs3Error::Transport(
+                silent @ (TransportError::Unreachable { .. } | TransportError::Io { .. }),
+            )) => {
+                let cause = unanswered(&silent, host);
+                if tries_left == 0 {
+                    return Err(turn.console_down(&cause).into());
+                }
+                transcript.decision(format!("{cause}; reading it again"));
+                sleep(HEALTH_PAUSE);
+            }
+            Err(other) => return Err(other),
+        }
+    }
+}
+
+/// What a status page that did not answer says, with the console's
+/// `host` masked: the queue's files never hold it.
+fn unanswered(error: &TransportError, host: &str) -> String {
+    let text = match error {
+        TransportError::Unreachable {
+            operation, source, ..
+        } => format!("the status page did not answer: {operation} the console: {source}"),
+        TransportError::Io { operation, source } => {
+            format!("the status page did not answer: {operation}: {source}")
+        }
+        other => format!("the status page did not answer: {other}"),
+    };
+    match host.trim() {
+        "" => text,
+        host => text.replace(host, "<host>"),
+    }
+}
+
+/// `unlock`: take the queue, then remove the console's lease whoever
+/// holds it.
+fn unlock<C: ConsoleOps>(
+    command: &Command,
+    context: &Context,
+    connect: impl FnOnce(&str) -> C,
+    sleep: &mut dyn FnMut(Duration),
+) -> Result<Report, RunnerPs3Error> {
+    let host = command.host(context.host_env.as_deref())?;
+    StopList::load(&context.workspace_root)?;
+    let mut console = connect(&host);
+    let mut transcript = Transcript::new();
+    let (turn, _page) = take_console(context, &host, &mut console, sleep, &mut transcript)?;
+    let removed = lease::unlock(&mut console, &mut transcript);
+    console.end_session(&mut transcript);
+    drop(turn);
+    Ok(Report::Unlock {
+        host,
+        removed: removed?,
+    })
+}
+
+/// `peek`: refuse a page the stop list lists, take the queue, then read
+/// the plan's pages and write their words as TSV.
+fn peek<C: ConsoleOps>(
+    command: &Command,
+    context: &Context,
+    connect: impl FnOnce(&str) -> C,
+    sleep: &mut dyn FnMut(Duration),
+) -> Result<Report, RunnerPs3Error> {
+    let host = command.host(context.host_env.as_deref())?;
+    let plan = command.peek_plan()?;
+    let stop_list = StopList::load(&context.workspace_root)?;
+    for page in plan.pages() {
+        stop_list.admit(plan.space(), page, page + (PAGE - 1))?;
+    }
+    let mut console = connect(&host);
+    let mut transcript = Transcript::new();
+    let (turn, _page) = take_console(context, &host, &mut console, sleep, &mut transcript)?;
+    let rows = peek::read(&mut console, &plan, &mut transcript);
+    console.end_session(&mut transcript);
+    drop(turn);
+    let tsv = peek::render_tsv(plan.width(), &rows?);
+    if let Some(out) = &command.out {
+        write(out, tsv.as_bytes())?;
+    }
+    Ok(Report::Peek {
+        tsv,
+        out: command.out.clone(),
+    })
 }
 
 fn claimed_profile(command: &Command, context: &Context) -> Result<String, RunnerPs3Error> {
@@ -261,7 +397,7 @@ impl Job {
     /// the console.
     fn of(verb: Verb, command: &Command) -> Result<Option<Self>, RunnerPs3Error> {
         let action = match verb {
-            Verb::Status | Verb::Convert | Verb::Unlock => return Ok(None),
+            Verb::Status | Verb::Convert | Verb::Unlock | Verb::Peek => return Ok(None),
             Verb::Deploy => Action::Deploy,
             Verb::Run => Action::Run,
             Verb::Fetch => Action::Fetch {
@@ -342,9 +478,10 @@ fn verb_line(
         .join(" ")
 }
 
-/// Every verb that talks to the console: identify it and check the
-/// claim first, hold any verb but `cleanup` to the load interlock, then
-/// take the lease for any verb that changes the console.
+/// Every verb that talks to the console: wait for the queue, identify
+/// the console and check the claim, hold any verb but `cleanup` to the
+/// load interlock, then take the lease for any verb that changes the
+/// console.
 fn on_console<C: ConsoleOps>(
     verb: Verb,
     command: &Command,
@@ -365,6 +502,7 @@ fn on_console<C: ConsoleOps>(
             deploy::admit(&Package::of(&job.manifest_path, &job.manifest))?;
         }
     }
+    StopList::load(&context.workspace_root).map_err(RunnerPs3Error::from)?;
     let session = Session {
         command,
         context,
@@ -373,7 +511,7 @@ fn on_console<C: ConsoleOps>(
     };
     let mut webman = connect(&host);
     let mut transcript = Transcript::new();
-    let html = load::status_page(&mut webman, &mut transcript)?;
+    let (turn, html) = take_console(context, &host, &mut webman, sleep, &mut transcript)?;
     let Some(job) = job else {
         return status_only(&session, &profiles, &html);
     };
@@ -433,7 +571,9 @@ fn on_console<C: ConsoleOps>(
         may_reclaim,
         &mut transcript,
     );
-    finish(lease, result, &mut webman, transcript)
+    let outcome = finish(lease, result, &mut webman, transcript);
+    drop(turn);
+    outcome
 }
 
 /// What every step of a console verb names: the command, the front

@@ -11,15 +11,20 @@ use super::*;
 use crate::cli::parse;
 use crate::console::STATUS_PATH;
 use crate::lease::LEASE_DIR;
-use crate::memory_console::{package_on_disk, ppu_elf, MemoryConsole, EXIT_ONLY, PACKAGED_FRAME};
+use crate::memory_console::{
+    ledger_on_disk, package_on_disk, ppu_elf, MemoryConsole, EXIT_ONLY, PACKAGED_FRAME,
+};
 use crate::ExitCode;
 
 #[path = "verbs_session_tests.rs"]
 mod session;
 
+#[path = "verbs_queue_tests.rs"]
+mod queue_turns;
+
 const PAGE: &str = include_str!("fixtures/cpursx.html");
 
-const HOST: &str = "10.77.0.2";
+const HOST: &str = "192.0.2.2";
 
 const PROFILE: &str = "cech20-cex-493";
 
@@ -84,6 +89,7 @@ impl Bench {
         std::fs::write(&profiles, PROFILES).expect("profiles");
         let marker_dir = scratch.join("markers");
         std::fs::create_dir_all(&marker_dir).expect("marker dir");
+        ledger_on_disk(&scratch);
         let mut console = MemoryConsole::empty();
         console
             .files
@@ -95,6 +101,12 @@ impl Bench {
             who: WHO.to_string(),
             workspace_root: scratch.to_path_buf(),
             invocation: INVOCATION.to_string(),
+            queue: crate::queue::Queue::new(
+                scratch.join("queue"),
+                std::time::Duration::ZERO,
+                std::time::Duration::ZERO,
+            ),
+            command_line: vec!["cellgov".to_string(), "ps3".to_string()],
         };
         Self {
             scratch,
@@ -289,7 +301,7 @@ fn every_verb_runs_through_the_library() {
     assert_eq!(std::fs::read_to_string(&written).expect("written"), json);
 
     let report = bench.execute(&["unlock"]).expect("unlock");
-    assert_eq!(report.lines(), ["no lease on 10.77.0.2"]);
+    assert_eq!(report.lines(), ["no lease on 192.0.2.2"]);
     drop(bench.lease("stale@elsewhere"));
     let report = bench.execute(&["unlock"]).expect("unlock");
     assert_eq!(
@@ -299,7 +311,7 @@ fn every_verb_runs_through_the_library() {
             removed: true
         }
     );
-    assert_eq!(report.lines(), ["removed the lease on 10.77.0.2"]);
+    assert_eq!(report.lines(), ["removed the lease on 192.0.2.2"]);
     assert!(!bench.console.dirs.contains(LEASE_DIR));
 }
 
@@ -337,7 +349,7 @@ fn every_remedy_names_the_front_end_that_ran_the_verb() {
         RunnerPs3Error::Refused { clear_with, .. } => assert_eq!(
             clear_with,
             &format!(
-                "cellgov ps3 cleanup --host 10.77.0.2 --profile cech20-cex-493 --model CECH-2001A \
+                "cellgov ps3 cleanup --host 192.0.2.2 --profile cech20-cex-493 --model CECH-2001A \
                  --cfw \"EvilNAT 4.93 PEX\" --debugger none --manifest {}, or rerun with --reclaim",
                 shell_word(&bench.manifest_arg())
             )
@@ -356,7 +368,7 @@ fn every_remedy_names_the_front_end_that_ran_the_verb() {
         failure
             .error
             .to_string()
-            .ends_with("clear it with `cellgov ps3 unlock --host 10.77.0.2`"),
+            .ends_with("clear it with `cellgov ps3 unlock --host 192.0.2.2`"),
         "{}",
         failure.error
     );
@@ -389,7 +401,7 @@ fn a_hot_console_refuses_every_verb_that_loads_it_and_leaves_status_unlock_and_c
         assert_eq!(
             failure.error.to_string(),
             "load: the console is hot: Cell 85 C, RSX 64 C; it is hot at 80 C and cool again \
-             only below 72 C. Poll `cellgov ps3 status --host 10.77.0.2 --profile cech20-cex-493 \
+             only below 72 C. Poll `cellgov ps3 status --host 192.0.2.2 --profile cech20-cex-493 \
              --model CECH-2001A --cfw \"EvilNAT 4.93 PEX\" --debugger none` until it reads cool, \
              or rerun with --wait-cool",
             "{verb}"

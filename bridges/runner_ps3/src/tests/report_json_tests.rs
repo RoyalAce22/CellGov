@@ -51,7 +51,7 @@ fn transcript() -> Vec<String> {
 fn every_report_round_trips_through_its_json() {
     for report in [
         Report::Unlock {
-            host: "10.77.0.2".to_string(),
+            host: "192.0.2.2".to_string(),
             removed: true,
         },
         status(StatusVerdict::Pass),

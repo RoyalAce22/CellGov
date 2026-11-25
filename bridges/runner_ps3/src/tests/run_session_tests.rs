@@ -30,7 +30,7 @@ fn the_session_ends_before_the_reclaim_question() {
         &target(),
         true,
         &mut |_| Ok(false),
-        "runner_ps3 cleanup --host 10.77.0.2",
+        "runner_ps3 cleanup --host 192.0.2.2",
         &mut Transcript::new(),
     )
     .expect_err("declined");

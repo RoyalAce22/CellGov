@@ -162,12 +162,12 @@ fn an_interrupted_read_is_retried_not_reported() {
 
 #[test]
 fn the_pasv_tuple_is_the_data_address() {
-    let address = parse_pasv("Entering Passive Mode (10,77,0,2,195,80).").expect("tuple");
-    assert_eq!(address.to_string(), "10.77.0.2:50000");
+    let address = parse_pasv("Entering Passive Mode (192,0,2,2,195,80).").expect("tuple");
+    assert_eq!(address.to_string(), "192.0.2.2:50000");
     for text in [
         "Entering Passive Mode",
-        "(10,77,0,2,195)",
-        "(10,77,0,2,195,256)",
+        "(192,0,2,2,195)",
+        "(192,0,2,2,195,256)",
         "(a,b,c,d,e,f)",
     ] {
         assert!(
@@ -184,7 +184,7 @@ fn a_session_logs_in_stores_a_file_and_quits_with_every_exchange_transcribed() {
         "331 password\r\n",
         "230 logged in\r\n",
         "200 binary\r\n",
-        "227 Entering Passive Mode (10,77,0,2,195,80)\r\n",
+        "227 Entering Passive Mode (192,0,2,2,195,80)\r\n",
         "150 opening\r\n",
         "226 Transfer complete\r\n",
         "221 bye\r\n",
@@ -218,7 +218,7 @@ fn a_session_logs_in_stores_a_file_and_quits_with_every_exchange_transcribed() {
             "#0006 > TYPE I",
             "#0007 < 200 binary",
             "#0008 > PASV",
-            "#0009 < 227 Entering Passive Mode (10,77,0,2,195,80)",
+            "#0009 < 227 Entering Passive Mode (192,0,2,2,195,80)",
             "#0010 > STOR /dev_hdd0/tmp/x.bin (4 bytes)",
             "#0011 < 150 opening",
             "#0012 < 226 Transfer complete",

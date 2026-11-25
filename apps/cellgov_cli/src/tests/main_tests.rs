@@ -73,6 +73,7 @@ const DISPATCHED: &[&str] = &[
     "ps3 capture",
     "ps3 convert",
     "ps3 unlock",
+    "ps3 peek",
     "dev disasm",
     "dev spu-disasm",
     "dev spu-census",

@@ -76,7 +76,7 @@ fn plan() -> (ScratchDir, CapturePlan) {
         reclaim: false,
         keep_deployed: false,
         recapture_reason: None,
-        clear_with: "runner_ps3 cleanup --host 10.77.0.2".to_string(),
+        clear_with: "runner_ps3 cleanup --host 192.0.2.2".to_string(),
     };
     (scratch, plan)
 }

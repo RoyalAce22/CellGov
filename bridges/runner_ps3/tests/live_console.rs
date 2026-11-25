@@ -87,6 +87,8 @@ fn run(verb: &str, extra: &[&str]) -> Result<Report, Box<Failure>> {
         who: env::who(|name| std::env::var(name).ok()),
         workspace_root: workspace_root(),
         invocation: "runner_ps3".to_string(),
+        queue: runner_ps3::queue::Queue::host_wide(),
+        command_line: words.iter().map(|word| word.to_string()).collect(),
     };
     verbs::execute(
         &command,
@@ -205,13 +207,24 @@ fn a_dirty_console_is_refused_with_a_recovery_command() {
         run("deploy", &["--manifest", &manifest_arg, "--wait-cool"]),
     );
     // A stale result beside the deployed package: the runner deletes it
-    // once, then refuses the occupied game directory.
+    // once, then refuses the occupied game directory. The plant is no
+    // verb, so it takes its own turn in the host-wide console queue.
+    let turn = runner_ps3::queue::Queue::host_wide()
+        .join(
+            &runner_ps3::queue::holder_text(
+                &env::who(|name| std::env::var(name).ok()),
+                "live_console: plant a stale result",
+            ),
+            &mut std::thread::sleep,
+        )
+        .unwrap_or_else(|e| panic!("the console queue gave no turn: {e}"));
     let mut planter = WebmanConsole::new(console());
     let mut planted = Transcript::new();
     planter
         .store(&target.result_path, b"stale", &mut planted)
         .expect("plant a stale result");
     planter.end_session(&mut planted);
+    drop(turn);
     let refused = run(
         "capture",
         &[

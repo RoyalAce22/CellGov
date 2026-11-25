@@ -9,7 +9,9 @@ use cellgov_compare::console_profile::ConsoleProfileError;
 use runner_ps3::cli::{Command as RunnerCommand, Verb};
 use runner_ps3::console::ConsoleError;
 use runner_ps3::lease::LeaseError;
+use runner_ps3::ledger::LedgerError;
 use runner_ps3::load::LoadError;
+use runner_ps3::queue::QueueError;
 use runner_ps3::run::{Reclaim, WebmanConsole};
 use runner_ps3::transport::Endpoint;
 use runner_ps3::verbs::{self, Context};
@@ -55,6 +57,10 @@ pub(crate) fn run(
         who: runner_ps3::env::who(var),
         workspace_root: crate::paths::workspace_root(),
         invocation: INVOCATION.to_string(),
+        queue: runner_ps3::queue::Queue::host_wide(),
+        command_line: std::env::args_os()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect(),
     };
     let mut sleep = std::thread::sleep;
     let outcome = verbs::execute(
@@ -190,6 +196,15 @@ pub(crate) fn runner_command(command: &Ps3Command, json: bool) -> RunnerCommand 
             out.verb = Some(Verb::Unlock);
             out.host = args.host.clone();
         }
+        Ps3Command::Peek(args) => {
+            out.verb = Some(Verb::Peek);
+            out.host = args.host.clone();
+            out.space = Some(args.space);
+            out.width = Some(args.width);
+            out.addresses = Some(args.address.clone());
+            out.reads = args.reads;
+            out.out = args.out.clone();
+        }
     }
     out
 }
@@ -230,7 +245,16 @@ pub(crate) fn exit_code(error: &RunnerPs3Error) -> i32 {
         )
         | RunnerPs3Error::LocalWrite { .. }
         | RunnerPs3Error::HostClock
-        | RunnerPs3Error::Serialize(_) => exit_codes::FAILED,
+        | RunnerPs3Error::Serialize(_)
+        | RunnerPs3Error::Queue(QueueError::Io { .. } | QueueError::GuardBusy { .. })
+        | RunnerPs3Error::Ledger(
+            LedgerError::Io { .. } | LedgerError::Malformed { .. } | LedgerError::Disagree { .. },
+        ) => exit_codes::FAILED,
+        RunnerPs3Error::Queue(QueueError::Timeout { .. })
+        | RunnerPs3Error::Ledger(LedgerError::Listed { .. }) => EXIT_REFUSED,
+        RunnerPs3Error::Queue(QueueError::ConsoleDown { .. }) | RunnerPs3Error::Peek(_) => {
+            EXIT_TRANSPORT
+        }
         RunnerPs3Error::Refused { .. }
         | RunnerPs3Error::PassiveOnlySyscall { .. }
         | RunnerPs3Error::UnscannableElf { .. }

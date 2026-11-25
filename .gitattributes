@@ -45,6 +45,7 @@ docs/lv2/tables/name.tsv -linguist-generated
 docs/lv2/tables/subentry_attribution.tsv -linguist-generated
 crates/cellgov_ps3_abi/src/nid/table.tsv -linguist-generated
 tests/micro/ps3_gaps.tsv -linguist-generated
+tests/micro/console_crashes.tsv -linguist-generated
 tests/micro/spu_float_edges/*.tsv -linguist-generated
 tests/micro/*/cases.tsv -linguist-generated
 crates/cellgov_fuzz/tests/fixtures/ppu_reference/addi.json -linguist-generated

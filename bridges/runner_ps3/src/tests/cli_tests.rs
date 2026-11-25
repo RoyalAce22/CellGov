@@ -23,7 +23,7 @@ fn a_capture_line_parses_into_every_flag() {
     let command = parsed(&[
         "capture",
         "--host",
-        "10.77.0.2",
+        "192.0.2.2",
         "--profile",
         "cech20-cex-493",
         "--model",
@@ -47,7 +47,7 @@ fn a_capture_line_parses_into_every_flag() {
         command,
         Command {
             verb: Some(Verb::Capture),
-            host: Some("10.77.0.2".to_string()),
+            host: Some("192.0.2.2".to_string()),
             profile: Some("cech20-cex-493".to_string()),
             model: Some("CECH-2001A".to_string()),
             cfw: Some("EvilNAT 4.93 PEX".to_string()),
@@ -100,10 +100,10 @@ fn the_defaults_fill_what_the_line_leaves_out() {
     );
     assert_eq!(command.poll_ms(), DEFAULT_POLL_MS);
     assert_eq!(command.operator().debugger_attached, None);
-    assert_eq!(command.host(Some(" 10.77.0.2 ")).expect("env"), "10.77.0.2");
+    assert_eq!(command.host(Some(" 192.0.2.2 ")).expect("env"), "192.0.2.2");
     assert_eq!(
         parsed(&["status", "--host", "ps3"])
-            .host(Some("10.77.0.2"))
+            .host(Some("192.0.2.2"))
             .expect("flag"),
         "ps3"
     );
@@ -152,8 +152,8 @@ fn a_malformed_line_is_a_usage_error_naming_the_problem() {
             "--reclaim given more than once",
         ),
         (
-            &["status", "10.77.0.2"][..],
-            "unexpected argument \"10.77.0.2\"",
+            &["status", "192.0.2.2"][..],
+            "unexpected argument \"192.0.2.2\"",
         ),
         (
             &["status", "--debugger", "maybe"][..],

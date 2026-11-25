@@ -13,7 +13,7 @@ use crate::ExitCode;
 /// identifier replaced by a synthetic value of the same shape.
 const PAGE: &str = include_str!("fixtures/cpursx.html");
 
-const HOST: &str = "10.77.0.2";
+const HOST: &str = "192.0.2.2";
 
 const LIMITS: LoadLimits = LoadLimits {
     hot_c: 80,
@@ -40,8 +40,8 @@ fn live_page(cpu_c: u32, rsx_c: u32, hdd: &str) -> String {
 fn a_host_folds_to_a_marker_file_name() {
     let dir = Path::new("markers");
     assert_eq!(
-        hot_path(dir, "10.77.0.2"),
-        dir.join("cellgov_runner_ps3_10.77.0.2.hot")
+        hot_path(dir, "192.0.2.2"),
+        dir.join("cellgov_runner_ps3_192.0.2.2.hot")
     );
     assert_eq!(
         hot_path(dir, "ps3:80/../x"),
@@ -146,7 +146,7 @@ fn interlock(scratch: &ScratchDir, wait_cool: bool, needs_space: bool) -> Interl
         host: HOST,
         wait_cool,
         needs_space,
-        poll_with: "runner_ps3 status --host 10.77.0.2".to_string(),
+        poll_with: "runner_ps3 status --host 192.0.2.2".to_string(),
     }
 }
 
@@ -178,7 +178,7 @@ fn a_hot_console_is_refused_with_both_temperatures_the_limits_and_the_poll() {
     assert_eq!(
         error.to_string(),
         "load: the console is hot: Cell 85 C, RSX 66 C; it is hot at 80 C and cool again only \
-         below 72 C. Poll `runner_ps3 status --host 10.77.0.2` until it reads cool, or rerun \
+         below 72 C. Poll `runner_ps3 status --host 192.0.2.2` until it reads cool, or rerun \
          with --wait-cool"
     );
     assert!(slept.is_empty());

@@ -8,7 +8,10 @@ use cellgov_observation::manifest::ManifestError;
 
 use crate::console::ConsoleError;
 use crate::lease::LeaseError;
+use crate::ledger::LedgerError;
 use crate::load::LoadError;
+use crate::peek::PeekError;
+use crate::queue::QueueError;
 
 /// Process exit codes, one per failure class.
 ///
@@ -24,10 +27,11 @@ pub enum ExitCode {
     Usage = 1,
     /// The runner refused before changing the console: a lease, a stale
     /// result, a profile mismatch, an existing output directory, a hot
-    /// console, a full `/dev_hdd0`, or a probe whose PPU relink holds a
-    /// UART or gamepad call number.
+    /// console, a full `/dev_hdd0`, a probe whose PPU relink holds a
+    /// UART or gamepad call number, a wait in the console queue that ran
+    /// out, or a peek of a range the crash ledger lists.
     Refused = 2,
-    /// The console did not answer as the protocol requires.
+    /// The console did not answer as the protocol requires, or is down.
     Transport = 3,
     /// The test did not leave its result within the manifest's budget.
     Timeout = 4,
@@ -35,8 +39,8 @@ pub enum ExitCode {
     Frame = 5,
     /// The capture succeeded but the runner could not restore the console.
     Cleanup = 6,
-    /// The runner could not write its own output on this machine, or the
-    /// host clock is unusable.
+    /// The runner could not write its own output or the console queue's
+    /// files on this machine, or the host clock is unusable.
     Local = 7,
 }
 
@@ -113,6 +117,16 @@ pub enum RunnerPs3Error {
     /// The console did not answer as the protocol requires.
     #[error("transport: {0}")]
     Transport(#[from] crate::transport::TransportError),
+    /// The turn in the console queue did not come, the console is down,
+    /// or the queue's files do not serve.
+    #[error("queue: {0}")]
+    Queue(#[from] QueueError),
+    /// The crash ledger's stop list did not load, or refused a peek.
+    #[error("crash ledger: {0}")]
+    Ledger(#[from] LedgerError),
+    /// A peek page did not give its bytes.
+    #[error("peek: {0}")]
+    Peek(#[from] PeekError),
     /// The result did not appear within the budget.
     #[error("timeout: no result at {result_path} after {timeout_ms} ms")]
     Timeout {
@@ -199,7 +213,19 @@ impl RunnerPs3Error {
             | Self::Manifest(_)
             | Self::Capture(_)
             | Self::Console(ConsoleError::OperatorMissing { .. }) => ExitCode::Usage,
-            Self::LocalWrite { .. } | Self::HostClock | Self::Serialize(_) => ExitCode::Local,
+            Self::LocalWrite { .. }
+            | Self::HostClock
+            | Self::Serialize(_)
+            | Self::Queue(QueueError::Io { .. } | QueueError::GuardBusy { .. }) => ExitCode::Local,
+            Self::Ledger(
+                LedgerError::Io { .. }
+                | LedgerError::Malformed { .. }
+                | LedgerError::Disagree { .. },
+            ) => ExitCode::Usage,
+            Self::Queue(QueueError::Timeout { .. }) | Self::Ledger(LedgerError::Listed { .. }) => {
+                ExitCode::Refused
+            }
+            Self::Queue(QueueError::ConsoleDown { .. }) | Self::Peek(_) => ExitCode::Transport,
             Self::Refused { .. }
             | Self::PassiveOnlySyscall { .. }
             | Self::UnscannableElf { .. }

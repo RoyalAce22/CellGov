@@ -43,10 +43,10 @@ fn a_get_sends_one_http_1_0_request_that_closes_and_parses_the_answer() {
         b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 5\r\n\r\nhello",
     );
     let mut transcript = Transcript::new();
-    let response = get(&mut wire, "10.77.0.2", "/cpursx.ps3", &mut transcript).expect("200");
+    let response = get(&mut wire, "192.0.2.2", "/cpursx.ps3", &mut transcript).expect("200");
     assert_eq!(
         wire.output,
-        b"GET /cpursx.ps3 HTTP/1.0\r\nHost: 10.77.0.2\r\nConnection: close\r\n\r\n"
+        b"GET /cpursx.ps3 HTTP/1.0\r\nHost: 192.0.2.2\r\nConnection: close\r\n\r\n"
     );
     assert_eq!(response.status, 200);
     assert_eq!(response.header("content-type"), Some("text/html"));
@@ -129,10 +129,10 @@ fn bare_line_feed_headers_do_not_end_at_a_blank_line_inside_the_body() {
 #[test]
 fn a_path_or_host_that_could_split_the_request_is_refused_before_anything_is_sent() {
     for (host, path) in [
-        ("10.77.0.2", "/a b"),
-        ("10.77.0.2", "/a\r\nHost: x"),
-        ("10.77.0.2", ""),
-        ("10.77.0.2 x", "/a"),
+        ("192.0.2.2", "/a b"),
+        ("192.0.2.2", "/a\r\nHost: x"),
+        ("192.0.2.2", ""),
+        ("192.0.2.2 x", "/a"),
         ("", "/a"),
     ] {
         let mut wire = MemoryWire::answering(b"HTTP/1.0 200 OK\r\n\r\n");
@@ -142,6 +142,6 @@ fn a_path_or_host_that_could_split_the_request_is_refused_before_anything_is_sen
         assert!(wire.output.is_empty(), "{host:?} {path:?} reached the wire");
         assert!(transcript.lines().is_empty());
     }
-    let err = request_bytes("10.77.0.2", "cpursx.ps3").expect_err("relative");
+    let err = request_bytes("192.0.2.2", "cpursx.ps3").expect_err("relative");
     assert!(matches!(err, TransportError::RelativePath(p) if p == "cpursx.ps3"));
 }

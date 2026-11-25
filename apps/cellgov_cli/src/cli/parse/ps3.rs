@@ -10,8 +10,9 @@ use std::path::PathBuf;
 pub(crate) const PS3_EXIT_CODES: &str = "Exit codes particular to this command:
   50  refused before changing the console: a lease, a stale result, a profile
       the console fails, an occupied game directory, an existing capture, a
-      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number
-  51  the console did not answer as the protocol requires
+      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number,
+      a wait in the console queue that ran out, a peek of a range the crash ledger lists
+  51  the console did not answer as the protocol requires, or is down
   52  the test left no result within the manifest's budget
   53  the fetched bytes are not one whole CGOV frame
   54  the capture succeeded, but cleanup left something on the console";
@@ -43,7 +44,37 @@ pub(crate) enum Ps3Command {
     /// Remove a stale lease on a console.
     #[command(after_help = PS3_EXIT_CODES)]
     Unlock(Ps3UnlockArgs),
+    /// Read words of console memory through webMAN's peek pages, as TSV.
+    #[command(after_help = PS3_EXIT_CODES)]
+    Peek(Ps3PeekArgs),
 }
+
+/// `cellgov ps3 peek`
+#[derive(Debug, Clone, clap::Args)]
+pub(crate) struct Ps3PeekArgs {
+    /// The console (default: CELLGOV_PS3_HOST).
+    #[arg(long, value_name = "HOST")]
+    pub host: Option<String>,
+    /// The memory to read: lv1 (the hypervisor) or lv2 (the kernel).
+    #[arg(long, value_name = "SPACE", value_parser = runner_ps3::cli::parse_space)]
+    pub space: runner_ps3::peek::Space,
+    /// The bytes of each word: 1, 2, 4 or 8.
+    #[arg(long, value_name = "N", value_parser = runner_ps3::cli::parse_width)]
+    pub width: u8,
+    /// Each word's address, 0x hex, separated by commas.
+    #[arg(long, value_name = "ADDR[,ADDR...]", value_parser = runner_ps3::cli::parse_addresses)]
+    pub address: AddressList,
+    /// The reads of each page (default: 2).
+    #[arg(long, value_name = "N", value_parser = runner_ps3::cli::parse_reads)]
+    pub reads: Option<u32>,
+    /// Where to write the TSV (default: stdout).
+    #[arg(long, value_name = "FILE")]
+    pub out: Option<PathBuf>,
+}
+
+/// The addresses one `--address` names; one value, so clap does not read
+/// it as a repeated flag.
+pub(crate) type AddressList = Vec<u64>;
 
 /// `--debugger`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]

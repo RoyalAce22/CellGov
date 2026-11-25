@@ -65,6 +65,7 @@ capture taken under its name assumed the old value.
 | `capture` | The whole loop, writing a committed capture. |
 | `convert` | Converts a fetched frame into an observation, offline. |
 | `unlock` | Removes a stale lease from a console, whoever holds it. |
+| `peek` | Reads words of lv1 or lv2 memory through webMAN's peek pages and writes them as the TSV a peek capture commits. |
 
 A command line `runner_ps3` cannot parse prints the usage with every
 verb's flags; `cellgov ps3 <verb> --help` prints the same flags. `--host`
@@ -100,6 +101,74 @@ that panics, leaves the lease for `unlock` to clear. The runner ignores
 the lease files its earlier versions kept in the host's temp directory;
 delete them at will.
 
+### The console queue
+
+Only one runner may use the reference console at a time. Every verb
+but `convert` waits its turn in one queue for the whole machine before
+it sends a request, and leaves the queue when it ends, on an error
+too. Use the verbs for every console access: a raw `curl` to the
+console skips the queue. Do not run a verb from inside another verb's
+turn; the inner one waits behind the outer one until its wait runs out.
+
+- **Where.** The queue is the directory
+  `%ProgramData%\cellgov\console_queue` on Windows and
+  `/tmp/cellgov-console-queue` elsewhere. It is not the temp
+  directory, because each session or sandbox can set `TMP`, `TEMP` or
+  `TMPDIR` differently, and two runners would then see two queues.
+- **Order.** Each waiter takes a numbered ticket, `<n>.ticket`, and
+  holds an OS lock on it. The live ticket with the lowest number holds
+  the console, so the queue is first in, first out.
+- **Bounded wait.** A waiter looks at the queue once a second and
+  gives up after 30 minutes, with a `queue:` refusal (class 2, or 50
+  under `cellgov ps3`) that names how long it waited, how many tickets
+  are ahead, and the holder's process and command line.
+- **Dead owners.** The OS releases a ticket's lock when its process
+  ends, however it ends. A ticket whose lock any process can take has
+  no live owner, and the next waiter removes it.
+- **Diagnosis.** Each ticket's `<n>.holder` file names its process,
+  user and machine, and command line. `log` keeps one line for each
+  join, grant, release, reclaim, timeout and down mark.
+- **No console identifier.** The holder files, the down mark and the
+  log mask the console's host, and the command line goes through the
+  transcript redactor.
+
+The runner that gets its turn reads the status page first. When the
+page does not answer three reads, two seconds apart, the runner writes
+`down` in the queue and fails with `console down; the operator must
+restart it` (class 3, or 51). Every waiter that finds `down` stops at
+its next look with the same error. The next runner to reach the head
+of the queue reads the status page again and clears `down` when the
+page answers.
+
+### The crash ledger as a stop list
+
+[`tests/micro/console_crashes.md`](../../tests/micro/console_crashes.md)
+records every call and read that took the reference console down.
+[`tests/micro/console_crashes.tsv`](../../tests/micro/console_crashes.tsv)
+lists the ranges of its peek rows: space, first and last address, and
+status. Every verb but `convert` loads both before it waits, and
+refuses (class 1) while they do not name the same ranges in the same
+order. `peek` refuses a page that overlaps a listed range (class 2, or
+50) before it waits or sends a request. A new peek row in the ledger
+names its range as `of 0x<first> to 0x<last>` and gets its line in the
+TSV in the same commit.
+
+### Peek captures
+
+`peek --space lv1|lv2 --width 1|2|4|8 --address A[,A...]` reads the
+0x200-byte page around each address `--reads` times (default 2), in
+address order, and prints one TSV line per address: the address, the
+read count, whether every read agrees, and the value at the first
+read. `--out` writes the TSV to a file. Each address must be a multiple
+of the width. The committed peek captures under
+`tests/micro/<name>/peek/<profile>/` with this shape are reproduced by
+the same command; for example, the console gate is
+
+```text
+cellgov ps3 peek --space lv1 --width 1 --address 0x374000 \
+  --out tests/micro/lv1_console_gate/peek/cech20-cex-493/gate.tsv
+```
+
 ### The thermal and capacity interlock
 
 `deploy`, `run`, `fetch` and `capture` refuse while the console is hot,
@@ -131,12 +200,12 @@ caught at the next verb, not during it.
 | success | 0 | 0 |
 | a bad or missing flag | 1 | 2 |
 | an input file that does not load | 1 | 1 |
-| refused before changing the console | 2 | 50 |
-| the console did not answer as the protocol requires | 3 | 51 |
+| refused before changing the console, a wait in the queue that ran out, or a listed peek range | 2 | 50 |
+| the console did not answer as the protocol requires, or is down | 3 | 51 |
 | no result within the manifest's budget | 4 | 52 |
 | the fetched bytes are not one whole `CGOV` frame | 5 | 53 |
 | cleanup left something on the console | 6 | 54 |
-| a local write failed, or the host clock is unusable | 7 | 1 |
+| a local write failed, the queue's files did not serve, or the host clock is unusable | 7 | 1 |
 
 ## What a capture writes
 
@@ -198,7 +267,8 @@ type-checks the suite and never runs it.
 
 The runner sends only what the loop needs: the status page, the start
 request (`/play.ps3?<APPID>`, which mounts the test and starts it), the
-result fetch, and the unmount over HTTP; and
+result fetch, the unmount and, for `peek`, the read-only peek pages over
+HTTP; and
 over FTP, listings, and directory creation, upload and deletion
 confined to its own game directory, its result file and its lease
 directory. It never sends a webMAN request

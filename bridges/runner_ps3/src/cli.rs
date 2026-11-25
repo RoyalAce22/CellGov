@@ -12,6 +12,7 @@ use cellgov_observation::console_profile::console_profiles_path;
 use crate::console::OperatorFacts;
 use crate::env;
 use crate::error::RunnerPs3Error;
+use crate::peek::{PeekPlan, Space, DEFAULT_READS};
 
 /// The wait between polls for the result when `--poll-ms` is absent.
 pub const DEFAULT_POLL_MS: u64 = 500;
@@ -29,8 +30,11 @@ usage: runner_ps3 <verb> [flags]
            [--reclaim] [--keep-deployed] [--recapture --reason TEXT] [--wait-cool]
   convert  --frame FILE --manifest F --profile P [--profiles F] [--out FILE]
   unlock   --host H [--json]
+  peek     --host H --space lv1|lv2 --width 1|2|4|8 --address A[,A...] [--reads N]
+           [--out FILE] [--json]
 --host defaults to CELLGOV_PS3_HOST and --profile to CELLGOV_PS3_PROFILE.
 --json prints the report as JSON; convert always prints JSON.
+Every verb but convert waits its turn in the host-wide console queue.
 deploy, run, fetch and capture refuse a hot console; --wait-cool waits for it to cool.";
 
 /// A runner verb.
@@ -52,6 +56,8 @@ pub enum Verb {
     Convert,
     /// Remove a stale lease.
     Unlock,
+    /// Read words of console memory through webMAN's peek pages.
+    Peek,
 }
 
 impl Verb {
@@ -66,6 +72,7 @@ impl Verb {
             Self::Capture => "capture",
             Self::Convert => "convert",
             Self::Unlock => "unlock",
+            Self::Peek => "peek",
         }
     }
 
@@ -155,6 +162,15 @@ impl Verb {
             ],
             Self::Convert => &["--frame", "--manifest", "--profile", "--profiles", "--out"],
             Self::Unlock => &["--host", "--json"],
+            Self::Peek => &[
+                "--host",
+                "--json",
+                "--space",
+                "--width",
+                "--address",
+                "--reads",
+                "--out",
+            ],
         }
     }
 }
@@ -198,6 +214,14 @@ pub struct Command {
     pub json: bool,
     /// `--wait-cool`.
     pub wait_cool: bool,
+    /// `--space`.
+    pub space: Option<Space>,
+    /// `--width`.
+    pub width: Option<u8>,
+    /// `--address`, one or more addresses.
+    pub addresses: Option<Vec<u64>>,
+    /// `--reads`.
+    pub reads: Option<u32>,
 }
 
 fn usage(message: String) -> RunnerPs3Error {
@@ -307,8 +331,74 @@ fn set_valued_flag(command: &mut Command, flag: &str, value: &str) -> Result<(),
         "--harness-revision" => set_once(&mut command.harness_revision, flag, text),
         "--poll-ms" => set_once(&mut command.poll_ms, flag, parse_poll_ms(value)?),
         "--reason" => set_once(&mut command.reason, flag, text),
+        "--space" => set_once(&mut command.space, flag, parse_space(value)?),
+        "--width" => set_once(&mut command.width, flag, parse_width(value)?),
+        "--address" => set_once(&mut command.addresses, flag, parse_addresses(value)?),
+        "--reads" => set_once(&mut command.reads, flag, parse_reads(value)?),
         _ => Err(usage(format!("unknown flag {flag}"))),
     }
+}
+
+/// `--space`: `lv1` or `lv2`.
+///
+/// # Errors
+///
+/// [`RunnerPs3Error::Usage`] for any other word.
+pub fn parse_space(value: &str) -> Result<Space, RunnerPs3Error> {
+    Space::from_name(value).ok_or_else(|| usage(format!("--space takes lv1 or lv2, not {value:?}")))
+}
+
+/// `--width`: 1, 2, 4 or 8 bytes.
+///
+/// # Errors
+///
+/// [`RunnerPs3Error::Usage`] for any other value.
+pub fn parse_width(value: &str) -> Result<u8, RunnerPs3Error> {
+    match value {
+        "1" | "2" | "4" | "8" => Ok(value.parse().unwrap_or_default()),
+        other => Err(usage(format!("--width takes 1, 2, 4 or 8, not {other:?}"))),
+    }
+}
+
+/// One `--address`: `0x` and hex digits.
+///
+/// # Errors
+///
+/// [`RunnerPs3Error::Usage`] for a value that is not `0x` hex.
+pub fn parse_address(value: &str) -> Result<u64, RunnerPs3Error> {
+    // from_str_radix also takes a leading `+`, which is not a hex digit.
+    value
+        .strip_prefix("0x")
+        .filter(|digits| digits.bytes().all(|b| b.is_ascii_hexdigit()))
+        .and_then(|digits| u64::from_str_radix(digits, 16).ok())
+        .ok_or_else(|| usage(format!("address {value:?} is not 0x hex")))
+}
+
+/// `--address`: addresses separated by commas.
+///
+/// # Errors
+///
+/// [`RunnerPs3Error::Usage`] for an address that is not `0x` hex.
+pub fn parse_addresses(value: &str) -> Result<Vec<u64>, RunnerPs3Error> {
+    value.split(',').map(parse_address).collect()
+}
+
+/// `--reads`: 1 to [`crate::peek::MAX_READS`].
+///
+/// # Errors
+///
+/// [`RunnerPs3Error::Usage`] for any other value.
+pub fn parse_reads(value: &str) -> Result<u32, RunnerPs3Error> {
+    value
+        .parse::<u32>()
+        .ok()
+        .filter(|reads| (1..=crate::peek::MAX_READS).contains(reads))
+        .ok_or_else(|| {
+            usage(format!(
+                "--reads takes 1 to {}, not {value:?}",
+                crate::peek::MAX_READS
+            ))
+        })
 }
 
 /// `--debugger`: `true` for `attached`, `false` for `none`.
@@ -392,6 +482,24 @@ impl Command {
         self.profiles
             .clone()
             .unwrap_or_else(|| console_profiles_path(workspace_root))
+    }
+
+    /// The peek the flags name; `--reads` defaults to [`DEFAULT_READS`].
+    ///
+    /// # Errors
+    ///
+    /// [`RunnerPs3Error::Usage`] for an absent `--space`, `--width` or
+    /// `--address`, and every refusal of [`PeekPlan::new`].
+    pub fn peek_plan(&self) -> Result<PeekPlan, RunnerPs3Error> {
+        let required = |flag: &str| usage(format!("{flag} is required"));
+        PeekPlan::new(
+            self.space.ok_or_else(|| required("--space"))?,
+            self.width.ok_or_else(|| required("--width"))?,
+            self.addresses
+                .clone()
+                .ok_or_else(|| required("--address"))?,
+            self.reads.unwrap_or(DEFAULT_READS),
+        )
     }
 
     /// `--poll-ms`, or [`DEFAULT_POLL_MS`].

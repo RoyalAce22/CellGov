@@ -72,7 +72,7 @@ const LINES: &[&[&str]] = &[
     &[
         "status",
         "--host",
-        "10.77.0.2",
+        "192.0.2.2",
         "--profile",
         "cech20-cex-493",
         "--profiles",
@@ -140,7 +140,22 @@ const LINES: &[&[&str]] = &[
         "--out",
         "observation.json",
     ],
-    &["unlock", "--host", "10.77.0.2"],
+    &["unlock", "--host", "192.0.2.2"],
+    &[
+        "peek",
+        "--host",
+        "192.0.2.2",
+        "--space",
+        "lv2",
+        "--width",
+        "8",
+        "--address",
+        "0x8000000000354d98,0x8000000000354da0",
+        "--reads",
+        "3",
+        "--out",
+        "kernel.tsv",
+    ],
 ];
 
 #[test]
@@ -181,6 +196,47 @@ fn a_line_the_runner_refuses_is_a_usage_error_here() {
         &["status", "--debugger", "maybe"][..],
         &["run", "--manifest", "m", "--poll-ms", "0"][..],
         &["unlock", "--manifest", "m"][..],
+        &[
+            "peek",
+            "--space",
+            "lv3",
+            "--width",
+            "8",
+            "--address",
+            "0x10",
+        ][..],
+        &[
+            "peek",
+            "--space",
+            "lv1",
+            "--width",
+            "3",
+            "--address",
+            "0x10",
+        ][..],
+        &["peek", "--space", "lv1", "--width", "1", "--address", "10"][..],
+        &[
+            "peek",
+            "--space",
+            "lv1",
+            "--width",
+            "1",
+            "--address",
+            "0x10",
+            "--reads",
+            "0",
+        ][..],
+        &[
+            "peek",
+            "--space",
+            "lv1",
+            "--width",
+            "1",
+            "--address",
+            "0x10",
+            "--address",
+            "0x20",
+        ][..],
     ] {
         let error = parsed(words).expect_err("refused");
         assert_eq!(error.exit_code(), exit_codes::USAGE, "{words:?}: {error}");
@@ -271,9 +327,9 @@ fn each_runner_failure_maps_to_its_status() {
         ),
         (
             RunnerPs3Error::from(LeaseError::Held {
-                host: "10.77.0.2".to_string(),
+                host: "192.0.2.2".to_string(),
                 holder: "pid=1 holder=x".to_string(),
-                unlock_with: "cellgov ps3 unlock --host 10.77.0.2".to_string(),
+                unlock_with: "cellgov ps3 unlock --host 192.0.2.2".to_string(),
             }),
             50,
         ),
@@ -340,6 +396,76 @@ fn each_runner_failure_maps_to_its_status() {
                 remaining: "/dev_hdd0/game/CGOV00001".to_string(),
             },
             54,
+        ),
+        (
+            RunnerPs3Error::from(QueueError::Timeout {
+                dir: PathBuf::from("queue"),
+                waited_ms: 1,
+                ahead: 1,
+                holder: "pid 1".to_string(),
+            }),
+            50,
+        ),
+        (
+            RunnerPs3Error::from(QueueError::ConsoleDown {
+                cause: "the status page did not answer".to_string(),
+            }),
+            51,
+        ),
+        (
+            RunnerPs3Error::from(QueueError::Io {
+                path: PathBuf::from("queue"),
+                source: io(),
+            }),
+            1,
+        ),
+        (
+            RunnerPs3Error::from(QueueError::GuardBusy {
+                path: PathBuf::from("queue/guard"),
+                tries: 1,
+            }),
+            1,
+        ),
+        (
+            RunnerPs3Error::from(LedgerError::Disagree {
+                reason: "row 1".to_string(),
+            }),
+            1,
+        ),
+        (
+            RunnerPs3Error::from(LedgerError::Malformed {
+                file: runner_ps3::ledger::STOP_LIST,
+                line: 2,
+                reason: "3 fields".to_string(),
+            }),
+            1,
+        ),
+        (
+            RunnerPs3Error::from(LedgerError::Io {
+                path: PathBuf::from("console_crashes.tsv"),
+                source: io(),
+            }),
+            1,
+        ),
+        (
+            RunnerPs3Error::from(LedgerError::Listed {
+                space: runner_ps3::peek::Space::Lv2,
+                first: 0x8000_0000_0f00_0000,
+                last: 0x8000_0000_0f00_01ff,
+                listed: runner_ps3::ledger::StopRange {
+                    space: runner_ps3::peek::Space::Lv2,
+                    first: 0x8000_0000_0f00_0000,
+                    last: 0x8000_0000_0f03_ffff,
+                    status: runner_ps3::ledger::Status::Suspected,
+                },
+            }),
+            50,
+        ),
+        (
+            RunnerPs3Error::from(runner_ps3::peek::PeekError::NotServed {
+                path: "/peek.lv1?0000000000374000".to_string(),
+            }),
+            51,
         ),
     ];
     for (error, code) in &cases {

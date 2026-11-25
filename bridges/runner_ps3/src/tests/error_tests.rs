@@ -58,15 +58,15 @@ fn each_error_maps_to_the_class_its_message_names() {
         (
             RunnerPs3Error::Refused {
                 reason: "another runner holds the console".to_string(),
-                clear_with: "runner_ps3 unlock --host 10.77.0.2".to_string(),
+                clear_with: "runner_ps3 unlock --host 192.0.2.2".to_string(),
             },
             ExitCode::Refused,
         ),
         (
             RunnerPs3Error::from(LeaseError::Held {
-                host: "10.77.0.2".to_string(),
+                host: "192.0.2.2".to_string(),
                 holder: "pid=1 holder=x".to_string(),
-                unlock_with: "runner_ps3 unlock --host 10.77.0.2".to_string(),
+                unlock_with: "runner_ps3 unlock --host 192.0.2.2".to_string(),
             }),
             ExitCode::Refused,
         ),
@@ -140,7 +140,7 @@ fn each_error_maps_to_the_class_its_message_names() {
                 thermal: Thermal::Hot,
                 reading: hot,
                 limits,
-                poll_with: "runner_ps3 status --host 10.77.0.2".to_string(),
+                poll_with: "runner_ps3 status --host 192.0.2.2".to_string(),
             }),
             ExitCode::Refused,
         ),
@@ -195,12 +195,12 @@ fn each_error_maps_to_the_class_its_message_names() {
 fn a_refusal_prints_the_command_that_clears_it() {
     let error = RunnerPs3Error::Refused {
         reason: "a result file already sits at /dev_hdd0/tmp/cgov_x.bin".to_string(),
-        clear_with: "runner_ps3 cleanup --host 10.77.0.2 --manifest tests/micro/x/manifest.toml"
+        clear_with: "runner_ps3 cleanup --host 192.0.2.2 --manifest tests/micro/x/manifest.toml"
             .to_string(),
     };
     assert_eq!(
         error.to_string(),
         "refused: a result file already sits at /dev_hdd0/tmp/cgov_x.bin; clear it with \
-         `runner_ps3 cleanup --host 10.77.0.2 --manifest tests/micro/x/manifest.toml`"
+         `runner_ps3 cleanup --host 192.0.2.2 --manifest tests/micro/x/manifest.toml`"
     );
 }

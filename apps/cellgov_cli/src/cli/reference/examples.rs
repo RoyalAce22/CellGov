@@ -203,7 +203,7 @@ pub(crate) const EXAMPLES: &[Examples] = &[
     Examples {
         path: "ps3 status",
         lines: &[
-            "cellgov ps3 status --host 10.77.0.2 --profile cech20-cex-493 --model CECH-2001A --cfw EvilNAT --debugger none",
+            "cellgov ps3 status --host 192.0.2.2 --profile cech20-cex-493 --model CECH-2001A --cfw EvilNAT --debugger none",
         ],
     },
     Examples {
@@ -244,7 +244,13 @@ pub(crate) const EXAMPLES: &[Examples] = &[
     },
     Examples {
         path: "ps3 unlock",
-        lines: &["cellgov ps3 unlock --host 10.77.0.2"],
+        lines: &["cellgov ps3 unlock --host 192.0.2.2"],
+    },
+    Examples {
+        path: "ps3 peek",
+        lines: &[
+            "cellgov ps3 peek --space lv1 --width 1 --address 0x374000 --out gate.tsv",
+        ],
     },
     Examples {
         path: "dev disasm",
