@@ -93,7 +93,13 @@ live 4.93 hypercall table, and the state.
   firmware. The call table cites the handler of each such name.
 
 A psdevwiki or CellGov name replaces the header's placeholder. The
-family comes from the header's name.
+family comes from the `name` column, so a psdevwiki or CellGov name
+decides the family of its call. The `console` family holds the logical
+console calls, 105, 106, 107, 108, 109 and 231, whether or not
+the table has a row for the number. No header names them: the headers
+give 105 to 109 only `undocumented_function_N`, and their psdevwiki
+names put them in `console`. A call whose name is still the header's
+placeholder is `undocumented`, and a number with no name is `unnamed`.
 
 A number that neither header lists has no header row and no
 placeholder. `UNLISTED_ALIASES` in `cellgov_ps3_abi::lv1::call` gives a
@@ -101,7 +107,7 @@ psdevwiki or CellGov name to some of these numbers:
 89, 137, 195, 196, 230 and 231. Each of them takes its name from that alias.
 Every other number that neither header lists has `none` as its name and
 its `name_source`. A number that neither header lists has `none` as its
-`inputs` and `outputs`, and its family is `unnamed`.
+`inputs` and `outputs`.
 
 `lv1_493` is `handler`, `invalid` or `past_table`. It comes from
 `cellgov_ps3_abi::lv1::table`, which holds the console capture
