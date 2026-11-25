@@ -267,21 +267,23 @@ pub const PPU_SYSCALL_ROUND_TRIP_CYCLES: u64 = 929;
 /// The round trip of an LV2 call that no capture times.
 ///
 /// The value is the lower median of the success round trips in
-/// [`PPU_SYSCALL_ROUND_TRIPS`]: the destroy of a lightweight mutex.
+/// [`PPU_SYSCALL_ROUND_TRIPS`]: `sys_semaphore_get_value`.
 ///
 /// The calls no capture times include:
 ///
-/// - the PRX module calls;
-/// - thread create and join;
-/// - the memory allocation and mmapper calls;
+/// - the PRX module calls other than load, start, stop and unload;
+/// - the mmapper calls;
 /// - the file system calls;
 /// - the waits the table lacks, when they do not block, such as an event
 ///   queue receive.
 ///
 /// Each of these creates a kernel object, writes a result to guest memory
-/// or switches threads. The timed calls of those kinds all take more than
-/// this median, so an untimed call can cost more than this round trip.
-pub const PPU_SYSCALL_UNTIMED_ROUND_TRIP_CYCLES: u64 = 5185;
+/// or switches threads. The timed calls that create a kernel object and
+/// the timed waits that block take more than this median. Of the timed
+/// calls that write a result, `sys_process_get_sdk_version` and
+/// `sys_event_flag_get` take less. So an untimed call can cost more than
+/// this round trip.
+pub const PPU_SYSCALL_UNTIMED_ROUND_TRIP_CYCLES: u64 = 6040;
 
 /// The round trip of each call the `ppu_lv2_call_cost` capture times,
 /// as `(syscall number, cycles)`: the cycles from the `sc` to the
@@ -311,7 +313,22 @@ pub const PPU_SYSCALL_UNTIMED_ROUND_TRIP_CYCLES: u64 = 5185;
 /// run, less the 18 cycles a create loop takes and the 15 a destroy loop
 /// takes beside the cheapest call's round trip. A create takes 9833 to
 /// 14097 cycles and a destroy 4736 to 5480.
-pub const PPU_SYSCALL_ROUND_TRIPS: [(u64, u64); 34] = [
+///
+/// The `ppu_lv2_call_heavy` capture times each PRX module, thread and
+/// memory call alone, 32 times, between other kernel work. Each entry is
+/// its call's lower median sample, less the 2511 cycles the cheapest
+/// call's median sample takes over its round trip. A start and a stop
+/// each make one call of the first phase and one of the second. Their
+/// entries are the mean of the two phases. The module is libadec.sprx,
+/// and the allocation is 1 MiB.
+///
+/// | call | cycles |
+/// | --- | --- |
+/// | `_sys_prx_start_module`, first phase | 1741649 |
+/// | `_sys_prx_start_module`, second phase | 31929 |
+/// | `_sys_prx_stop_module`, first phase | 31209 |
+/// | `_sys_prx_stop_module`, second phase | 1155449 |
+pub const PPU_SYSCALL_ROUND_TRIPS: [(u64, u64); 43] = [
     (syscall::PROCESS_GETPID, 1129),
     (syscall::MEMORY_GET_PAGE_ATTRIBUTE, 8506),
     (syscall::TIME_GET_TIMEBASE_FREQUENCY, 929),
@@ -346,6 +363,15 @@ pub const PPU_SYSCALL_ROUND_TRIPS: [(u64, u64); 34] = [
     (syscall::EVENT_FLAG_DESTROY, 4736),
     (syscall::COND_CREATE, 14097),
     (syscall::COND_DESTROY, 5480),
+    (syscall::SYS_PRX_LOAD_MODULE, 26_665_329),
+    (syscall::SYS_PRX_START_MODULE, 886_789),
+    (syscall::SYS_PRX_STOP_MODULE, 593_329),
+    (syscall::SYS_PRX_UNLOAD_MODULE, 108_609),
+    (syscall::PPU_THREAD_CREATE, 255_169),
+    (syscall::PPU_THREAD_START, 11809),
+    (syscall::PPU_THREAD_JOIN, 9809),
+    (syscall::MEMORY_ALLOCATE, 1_601_449),
+    (syscall::MEMORY_FREE, 62169),
 ];
 
 /// The round trip of the call `number` selects: its entry in

@@ -1,0 +1,21 @@
+[test]
+name = "ppu_lv2_call_heavy"
+
+# A hardware probe of the LV2 round trip of the PRX module load, start,
+# stop and unload calls, thread create, start and join, and memory
+# allocate and free, each call timed alone with mftb over 32 rounds.
+# The console capture is the answer; ppu/main.c's header lists the calls
+# and the payload layout.
+
+[observe]
+# Big-endian u64 words, then u32 samples, at the offsets ppu/main.c
+# lists: 2048 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 2048 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

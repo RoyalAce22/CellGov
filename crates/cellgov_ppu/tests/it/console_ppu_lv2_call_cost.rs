@@ -8,6 +8,7 @@
 //! console runs while every call so far returned 0.
 
 use crate::console_ppu_issue_timing::{replay, replay_r3, Replay, Seed, ONE_LINE};
+use crate::console_ppu_lv2_call_heavy as heavy;
 use crate::console_ppu_lv2_call_lifecycle as lifecycle;
 use crate::console_ppu_lv2_call_untimed as untimed;
 use cellgov_ps3_abi::hw::ppu_issue::{
@@ -181,13 +182,15 @@ fn each_timed_call_s_round_trip_is_its_fastest_run_less_the_loop_s_other_cycles(
     }
     let mut timed: Vec<u64> = PPU_SYSCALL_ROUND_TRIPS.iter().map(|&(n, _)| n).collect();
     // The `ppu_lv2_call_paths` console capture times `sys_process_getpid`
-    // and `sys_memory_get_page_attribute`. The `ppu_lv2_call_untimed` and
-    // `ppu_lv2_call_lifecycle` captures time the rest.
+    // and `sys_memory_get_page_attribute`. The `ppu_lv2_call_untimed`,
+    // `ppu_lv2_call_lifecycle` and `ppu_lv2_call_heavy` captures time the
+    // rest.
     let mut looped: Vec<u64> = [
         &LOOPS[..],
         &[sc::PROCESS_GETPID, sc::MEMORY_GET_PAGE_ATTRIBUTE],
         &untimed::LOOPS[..],
         &lifecycle::LOOPS[..],
+        &heavy::LOOPS[..],
     ]
     .concat();
     timed.sort_unstable();

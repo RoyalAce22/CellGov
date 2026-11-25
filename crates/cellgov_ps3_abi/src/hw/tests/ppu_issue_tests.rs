@@ -37,9 +37,9 @@ fn an_untimed_call_takes_the_lower_median_of_the_timed_success_trips() {
         trips[(trips.len() - 1) / 2]
     );
     assert_eq!(
-        ppu_syscall_round_trip_cycles(crate::lv2::syscall::PPU_THREAD_CREATE),
+        ppu_syscall_round_trip_cycles(crate::lv2::syscall::FS_OPEN),
         PPU_SYSCALL_UNTIMED_ROUND_TRIP_CYCLES,
-        "thread create is untimed",
+        "a file open is untimed",
     );
 }
 

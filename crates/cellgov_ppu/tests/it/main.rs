@@ -97,6 +97,7 @@ mod console_ppu_lswx_zero_count;
 mod console_ppu_lv2_call_arg_refusals;
 mod console_ppu_lv2_call_contended;
 mod console_ppu_lv2_call_cost;
+mod console_ppu_lv2_call_heavy;
 mod console_ppu_lv2_call_lifecycle;
 mod console_ppu_lv2_call_live_errors;
 mod console_ppu_lv2_call_paths;
