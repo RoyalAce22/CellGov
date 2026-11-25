@@ -1,18 +1,20 @@
 //! What the paths to each join word bring in the GPRs and in LR.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::constants::{ends_path, Constants, Value};
 use super::ctr_flow::{calls, links_to_next_word, positions};
+use super::lost::{join_origins, LostGprs, Origins};
 use super::toc::WordTocs;
+use crate::caller_census::{JoinDrop, JoinRegister};
 use crate::hypercall_cfg::{branch_target, Code};
 use crate::instruction::PpuInstruction;
 
 /// The largest number of constants that the flow keeps for one GPR, or
-/// for LR, at a join word.
+/// for LR, at a join word whose bound [`Bounds`] does not raise.
 ///
-/// When the paths to a join word bring more constants than this in a
-/// register, the join keeps the constants that it holds. It marks the
+/// When the paths to a join word bring more constants than its bound in
+/// a register, the join keeps the constants that it holds. It marks the
 /// register as lost: the register can also hold a constant that the flow
 /// dropped. So a loop that steps a constant adds a finite number of
 /// constants, and the flow ends.
@@ -25,23 +27,29 @@ use crate::instruction::PpuInstruction;
 /// - a lost SRR0 at an `rfid`.
 const JOIN_LIMIT: usize = 16;
 
+/// The largest bound that [`Bounds::raise`] gives one register at one
+/// join word.
+pub(super) const RAISED_LIMIT: usize = 64;
+
 /// What the paths to one join word bring in the GPRs and in LR.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Brought {
     /// The constants of each GPR that holds one, by GPR number in
     /// ascending order.
     gprs: Vec<(u8, Value)>,
-    /// Each GPR that can also hold a constant that the flow dropped, as
-    /// bit `n` for GPR `n`.
-    lost_gprs: u32,
+    /// The origins of each GPR that can also hold a constant that the
+    /// flow dropped.
+    lost_gprs: LostGprs,
     /// The constants in LR, by the address of the word that wrote each
     /// one.
     lr: BTreeMap<u64, Value>,
-    /// Whether LR can also hold a constant that the flow dropped.
-    lr_lost: bool,
-    /// Whether SRR0 and SRR1 can also hold a constant that the flow
-    /// dropped. The flow brings no SRR0 or SRR1 constant to a join word.
-    srrs_lost: [bool; 2],
+    /// The origins of LR when it can also hold a constant that the flow
+    /// dropped.
+    lr_lost: Option<Origins>,
+    /// The origins of SRR0 and of SRR1 when each can also hold a
+    /// constant that the flow dropped. The flow brings no SRR0 or SRR1
+    /// constant to a join word.
+    srrs_lost: [Option<Origins>; 2],
 }
 
 impl Brought {
@@ -51,29 +59,32 @@ impl Brought {
         for (gpr, value) in &self.gprs {
             constants.gprs[usize::from(*gpr)] = Some(value.clone());
         }
-        constants.lost_gprs = self.lost_gprs;
+        constants.lost_gprs.clone_from(&self.lost_gprs);
         constants.lr.clone_from(&self.lr);
-        constants.lr_lost = self.lr_lost;
-        [constants.srr0_lost, constants.srr1_lost] = self.srrs_lost;
+        constants.lr_lost.clone_from(&self.lr_lost);
+        [constants.srr0_lost, constants.srr1_lost] = self.srrs_lost.clone();
         constants
     }
 
     /// Joins the constants that one path brings into `self`, and returns
     /// whether `self` changed.
     ///
-    /// A join that would leave more than [`JOIN_LIMIT`] constants in a
-    /// register keeps the constants of the register and marks it as lost.
-    /// The join also marks each register that the path marks as lost.
-    fn join(&mut self, path: &Constants) -> bool {
-        let mut changed = false;
-        let mut lost_gprs = self.lost_gprs | path.lost_gprs;
+    /// A join that would leave more constants in a register than the
+    /// bound of the register keeps the constants of the register. It
+    /// records the drop in `drops` and marks the register as lost with
+    /// that drop. The join also takes the origins of each register that
+    /// the path marks as lost.
+    fn join(&mut self, path: &Constants, join: JoinAt<'_>, drops: &mut Drops) -> bool {
+        let mut changed = self.lost_gprs.join(&path.lost_gprs);
         for gpr in 0..32u8 {
             let Some(value) = path.gpr(gpr) else {
                 continue;
             };
+            let register = JoinRegister::Gpr(gpr);
+            let limit = join.limit(register);
             let joined = match self.gprs.binary_search_by_key(&gpr, |&(own, _)| own) {
-                Ok(at) => join_limited(&mut self.gprs[at].1, value),
-                Err(at) if value.constants().len() <= JOIN_LIMIT => {
+                Ok(at) => join_limited(&mut self.gprs[at].1, value, limit),
+                Err(at) if value.constants().len() <= limit => {
                     self.gprs.insert(at, (gpr, value.clone()));
                     Joined::Grew
                 }
@@ -82,42 +93,99 @@ impl Brought {
             match joined {
                 Joined::Held => {}
                 Joined::Grew => changed = true,
-                Joined::Overflowed => lost_gprs |= 1 << gpr,
+                Joined::Overflowed => {
+                    let own = self.gpr(gpr);
+                    let dropped = missing(own, value).map(|constant| (0, constant));
+                    let origins = drops.record(join.slot, register, dropped);
+                    changed |= self.lost_gprs.join_gpr(gpr, &origins);
+                }
             }
         }
-        let mut lr_lost = self.lr_lost || path.lr_lost;
+        changed |= join_origins(&mut self.lr_lost, path.lr_lost.as_ref());
+        let limit = join.limit(JoinRegister::Lr);
+        let mut dropped = Vec::new();
         for (&by, value) in &path.lr {
             let own = self.lr.get(&by);
             let joined_len = match own {
                 Some(own) if own.holds_all(value) => continue,
-                Some(own) => joined_len(own, value),
+                Some(own) => joined_len(own, value, limit),
                 None => value.constants().len(),
             };
             let others = self.lr_count() - own.map_or(0, |own| own.constants().len());
-            if others + joined_len <= JOIN_LIMIT {
+            if others + joined_len <= limit {
                 let joined = own.map_or_else(|| value.clone(), |own| own.clone().union(value));
                 self.lr.insert(by, joined);
                 changed = true;
             } else {
-                lr_lost = true;
+                dropped.extend(missing(own, value).map(|constant| (by, constant)));
             }
         }
-        let srrs_lost = [
-            self.srrs_lost[0] || path.srr0_lost,
-            self.srrs_lost[1] || path.srr1_lost,
-        ];
-        if (lost_gprs, lr_lost, srrs_lost) != (self.lost_gprs, self.lr_lost, self.srrs_lost) {
-            self.lost_gprs = lost_gprs;
-            self.lr_lost = lr_lost;
-            self.srrs_lost = srrs_lost;
-            changed = true;
+        if !dropped.is_empty() {
+            let origins = drops.record(join.slot, JoinRegister::Lr, dropped.into_iter());
+            changed |= join_origins(&mut self.lr_lost, Some(&origins));
         }
+        changed |= join_origins(&mut self.srrs_lost[0], path.srr0_lost.as_ref());
+        changed |= join_origins(&mut self.srrs_lost[1], path.srr1_lost.as_ref());
         changed
+    }
+
+    /// The constants of `gpr`, when it holds any.
+    fn gpr(&self, gpr: u8) -> Option<&Value> {
+        let at = self.gprs.binary_search_by_key(&gpr, |&(own, _)| own).ok()?;
+        Some(&self.gprs[at].1)
     }
 
     /// The number of constants in LR, over each word that wrote one.
     fn lr_count(&self) -> usize {
         self.lr.values().map(|value| value.constants().len()).sum()
+    }
+
+    /// Whether `register` holds `item`: a constant of a GPR keyed by 0,
+    /// or a constant of LR keyed by the word that wrote it.
+    fn holds(&self, register: JoinRegister, (by, constant): (u64, u64)) -> bool {
+        let value = match register {
+            JoinRegister::Gpr(gpr) => self.gpr(gpr),
+            JoinRegister::Lr => self.lr.get(&by),
+        };
+        value.is_some_and(|value| value.constants().binary_search(&constant).is_ok())
+    }
+
+    /// The number of constants that `register` holds, as [`Self::holds`]
+    /// counts them.
+    fn count(&self, register: JoinRegister) -> usize {
+        match register {
+            JoinRegister::Gpr(gpr) => self.gpr(gpr).map_or(0, |value| value.constants().len()),
+            JoinRegister::Lr => self.lr_count(),
+        }
+    }
+}
+
+/// The constants of `value` that `own` does not hold.
+fn missing<'v>(own: Option<&'v Value>, value: &'v Value) -> impl Iterator<Item = u64> + 'v {
+    value
+        .constants()
+        .iter()
+        .filter(move |constant| {
+            own.is_none_or(|own| own.constants().binary_search(constant).is_err())
+        })
+        .copied()
+}
+
+/// The join word that a path joins into: its slot, and the bounds that
+/// [`Bounds`] raises there.
+#[derive(Clone, Copy)]
+struct JoinAt<'b> {
+    slot: usize,
+    raised: Option<&'b BTreeMap<JoinRegister, usize>>,
+}
+
+impl JoinAt<'_> {
+    /// The most constants that the join word keeps in `register`.
+    fn limit(self, register: JoinRegister) -> usize {
+        self.raised
+            .and_then(|raised| raised.get(&register))
+            .copied()
+            .unwrap_or(JOIN_LIMIT)
     }
 }
 
@@ -128,17 +196,17 @@ enum Joined {
     /// The register took the new constants.
     Grew,
     /// The register kept its constants, because the join would leave
-    /// more than [`JOIN_LIMIT`] constants.
+    /// more constants than its bound.
     Overflowed,
 }
 
 /// Joins `value` into `own` unless the join would leave more than
-/// [`JOIN_LIMIT`] constants.
-fn join_limited(own: &mut Value, value: &Value) -> Joined {
+/// `limit` constants.
+fn join_limited(own: &mut Value, value: &Value, limit: usize) -> Joined {
     if own.holds_all(value) {
         return Joined::Held;
     }
-    if joined_len(own, value) > JOIN_LIMIT {
+    if joined_len(own, value, limit) > limit {
         return Joined::Overflowed;
     }
     *own = own.clone().union(value);
@@ -146,12 +214,12 @@ fn join_limited(own: &mut Value, value: &Value) -> Joined {
 }
 
 /// The number of constants that the join of `own` and `value` holds, or
-/// `JOIN_LIMIT + 1` when it holds more than [`JOIN_LIMIT`].
+/// `limit + 1` when it holds more than `limit`.
 ///
 /// The count does not build the join, so a join that overflows costs no
 /// allocation. The count stops when the join overflows.
-fn joined_len(own: &Value, value: &Value) -> usize {
-    let over = JOIN_LIMIT + 1;
+fn joined_len(own: &Value, value: &Value, limit: usize) -> usize {
+    let over = limit + 1;
     let room = over.saturating_sub(own.constants().len());
     let added = value
         .constants()
@@ -193,30 +261,48 @@ fn taken(address: u64, raw: u32) -> Option<u64> {
 ///
 /// The flow joins the constants of each path to a join word, and
 /// continues until no join word changes. Each register of a join word
-/// only grows, to at most [`JOIN_LIMIT`] constants and one lost mark, so
-/// the flow ends.
+/// only grows, to at most its bound of constants and a lost mark with at
+/// most one origin for each drop, so the flow ends.
 ///
 /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
 pub(super) struct JoinFlow<'a> {
     words: &'a JoinWords<'a>,
     tocs: &'a WordTocs,
     every: &'a Value,
+    bounds: &'a Bounds,
     /// What the paths to each join word bring, by the slot of the join
     /// word.
     at: Vec<Brought>,
+    drops: Drops,
 }
 
 impl<'a> JoinFlow<'a> {
     /// The flow of the code of `words` until no join word changes.
     ///
     /// `tocs` holds the TOC of each word, and `every` holds each TOC that
-    /// a descriptor gives.
-    pub(super) fn run(words: &'a JoinWords<'a>, tocs: &'a WordTocs, every: &'a Value) -> Self {
+    /// a descriptor gives. `bounds` holds the join words where a register
+    /// keeps more than [`JOIN_LIMIT`] constants.
+    ///
+    /// With `counting`, the flow keeps the constants that each drop
+    /// dropped, so [`Self::drops`] can count them. The flow is the same
+    /// with or without `counting`, and so are the drop ids.
+    pub(super) fn run(
+        words: &'a JoinWords<'a>,
+        tocs: &'a WordTocs,
+        every: &'a Value,
+        bounds: &'a Bounds,
+        counting: bool,
+    ) -> Self {
         let mut flow = Self {
             words,
             tocs,
             every,
+            bounds,
             at: vec![Brought::default(); words.joins.len()],
+            drops: Drops {
+                counting,
+                ..Drops::default()
+            },
         };
         let mut work = Worklist::new(&words.steps);
         for (index, steps) in words.steps.iter().enumerate().rev() {
@@ -272,9 +358,158 @@ impl<'a> JoinFlow<'a> {
     /// Joins `constants` into the join word at `slot`, and queues the word
     /// when what it gets changes.
     fn join_into(&mut self, slot: usize, constants: &Constants, work: &mut Worklist) {
-        if self.at[slot].join(constants) {
+        let at = JoinAt {
+            slot,
+            raised: self.bounds.0.get(&slot),
+        };
+        if self.at[slot].join(constants, at, &mut self.drops) {
             work.push(self.words.joins[slot]);
         }
+    }
+
+    /// Each drop of the flow, by its id, with the slot of its join word.
+    ///
+    /// The count of a drop holds the constants that the paths brought to
+    /// the register at the join word: those it kept and those it dropped.
+    /// The count is `None` past [`RAISED_LIMIT`], and in a run without
+    /// `counting`.
+    pub(super) fn drops(&self) -> Vec<(usize, JoinDrop)> {
+        self.drops
+            .records
+            .iter()
+            .map(|record| {
+                let brought = &self.at[record.slot];
+                let count = brought.count(record.register)
+                    + record
+                        .dropped
+                        .iter()
+                        .filter(|&&item| !brought.holds(record.register, item))
+                        .count();
+                let (index, word) = self.words.joins[record.slot];
+                let segment = &self.words.code.segments()[index];
+                let drop = JoinDrop {
+                    join: segment.vaddr + (word as u64) * 4,
+                    register: record.register,
+                    brought: Some(count)
+                        .filter(|&count| self.drops.counting && count <= RAISED_LIMIT),
+                };
+                (record.slot, drop)
+            })
+            .collect()
+    }
+}
+
+/// The drops of one [`JoinFlow`] run.
+#[derive(Debug, Default)]
+struct Drops {
+    /// The id of the drop of each register at each join word, by the
+    /// slot of the join word.
+    ids: BTreeMap<(usize, JoinRegister), u32>,
+    /// Each drop, by its id.
+    records: Vec<DropRecord>,
+    /// Whether each record keeps its dropped constants.
+    counting: bool,
+}
+
+/// The constants that the joins at one join word dropped from one
+/// register.
+#[derive(Debug)]
+struct DropRecord {
+    slot: usize,
+    register: JoinRegister,
+    /// The dropped constants, each keyed as [`Brought::holds`] keys it.
+    /// The record keeps at most `RAISED_LIMIT + 1` of them, which is
+    /// enough to show that the count is past [`RAISED_LIMIT`].
+    dropped: BTreeSet<(u64, u64)>,
+}
+
+impl Drops {
+    /// Records that the join at `slot` dropped the constants `dropped`
+    /// of `register`, and returns the origins of the mark that the drop
+    /// sets.
+    ///
+    /// A drop past the last id that a `u32` holds gets no id: its mark
+    /// names no drop and has more, so the register stays lost.
+    fn record(
+        &mut self,
+        slot: usize,
+        register: JoinRegister,
+        dropped: impl Iterator<Item = (u64, u64)>,
+    ) -> Origins {
+        let id = match self.ids.get(&(slot, register)) {
+            Some(&id) => id,
+            None => {
+                let Ok(id) = u32::try_from(self.records.len()) else {
+                    return Origins::unnamed();
+                };
+                self.ids.insert((slot, register), id);
+                self.records.push(DropRecord {
+                    slot,
+                    register,
+                    dropped: BTreeSet::new(),
+                });
+                id
+            }
+        };
+        if self.counting {
+            let record = &mut self.records[id as usize];
+            for item in dropped {
+                if record.dropped.len() > RAISED_LIMIT {
+                    break;
+                }
+                record.dropped.insert(item);
+            }
+        }
+        Origins::of(id)
+    }
+}
+
+/// The bound of each register at each join word where it is more than
+/// [`JOIN_LIMIT`], by the slot of the join word.
+#[derive(Debug, Default)]
+pub(super) struct Bounds(BTreeMap<usize, BTreeMap<JoinRegister, usize>>);
+
+impl Bounds {
+    /// The bound of `register` at the join word at `slot`.
+    #[cfg(test)]
+    pub(super) fn bound(&self, slot: usize, register: JoinRegister) -> usize {
+        let raised = self.0.get(&slot);
+        JoinAt { slot, raised }.limit(register)
+    }
+
+    /// Raises the bound of each drop that `origins` names, when its count
+    /// is at most [`RAISED_LIMIT`], and returns whether a bound rose.
+    ///
+    /// The new bound is the count or twice the old bound, whichever is
+    /// more, and at most [`RAISED_LIMIT`]. A loop that steps a constant
+    /// brings one more constant than each bound, so the doubling takes
+    /// it past [`RAISED_LIMIT`] in two raises.
+    ///
+    /// `drops` holds each drop of the run that gave `origins`, by its id,
+    /// as [`JoinFlow::drops`] gives it. A drop happens only when the count
+    /// is past the bound, so each raise is strict.
+    pub(super) fn raise<'o>(
+        &mut self,
+        origins: impl Iterator<Item = &'o Origins>,
+        drops: &[(usize, JoinDrop)],
+    ) -> bool {
+        let mut raised = false;
+        for &id in origins.flat_map(Origins::drops) {
+            let Some(&(slot, drop)) = drops.get(id as usize) else {
+                continue;
+            };
+            let Some(count) = drop.brought else {
+                continue;
+            };
+            let bound = self.0.entry(slot).or_default().entry(drop.register);
+            let bound = bound.or_insert(JOIN_LIMIT);
+            let to = count.max(*bound * 2).min(RAISED_LIMIT);
+            if to > *bound {
+                *bound = to;
+                raised = true;
+            }
+        }
+        raised
     }
 }
 

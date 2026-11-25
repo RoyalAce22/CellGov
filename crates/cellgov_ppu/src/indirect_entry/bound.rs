@@ -8,10 +8,11 @@ use cellgov_ps3_abi::format::elf::ppc64_function_descriptor as descriptor;
 
 use super::constants::{Constants, Value};
 use super::ctr_flow::CtrFlow;
-use super::join_flow::{JoinFlow, JoinWords};
+use super::join_flow::{Bounds, JoinFlow, JoinWords};
+use super::lost::Origins;
 use super::real_mode::{real_mode_entries, Switches};
 use super::toc::{function_tocs, FunctionToc, FunctionWords};
-use crate::caller_census::CallerScanError;
+use crate::caller_census::{CallerScanError, JoinDrop};
 use crate::hypercall_cfg::{low_word, Code, CodeSegment};
 use crate::instruction::PpuInstruction;
 
@@ -127,6 +128,11 @@ pub(crate) struct IndirectBound {
     /// path reaches it with a lost SRR0. A lost SRR0 can hold a constant
     /// that `JoinFlow` dropped.
     pub(crate) lost_targets: BTreeSet<u64>,
+    /// The joins that dropped the constants of each lost value that an
+    /// `mtctr`, a `bclr` or an `rfid` takes, by the address of the word.
+    ///
+    /// The map is empty when [`Self::lost_targets`] is empty.
+    pub(crate) lost_origins: BTreeMap<u64, LostOrigins>,
     /// Each address where an `rfid`, `mtmsr` or `mtmsrd` can put control
     /// into real mode.
     ///
@@ -145,6 +151,20 @@ pub(crate) struct IndirectBound {
     pub(crate) unbounded_mode32_switches: BTreeSet<u64>,
 }
 
+/// The joins that dropped the constants of one lost value.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct LostOrigins {
+    /// Each join that the lost mark names.
+    pub(crate) drops: BTreeSet<JoinDrop>,
+    /// Whether the value can also hold a constant of a join that
+    /// `drops` does not name.
+    pub(crate) more: bool,
+}
+
+/// The most times [`indirect_entries`] raises the bounds of `JoinFlow`
+/// and runs the bound again.
+const REFINEMENTS: usize = 16;
+
 /// The words of `code` that control can enter other than by a direct
 /// branch or a fall-through, and the targets of the indirect branches.
 ///
@@ -160,6 +180,18 @@ pub(crate) struct IndirectBound {
 /// [PPC-Book1 p:24 s:2.4] A branch alters only CTR and LR, so r2 at the target is r2 at the branch.
 ///
 /// The named words only grow, so the rounds end.
+///
+/// When the rounds end with a lost target, the bound refines `JoinFlow`
+/// and runs the rounds again from the named words it has:
+/// - it takes the origins of each lost value that an `mtctr`, a `bclr`
+///   or an `rfid` takes;
+/// - it raises the bound of each join that dropped those constants, as
+///   [`Bounds::raise`] states.
+///
+/// A raised join keeps each constant that the paths bring, so it drops
+/// none. The refinement stops when no lost target remains, when it can
+/// raise no bound, or after [`REFINEMENTS`] runs. A loop that steps a
+/// constant brings more constants than any bound, so it stays lost.
 ///
 /// # Errors
 ///
@@ -179,9 +211,9 @@ pub(crate) fn indirect_entries(
         tables: BTreeSet::new(),
         targets: BTreeMap::new(),
         ctr_writes: BTreeMap::new(),
-        lost_ctr_writes: BTreeSet::new(),
-        lost_returns: BTreeSet::new(),
-        lost_rfids: BTreeSet::new(),
+        lost_ctr_writes: BTreeMap::new(),
+        lost_returns: BTreeMap::new(),
+        lost_rfids: BTreeMap::new(),
     };
     for file in files {
         for value in file.doublewords() {
@@ -198,39 +230,30 @@ pub(crate) fn indirect_entries(
     let every = Value::sorted(functions.values().flatten().copied().collect());
     let mut words = FunctionWords::new(code, &functions);
     let join_words = JoinWords::new(code);
-    loop {
-        let before = bound.named_lens();
-        let reached: BTreeSet<u64> = bound
-            .named
-            .iter()
-            .chain(&bound.real_named)
-            .chain(&bound.low_named)
-            .copied()
-            .collect();
-        words.grow(&reached);
-        bound.targets.clear();
-        bound.ctr_writes.clear();
-        bound.lost_ctr_writes.clear();
-        bound.lost_returns.clear();
-        bound.lost_rfids.clear();
-        for (index, segment) in code.segments().iter().enumerate() {
-            bound.code_constants(index, segment, words.tocs.segment(index), &every, None);
+    let mut bounds = Bounds::default();
+    let mut refinements = 0;
+    let mut lost_origins = BTreeMap::new();
+    let lost_targets = loop {
+        bound.rounds(&mut words, &join_words, &every, &bounds)?;
+        let lost_writes: BTreeSet<(usize, u64)> = bound.lost_ctr_writes.keys().copied().collect();
+        let mut flow = CtrFlow::new(code, &bound.ctr_writes, &lost_writes);
+        flow.run();
+        let mut lost_targets = flow.bcctr_targets(&mut bound.targets);
+        lost_targets.extend(bound.lost_returns.keys());
+        lost_targets.extend(bound.lost_rfids.keys());
+        if lost_targets.is_empty() {
+            break lost_targets;
         }
-        let joins = JoinFlow::run(&join_words, &words.tocs, &every);
-        for (index, segment) in code.segments().iter().enumerate() {
-            let tocs = words.tocs.segment(index);
-            bound.code_constants(index, segment, tocs, &every, Some(&joins));
+        // The last round named no new word, so this run repeats its flow,
+        // with the same drop ids, and counts each drop.
+        let drops = JoinFlow::run(&join_words, &words.tocs, &every, &bounds, true).drops();
+        let origins = bound.lost_values().map(|(_, origins)| origins);
+        if refinements == REFINEMENTS || !bounds.raise(origins, &drops) {
+            lost_origins = bound.lost_origins(&drops);
+            break lost_targets;
         }
-        bound.jump_tables()?;
-        if bound.named_lens() == before {
-            break;
-        }
-    }
-    let mut flow = CtrFlow::new(code, &bound.ctr_writes, &bound.lost_ctr_writes);
-    flow.run();
-    let mut lost_targets = flow.bcctr_targets(&mut bound.targets);
-    lost_targets.extend(&bound.lost_returns);
-    lost_targets.extend(&bound.lost_rfids);
+        refinements += 1;
+    };
     let mut entries = real_mode_entries(elf, code);
     entries.extend(bound.named);
     let mut indirect = IndirectBound {
@@ -239,6 +262,7 @@ pub(crate) fn indirect_entries(
         low_named: bound.low_named,
         targets: bound.targets,
         lost_targets,
+        lost_origins,
         ..IndirectBound::default()
     };
     let switches = Switches::find(code, &words.tocs, &every, &indirect);
@@ -289,18 +313,108 @@ pub(super) struct Bound<'a> {
     /// round.
     ctr_writes: BTreeMap<(usize, u64), Value>,
     /// Each `mtctr` that can also copy a constant that [`JoinFlow`]
-    /// dropped, by segment index and address, from the TOCs of the latest
-    /// round.
-    lost_ctr_writes: BTreeSet<(usize, u64)>,
+    /// dropped, by segment index and address, with the origins of the
+    /// GPR, from the TOCs of the latest round.
+    lost_ctr_writes: BTreeMap<(usize, u64), Origins>,
     /// The address of each `bclr` whose LR can hold a constant that
-    /// [`JoinFlow`] dropped, from the TOCs of the latest round.
-    lost_returns: BTreeSet<u64>,
+    /// [`JoinFlow`] dropped, with the origins of LR, from the TOCs of the
+    /// latest round.
+    lost_returns: BTreeMap<u64, Origins>,
     /// The address of each `rfid` that [`Constants::translated_rfid_lost`]
-    /// gives, from the TOCs of the latest round.
-    lost_rfids: BTreeSet<u64>,
+    /// gives, with the origins of SRR0, from the TOCs of the latest round.
+    lost_rfids: BTreeMap<u64, Origins>,
+}
+
+/// Joins `origins` into the origins of `key` in `lost`.
+fn note<K: Ord>(lost: &mut BTreeMap<K, Origins>, key: K, origins: &Origins) {
+    lost.entry(key)
+        .and_modify(|own| *own = own.union(origins))
+        .or_insert_with(|| origins.clone());
 }
 
 impl Bound<'_> {
+    /// Runs the rounds of the bound until a round names no new word.
+    ///
+    /// `bounds` holds the raised bounds of `JoinFlow`. The origins that
+    /// the last round records name the drops of its `JoinFlow` run.
+    fn rounds(
+        &mut self,
+        words: &mut FunctionWords,
+        join_words: &JoinWords<'_>,
+        every: &Value,
+        bounds: &Bounds,
+    ) -> Result<(), CallerScanError> {
+        let code = self.code;
+        loop {
+            let before = self.named_lens();
+            let reached: BTreeSet<u64> = self
+                .named
+                .iter()
+                .chain(&self.real_named)
+                .chain(&self.low_named)
+                .copied()
+                .collect();
+            words.grow(&reached);
+            self.targets.clear();
+            self.ctr_writes.clear();
+            self.lost_ctr_writes.clear();
+            self.lost_returns.clear();
+            self.lost_rfids.clear();
+            for (index, segment) in code.segments().iter().enumerate() {
+                self.code_constants(index, segment, words.tocs.segment(index), every, None);
+            }
+            let joins = JoinFlow::run(join_words, &words.tocs, every, bounds, false);
+            for (index, segment) in code.segments().iter().enumerate() {
+                let tocs = words.tocs.segment(index);
+                self.code_constants(index, segment, tocs, every, Some(&joins));
+            }
+            self.jump_tables()?;
+            if self.named_lens() == before {
+                return Ok(());
+            }
+        }
+    }
+
+    /// The address of each `mtctr`, `bclr` and `rfid` that takes a lost
+    /// value, with the origins of that value.
+    fn lost_values(&self) -> impl Iterator<Item = (u64, &Origins)> + '_ {
+        self.lost_ctr_writes
+            .iter()
+            .map(|(&(_, address), origins)| (address, origins))
+            .chain(
+                self.lost_returns
+                    .iter()
+                    .map(|(&address, origins)| (address, origins)),
+            )
+            .chain(
+                self.lost_rfids
+                    .iter()
+                    .map(|(&address, origins)| (address, origins)),
+            )
+    }
+
+    /// The [`IndirectBound::lost_origins`], from the drops `drops` of the
+    /// run that recorded the lost values.
+    fn lost_origins(&self, drops: &[(usize, JoinDrop)]) -> BTreeMap<u64, LostOrigins> {
+        let mut lost: BTreeMap<u64, LostOrigins> = BTreeMap::new();
+        for (address, origins) in self.lost_values() {
+            let own = lost.entry(address).or_default();
+            let unknown = origins
+                .drops()
+                .iter()
+                .any(|&id| drops.get(id as usize).is_none());
+            own.more |= origins.has_more() || unknown;
+            own.drops.extend(
+                origins
+                    .drops()
+                    .iter()
+                    .filter_map(|&id| drops.get(id as usize))
+                    .map(|&(_, drop)| drop),
+            );
+        }
+        lost
+    }
+
     /// The sizes of the sets of named words, which grow until a round
     /// names no new word.
     fn named_lens(&self) -> [usize; 3] {
@@ -392,8 +506,8 @@ impl Bound<'_> {
                         .or_default()
                         .extend(lr.constants().iter().map(|&lr| lr & !0b11));
                 }
-                if constants.lr_lost {
-                    self.lost_returns.insert(address);
+                if let Some(origins) = &constants.lr_lost {
+                    note(&mut self.lost_returns, address, origins);
                 }
             }
             if let Ok(PpuInstruction::Mtctr { rs }) = decoded {
@@ -403,15 +517,15 @@ impl Bound<'_> {
                         .and_modify(|own| *own = own.clone().union(value))
                         .or_insert_with(|| value.clone());
                 }
-                if constants.is_lost(rs) {
-                    self.lost_ctr_writes.insert((index, address));
+                if let Some(origins) = constants.lost(rs) {
+                    note(&mut self.lost_ctr_writes, (index, address), origins);
                 }
             }
             for target in constants.translated_rfid_targets(raw) {
                 self.enter(target);
             }
-            if constants.translated_rfid_lost(raw) {
-                self.lost_rfids.insert(address);
+            if let Some(origins) = constants.translated_rfid_lost(raw) {
+                note(&mut self.lost_rfids, address, origins);
             }
             for &constant in constants
                 .step(address, raw)

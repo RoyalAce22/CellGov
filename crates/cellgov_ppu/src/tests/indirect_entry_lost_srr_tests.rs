@@ -1,4 +1,5 @@
 use super::constants::{Constants, Value};
+use super::lost::{LostGprs, Origins};
 use super::tests::word;
 use super::*;
 use cellgov_ps3_abi::hw::ppc_isa::PPC_NOP;
@@ -18,13 +19,23 @@ const RFID: u32 = (19 << 26) | (18 << 1);
 /// An SRR0 constant above 4 GiB whose low-order 32 bits are 0x3004.
 const HIGH: u64 = 0x1_0000_3004;
 
+/// The lost marks of the GPRs of the bits of `lost`, with origins that
+/// name no drop.
+fn marked(lost: u32) -> LostGprs {
+    let mut gprs = LostGprs::default();
+    for gpr in (0..32u8).filter(|&gpr| lost & (1 << gpr) != 0) {
+        gprs.set(gpr, Some(Origins::unnamed()));
+    }
+    gprs
+}
+
 /// The constants after `mtspr SRR0,r3; mtspr SRR1,r4`, with `srr0` in r3,
 /// `srr1` in r4, and the GPRs of the bits of `lost` marked as lost.
 fn copied(srr0: u64, srr1: u64, lost: u32) -> Constants {
     let mut constants = Constants::default();
     constants.gprs[3] = Some(Value::One(srr0));
     constants.gprs[4] = Some(Value::One(srr1));
-    constants.lost_gprs = lost;
+    constants.lost_gprs = marked(lost);
     constants.step(0, mtspr(SPR_SRR0, 3));
     constants.step(4, mtspr(SPR_SRR1, 4));
     constants
@@ -46,12 +57,13 @@ fn an_srr1_copied_from_a_lost_gpr_lets_the_rfid_fetch_with_sf_at_0_or_1() {
 /// [PPC-Book3 p:13 s:2.3] `rfid` sets MSR\[IR\] to SRR1\[IR\] | SRR1\[PR\].
 #[test]
 fn an_rfid_is_lost_only_with_a_lost_srr0_and_an_srr1_that_can_set_ir() {
-    assert!(copied(HIGH, MSR_IR, 1 << 3).translated_rfid_lost(RFID));
-    assert!(copied(HIGH, 0, (1 << 3) | (1 << 4)).translated_rfid_lost(RFID));
-    assert!(!copied(HIGH, MSR_IR, 0).translated_rfid_lost(RFID));
-    assert!(!copied(HIGH, MSR_IR, 1 << 4).translated_rfid_lost(RFID));
-    assert!(!copied(HIGH, 0, 1 << 3).translated_rfid_lost(RFID));
-    assert!(!copied(HIGH, MSR_IR, 1 << 3).translated_rfid_lost(PPC_NOP));
+    let lost = |srr1, gprs, raw| copied(HIGH, srr1, gprs).translated_rfid_lost(raw).is_some();
+    assert!(lost(MSR_IR, 1 << 3, RFID));
+    assert!(lost(0, (1 << 3) | (1 << 4), RFID));
+    assert!(!lost(MSR_IR, 0, RFID));
+    assert!(!lost(MSR_IR, 1 << 4, RFID));
+    assert!(!lost(0, 1 << 3, RFID));
+    assert!(!lost(MSR_IR, 1 << 3, PPC_NOP));
 }
 
 /// [PPC-Book1 p:24 s:2.4] A branch alters only CTR and LR, so the routine that a call runs can leave SRR0 unchanged.
@@ -66,7 +78,7 @@ fn a_call_keeps_the_lost_mark_of_srr0() {
             link: true,
         }),
     );
-    assert!(constants.translated_rfid_lost(RFID));
+    assert!(constants.translated_rfid_lost(RFID).is_some());
 }
 
 /// `mfspr rt,spr`.
@@ -81,13 +93,13 @@ fn mfspr(rt: u8, spr: u16) -> u32 {
 #[test]
 fn an_mfspr_of_a_lost_srr0_or_srr1_marks_its_gpr_as_lost() {
     let mut constants = copied(HIGH, MSR_IR, (1 << 3) | (1 << 4));
-    constants.lost_gprs = 0;
+    constants.lost_gprs = LostGprs::default();
     constants.step(8, mfspr(5, SPR_SRR0));
     constants.step(12, mfspr(6, SPR_SRR1));
     assert!(constants.is_lost(5));
     assert!(constants.is_lost(6));
     let mut kept = copied(HIGH, MSR_IR, 0);
-    kept.lost_gprs = 1 << 5;
+    kept.lost_gprs = marked(1 << 5);
     kept.step(8, mfspr(5, SPR_SRR0));
     assert!(!kept.is_lost(5));
 }

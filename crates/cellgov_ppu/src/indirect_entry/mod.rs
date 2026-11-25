@@ -77,14 +77,20 @@
 //! gives the constants that the paths to a branch target bring in the
 //! GPRs and in LR. These limits apply to it:
 //! - it does not follow a call into its routine;
-//! - it keeps at most 16 constants of one register at a branch target.
-//!   When the paths bring more, it drops them and marks the register as
-//!   one that can hold a constant the scan dropped. The image does not
+//! - it keeps at most 16 constants of one register at a branch target,
+//!   until it raises that bound as the next item states. When the
+//!   paths bring more, it drops them and marks the register as one
+//!   that can hold a constant the scan dropped. The image does not
 //!   name a dropped constant. The mark moves only with a copy of the
 //!   register, also a copy into or out of SRR0 or SRR1. A call keeps
 //!   the marks of SRR0 and SRR1, and an `sc` clears them. So the scan
 //!   does not record a dropped constant that a store and a load move,
-//!   or that a call takes into its routine.
+//!   or that a call takes into its routine;
+//! - the mark records its origins: the branch target, the register and
+//!   the number of constants that the paths brought there. When a
+//!   `bcctr`, `bclr` or `rfid` can reach a dropped constant, the scan
+//!   raises the bound at those origins to at most 64 constants and runs
+//!   again.
 //!
 //! A second scan finds where an `rfid`, `mtmsr` or `mtmsrd` can put
 //! control into real mode. It forgets each constant at a word that
@@ -120,11 +126,14 @@ mod bound;
 mod constants;
 mod ctr_flow;
 mod join_flow;
+mod lost;
 mod real_mode;
 mod slot_set;
 mod toc;
 
-pub(crate) use bound::{indirect_entries, FileSegment, IndirectBound, JUMP_TABLE_LIMIT};
+pub(crate) use bound::{
+    indirect_entries, FileSegment, IndirectBound, LostOrigins, JUMP_TABLE_LIMIT,
+};
 pub(crate) use real_mode::real_mode_entries;
 
 // The test modules take these names from this module's scope.
@@ -174,3 +183,7 @@ mod rfid_low_word_tests;
 #[cfg(test)]
 #[path = "../tests/indirect_entry_lost_srr_tests.rs"]
 mod lost_srr_tests;
+
+#[cfg(test)]
+#[path = "../tests/indirect_entry_join_drop_tests.rs"]
+mod join_drop_tests;

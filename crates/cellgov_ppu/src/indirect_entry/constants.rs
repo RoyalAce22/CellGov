@@ -7,6 +7,7 @@ use std::rc::Rc;
 
 use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_BIT1, MSR_IR, MSR_PR, MSR_SF, SPR_SRR0, SPR_SRR1};
 
+use super::lost::{LostGprs, Origins};
 use super::real_mode::{fetch_address, MsrWord, Switch};
 use super::toc::FunctionToc;
 use crate::caller_census::{surely_written_gprs, written_gprs};
@@ -85,23 +86,25 @@ impl Value {
 
 /// The constants that the code builds in its GPRs, LR, SRR0 and SRR1 on
 /// one path, or on the paths that join at a word.
+///
+/// A register that can also hold a constant that the scan dropped is
+/// lost. Its mark holds the origins of the dropped constants.
 #[derive(Debug, Default)]
 pub(super) struct Constants {
     pub(super) gprs: [Option<Value>; 32],
-    /// Each GPR that can also hold a constant that the scan dropped, as
-    /// bit `n` for GPR `n`.
-    pub(super) lost_gprs: u32,
+    /// The origins of each lost GPR.
+    pub(super) lost_gprs: LostGprs,
     /// The constants in LR, by the address of the word that wrote each
     /// one.
     pub(super) lr: BTreeMap<u64, Value>,
-    /// Whether LR can also hold a constant that the scan dropped.
-    pub(super) lr_lost: bool,
+    /// The origins of LR when it is lost.
+    pub(super) lr_lost: Option<Origins>,
     srr0: Option<Value>,
     srr1: Option<Value>,
-    /// Whether SRR0 can also hold a constant that the scan dropped.
-    pub(super) srr0_lost: bool,
-    /// Whether SRR1 can also hold a constant that the scan dropped.
-    pub(super) srr1_lost: bool,
+    /// The origins of SRR0 when it is lost.
+    pub(super) srr0_lost: Option<Origins>,
+    /// The origins of SRR1 when it is lost.
+    pub(super) srr1_lost: Option<Origins>,
 }
 
 impl Constants {
@@ -116,15 +119,15 @@ impl Constants {
             return None;
         };
         if let Some((gpr, value)) = self.written(decoded) {
-            let lost = self.copies_lost(decoded);
-            self.set_lost(gpr, lost);
+            let lost = self.copied_lost(decoded);
+            self.lost_gprs.set(gpr, lost);
             self.gprs[usize::from(gpr)].clone_from(&value);
             return value;
         }
         match decoded {
             PpuInstruction::Mtlr { rs } => {
                 self.lr = self.written_by(rs, address);
-                self.lr_lost = self.is_lost(rs);
+                self.lr_lost = self.lost(rs).cloned();
             }
             PpuInstruction::B { link, .. } => self.after_branch(address, 0b10100, link),
             PpuInstruction::Bc { bo, link, .. }
@@ -146,17 +149,17 @@ impl Constants {
         match MsrWord::of(raw) {
             Some(MsrWord::MtSrr0 { rs }) => {
                 self.srr0 = self.gpr(rs).cloned();
-                self.srr0_lost = self.is_lost(rs);
+                self.srr0_lost = self.lost(rs).cloned();
             }
             Some(MsrWord::MtSrr1 { rs }) => {
                 self.srr1 = self.gpr(rs).cloned();
-                self.srr1_lost = self.is_lost(rs);
+                self.srr1_lost = self.lost(rs).cloned();
             }
             _ => {
                 let lost = self.lost_srr_copy(raw);
                 self.forget_written(decoded);
-                if let Some(rt) = lost {
-                    self.set_lost(rt, true);
+                if let Some((rt, origins)) = lost {
+                    self.lost_gprs.set(rt, Some(origins));
                 }
             }
         }
@@ -175,24 +178,24 @@ impl Constants {
     fn forget_srrs(&mut self) {
         self.srr0 = None;
         self.srr1 = None;
-        self.srr0_lost = false;
-        self.srr1_lost = false;
+        self.srr0_lost = None;
+        self.srr1_lost = None;
     }
 
-    /// The GPR that the word `raw` copies SRR0 or SRR1 into, when that
-    /// register can hold a constant that the scan dropped.
+    /// The GPR that the word `raw` copies SRR0 or SRR1 into and the
+    /// origins of that register, when that register is lost.
     ///
     /// [PPC-Book3 p:21 s:3.4] `mfspr` is primary opcode 31 with extended opcode 339, and it places the SPR that its SPR field names into RT.
-    fn lost_srr_copy(&self, raw: u32) -> Option<u8> {
+    fn lost_srr_copy(&self, raw: u32) -> Option<(u8, Origins)> {
         if (raw >> 26, (raw >> 1) & 0x3FF) != (31, 339) {
             return None;
         }
         let lost = match spr_number(raw) {
-            SPR_SRR0 => self.srr0_lost,
-            SPR_SRR1 => self.srr1_lost,
-            _ => false,
+            SPR_SRR0 => self.srr0_lost.as_ref(),
+            SPR_SRR1 => self.srr1_lost.as_ref(),
+            _ => None,
         };
-        lost.then_some(((raw >> 21) & 0x1F) as u8)
+        lost.map(|origins| (((raw >> 21) & 0x1F) as u8, origins.clone()))
     }
 
     /// Where the word `raw` at `address` can put control into real mode.
@@ -262,23 +265,27 @@ impl Constants {
             .collect()
     }
 
-    /// Whether the word `raw` is an `rfid` that can leave MSR\[IR\] at 1 with a lost SRR0.
+    /// The origins of SRR0 when the word `raw` is an `rfid` that can
+    /// leave MSR\[IR\] at 1 with a lost SRR0.
     ///
     /// A lost SRR0 can hold a constant that the scan dropped. The image
     /// need not name that constant, so the `rfid` can enter a word that
     /// the bound does not hold, with MSR\[SF\] at 0 or at 1.
     ///
     /// [PPC-Book3 p:13 s:2.3] `rfid` sets MSR\[IR\] to SRR1\[IR\] | SRR1\[PR\] and fetches the next instruction from SRR0 under the new MSR.
-    pub(super) fn translated_rfid_lost(&self, raw: u32) -> bool {
-        MsrWord::of(raw) == Some(MsrWord::Rfid)
-            && self.srr0_lost
-            && !fetch_kinds(self.known_srr1(), true).is_empty()
+    pub(super) fn translated_rfid_lost(&self, raw: u32) -> Option<&Origins> {
+        if MsrWord::of(raw) != Some(MsrWord::Rfid)
+            || fetch_kinds(self.known_srr1(), true).is_empty()
+        {
+            return None;
+        }
+        self.srr0_lost.as_ref()
     }
 
     /// The SRR1 constants, or `None` when SRR1 can also hold a constant
     /// that the scan dropped.
     fn known_srr1(&self) -> Option<&Value> {
-        self.srr1.as_ref().filter(|_| !self.srr1_lost)
+        self.srr1.as_ref().filter(|_| self.srr1_lost.is_none())
     }
 
     /// Where the word `raw` at `address` can put control into 32-bit
@@ -342,34 +349,31 @@ impl Constants {
             self.gprs[bits.trailing_zeros() as usize] = None;
             bits &= bits - 1;
         }
-        self.lost_gprs &= !surely_written_gprs(decoded);
+        self.lost_gprs.forget(surely_written_gprs(decoded));
     }
 
     /// Whether `gpr` can also hold a constant that the scan dropped.
+    #[cfg(test)]
     pub(super) fn is_lost(&self, gpr: u8) -> bool {
-        self.lost_gprs
-            .checked_shr(u32::from(gpr))
-            .is_some_and(|bits| bits & 1 == 1)
+        self.lost(gpr).is_some()
     }
 
-    fn set_lost(&mut self, gpr: u8, lost: bool) {
-        let bit = 1u32.checked_shl(u32::from(gpr)).unwrap_or(0);
-        if lost {
-            self.lost_gprs |= bit;
-        } else {
-            self.lost_gprs &= !bit;
-        }
+    /// The origins of `gpr` when it can also hold a constant that the
+    /// scan dropped.
+    pub(super) fn lost(&self, gpr: u8) -> Option<&Origins> {
+        self.lost_gprs.get(gpr)
     }
 
-    /// Whether the GPR that `decoded` builds can also hold a constant
-    /// that the scan dropped, because its source can.
-    fn copies_lost(&self, decoded: PpuInstruction) -> bool {
+    /// The origins of the source of the GPR that `decoded` builds, when
+    /// that source can hold a constant that the scan dropped.
+    fn copied_lost(&self, decoded: PpuInstruction) -> Option<Origins> {
         if let PpuInstruction::Mflr { .. } = decoded {
-            return self.lr_lost;
+            return self.lr_lost.clone();
         }
         GprStep::of(decoded)
             .and_then(|step| step.source)
-            .is_some_and(|gpr| self.is_lost(gpr))
+            .and_then(|gpr| self.lost(gpr))
+            .cloned()
     }
 
     /// The GPR that `decoded` writes and the constant it writes there,
@@ -421,7 +425,7 @@ impl Constants {
         if link {
             self.srr0 = None;
             self.srr1 = None;
-            self.lr_lost = false;
+            self.lr_lost = None;
             self.lr = address
                 .checked_add(4)
                 .map(|value| BTreeMap::from([(address, Value::One(value))]))

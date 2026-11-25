@@ -1,5 +1,6 @@
 use super::hypercall_ctr_decrement_tests::{bc, quiet, window, QUIET_SC, SC, VECTOR};
 use super::hypercall_entry_tests::{code, data_bytes, ordinals, word, Segment};
+use super::hypercall_join_drop_tests::RAISED_LIMIT;
 use super::hypercall_tests::KERNEL;
 use super::*;
 use cellgov_ps3_abi::hw::ppc_isa::PPC_BLR;
@@ -222,14 +223,14 @@ pub(super) const EVERY_UNRESOLVED: [(u64, Option<u16>); 2] = [(SC, None), (QUIET
 ///
 /// [PPC-Book1 p:20 s:2.4.1] BO 011at branches if the CR bit is 1 and does not decrement CTR.
 /// [PPC-Book1 p:51 s:3.3.8] `addi` adds EXTS(SI) to RA.
-fn twenty_pass_loop() -> Vec<u32> {
+pub(super) fn twenty_pass_loop() -> Vec<u32> {
     let mut words = build(3, NOP_REAL - 0x10 * 20).to_vec();
     words.extend([addi(3, 3, 0x10), bc(0b01100, -4)]);
     words
 }
 
-/// The join keeps 16 of the constants of the loop in r3, so the `bctr`
-/// can reach a constant that the scan dropped.
+/// The loop brings more constants in r3 to its join than any bound, so
+/// the `bctr` can reach a constant that the scan dropped.
 ///
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
 #[test]
@@ -239,8 +240,8 @@ fn a_bctr_of_a_gpr_that_a_loop_steps_past_the_join_limit_leaves_every_site_unres
     assert_eq!(sites(VECTOR, &words), EVERY_UNRESOLVED);
 }
 
-/// The join keeps 16 of the constants of the loop in r3, so the `blr`
-/// can reach a constant that the scan dropped.
+/// The loop brings more constants in r3 to its join than any bound, so
+/// the `blr` can reach a constant that the scan dropped.
 ///
 /// [PPC-Book1 p:81 s:3.3.13] `mtlr` and `mtctr` copy RS into LR or CTR.
 /// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00.
@@ -252,8 +253,9 @@ fn a_blr_of_a_gpr_that_a_loop_steps_past_the_join_limit_leaves_every_site_unreso
 }
 
 /// The loop marks r3 at its own join. The `blt` after the loop brings
-/// 16 constants and the mark to the `mtctr`, a second join, which does
-/// not overflow and keeps the mark.
+/// the kept constants and the mark to the `mtctr`, a second join. When
+/// the bound of the second join rises, it does not overflow and keeps
+/// the mark.
 ///
 /// [PPC-Book1 p:81 s:3.3.13] `mtlr` and `mtctr` copy RS into LR or CTR.
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
@@ -265,8 +267,9 @@ fn a_bctr_of_a_gpr_that_a_loop_marks_lost_before_a_later_join_leaves_every_site_
 }
 
 /// The loop marks r3 at its own join, and the `mtlr` copies the mark
-/// into LR. The `blt` after it brings 16 constants and the mark to the
-/// `blr`, a second join, which does not overflow and keeps the mark.
+/// into LR. The `blt` after it brings the kept constants and the mark
+/// to the `blr`, a second join. When the bound of the second join
+/// rises, it does not overflow and keeps the mark.
 ///
 /// [PPC-Book1 p:81 s:3.3.13] `mtlr` and `mtctr` copy RS into LR or CTR.
 /// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00.
@@ -301,7 +304,7 @@ pub(super) const WINDOW_RESOLVED: [(u64, Option<u16>); 2] = [(SC, Some(75)), (QU
 /// each build and then a `blt` to the word after the last `blt`.
 ///
 /// [PPC-Book1 p:20 s:2.4.1] BO 011at branches if the CR bit is 1 and does not decrement CTR.
-fn writers(writers: u16, tail: &[u32]) -> Vec<u32> {
+pub(super) fn writers(writers: u16, tail: &[u32]) -> Vec<u32> {
     let per_writer = u16::try_from(tail.len()).expect("a short tail") + 3;
     let mut words = Vec::new();
     for writer in 0..writers {
@@ -319,12 +322,14 @@ pub(super) fn lr_writers(count: u16) -> Vec<u32> {
     writers(count, &[mtlr(3)])
 }
 
-/// The join keeps 16 of the constants of the 17 writers in LR.
+/// The 65 writers bring more constants in LR than a raised bound keeps,
+/// so the bound of the join does not rise, and the join keeps 16 of
+/// them.
 ///
 /// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00.
 #[test]
-fn a_blr_that_more_lr_writers_reach_than_the_join_limit_leaves_every_site_unresolved() {
-    let mut words = lr_writers(JOIN_LIMIT + 1);
+fn a_blr_that_more_lr_writers_reach_than_the_raised_limit_leaves_every_site_unresolved() {
+    let mut words = lr_writers(RAISED_LIMIT + 1);
     words.push(PPC_BLR);
     assert_eq!(sites(VECTOR, &words), EVERY_UNRESOLVED);
 }
@@ -378,18 +383,18 @@ fn descriptor(entry: u64, toc: u64) -> Vec<u8> {
         .collect()
 }
 
-/// Seventeen descriptors give the first word seventeen TOCs, so r2 holds
-/// each of them on the path to the `mtctr`. The `blt` brings that r2 to
-/// the `mtctr`, a join with more TOCs than the join limit, so the join
-/// marks r2.
+/// Sixty-five descriptors give the first word sixty-five TOCs, so r2
+/// holds each of them on the path to the `mtctr`. The `blt` brings that
+/// r2 to the `mtctr`, a join with more TOCs than the raised limit, so
+/// the join marks r2.
 ///
 /// [PPC-Book1 p:24 s:2.4] A branch alters only CTR and LR, so r2 at the target is r2 at the branch.
 /// [PPC-Book1 p:81 s:3.3.13] `mtlr` and `mtctr` copy RS into LR or CTR.
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
 #[test]
-fn a_bctr_of_an_r2_with_more_tocs_than_the_join_limit_at_a_join_leaves_every_site_unresolved() {
+fn a_bctr_of_an_r2_with_more_tocs_than_the_raised_limit_at_a_join_leaves_every_site_unresolved() {
     let words = [skip(0), mtctr(2), bctr()];
-    let descriptors: Vec<u8> = (0..=JOIN_LIMIT)
+    let descriptors: Vec<u8> = (0..=RAISED_LIMIT)
         .flat_map(|toc| descriptor(VECTOR, u64::from(NOWHERE + 0x10 * toc)))
         .collect();
     let segments = [
@@ -401,13 +406,15 @@ fn a_bctr_of_an_r2_with_more_tocs_than_the_join_limit_at_a_join_leaves_every_sit
     assert_eq!(ordinals(0, &segments), EVERY_UNRESOLVED);
 }
 
-/// The join keeps 16 of the constants that the 17 paths bring in r3.
+/// The 65 paths bring more constants in r3 than a raised bound keeps,
+/// so the bound of the join does not rise, and the join keeps 16 of
+/// them.
 ///
 /// [PPC-Book1 p:81 s:3.3.13] `mtlr` and `mtctr` copy RS into LR or CTR.
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
 #[test]
-fn a_bctr_of_a_gpr_that_more_paths_bring_than_the_join_limit_leaves_every_site_unresolved() {
-    let mut words = writers(JOIN_LIMIT + 1, &[]);
+fn a_bctr_of_a_gpr_that_more_paths_bring_than_the_raised_limit_leaves_every_site_unresolved() {
+    let mut words = writers(RAISED_LIMIT + 1, &[]);
     words.extend([mtctr(3), bctr()]);
     assert_eq!(sites(VECTOR, &words), EVERY_UNRESOLVED);
 }
@@ -436,15 +443,15 @@ fn a_bctr_of_a_gpr_that_one_path_brings_at_the_join_limit_keeps_the_sites_resolv
     assert_eq!(sites(VECTOR, &words), WINDOW_RESOLVED);
 }
 
-/// The join keeps 16 of the constants of the 17 writers in LR, so the
-/// GPR that the `mflr` copies LR into can hold a constant that the scan
-/// dropped.
+/// The 65 writers bring more constants in LR than a raised bound keeps,
+/// so the join drops some of them, and the GPR that the `mflr` copies
+/// LR into can hold a constant that the scan dropped.
 ///
 /// [PPC-Book1 p:82 s:3.3.13] `mflr` copies LR into RT.
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
 #[test]
-fn a_bctr_of_an_mflr_copy_of_an_lr_past_the_join_limit_leaves_every_site_unresolved() {
-    let mut words = lr_writers(JOIN_LIMIT + 1);
+fn a_bctr_of_an_mflr_copy_of_an_lr_past_the_raised_limit_leaves_every_site_unresolved() {
+    let mut words = lr_writers(RAISED_LIMIT + 1);
     words.extend([mflr(5), mtctr(5), bctr()]);
     assert_eq!(sites(VECTOR, &words), EVERY_UNRESOLVED);
 }

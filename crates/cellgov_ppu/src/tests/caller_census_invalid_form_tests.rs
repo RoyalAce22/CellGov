@@ -1,11 +1,12 @@
 use super::hypercall_constant_join_tests::{
     bctr as join_bctr, lr_writers, mflr, mtctr as join_mtctr, sites as join_sites,
-    EVERY_UNRESOLVED, JOIN_LIMIT, WINDOW_RESOLVED,
+    EVERY_UNRESOLVED, WINDOW_RESOLVED,
 };
 use super::hypercall_ctr_copy_tests::{call, copy_stub, mfctr, mtctr};
 use super::hypercall_ctr_decrement_tests::{QUIET_SC, SC, VECTOR};
 use super::hypercall_ctr_virtual_tests::{build, sites};
 use super::hypercall_entry_tests::word;
+use super::hypercall_join_drop_tests::RAISED_LIMIT;
 use super::*;
 
 fn mask(gprs: &[u8]) -> u32 {
@@ -201,15 +202,15 @@ fn an_invalid_lmw_joins_a_slot_copy_into_a_gpr_past_ra_that_holds_a_copy() {
     assert_eq!(sites(vec![copy_stub(&between)]), UNRESOLVED);
 }
 
-/// The join keeps 16 of the constants of the 17 writers in LR, so the
-/// `mflr` copy in r5 can hold a dropped constant. The PPE refuses the
-/// `lwzu r5,0(r5)`, so r5 keeps that mark.
+/// The 65 writers bring more constants in LR than a raised bound keeps,
+/// so the `mflr` copy in r5 can hold a dropped constant. The PPE
+/// refuses the `lwzu r5,0(r5)`, so r5 keeps that mark.
 ///
 /// [PPC-Book1 p:33 s:3.3.2] A load with update is an invalid form when RA is 0 or RT.
 /// [CBE-Handbook p:254 s:9.5.9] The PPE takes the illegal-instruction interrupt for a load with update whose RA is 0 or RT.
 #[test]
 fn a_bctr_of_an_mflr_copy_of_a_lost_lr_across_an_invalid_lwzu_leaves_every_site_unresolved() {
-    let mut words = lr_writers(JOIN_LIMIT + 1);
+    let mut words = lr_writers(RAISED_LIMIT + 1);
     words.extend([mflr(5), word(lwzu(5, 5)), join_mtctr(5), join_bctr()]);
     assert_eq!(join_sites(VECTOR, &words), EVERY_UNRESOLVED);
 }
@@ -219,7 +220,7 @@ fn a_bctr_of_an_mflr_copy_of_a_lost_lr_across_an_invalid_lwzu_leaves_every_site_
 /// [PPC-Book1 p:33 s:3.3.2] A load with update whose RA is neither 0 nor RT places EA into RA and loads RT.
 #[test]
 fn a_bctr_of_a_valid_lwzu_over_an_mflr_copy_of_a_lost_lr_keeps_the_sites_resolved() {
-    let mut words = lr_writers(JOIN_LIMIT + 1);
+    let mut words = lr_writers(RAISED_LIMIT + 1);
     words.extend([mflr(5), word(lwzu(5, 4)), join_mtctr(5), join_bctr()]);
     assert_eq!(join_sites(VECTOR, &words), WINDOW_RESOLVED);
 }
@@ -231,7 +232,7 @@ fn a_bctr_of_a_valid_lwzu_over_an_mflr_copy_of_a_lost_lr_keeps_the_sites_resolve
 #[test]
 fn a_bctr_of_an_mflr_copy_of_a_lost_lr_across_an_sc_leaves_every_site_unresolved() {
     let sc = word(PpuInstruction::Sc { lev: 0 });
-    let mut words = lr_writers(JOIN_LIMIT + 1);
+    let mut words = lr_writers(RAISED_LIMIT + 1);
     words.extend([mflr(5), sc, join_mtctr(5), join_bctr()]);
     assert_eq!(join_sites(VECTOR, &words), EVERY_UNRESOLVED);
 }

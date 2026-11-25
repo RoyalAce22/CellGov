@@ -38,7 +38,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::funcmap::{self, FuncMapError, FunctionName};
 use crate::hypercall_cfg::{Code, CodeSegment};
-use crate::indirect_entry::{indirect_entries, real_mode_entries, FileSegment};
+use crate::indirect_entry::{indirect_entries, real_mode_entries, FileSegment, LostOrigins};
 use crate::instruction::PpuInstruction;
 use crate::loader::{pt_load_segments, LoadError, LoadSegment};
 use cellgov_ps3_abi::format::elf::{ELF_E_MACHINE_OFFSET, ELF_HEADER_SIZE, EM_PPC64};
@@ -188,6 +188,89 @@ pub fn scan_hypercalls(elf: &[u8]) -> Result<Vec<CallerSite>, CallerScanError> {
     let mut sites = crate::hypercall_cfg::scan(&code, &bound, &real_mode_entries(elf, &code));
     sites.sort_by_key(|site| site.address);
     Ok(sites)
+}
+
+/// A register whose constants a join of the hypercall scan drops.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum JoinRegister {
+    /// The GPR with this number.
+    Gpr(u8),
+    /// The link register.
+    Lr,
+}
+
+/// A branch target where the hypercall scan dropped constants of one
+/// register, because the paths to it brought more than it keeps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct JoinDrop {
+    /// Guest address of the branch target.
+    pub join: u64,
+    /// The register whose constants the scan dropped.
+    pub register: JoinRegister,
+    /// The number of different constants that the paths brought to the
+    /// register there, or `None` when it is more than 64. A constant of
+    /// LR counts once for each word that wrote it.
+    pub brought: Option<usize>,
+}
+
+/// A word that takes a value whose constants the hypercall scan dropped:
+/// an `mtctr`, a `bclr` or an `rfid`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DroppedValue {
+    /// Guest address of the word.
+    pub address: u64,
+    /// The branch targets that dropped constants of the value, by
+    /// address.
+    pub drops: Vec<JoinDrop>,
+    /// Whether the value can also hold a constant that a branch target
+    /// outside `drops` dropped.
+    pub more: bool,
+}
+
+/// Why the hypercall scan of an ELF leaves every site unresolved.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HypercallLosses {
+    /// Guest address of each `bcctr`, `bclr` or `rfid` that can reach an
+    /// address that the scan does not know. When this list is not empty,
+    /// [`scan_hypercalls`] leaves every site unresolved.
+    pub lost_targets: Vec<u64>,
+    /// Each word that takes a value whose constants the scan dropped,
+    /// by address. The list is empty when `lost_targets` is empty.
+    pub dropped: Vec<DroppedValue>,
+}
+
+/// Find each indirect branch whose target the LV1 hypercall scan of `elf`
+/// cannot bound, and the branch targets where the scan dropped the
+/// constants that it can reach.
+///
+/// The scan is the one that [`scan_hypercalls`] runs.
+///
+/// # Errors
+///
+/// Returns [`CallerScanError`] in the cases that [`scan_hypercalls`]
+/// does.
+pub fn hypercall_losses(elf: &[u8]) -> Result<HypercallLosses, CallerScanError> {
+    let segments = pt_load_segments(elf)?;
+    let code = Code::new(executable_segments(
+        elf,
+        &segments,
+        validate_segment_extent,
+    )?);
+    let files = file_segments(elf, &segments)?;
+    let bound = indirect_entries(elf, &files, &code)?;
+    let dropped = bound
+        .lost_origins
+        .into_iter()
+        .map(|(address, LostOrigins { drops, more })| DroppedValue {
+            address,
+            drops: drops.into_iter().collect(),
+            more,
+        })
+        .collect();
+    Ok(HypercallLosses {
+        lost_targets: bound.lost_targets.into_iter().collect(),
+        dropped,
+    })
 }
 
 /// The file bytes of every segment in `segments`, in program-header
@@ -946,3 +1029,7 @@ mod hypercall_mode32_review_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_rfid_lost_srr0_tests.rs"]
 mod hypercall_rfid_lost_srr0_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_join_drop_tests.rs"]
+mod hypercall_join_drop_tests;

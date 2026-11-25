@@ -51,7 +51,7 @@ fn data(vaddr: u64, doubleword: u64) -> Segment {
 }
 
 /// An ELF with the entry `entry` and the PT_LOAD segments `segments`.
-fn elf(entry: u64, segments: &[Segment]) -> Vec<u8> {
+pub(super) fn elf(entry: u64, segments: &[Segment]) -> Vec<u8> {
     let headers = ELF_HEADER_SIZE + segments.len() * ELF_PHENTSIZE;
     let mut elf = vec![0; headers];
     elf[0..4].copy_from_slice(&ELF_MAGIC);
