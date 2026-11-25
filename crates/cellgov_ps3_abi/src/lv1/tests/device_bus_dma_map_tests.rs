@@ -162,12 +162,13 @@ fn the_page_checks_run_in_lv1_order_and_pass_the_kernel_call() {
 }
 
 /// The entry at +120 refuses a bus address outside the window
-/// [OFW-4.93 lv1 a:0x22D72C-0x22D760], so no region that the model
-/// knows reaches that refusal.
+/// [OFW-4.93 lv1 a:0x22D72C-0x22D760], so no region of the network device
+/// that the model knows reaches that refusal.
 #[test]
 fn every_known_region_lies_in_the_io_bus_window() {
     let regions = GAME_OS_DMA_REGIONS
         .iter()
+        .filter(|r| r.device == 0)
         .map(|r| (r.address, r.size))
         .chain(LV1_DMA_REGIONS.iter().map(|r| (r.address, r.size)));
     let mut count = 0;

@@ -564,16 +564,70 @@
 //! CellGov does not model. [`GAME_OS_DMA_REGIONS`] gives the address
 //! that the console's lv1 gave the 4.93 kernel's call.
 //!
+//! # `allocate_device_dma_region` for devices 1 and 2 of bus 1
+//!
+//! The allocate function sends the devices of [`DMA_SLOT_DEVICES`] to a
+//! path of their own [OFW-4.93 lv1 a:0x237008-0x23700C]
+//! [OFW-4.93 lv1 a:0x237108-0x23711C]. The path has no flags check. It
+//! does these steps:
+//! 1. It takes the device's slot object, the controller object that
+//!    `open_device` uses, from a table: entry 0 for device 1 and entry 1
+//!    for device 2 [OFW-4.93 lv1 a:0x23710C-0x237120]
+//!    [OFW-4.93 lv1 a:0x23D0F8-0x23D104]. The TOC slot at r2 - 25520
+//!    holds the table's address, 0x3682F8 [OFW-4.93 lv1 a:0x353C88-0x353C8C].
+//! 2. It calls the slot function [OFW-4.93 lv1 a:0x23D4C4] with the slot
+//!    object, the partition, r5, r6, r7 and two outputs
+//!    [OFW-4.93 lv1 a:0x237124-0x23713C]. On 0 it stores the address as
+//!    device 0's path does [OFW-4.93 lv1 a:0x237140-0x237144]. A nonzero
+//!    r3 gets device 0's mark handling [OFW-4.93 lv1 a:0x237148-0x237164].
+//!
+//! The slot function holds the lock at +0 of the slot object
+//! [OFW-4.93 lv1 a:0x23D508-0x23D520] and does these steps:
+//! 1. It calls the device's allocate function [OFW-4.93 lv1 a:0x2267FC]
+//!    for the device at +24 of the slot object
+//!    [OFW-4.93 lv1 a:0x23D524-0x23D540]. A nonzero r3 is the answer, and
+//!    no slot changes [OFW-4.93 lv1 a:0x23D544-0x23D548].
+//! 2. It searches the six slots at +104, in order, for a free one
+//!    [OFW-4.93 lv1 a:0x23D54C-0x23D578]. When all six are taken, it gives
+//!    the region back and returns -2 [OFW-4.93 lv1 a:0x23D57C-0x23D590].
+//! 3. It marks the slot and stores the partition and the low word of the
+//!    address in it [OFW-4.93 lv1 a:0x23D5D0-0x23D5FC].
+//! 4. It writes the flags, the size and the low word of the address to
+//!    the slot object's register block
+//!    [OFW-4.93 lv1 a:0x23D600] [OFW-4.93 lv1 a:0x23D3A8-0x23D4C0]. That
+//!    function returns 0, so the slot function returns 0
+//!    [OFW-4.93 lv1 a:0x23D604-0x23D608].
+//!
+//! The device at +24 of device 1's slot object is the device that the
+//! access check finds. The lookup gives device 1 the code 3
+//! [OFW-4.93 lv1 a:0x235DA4-0x235DAC], which selects +56 of the system bus
+//! object [OFW-4.93 lv1 a:0x22B838-0x22B844]. The capture
+//! [`DMA_SLOTS_CAPTURE`] reads these facts:
+//! - The device's method table is device 0's, so the entries that the
+//!   access check calls and the entries at +152 and +88 that reach the
+//!   pool function are device 0's. The size and page shift checks run in
+//!   the device's allocate function before any entry of the table.
+//! - The device's +120 holds 5, so the device accepts a region.
+//! - The pool index at +128 is 3, so the pool differs from device 0's.
+//!
+//! [`GAME_OS_DMA_REGIONS`] gives the address that the console's lv1 gave
+//! the 4.93 kernel's call for device 1.
+//!
 //! # The 4.93 kernel's call of `allocate_device_dma_region`
 //!
 //! The kernel's wrapper sends the call with these inputs
 //! [OFW-4.93 lv2_kernel a:0x8000000000095848-0x800000000009585C]:
-//! - r3 and r4: the bus id at +144 and the device id at +152 of its
-//!   device record [OFW-4.93 lv2_kernel a:0x80000000000AA488-0x80000000000AA4A0];
-//! - r5: the size;
+//! - r3, r4 and r5: its caller's bus id, device id and size;
 //! - r6: the base-2 logarithm of the page size, 12, 16, 20 or 24
 //!   [OFW-4.93 lv2_kernel a:0x8000000000095794-0x80000000000957FC];
-//! - r7: 0.
+//! - r7: its caller's flags [OFW-4.93 lv2_kernel a:0x8000000000095830]
+//!   [OFW-4.93 lv2_kernel a:0x8000000000095854].
+//!
+//! The network device's caller takes the bus id and the device id from
+//! +144 and +152 of its device record and sends flags 0
+//! [OFW-4.93 lv2_kernel a:0x80000000000AA488-0x80000000000AA4A0]. The
+//! call for device 1 has flags 1, so another caller sends it. The README
+//! of [`DMA_SLOTS_CAPTURE`] gives its inputs.
 //!
 //! When r3 is 0, the wrapper stores r4 as the region's address
 //! [OFW-4.93 lv2_kernel a:0x8000000000095860-0x8000000000095880].
@@ -1184,17 +1238,35 @@ pub struct GameOsDmaRegion {
 
 /// Each region of a kernel's boot call, by firmware.
 ///
-/// The 4.93 row is the network device's 1 MB region of 1 MB pages. The
-/// capture [`DMA_REGION_CAPTURE`] finds it in the device's list, with
-/// the game OS partition at +8 and the address at +48.
-pub const GAME_OS_DMA_REGIONS: &[GameOsDmaRegion] = &[GameOsDmaRegion {
-    firmware: "4.93",
-    bus: 1,
-    device: 0,
-    size: 0x10_0000,
-    page_shift: 20,
-    address: 0xC000_0000,
-}];
+/// The rows are these:
+/// - The network device's 1 MB region of 1 MB pages. The capture
+///   [`DMA_REGION_CAPTURE`] finds it in the device's list, with the game
+///   OS partition at +8 and the address at +48.
+/// - Device 1's 256 KB region of 64 KB pages. The capture
+///   [`DMA_SLOTS_CAPTURE`] finds it at the head of the device's list,
+///   and in the first of the device's slots.
+pub const GAME_OS_DMA_REGIONS: &[GameOsDmaRegion] = &[
+    GameOsDmaRegion {
+        firmware: "4.93",
+        bus: 1,
+        device: 0,
+        size: 0x10_0000,
+        page_shift: 20,
+        address: 0xC000_0000,
+    },
+    GameOsDmaRegion {
+        firmware: "4.93",
+        bus: 1,
+        device: 1,
+        size: 0x4_0000,
+        page_shift: 16,
+        address: 0xC000_0000,
+    },
+];
+
+/// The devices of bus 1 whose regions lv1 also keeps in a slot object:
+/// devices 1 and 2 [OFW-4.93 lv1 a:0x237108-0x23711C].
+pub const DMA_SLOT_DEVICES: [u64; 2] = [1, 2];
 
 /// The bus address that lv1 gave the kernel's boot call for device
 /// `device` of bus `bus` with `size` and `page_shift`, or `None` when no
@@ -1224,6 +1296,13 @@ pub fn game_os_dma_region(
 /// The path is relative to the workspace root. Its README gives the
 /// method and the analysis.
 pub const DMA_REGION_CAPTURE: &str = "tests/micro/lv1_device_dma_region";
+
+/// The console capture of device 1's slot object, the device and its DMA
+/// regions.
+///
+/// The path is relative to the workspace root. Its README gives the
+/// method and the analysis.
+pub const DMA_SLOTS_CAPTURE: &str = "tests/micro/lv1_device_dma_slots";
 
 /// The handler of hypercall 176 in one firmware's lv1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1777,6 +1856,10 @@ mod dma_region_tests;
 #[cfg(test)]
 #[path = "tests/device_bus_dma_region_console_tests.rs"]
 mod dma_region_console_tests;
+
+#[cfg(test)]
+#[path = "tests/device_bus_dma_slots_console_tests.rs"]
+mod dma_slots_console_tests;
 
 #[cfg(test)]
 #[path = "tests/device_bus_dma_map_tests.rs"]

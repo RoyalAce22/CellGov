@@ -1,16 +1,16 @@
 //! Hypercall 174, `allocate_device_dma_region`: lv1 gives a device of a
 //! bus a region of bus addresses for its DMA.
 //!
-//! The handler answers the call for device 0 of bus 1, the network
-//! device; see [`cellgov_ps3_abi::lv1::device_bus`]. The state holds each
-//! region that the partition allocated.
+//! The handler answers the call for devices 0, 1 and 2 of bus 1; see
+//! [`cellgov_ps3_abi::lv1::device_bus`]. The state holds each region that
+//! the partition allocated.
 
 use cellgov_mem::lanes::{LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::call::ALLOCATE_DEVICE_DMA_REGION;
 use cellgov_ps3_abi::lv1::device_bus::{
     dma_region_handler, dma_region_shape_r3, game_os_dma_region, DMA_REGION_BUS_RANGE_R3,
     DMA_REGION_FLAGS_MAX, DMA_REGION_FLAGS_R3, DMA_REGION_FLAGS_RANGE_R3, DMA_REGION_NOT_OPEN_R3,
-    DMA_REGION_NO_BUS_R3, OPEN_DEVICE_BUS_MAX,
+    DMA_REGION_NO_BUS_R3, DMA_SLOT_DEVICES, OPEN_DEVICE_BUS_MAX,
 };
 use cellgov_ps3_abi::lv1::network::{STATUS_INDICATOR_BUS, STATUS_INDICATOR_DEVICE};
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
@@ -28,8 +28,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
     handler: |request, input| allocate_region(request, input.firmware, input.groups.device_bus()),
 }];
 
-/// The device whose allocate path CellGov read: device 0 of bus 1, the
-/// network device.
+/// Device 0 of bus 1, the network device.
 const NETWORK_DEVICE: OpenDevice = OpenDevice {
     bus: STATUS_INDICATOR_BUS,
     device: STATUS_INDICATOR_DEVICE,
@@ -76,10 +75,10 @@ const OTHER_BUS: UnmodelledError = UnmodelledError::new(
     "an allocate_device_dma_region for bus 2, 3 or 4, whose lv1 path is not read",
 );
 
-/// The call for a device of bus 1 other than device 0.
+/// The call for a device of bus 1 other than devices 0, 1 and 2.
 const OTHER_DEVICE: UnmodelledError = UnmodelledError::new(
-    "an allocate_device_dma_region for a device of bus 1 other than device 0, whose lv1 path is \
-     not read",
+    "an allocate_device_dma_region for a device of bus 1 other than devices 0, 1 and 2, whose \
+     lv1 path is not read",
 );
 
 /// A call after the partition holds a region of the device.
@@ -107,22 +106,27 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// their order. A call that passes them gets 0 in r3, the bus address in
 /// r4 and r5 to r10 cleared, and the answer carries the region.
 ///
+/// Only device 0 checks that the flags are 0. Devices 1 and 2 accept
+/// flags 0 to 3.
+///
 /// lv1 picks the address from a pool whose state CellGov does not model.
 /// The answer gives the captured address to the device's first region of
 /// the captured size and page shift.
 ///
 /// The model makes these assumptions:
 /// - lv1's init leaves +120 of the device at a value other than -1, as
-///   the capture shows.
+///   the captures show.
 /// - The partition's first region of the device gets the captured
-///   address. lv1's own region of the device is in the pool before the
-///   kernel's call.
+///   address. For device 0, lv1's own region of the device is in the
+///   pool before the kernel's call.
 /// - lv1's allocation of its 80-byte region object succeeds.
+/// - For device 1 or 2, one of the six slots is free for the partition's
+///   first region.
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
 /// - r3 is bus 2, 3 or 4;
-/// - r4 names a device of bus 1 other than device 0;
+/// - r4 names a device of bus 1 other than devices 0, 1 and 2;
 /// - the partition already holds a region of the device;
 /// - no console capture gives the size and the page shift.
 pub(crate) fn allocate_region(
@@ -152,19 +156,21 @@ pub(crate) fn allocate_region(
     if bus != NETWORK_DEVICE.bus {
         return OTHER_BUS.refusal(request);
     }
-    if device != NETWORK_DEVICE.device {
+    let slot_device = DMA_SLOT_DEVICES.contains(&device);
+    if device != NETWORK_DEVICE.device && !slot_device {
         return OTHER_DEVICE.refusal(request);
     }
-    if !state.is_open(NETWORK_DEVICE) {
+    let open_device = OpenDevice { bus, device };
+    if !state.is_open(open_device) {
         return lv1_answer(DMA_REGION_NOT_OPEN_R3);
     }
-    if flags != 0 {
+    if !slot_device && flags != 0 {
         return lv1_answer(DMA_REGION_FLAGS_R3);
     }
     if let Some(r3) = dma_region_shape_r3(size, page_shift) {
         return lv1_answer(r3);
     }
-    if state.regions_of(NETWORK_DEVICE).next().is_some() {
+    if state.regions_of(open_device).next().is_some() {
         return NEXT_REGION.refusal(request);
     }
     let Some(address) = game_os_dma_region(firmware, bus, device, size, page_shift) else {
@@ -185,3 +191,7 @@ pub(crate) fn allocate_region(
 #[cfg(test)]
 #[path = "tests/dma_region_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/dma_region_slot_tests.rs"]
+mod slot_tests;

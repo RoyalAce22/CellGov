@@ -132,8 +132,8 @@ fn the_shape_checks_run_in_lv1_order_and_pass_the_kernel_call() {
 }
 
 #[test]
-fn only_the_captured_call_has_a_game_os_dma_region() {
-    assert_eq!(GAME_OS_DMA_REGIONS.len(), 1);
+fn only_the_captured_calls_have_a_game_os_dma_region() {
+    assert_eq!(GAME_OS_DMA_REGIONS.len(), 2);
     assert_eq!(
         game_os_dma_region("4.93", 1, 0, 0x10_0000, 20),
         Some(0xC000_0000)

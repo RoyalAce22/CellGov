@@ -249,7 +249,7 @@ fn a_call_for_another_bus_or_device_of_bus_1_is_a_refusal() {
     let cases = [
         (request(2, 0, KERNEL_SIZE, 20, 0), OTHER_BUS.what),
         (request(4, 0, KERNEL_SIZE, 20, 0), OTHER_BUS.what),
-        (request(1, 1, KERNEL_SIZE, 20, 0), OTHER_DEVICE.what),
+        (request(1, 3, KERNEL_SIZE, 20, 0), OTHER_DEVICE.what),
         (request(1, 1 << 32, KERNEL_SIZE, 20, 0), OTHER_DEVICE.what),
     ];
     assert_eq!(cases.len(), 4);
