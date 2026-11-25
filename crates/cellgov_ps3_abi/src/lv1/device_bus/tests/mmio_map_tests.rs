@@ -80,6 +80,7 @@ fn the_page_shifts_are_the_four_that_the_map_function_compares() {
 fn device_1_has_the_three_regions_of_lv1s_init_in_slot_order() {
     let regions: Vec<_> = MMIO_REGIONS
         .iter()
+        .filter(|r| r.device == 1)
         .map(|r| (r.firmware, r.bus, r.device, r.slot, r.address, r.size))
         .collect();
     assert_eq!(
@@ -114,9 +115,10 @@ fn a_region_matches_only_its_own_firmware_bus_device_and_bus_address() {
 }
 
 #[test]
-fn the_regions_are_read_only_for_device_1_of_bus_1_at_4_93() {
+fn the_regions_are_read_only_for_devices_1_and_2_of_bus_1_at_4_93() {
     assert!(mmio_regions_read("4.93", 1, 1));
-    assert!(!mmio_regions_read("4.93", 1, 2));
+    assert!(mmio_regions_read("4.93", 1, 2));
+    assert!(!mmio_regions_read("4.93", 1, 3));
     assert!(!mmio_regions_read("4.93", 2, 1));
     assert!(!mmio_regions_read("4.92", 1, 1));
 }

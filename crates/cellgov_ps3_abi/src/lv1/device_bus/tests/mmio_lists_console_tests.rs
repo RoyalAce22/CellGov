@@ -117,10 +117,10 @@ fn the_first_region_holds_only_lv1s_own_mapping() {
 }
 
 #[test]
-fn the_kernels_mappings_take_the_region_counter_values_7_and_8() {
+fn the_kernels_device_1_mappings_take_the_region_counter_values_7_and_8() {
     let rows: Vec<_> = GAME_OS_MMIO_MAPPINGS
         .iter()
-        .filter(|row| row.firmware == "4.93")
+        .filter(|row| row.firmware == "4.93" && row.device == 1)
         .collect();
     assert_eq!(rows.len(), 2);
     for (counter, row) in (7u64..).zip(rows) {

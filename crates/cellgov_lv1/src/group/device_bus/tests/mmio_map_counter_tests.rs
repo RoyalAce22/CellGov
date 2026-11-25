@@ -58,8 +58,12 @@ fn answer_parts(d: HypercallDisposition) -> (u64, u64, Vec<StateChange>) {
 #[test]
 fn the_kernels_two_calls_take_the_counter_values_7_and_8_and_get_the_captured_addresses() {
     let mut groups = groups(Some(7));
-    assert_eq!(GAME_OS_MMIO_MAPPINGS.len(), 2);
-    for row in GAME_OS_MMIO_MAPPINGS {
+    let rows: Vec<_> = GAME_OS_MMIO_MAPPINGS
+        .iter()
+        .filter(|row| row.device == DEVICE_1.device)
+        .collect();
+    assert_eq!(rows.len(), 2);
+    for row in rows {
         let call = request(row.bus_address, row.size, row.page_shift);
         let (r3, r4, changes) = answer_parts(map(&groups, &call));
         assert_eq!((r3, r4), (0, row.lpar_address), "{:#x}", row.bus_address);

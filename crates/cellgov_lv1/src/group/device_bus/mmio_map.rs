@@ -227,3 +227,11 @@ mod console_tests;
 #[cfg(test)]
 #[path = "tests/mmio_map_counter_tests.rs"]
 mod counter_tests;
+
+#[cfg(test)]
+#[path = "tests/mmio_map_device_2_tests.rs"]
+mod device_2_tests;
+
+#[cfg(test)]
+#[path = "tests/mmio_map_device_2_order_tests.rs"]
+mod device_2_order_tests;

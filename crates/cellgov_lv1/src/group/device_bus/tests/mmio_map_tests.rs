@@ -178,11 +178,6 @@ fn each_path_without_a_source_is_a_refusal_that_names_it() {
         map(&open, &other_device),
         refused(&other_device, OTHER_DEVICE.what)
     );
-    let device_2 = request(1, 2, 0x302_0000, 0x1_0000, 12);
-    assert_eq!(
-        map(&open, &device_2),
-        refused(&device_2, UNREAD_REGIONS.what)
-    );
     let call = kernel_call();
     for firmware in [None, Some("4.92"), Some("3.70")] {
         assert_eq!(
