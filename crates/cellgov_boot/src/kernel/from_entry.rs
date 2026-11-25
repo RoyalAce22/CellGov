@@ -27,7 +27,7 @@ use cellgov_ps3_abi::hw::ppu_spr::{
 use cellgov_ps3_abi::hw::ppu_supervisor::MSR_SF;
 use cellgov_time::Budget;
 
-use super::device_mmio::{declare_device_mmio, device_access, DeviceMmioAccess};
+use super::device_mmio::{declare_device_mmio, device_access, DeviceMmioAccess, DeviceMmioError};
 use super::map::{map_kernel, KernelMapError};
 use crate::diag::is_hypercall;
 
@@ -217,12 +217,17 @@ pub enum KernelRunError {
     /// The ELF does not map at its link address.
     #[error(transparent)]
     Map(#[from] KernelMapError),
-    /// The real-mode address space refused a region, a segment or a
-    /// declaration of device MMIO.
+    /// The real-mode address space refused a region or a segment.
     #[error("real-mode kernel address space: {source}")]
     RealMode {
         /// The address space's own account of the refusal.
         source: MemError,
+    },
+    /// The run did not declare the MMIO of the devices.
+    #[error("device MMIO: {source}")]
+    DeviceMmio {
+        /// Why the run did not declare it.
+        source: DeviceMmioError,
     },
     /// A segment's end passes the top of the address space.
     #[error("kernel segment at real address 0x{at:016x} with 0x{len:x} bytes overflows")]
@@ -300,6 +305,7 @@ pub enum KernelRunError {
 ///
 /// Returns a [`KernelRunError`] in these cases:
 /// - the ELF does not map into the real-mode address space;
+/// - a device MMIO region of `firmware` has no real address;
 /// - the real-mode address space refuses a device MMIO span or word of
 ///   `firmware`;
 /// - no partition comes from the repository rows of `firmware`.
@@ -531,7 +537,7 @@ fn real_mode_image(
     ])
     .map_err(|source| KernelRunError::RealMode { source })?;
     declare_device_mmio(&mut mem, firmware)
-        .map_err(|source| KernelRunError::RealMode { source })?;
+        .map_err(|source| KernelRunError::DeviceMmio { source })?;
     for s in segments.iter().filter(|s| s.memsz != 0) {
         // [PPC-Book3 p:29 s:4.2.6] Real addressing ignores EA bit 1, and EA bit 0 picks the mechanism that forms the real address.
         let real = s.vaddr & !REAL_MODE_IGNORED_EA;

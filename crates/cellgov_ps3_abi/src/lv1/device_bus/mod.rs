@@ -80,6 +80,10 @@ mod mmio_map_console_tests;
 mod mmio_real_tests;
 
 #[cfg(test)]
+#[path = "tests/mmio_index_tests.rs"]
+mod mmio_index_tests;
+
+#[cfg(test)]
 #[path = "tests/mmio_lists_console_tests.rs"]
 mod mmio_lists_console_tests;
 

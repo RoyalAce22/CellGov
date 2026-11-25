@@ -12,20 +12,32 @@
 //!   gets the word.
 //! - The run models some operational registers and the PS3 setup
 //!   registers of each EHCI controller as register words ([`ehci`]).
+//!
+//! [`DEVICE_REGISTER_READS`]: cellgov_ps3_abi::hw::device_register::DEVICE_REGISTER_READS
 
 use cellgov_effects::FaultKind;
 use cellgov_exec::ExecutionStepResult;
-use cellgov_mem::{GuestMemory, MemError};
+use cellgov_mem::GuestMemory;
 use cellgov_ppu::FAULT_UNMODELLED_STORAGE;
-use cellgov_ps3_abi::hw::device_register::DEVICE_REGISTER_READS;
-use cellgov_ps3_abi::lv1::device_bus::{MmioRegion, MMIO_REAL_BASE, MMIO_REGIONS};
+use cellgov_ps3_abi::hw::device_register::DeviceRegisterRead;
+use cellgov_ps3_abi::lv1::device_bus::MmioRegion;
+
+pub use mmio_real::{DeviceMmioError, MmioRealRefusal};
+use mmio_real::{MmioTables, SHIPPED};
 
 #[cfg(test)]
 #[path = "tests/device_mmio_register_tests.rs"]
 mod register_tests;
 
+#[cfg(test)]
+#[path = "tests/device_mmio_real_tests.rs"]
+mod real_tests;
+
 #[path = "ehci.rs"]
 mod ehci;
+
+#[path = "mmio_real.rs"]
+mod mmio_real;
 
 #[cfg(test)]
 #[path = "tests/ehci_tests.rs"]
@@ -53,13 +65,42 @@ pub struct DeviceMmioAccess {
     pub ea: u64,
 }
 
-/// The MMIO regions that lv1's init gives the devices at `firmware`,
-/// each with its real address.
-fn regions_of(firmware: &str) -> impl Iterator<Item = (u64, &'static MmioRegion)> + '_ {
-    MMIO_REGIONS
+/// The MMIO regions of `tables` at `firmware`, each with its real address
+/// or the refusal of that address.
+fn regions_of<'a>(
+    tables: MmioTables<'a>,
+    firmware: &'a str,
+) -> impl Iterator<Item = Result<(u64, &'a MmioRegion), DeviceMmioError>> + 'a {
+    tables
+        .regions
         .iter()
         .filter(move |region| region.firmware == firmware)
-        .map(|region| (MMIO_REAL_BASE + region.address, region))
+        .map(move |region| {
+            let real = tables.real(firmware, region.bus, region.device, region.address)?;
+            Ok((real, region))
+        })
+}
+
+/// The register words of `tables` at `firmware`, each with its real
+/// address.
+///
+/// # Errors
+///
+/// Returns [`DeviceMmioError::NoRealAddress`] for the first word whose
+/// region has no real address.
+fn words_of<'a>(
+    tables: MmioTables<'a>,
+    firmware: &str,
+) -> Result<Vec<(u64, &'a DeviceRegisterRead)>, DeviceMmioError> {
+    tables
+        .reads
+        .iter()
+        .filter(|read| read.firmware == firmware)
+        .map(|read| {
+            let real = tables.real(firmware, read.bus, read.device, read.region)?;
+            Ok((real + read.offset, read))
+        })
+        .collect()
 }
 
 /// Declares each MMIO region of the devices at `firmware` an unmodelled
@@ -72,25 +113,56 @@ fn regions_of(firmware: &str) -> impl Iterator<Item = (u64, &'static MmioRegion)
 /// # Errors
 ///
 /// Returns one of these:
+/// - [`DeviceMmioError::NoRealAddress`] when a region, a word or a
+///   controller has no real address. The function then declares nothing;
 /// - the refusal of [`GuestMemory::declare_unmodelled`] when a region
 ///   overlaps a region of `mem` or another span, or runs past the end of
 ///   the address space;
 /// - the refusal of [`GuestMemory::declare_sourced_word`] when a word is
-///   not an aligned word of one span, or repeats a word and reader. A
-///   word of a region that lv1 does not give the device is in no span;
+///   not an aligned word of one span, or repeats a word and reader;
 /// - the refusal of a register file, reader or writer declaration.
-pub(super) fn declare_device_mmio(mem: &mut GuestMemory, firmware: &str) -> Result<(), MemError> {
-    for (real, region) in regions_of(firmware) {
+pub(super) fn declare_device_mmio(
+    mem: &mut GuestMemory,
+    firmware: &str,
+) -> Result<(), DeviceMmioError> {
+    declare_from(mem, SHIPPED, firmware)
+}
+
+/// Declares the device MMIO of `tables` at `firmware` in `mem`, as
+/// [`declare_device_mmio`] does.
+fn declare_from(
+    mem: &mut GuestMemory,
+    tables: MmioTables<'_>,
+    firmware: &str,
+) -> Result<(), DeviceMmioError> {
+    let regions: Vec<_> = regions_of(tables, firmware).collect::<Result<_, _>>()?;
+    let words = words_of(tables, firmware)?;
+    let controllers = ehci::controllers_of(tables, firmware)?;
+    for (real, region) in regions {
         mem.declare_unmodelled(real, region.size)?;
     }
-    for read in DEVICE_REGISTER_READS
-        .iter()
-        .filter(|r| r.firmware == firmware)
-    {
-        let real = MMIO_REAL_BASE + read.region + read.offset;
+    for (real, read) in words {
         mem.declare_sourced_word(real, read.value, read.reader)?;
     }
-    ehci::declare_ehci(mem, firmware)
+    ehci::declare_ehci(mem, firmware, &controllers)?;
+    Ok(())
+}
+
+/// The MMIO region of `tables` at `firmware` that holds the real address
+/// `real`, and the bus address of `real` in that region.
+///
+/// A region with no real address holds no address.
+fn region_at<'a>(
+    tables: MmioTables<'a>,
+    firmware: &'a str,
+    real: u64,
+) -> Option<(&'a MmioRegion, u64)> {
+    regions_of(tables, firmware)
+        .filter_map(Result::ok)
+        .find_map(|(base, region)| {
+            let offset = real.checked_sub(base).filter(|&off| off < region.size)?;
+            Some((region, region.address + offset))
+        })
 }
 
 /// The device access that the fault `fault` of hardware thread `thread`
@@ -112,13 +184,12 @@ pub(super) fn device_access(
     }
     let diag = &result.local_diagnostics;
     let (ea, real) = (diag.faulting_ea?, diag.faulting_ra?);
-    let (_, region) = regions_of(firmware)
-        .find(|&(base, region)| real.checked_sub(base).is_some_and(|off| off < region.size))?;
+    let (region, bus_address) = region_at(SHIPPED, firmware, real)?;
     Some(DeviceMmioAccess {
         thread,
         pc: diag.pc,
         region: *region,
-        bus_address: real - MMIO_REAL_BASE,
+        bus_address,
         real,
         ea,
     })

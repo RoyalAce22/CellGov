@@ -1,5 +1,5 @@
-//! The MMIO regions that lv1's init gives devices 1 and 2 of bus 1, and
-//! the real address of each region.
+//! The MMIO regions that lv1's init gives devices 1 and 2 of bus 1, the
+//! index of each device, and the real address of each region.
 
 /// An MMIO region that lv1's init gives a device in one firmware.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,7 +101,18 @@ pub fn mmio_region(
     device: u64,
     bus_address: u64,
 ) -> Option<&'static MmioRegion> {
-    MMIO_REGIONS.iter().find(|region| {
+    region_in(MMIO_REGIONS, firmware, bus, device, bus_address)
+}
+
+/// The region of `regions` that [`mmio_region`] finds.
+fn region_in<'a>(
+    regions: &'a [MmioRegion],
+    firmware: &str,
+    bus: u64,
+    device: u64,
+    bus_address: u64,
+) -> Option<&'a MmioRegion> {
+    regions.iter().find(|region| {
         region.firmware == firmware
             && region.bus == bus
             && region.device == device
@@ -109,25 +120,120 @@ pub fn mmio_region(
     })
 }
 
+/// The index that lv1's init gives a device of [`MMIO_REGIONS`] in one
+/// firmware.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MmioDeviceIndex {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The bus id of the device.
+    pub bus: u64,
+    /// The device id of the device.
+    pub device: u64,
+    /// The index, which lv1 keeps as the word at +128 of the device.
+    pub index: u32,
+}
+
+/// The index of each device of [`MMIO_REGIONS`], by firmware and device.
+///
+/// lv1's init passes the index in r4 to the device constructor. The
+/// constructor stores it as the word at +128 of the device
+/// [OFW-4.93 lv1 a:0x3A972C] [OFW-4.93 lv1 a:0x3A9768-0x3A9780]
+/// [OFW-4.93 lv1 a:0x22DD94] [OFW-4.93 lv1 a:0x22DDD8]. lv1's init gives
+/// these 4.93 indexes:
+/// - device 1 gets index 3 [OFW-4.93 lv1 a:0x3A9A4C-0x3A9A5C];
+/// - device 2 gets index 4 [OFW-4.93 lv1 a:0x3A9AA0-0x3A9AB0].
+pub const MMIO_DEVICE_INDEXES: &[MmioDeviceIndex] = &[
+    MmioDeviceIndex {
+        firmware: "4.93",
+        bus: 1,
+        device: 1,
+        index: 3,
+    },
+    MmioDeviceIndex {
+        firmware: "4.93",
+        bus: 1,
+        device: 2,
+        index: 4,
+    },
+];
+
 /// The real address that lv1 gives to bus address 0 of a system bus
 /// device [OFW-4.93 lv1 a:0x22BE2C-0x22BE44].
 pub const MMIO_REAL_BASE: u64 = 0x240_0000_0000;
 
+/// The device index for which lv1's address function also adds the
+/// doubleword at +480 of the bus object
+/// [OFW-4.93 lv1 a:0x22BE20] [OFW-4.93 lv1 a:0x22BE4C-0x22BE60].
+pub const MMIO_BUS_DOUBLEWORD_INDEX: u32 = 6;
+
+/// The answer of [`mmio_real_address`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MmioRealAddress {
+    /// The region lies at this real address.
+    Real(u64),
+    /// [`mmio_region`] gives no region.
+    NoRegion,
+    /// No lv1 image read shows the index of the region's device.
+    NoIndex,
+    /// The device has [`MMIO_BUS_DOUBLEWORD_INDEX`]. CellGov does not hold
+    /// the doubleword of the bus object that lv1 adds for that index.
+    BusDoubleword,
+}
+
 /// The real address of the MMIO region at `bus_address` of device
-/// `device` of bus `bus`, or `None` when [`mmio_region`] gives no region.
+/// `device` of bus `bus`.
 ///
 /// The device's entry at +128 passes the device's index at +128 to lv1's
 /// address function [OFW-4.93 lv1 a:0x22D9C0-0x22D9D0]. That function
-/// adds [`MMIO_REAL_BASE`] to the bus address. For index 6 only, it also
-/// adds the doubleword at +480 of the bus object
-/// [OFW-4.93 lv1 a:0x22BE1C-0x22BE68]. lv1's init creates the devices
-/// of [`MMIO_REGIONS`] with these indexes, which the constructor stores
-/// at +128 [OFW-4.93 lv1 a:0x3A972C] [OFW-4.93 lv1 a:0x3A9768-0x3A9780]
-/// [OFW-4.93 lv1 a:0x22DD94] [OFW-4.93 lv1 a:0x22DDD8]:
-/// - device 1 with index 3 [OFW-4.93 lv1 a:0x3A9A4C-0x3A9A5C];
-/// - device 2 with index 4 [OFW-4.93 lv1 a:0x3A9AA0-0x3A9AB0].
-pub fn mmio_real_address(firmware: &str, bus: u64, device: u64, bus_address: u64) -> Option<u64> {
-    mmio_region(firmware, bus, device, bus_address).map(|region| MMIO_REAL_BASE + region.address)
+/// adds [`MMIO_REAL_BASE`] to the bus address. For
+/// [`MMIO_BUS_DOUBLEWORD_INDEX`] only, it also adds the doubleword at
+/// +480 of the bus object [OFW-4.93 lv1 a:0x22BE1C-0x22BE68].
+/// [`MMIO_DEVICE_INDEXES`] gives the index of each device.
+pub fn mmio_real_address(
+    firmware: &str,
+    bus: u64,
+    device: u64,
+    bus_address: u64,
+) -> MmioRealAddress {
+    real_address_in(
+        MMIO_REGIONS,
+        MMIO_DEVICE_INDEXES,
+        firmware,
+        bus,
+        device,
+        bus_address,
+    )
+}
+
+/// The answer of [`mmio_real_address`] over the tables `regions` and
+/// `indexes`.
+///
+/// A caller that takes its rows from [`MMIO_REGIONS`] and
+/// [`MMIO_DEVICE_INDEXES`] gets the answer of [`mmio_real_address`].
+/// Other tables let a test give a device an index that no shipped row
+/// holds.
+pub fn real_address_in(
+    regions: &[MmioRegion],
+    indexes: &[MmioDeviceIndex],
+    firmware: &str,
+    bus: u64,
+    device: u64,
+    bus_address: u64,
+) -> MmioRealAddress {
+    let Some(region) = region_in(regions, firmware, bus, device, bus_address) else {
+        return MmioRealAddress::NoRegion;
+    };
+    let Some(entry) = indexes
+        .iter()
+        .find(|entry| (entry.firmware, entry.bus, entry.device) == (firmware, bus, device))
+    else {
+        return MmioRealAddress::NoIndex;
+    };
+    if entry.index == MMIO_BUS_DOUBLEWORD_INDEX {
+        return MmioRealAddress::BusDoubleword;
+    }
+    MmioRealAddress::Real(MMIO_REAL_BASE + region.address)
 }
 
 /// The r3 of `write_htab_entry` for a valid entry whose page lies in an

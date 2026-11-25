@@ -140,7 +140,7 @@ fn the_kernel_call_mapping_is_the_one_game_os_mapping_of_its_region() {
     assert_eq!(at(&rows, "mapping_2_previous", second + 24), first);
     assert_eq!(at(&rows, "mapping_2_next", second + 32), 0);
     assert_eq!(
-        Some(at(&rows, "mapping_2_lpar", second + 48)),
+        MmioRealAddress::Real(at(&rows, "mapping_2_lpar", second + 48)),
         mmio_real_address(row.firmware, row.bus, row.device, row.bus_address)
     );
     assert_eq!(at(&rows, "mapping_2_region", second + 72), object);

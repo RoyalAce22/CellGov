@@ -9,7 +9,9 @@
 //!
 //! [`STORED_MEMORY_LIMIT`]: cellgov_ps3_abi::lv1::page_table::STORED_MEMORY_LIMIT
 
-use cellgov_ps3_abi::lv1::device_bus::{mmio_real_address, WRITE_HTAB_MMIO_PAGE_SIZE_R3};
+use cellgov_ps3_abi::lv1::device_bus::{
+    mmio_real_address, MmioRealAddress, WRITE_HTAB_MMIO_PAGE_SIZE_R3,
+};
 
 use crate::group::device_bus::DeviceBusState;
 
@@ -44,9 +46,16 @@ pub(crate) fn mapping_page(
     }
     let base = mmio_real_address(firmware, mapping.bus, mapping.device, mapping.bus_address);
     Some(match base {
-        Some(base) => MmioPage::Io(base + (address - mapping.lpar_address)),
-        None => MmioPage::Refused(
-            "a valid entry in an MMIO mapping whose real address no lv1 image read gives",
+        MmioRealAddress::Real(base) => MmioPage::Io(base + (address - mapping.lpar_address)),
+        MmioRealAddress::NoRegion => MmioPage::Refused(
+            "a valid entry in an MMIO mapping whose region no lv1 image read gives",
+        ),
+        MmioRealAddress::NoIndex => MmioPage::Refused(
+            "a valid entry in an MMIO mapping of a device whose index no lv1 image read gives",
+        ),
+        MmioRealAddress::BusDoubleword => MmioPage::Refused(
+            "a valid entry in an MMIO mapping of a device of index 6, \
+             whose real address adds a bus object doubleword that CellGov does not hold",
         ),
     })
 }

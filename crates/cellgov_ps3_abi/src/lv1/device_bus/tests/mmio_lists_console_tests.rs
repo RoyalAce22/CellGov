@@ -96,7 +96,7 @@ fn the_third_regions_game_os_mapping_is_the_record_of_the_kernels_second_call() 
     assert_eq!(lists[&(next + 24)], head);
     assert_eq!(lists[&(next + 32)], 0);
     assert_eq!(
-        Some(lists[&(next + 48)]),
+        MmioRealAddress::Real(lists[&(next + 48)]),
         mmio_real_address(row.firmware, row.bus, row.device, row.bus_address)
     );
     assert_eq!(lists[&(next + 64)] >> 56, 0);
@@ -113,7 +113,7 @@ fn the_first_region_holds_only_lv1s_own_mapping() {
     assert_eq!(lists[&(head + 8)], 0);
     assert_eq!(lists[&(head + 32)], 0);
     assert_eq!(
-        Some(lists[&(head + 48)]),
+        MmioRealAddress::Real(lists[&(head + 48)]),
         mmio_real_address(region.firmware, region.bus, region.device, region.address)
     );
     assert_eq!(lists[&(head + 72)], object);

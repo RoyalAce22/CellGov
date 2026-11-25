@@ -30,7 +30,8 @@ use cellgov_ps3_abi::hw::ehci::{
     USBCMD, USBCMD_HCRESET, USBCMD_PARK_BITS, USBCMD_RESET_VALUE, USBCMD_RS, USBINTR,
     USBINTR_RESET_VALUE, USBSTS, USBSTS_HCHALTED, USBSTS_RESET_VALUE,
 };
-use cellgov_ps3_abi::lv1::device_bus::MMIO_REAL_BASE;
+
+use super::mmio_real::{DeviceMmioError, MmioTables};
 
 #[cfg(test)]
 #[path = "tests/ehci_firmware_rule_tests.rs"]
@@ -55,9 +56,35 @@ const REGISTERS: [u64; WORDS] = [USBCMD, USBSTS, USBINTR, INSNREG01, INSNREG03];
 /// row does not compile without its own rule.
 const RULES: [RegisterRule; EHCI_CONTROLLERS.len()] = [store_operational::<0>];
 
-/// Declares the registers of each EHCI controller at `firmware` as a
-/// register file of `mem`, with the rule of that controller. It also
-/// declares these:
+/// The real address of the operational registers of each EHCI controller
+/// of `tables` at `firmware`, with the rule of that controller.
+///
+/// The rule of a controller is the entry of [`RULES`] at the controller's
+/// index in `tables`.
+///
+/// # Errors
+///
+/// Returns [`DeviceMmioError::NoRealAddress`] for the first controller
+/// whose region has no real address.
+pub(super) fn controllers_of(
+    tables: MmioTables<'_>,
+    firmware: &str,
+) -> Result<Vec<(u64, RegisterRule)>, DeviceMmioError> {
+    tables
+        .controllers
+        .iter()
+        .zip(RULES)
+        .filter(|(c, _)| c.firmware == firmware)
+        .map(|(c, rule)| {
+            let real = tables.real(firmware, c.bus, c.device, c.region)?;
+            Ok((real + c.operational, rule))
+        })
+        .collect()
+}
+
+/// Declares the registers of each controller of `controllers`, given by
+/// the real address of its operational registers and its rule, as a
+/// register file of `mem`. It also declares these:
 /// - the readers of [`EHCI_RESET_READERS`];
 /// - the store instruction of each row of [`EHCI_SETUP_STORES`] at
 ///   `firmware`, as a writer of its setup register.
@@ -68,13 +95,12 @@ const RULES: [RegisterRule; EHCI_CONTROLLERS.len()] = [store_operational::<0>];
 /// [`GuestMemory::declare_register_reader`] or
 /// [`GuestMemory::declare_register_writer`]. The memory refuses a
 /// register outside the controller's unmodelled span.
-pub(super) fn declare_ehci(mem: &mut GuestMemory, firmware: &str) -> Result<(), MemError> {
-    let controllers = EHCI_CONTROLLERS
-        .iter()
-        .zip(RULES)
-        .filter(|(c, _)| c.firmware == firmware);
-    for (controller, rule) in controllers {
-        let base = MMIO_REAL_BASE + controller.region + controller.operational;
+pub(super) fn declare_ehci(
+    mem: &mut GuestMemory,
+    firmware: &str,
+    controllers: &[(u64, RegisterRule)],
+) -> Result<(), MemError> {
+    for &(base, rule) in controllers {
         let words = REGISTERS.map(|offset| (base + offset, RegisterWord::UNKNOWN));
         mem.declare_registers(&words, rule)?;
         let reads = EHCI_RESET_READERS.iter().filter(|r| r.firmware == firmware);

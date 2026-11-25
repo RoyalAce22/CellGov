@@ -11,7 +11,7 @@ mod from_entry;
 mod map;
 
 pub use acquire::{kernel_of_record, KernelUnavailable, LoadedKernel};
-pub use device_mmio::DeviceMmioAccess;
+pub use device_mmio::{DeviceMmioAccess, DeviceMmioError, MmioRealRefusal};
 pub use from_entry::{
     kernel_partition, run_kernel_from_entry, KernelHypercall, KernelHypercallSite, KernelPosition,
     KernelRun, KernelRunError, KernelRunStop, RECENT_PCS,

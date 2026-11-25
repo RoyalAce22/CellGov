@@ -70,7 +70,7 @@ fn words(file: &str) -> BTreeMap<u64, u64> {
 
 /// The words of the MMIO files of the capture: the device, its regions
 /// and the mappings of their lists.
-fn mmio_words() -> BTreeMap<u64, u64> {
+pub(super) fn mmio_words() -> BTreeMap<u64, u64> {
     let files = [
         ("globals.tsv", 3),
         ("device_pointers.tsv", 2),
@@ -91,7 +91,7 @@ fn mmio_words() -> BTreeMap<u64, u64> {
 
 /// The address of device 2, from +64 of the system bus object, after the
 /// check that the object there has the method table of the bus 1 devices.
-fn device_2(words: &BTreeMap<u64, u64>) -> u64 {
+pub(super) fn device_2(words: &BTreeMap<u64, u64>) -> u64 {
     let device = words[&(words[&SYSTEM_BUS_GLOBAL] + DEVICE_2_SLOT)];
     assert_eq!(words[&device], DEVICE_TABLE, "the table of {device:#x}");
     device
@@ -141,7 +141,7 @@ fn device_2_has_index_4_and_each_regions_real_address_is_that_of_lv1s_own_mappin
         let object = words[&(device + 24 + 8 * region.slot)];
         assert_eq!(
             mmio_real_address(region.firmware, region.bus, region.device, region.address),
-            Some(lv1_mapping_address(&words, object)),
+            MmioRealAddress::Real(lv1_mapping_address(&words, object)),
             "slot {}",
             region.slot
         );
@@ -208,7 +208,7 @@ fn each_device_2_row_is_the_game_os_mapping_at_the_head_of_its_regions_list() {
         assert_eq!(words[&(next + 24)], head, "{:#x}", row.bus_address);
         assert_eq!(words[&(next + 32)], 0, "{:#x}", row.bus_address);
         assert_eq!(
-            Some(words[&(next + 48)]),
+            MmioRealAddress::Real(words[&(next + 48)]),
             mmio_real_address(row.firmware, row.bus, row.device, row.bus_address),
             "{:#x}",
             row.bus_address
