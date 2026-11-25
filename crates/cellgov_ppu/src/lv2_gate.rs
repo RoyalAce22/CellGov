@@ -123,7 +123,8 @@ fn entry_thunk_target(base: u64, instruction: &PpuInstruction) -> Option<u64> {
         return None;
     };
     if *aa {
-        u64::try_from(i64::from(*offset)).ok()
+        // [PPC-Book1 p:24 s:2.4] With AA = 1 the target is EXTS(displacement) in 64-bit mode.
+        Some(0u64.wrapping_add_signed(i64::from(*offset)))
     } else {
         add_signed(base, i64::from(*offset))
     }
@@ -402,3 +403,7 @@ mod scheduled_branch_tests;
 #[cfg(test)]
 #[path = "tests/lv2_gate_top_segment_tests.rs"]
 mod top_segment_tests;
+
+#[cfg(test)]
+#[path = "tests/lv2_gate_negative_thunk_tests.rs"]
+mod negative_thunk_tests;
