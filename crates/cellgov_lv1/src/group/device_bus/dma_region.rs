@@ -102,9 +102,10 @@ const OTHER_HELD: UnmodelledError = UnmodelledError::new(
      pool state",
 );
 
-/// A call for a device after a close freed one of its regions.
+/// A call for a device after lv1 freed one of its regions.
 ///
-/// lv1's free calls the device's method at +112 with the region's address
+/// A close of the device and `free_device_dma_region` reach the same
+/// free method. lv1's free calls the device's method at +112 with the region's address
 /// [OFW-4.93 lv1 a:0x2276C8-0x2276E4]. That method reaches the pool's
 /// release [OFW-4.93 lv1 a:0x22D918-0x22D924]
 /// [OFW-4.93 lv1 a:0x22CEE0-0x22CEE4]. The release passes the address to
@@ -126,9 +127,9 @@ const OTHER_HELD: UnmodelledError = UnmodelledError::new(
 /// owner's listeners get event 3 [OFW-4.93 lv1 a:0x2D7658-0x2D7680]
 /// [OFW-4.93 lv1 a:0x2D76A4-0x2D772C] [OFW-4.93 lv1 a:0x2D714C-0x2D7178]
 /// [OFW-4.93 lv1 a:0x2D72D4-0x2D7308]. No read shows which code sends that
-/// event. So no source shows the address after the close.
+/// event. So no source shows the address after the free.
 ///
-/// The refusal holds for the closed device alone. lv1's init gives the
+/// The refusal holds for the device of the freed region alone. lv1's init gives the
 /// word at +160 the value 2 for device 0, 8 for device 1 and 9 for
 /// device 2 [OFW-4.93 lv1 a:0x3A9924-0x3A9938]
 /// [OFW-4.93 lv1 a:0x3A9A4C-0x3A9A5C] [OFW-4.93 lv1 a:0x3A9AA0-0x3A9AB0].
@@ -136,11 +137,11 @@ const OTHER_HELD: UnmodelledError = UnmodelledError::new(
 /// [OFW-4.93 lv1 a:0x22CD58-0x22CD90] [OFW-4.93 lv1 a:0x22A1F0-0x22A214],
 /// and the ranges of two devices do not overlap. A free gives back only
 /// the segment of the freed address [OFW-4.93 lv1 a:0x2D8974-0x2D8990],
-/// and the segment pick stays in the caller's range. So a close of one
+/// and the segment pick stays in the caller's range. So a free in one
 /// device leaves the next address of each other device, as the console
 /// capture of the allocators and the segment table shows.
 const FREED_POOL: UnmodelledError = UnmodelledError::new(
-    "an allocate_device_dma_region for a device after a close freed one of its regions, whose \
+    "an allocate_device_dma_region for a device after lv1 freed one of its regions, whose \
      address depends on the pool state that lv1's free leaves",
 );
 
@@ -177,7 +178,7 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// - lv1's init leaves +120 of the device at a value other than -1, as
 ///   the captures show.
 /// - The partition's regions of the device get the captured addresses in
-///   the captured order while no close freed a region of the device. For
+///   the captured order while lv1 freed no region of the device. For
 ///   device 0, lv1's own region of the device is in the pool before the
 ///   kernel's call.
 /// - lv1's allocation of its 80-byte region object succeeds.
@@ -188,7 +189,7 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// - no lv1 image read shows the handler for `firmware`;
 /// - r3 is bus 2, 3 or 4;
 /// - r4 names a device of bus 1 other than devices 0, 1 and 2;
-/// - a close freed a region of the device;
+/// - lv1 freed a region of the device;
 /// - for device 1 or 2, the partition holds all six slots;
 /// - the partition holds regions of the device other than its first
 ///   captured regions;

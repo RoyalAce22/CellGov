@@ -9,8 +9,8 @@
 //! - `close_device` for devices 0, 1 and 2 of bus 1, for a storage bus
 //!   that the partition does not hold open, and for each bus 4 device
 //!   that lv1 finds absent;
-//! - `allocate_device_dma_region` and `map_device_dma_region` for devices
-//!   0, 1 and 2 of bus 1;
+//! - `allocate_device_dma_region`, `free_device_dma_region` and
+//!   `map_device_dma_region` for devices 0, 1 and 2 of bus 1;
 //! - `map_device_mmio_region` for devices 0 and 1 of bus 1, and for
 //!   device 2 of bus 1 that the partition does not hold open;
 //! - `unmap_device_mmio_region` and `unmap_device_dma_region` for devices
@@ -19,6 +19,7 @@
 //! [`DeviceBusState`] holds the state of the group.
 
 mod close;
+mod dma_free;
 mod dma_map;
 mod dma_region;
 mod dma_unmap;

@@ -6,6 +6,7 @@
 //! these facts.
 
 mod close;
+mod dma_free;
 mod dma_map;
 mod dma_region;
 mod dma_unmap;
@@ -17,7 +18,7 @@ mod open;
 mod storage_bus;
 
 pub use self::{
-    close::*, dma_map::*, dma_region::*, dma_unmap::*, game_os_mmio::*, mmio_map::*,
+    close::*, dma_free::*, dma_map::*, dma_region::*, dma_unmap::*, game_os_mmio::*, mmio_map::*,
     mmio_region::*, mmio_unmap::*, open::*, storage_bus::*,
 };
 
@@ -104,3 +105,7 @@ mod mmio_unmap_tests;
 #[cfg(test)]
 #[path = "tests/dma_unmap_tests.rs"]
 mod dma_unmap_tests;
+
+#[cfg(test)]
+#[path = "tests/dma_free_tests.rs"]
+mod dma_free_tests;

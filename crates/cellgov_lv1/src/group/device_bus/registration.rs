@@ -8,6 +8,7 @@ use cellgov_mem::scheme::{HashedSurface, Stamp};
 use cellgov_ps3_abi::lv1::device_bus::{opens_storage_bus, STORAGE_BUS};
 
 use super::close;
+use super::dma_free;
 use super::dma_map::{self, DmaMapping};
 use super::dma_region::{self, DmaRegion};
 use super::dma_unmap;
@@ -24,6 +25,7 @@ pub(crate) const GROUP: Group = Group {
         open::HYPERCALLS,
         close::HYPERCALLS,
         dma_region::HYPERCALLS,
+        dma_free::HYPERCALLS,
         dma_map::HYPERCALLS,
         dma_unmap::HYPERCALLS,
         mmio_map::HYPERCALLS,
@@ -77,7 +79,7 @@ pub(crate) const GROUP: Group = Group {
             stamp: Stamp::Version(35),
         },
         HashedSurface {
-            name: "the devices whose DMA regions a close freed",
+            name: "the devices whose DMA regions lv1 freed",
             source: Some(FREED_POOL_SOURCE),
             stamp: Stamp::Version(36),
         },
@@ -121,7 +123,7 @@ pub(crate) const MMIO_MAPPING_SOURCE: u8 = 183;
 /// for each mapping, with the key of [`MMIO_MAPPING_SOURCE`].
 pub(crate) const MMIO_PAGE_SHIFT_SOURCE: u8 = 184;
 
-/// The lane source of the devices whose DMA regions a close freed: one
+/// The lane source of the devices whose DMA regions lv1 freed: one
 /// object for each device, keyed by its index in bus and device order.
 pub(crate) const FREED_POOL_SOURCE: u8 = 185;
 
@@ -157,7 +159,7 @@ impl LaneValue for StorageDevicePort {
 /// - each storage device open that the partition holds;
 /// - the event receive port that lv1 connected to each storage device;
 /// - each mapping that lv1 made in an MMIO region for the partition;
-/// - each device whose DMA regions a close freed.
+/// - each device whose DMA regions lv1 freed.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeviceBusState {
     open: BTreeSet<OpenDevice>,
@@ -243,13 +245,12 @@ impl DeviceBusState {
             .filter(move |region| region.bus == device.bus && region.device == device.device)
     }
 
-    /// Each device whose DMA regions a close freed, in bus and device
-    /// order.
+    /// Each device whose DMA regions lv1 freed, in bus and device order.
     pub fn freed_pools(&self) -> impl Iterator<Item = OpenDevice> + '_ {
         self.freed_pools.iter().copied()
     }
 
-    /// Whether a close freed a DMA region of `device`.
+    /// Whether lv1 freed a DMA region of `device`.
     pub fn pool_freed(&self, device: OpenDevice) -> bool {
         self.freed_pools.contains(&device)
     }
@@ -273,6 +274,13 @@ impl DeviceBusState {
             }
             DeviceBusChange::DmaRegionAllocated(region) => {
                 self.regions.insert(region);
+            }
+            DeviceBusChange::DmaRegionFreed(region) => {
+                self.regions.remove(&region);
+                self.freed_pools.insert(OpenDevice {
+                    bus: region.bus,
+                    device: region.device,
+                });
             }
             DeviceBusChange::DmaRegionMapped(mapping) => {
                 self.mappings.insert(mapping);
@@ -398,6 +406,9 @@ pub enum DeviceBusChange {
     Opened(OpenDevice),
     /// lv1 gave the partition this DMA region.
     DmaRegionAllocated(DmaRegion),
+    /// lv1 freed this DMA region of the partition. The change records the
+    /// region's device as a device whose DMA regions lv1 freed.
+    DmaRegionFreed(DmaRegion),
     /// lv1 made this DMA mapping for the partition.
     DmaRegionMapped(DmaMapping),
     /// lv1 removed this DMA mapping of the partition.
@@ -425,7 +436,7 @@ pub enum DeviceBusChange {
     ///   partition's open and the port of its slot.
     ///
     /// When the change removes a DMA region, it records the device as a
-    /// device whose DMA regions a close freed.
+    /// device whose DMA regions lv1 freed.
     Closed(OpenDevice),
 }
 
