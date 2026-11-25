@@ -59,9 +59,9 @@ pub(super) struct Cursor<'m> {
     pub(super) last_retired: u64,
     /// A fused pair that faulted runs again split, at this pc.
     force_split: Option<u64>,
-    /// An instruction that runs again after a translation miss, at
-    /// this pc.
-    rerun: Option<u64>,
+    /// An instruction that runs again after a translation miss: its pc,
+    /// and the table write and read counts before its first attempt.
+    rerun: Option<(u64, (usize, usize))>,
     /// The span of the buffered stores when the last `isync` retired.
     pub(super) synced_stores: Option<(u64, u64)>,
     /// The fetchable span the last fetch read: its first byte and the
@@ -138,7 +138,11 @@ impl PpuExecutionUnit {
             };
 
             // A rerun after a translation miss is the same dispatch.
-            if cur.rerun.take() != Some(step_pc) {
+            let rerun = cur
+                .rerun
+                .take()
+                .and_then(|(pc, searches)| (pc == step_pc).then_some(searches));
+            if rerun.is_none() {
                 tap.dispatch(self.id, &insn, &self.state);
             }
             let (mut ops, n_ops) = crate::timing::classify(&insn, &self.state);
@@ -147,7 +151,7 @@ impl PpuExecutionUnit {
             }
             let ops = &ops[..n_ops];
             self.align_clock_read_to_issue(ctx, &entry, step_pc, &insn, ops);
-            let attempt = self.begin_attempt(mem, effects.len(), insn, step_pc, translating);
+            let attempt = self.begin_attempt(mem, effects.len(), insn, step_pc, translating, rerun);
             let load = if self.profile_mode {
                 self.probe_load(&insn, step_pc, regions.as_slice())
             } else {
@@ -189,7 +193,7 @@ impl PpuExecutionUnit {
                 let boundary = (attempt.effects_before, attempt.stores_before);
                 let last = cur.last_retired;
                 match self.settle_fault(mem, effects, &mut regions, translating, &attempt, exit) {
-                    Retry::Rerun => cur.rerun = Some(step_pc),
+                    Retry::Rerun => cur.rerun = Some((step_pc, attempt.searches_before)),
                     Retry::Split => cur.force_split = Some(step_pc),
                     Retry::EndBatch => return self.budget_yield(&entry, effects, last),
                     Retry::Stop(exit) => {

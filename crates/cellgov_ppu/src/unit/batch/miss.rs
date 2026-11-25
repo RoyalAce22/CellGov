@@ -4,7 +4,7 @@
 
 use super::exit::{Attempt, FaultExit};
 use super::regions::RegionTable;
-use crate::exec::PpuFault;
+use crate::exec::{PpuFault, PpuInterrupt};
 use crate::instruction;
 use crate::mmu::Access;
 use crate::unit::ppu_unit::PpuExecutionUnit;
@@ -67,9 +67,40 @@ impl PpuExecutionUnit {
     /// What `attempt`, which faulted with `exit`, does next after a
     /// translation miss: run again, end the batch, or stop.
     ///
-    /// A fault that is not a miss stops at `exit`.
+    /// A fault that is not a miss stops at `exit`. A misaligned store that
+    /// stops at the alignment interrupt keeps no R or C write and no group
+    /// read of the table searches of its attempts. A store that takes the
+    /// interrupt in caching-inhibited storage at any alignment keeps them
+    /// (`refused_at_any_alignment`).
+    ///
+    /// [CBE-Handbook p:90 s:4.2.6.8] Footnote 4: a misaligned caching-inhibited store is speculative, so its table lookup is not performed when it takes the alignment interrupt.
     #[inline]
     pub(super) fn miss_step<'m>(
+        &mut self,
+        mem: &'m cellgov_mem::GuestMemory,
+        effects: &mut Vec<Effect>,
+        regions: &mut RegionTable<'m>,
+        translating: bool,
+        attempt: &Attempt,
+        exit: FaultExit,
+    ) -> MissStep {
+        let step = self.refill_step(mem, effects, regions, translating, attempt, exit);
+        if let MissStep::Stop(FaultExit::Verdict(PpuFault::Interrupt(PpuInterrupt::Alignment {
+            store: true,
+            ..
+        }))) = &step
+        {
+            if !refused_at_any_alignment(&attempt.insn) {
+                self.drop_searches(attempt.searches_before);
+            }
+        }
+        step
+    }
+
+    /// [`Self::miss_step`] before it drops the searches of a store that
+    /// takes the alignment interrupt.
+    #[inline]
+    fn refill_step<'m>(
         &mut self,
         mem: &'m cellgov_mem::GuestMemory,
         effects: &mut Vec<Effect>,
@@ -225,6 +256,37 @@ impl PpuExecutionUnit {
         mem.rewind_provisional_reads(reads_before);
         self.restore_witnesses(witnesses);
     }
+}
+
+/// Whether `insn` is a store that takes the alignment interrupt in
+/// caching-inhibited storage whatever its operand's alignment:
+/// - `dcbz`, `stmw`, `stswi`, `stswx`, `stwcx.` or `stdcx.`;
+/// - a vector left or right store: `stvlx`, `stvlxl`, `stvrx` or
+///   `stvrxl`.
+///
+/// Such a store that takes the interrupt there is not misaligned, so its
+/// table searches keep their R and C writes. A misaligned `stmw`,
+/// `stwcx.` or `stdcx.` takes its alignment interrupt before any access,
+/// so it makes no search.
+///
+/// [CBE-Handbook p:253 s:9.5.8] The scalar instructions take the alignment interrupt for an operand in caching-inhibited storage, aligned or not.
+/// [CBE-Handbook p:290 s:9.10] Table 9-39 gives a VSU store left or right in caching-inhibited storage the alignment interrupt, with no alignment condition.
+/// [CBE-Handbook p:90 s:4.2.6.8] Each table lookup but that of a misaligned caching-inhibited store is nonspeculative, so it sets R whatever interrupt the access takes.
+fn refused_at_any_alignment(insn: &instruction::PpuInstruction) -> bool {
+    use instruction::PpuInstruction as I;
+    matches!(
+        insn,
+        I::Dcbz { .. }
+            | I::Stmw { .. }
+            | I::Stswi { .. }
+            | I::Stswx { .. }
+            | I::Stwcx { .. }
+            | I::Stdcx { .. }
+            | I::Stvlx { .. }
+            | I::Stvlxl { .. }
+            | I::Stvrx { .. }
+            | I::Stvrxl { .. }
+    )
 }
 
 /// Whether a view of `views` holds the byte at `ea`.

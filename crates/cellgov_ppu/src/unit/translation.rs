@@ -282,9 +282,8 @@ impl PpuExecutionUnit {
     ///
     /// The cache keeps no translation of the next page. The unit keeps the
     /// R write of that page's search and the groups the search read, as
-    /// [`Self::refill_for`] keeps them. A store that takes the alignment
-    /// interrupt keeps neither. The batch ends ahead of the access when a
-    /// buffered store reaches a byte that the search writes.
+    /// [`Self::refill_for`] keeps them. The batch ends ahead of the access
+    /// when a buffered store reaches a byte that the search writes.
     ///
     /// [PPC-Book3 p:43 s:4.9] The pieces of an operand that crosses a page boundary are separate accesses for R and C.
     fn unperformed_refusal(
@@ -299,7 +298,6 @@ impl PpuExecutionUnit {
         let mut probe_views = views.to_vec();
         probe_views.push(stand_in(t, ea));
         let mut verdict = self.probe(insn, mem, &probe_views);
-        let before_search = (self.table_writes.len(), self.table_reads.len());
         if let Some(next) = unheld_after(&verdict, t) {
             let next_t = match self.probe_for(mem, next, access) {
                 Err(RefillStop::AfterStores) => return Some(MissStep::EndBatch),
@@ -321,11 +319,6 @@ impl PpuExecutionUnit {
         }
         match verdict {
             ExecuteVerdict::Fault(f @ PpuFault::Interrupt(PpuInterrupt::Alignment { .. })) => {
-                // [CBE-Handbook p:90 s:4.2.6.8] Footnote 4: a misaligned caching-inhibited store takes the alignment interrupt before the table lookup, so the lookup writes no R or C.
-                if access == Access::Store {
-                    self.table_writes.truncate(before_search.0);
-                    self.table_reads.truncate(before_search.1);
-                }
                 Some(MissStep::Stop(FaultExit::Verdict(f)))
             }
             ExecuteVerdict::StoreFault(e @ cellgov_mem::MemError::ReservedWrite { .. }) => {
@@ -431,7 +424,9 @@ impl PpuExecutionUnit {
     ///
     /// The search writes R = 1 to the entry it matches, even when the
     /// access takes an interrupt. A store writes C later, when it meets a
-    /// [`CHANGE_UNSET`] view ([`Self::refill_change`]).
+    /// [`CHANGE_UNSET`] view ([`Self::refill_change`]). A misaligned store
+    /// that takes the alignment interrupt drops both writes
+    /// ([`Self::drop_searches`]).
     ///
     /// # Errors
     ///
@@ -573,6 +568,19 @@ impl PpuExecutionUnit {
             self.real_store_pieces(ea, len)
                 .any(|(at, n)| at <= ra && ra - at < u64::from(n))
         })
+    }
+
+    /// Drop the R and C writes and the group reads that the block's
+    /// searches added after the counts `(writes, reads)`.
+    ///
+    /// The unit drops them for a misaligned store that takes the alignment
+    /// interrupt. Its table searches are speculative, so the PPE performs
+    /// none of their writes.
+    ///
+    /// [CBE-Handbook p:90 s:4.2.6.8] Footnote 4: a misaligned caching-inhibited store is speculative, so its table lookup is not performed when it takes the alignment interrupt.
+    pub(super) fn drop_searches(&mut self, (writes, reads): (usize, usize)) {
+        self.table_writes.truncate(writes);
+        self.table_reads.truncate(reads);
     }
 
     /// Publish the R and C writes the block's searches made, ahead of the

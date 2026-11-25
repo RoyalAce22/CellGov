@@ -60,6 +60,14 @@ mod reference_change_tests;
 mod probe_reference_tests;
 
 #[cfg(test)]
+#[path = "tests/inhibited_vector_edge_reference_tests.rs"]
+mod inhibited_vector_edge_reference_tests;
+
+#[cfg(test)]
+#[path = "tests/inhibited_store_reference_tests.rs"]
+mod inhibited_store_reference_tests;
+
+#[cfg(test)]
 #[path = "tests/entry_write_range_tests.rs"]
 mod entry_write_range_tests;
 

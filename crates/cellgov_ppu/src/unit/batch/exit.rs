@@ -37,6 +37,9 @@ pub(super) struct Attempt {
     /// The `lwarx` and `ldarx` execution counts before the attempt;
     /// `None` when the thread does not translate.
     pub(super) witnesses: Option<(u64, u64)>,
+    /// The unit's table write and read counts before the first attempt
+    /// of the instruction. A rerun after a translation miss keeps them.
+    pub(super) searches_before: (usize, usize),
 }
 
 impl Attempt {
@@ -63,6 +66,10 @@ pub(super) enum Retry {
 
 impl PpuExecutionUnit {
     /// Records the counts an attempt of `insn` at `step_pc` rolls back to.
+    ///
+    /// `rerun` holds the table write and read counts before the first
+    /// attempt, when this attempt runs `insn` again after a translation
+    /// miss.
     #[inline(always)]
     pub(super) fn begin_attempt(
         &self,
@@ -71,6 +78,7 @@ impl PpuExecutionUnit {
         insn: instruction::PpuInstruction,
         step_pc: u64,
         translating: bool,
+        rerun: Option<(usize, usize)>,
     ) -> Attempt {
         let pair = insn.is_super_pair();
         let stores_before = self.store_buf.len();
@@ -96,6 +104,7 @@ impl PpuExecutionUnit {
             stores_before,
             reads_before,
             witnesses,
+            searches_before: rerun.unwrap_or((self.table_writes.len(), self.table_reads.len())),
         }
     }
 
