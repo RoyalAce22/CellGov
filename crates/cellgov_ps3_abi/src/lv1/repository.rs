@@ -231,8 +231,9 @@ const GAME_OS_341_DUMP: NodeSource = NodeSource::PsdevwikiDump {
 ///
 /// The dump is of firmware 3.41, which no logged boot is. No source gives
 /// the values for 1.50, 1.94 or 3.70. At 4.93 the console captures
-/// [`BOOT_RECORD_CAPTURE`], [`DEBUG_SUPPORT_CAPTURE`] and
-/// [`FLASH_EXT_CAPTURE`] give each value that the 4.93 boot reads.
+/// [`BOOT_RECORD_CAPTURE`], [`DEBUG_SUPPORT_CAPTURE`],
+/// [`FLASH_EXT_CAPTURE`] and [`BUS_CAPTURE`] give each value that the 4.93
+/// boot reads.
 const DUMP_FIRMWARE_BEFORE_4_93: &[&str] = &["1.50", "1.94", "3.70"];
 
 /// The console capture of the 4.93 kernel's boot repository record, on
@@ -247,8 +248,8 @@ pub const BOOT_RECORD_CAPTURE: &str = "tests/micro/lv2_repository_boot_nodes/ps3
 /// The address of the 4.93 kernel's boot repository record.
 pub const BOOT_RECORD_4_93: u64 = 0x8000_0000_0037_a5a0;
 
-/// The firmware of [`BOOT_RECORD_CAPTURE`], [`DEBUG_SUPPORT_CAPTURE`] and
-/// [`FLASH_EXT_CAPTURE`].
+/// The firmware of [`BOOT_RECORD_CAPTURE`], [`DEBUG_SUPPORT_CAPTURE`],
+/// [`FLASH_EXT_CAPTURE`] and [`BUS_CAPTURE`].
 const CAPTURE_FIRMWARE: &[&str] = &["4.93"];
 
 /// The value at offset `offset` of the 4.93 boot record, as
@@ -299,6 +300,28 @@ pub const FLASH_EXT_CAPTURE: &str = "tests/micro/lv1_repository_flash/peek/cech2
 /// The lv1 address of the first value of the node that
 /// [`FLASH_EXT_CAPTURE`] read.
 const FLASH_EXT_V1_ADDRESS: u64 = 0x0068_8d78;
+
+/// The console capture of lpar 1's bus nodes in lv1's repository, on the
+/// reference console at firmware 4.93. Its README gives the method.
+pub const BUS_CAPTURE: &str = "tests/micro/lv1_repository_bus/peek/cech20-cex-493";
+
+/// A node of lpar 1's bus `bus` whose last three key words are `n`.
+///
+/// [`BUS_CAPTURE`] read the node's two values at the lv1 addresses
+/// `address` and `address` + 8.
+const fn bus_node(bus: u64, n: [u64; 3], v1: u64, v2: u64, address: u64) -> RepositoryNode {
+    node(
+        LPAR_ID_PME,
+        [first_field(b"bus", bus), n[0], n[1], n[2]],
+        v1,
+        SecondValue::Given(v2),
+        CAPTURE_FIRMWARE,
+        NodeSource::Lv1NodeCapture {
+            capture: BUS_CAPTURE,
+            address,
+        },
+    )
+}
 
 /// The second value of a node that [`BOOT_RECORD_CAPTURE`] gives.
 ///
@@ -353,6 +376,37 @@ pub const NODES: &[RepositoryNode] = &[
         CAPTURE_FIRMWARE,
         captured(0xb0),
     ),
+    // `bus.<n>.type` for n = 0, 1: the bus type. The kernel's bus search
+    // reads it for n = 0 to 3 and stops at the first bus of type 4
+    // [OFW-4.93 lv2_kernel a:0x80000000002777f8-0x8000000000277830]. Its
+    // caller asks for type 4 [OFW-4.93 lv2_kernel a:0x8000000000277910].
+    // Bus 1 is the first bus of type 4 on the reference console.
+    bus_node(0, [field(b"type", 0), 0, 0], 3, 0, 0x0068_9ff8),
+    // `bus.1.dev.<n>.id`: the device id. The handler of a device of type 3
+    // reads it and gives it to the device object with the bus id
+    // [OFW-4.93 lv2_kernel a:0x80000000000936cc-0x80000000000936ec].
+    bus_node(1, [field(b"dev", 0), field(b"id", 0), 0], 0, 0, 0x0068_a1f8),
+    // `bus.1.dev.<n>.type`: the device type. The kernel reads it for each
+    // device of the bus and selects a handler for types 3, 4 and 6
+    // [OFW-4.93 lv2_kernel a:0x80000000000937fc-0x8000000000093844].
+    bus_node(
+        1,
+        [field(b"dev", 0), field(b"type", 0), 0],
+        3,
+        0,
+        0x0068_a278,
+    ),
+    // `bus.1.id`: the bus id. The bus search reads it for the bus it finds
+    // [OFW-4.93 lv2_kernel a:0x800000000027786c]. The kernel reads it again
+    // and keeps the low word of v2 when v2 is not 0
+    // [OFW-4.93 lv2_kernel a:0x8000000000093900-0x8000000000093924].
+    bus_node(1, [field(b"id", 0), 0, 0], 1, 0x0400_0102, 0x0068_acf8),
+    // `bus.1.num_dev`: the number of devices on the bus. The bus search
+    // reads it [OFW-4.93 lv2_kernel a:0x8000000000277880], and the device
+    // loop runs that many times
+    // [OFW-4.93 lv2_kernel a:0x80000000000937bc-0x80000000000937f8].
+    bus_node(1, [field(b"num_dev", 0), 0, 0], 4, 0, 0x0068_adf8),
+    bus_node(1, [field(b"type", 0), 0, 0], 4, 0, 0x0068_ad78),
     // `plat.id`: the platform id, 8 bytes of text. The kernel keeps it at
     // offset 0xa8 of its boot record [OFW-4.93 lv2_kernel a:0x800000000000CD08].
     node(
@@ -551,3 +605,7 @@ mod debug_support_tests;
 #[cfg(test)]
 #[path = "tests/repository_flash_ext_tests.rs"]
 mod flash_ext_tests;
+
+#[cfg(test)]
+#[path = "tests/repository_bus_tests.rs"]
+mod bus_tests;

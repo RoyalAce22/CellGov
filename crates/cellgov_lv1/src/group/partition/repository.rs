@@ -129,3 +129,7 @@ mod console_tests;
 #[cfg(test)]
 #[path = "tests/console_repository_flash_ext_tests.rs"]
 mod console_flash_ext_tests;
+
+#[cfg(test)]
+#[path = "tests/console_repository_bus_tests.rs"]
+mod console_bus_tests;

@@ -46,15 +46,20 @@ fn every_lv1_node_row_is_the_node_its_capture_read_twice_alike() {
             NodeSource::PsdevwikiDump { .. } | NodeSource::ConsoleCapture { .. } => None,
         })
         .collect();
-    assert_eq!(rows.len(), 2);
+    assert_eq!(rows.len(), 8);
     for (node, capture, address) in rows {
         let captured = capture_rows(
             capture,
             "node.tsv",
             "fw\tlpar\tn1\tn2\tn3\tn4\taddress\treads\tagree\tv1\tv2",
         );
-        assert_eq!(captured.len(), 1, "{capture}");
-        let row = &captured[0];
+        let key = [node.key.n1, node.key.n2, node.key.n3, node.key.n4];
+        let matching: Vec<&Vec<String>> = captured
+            .iter()
+            .filter(|row| [hex(&row[2]), hex(&row[3]), hex(&row[4]), hex(&row[5])] == key)
+            .collect();
+        assert_eq!(matching.len(), 1, "{capture}: one row for {}", node.key);
+        let row = matching[0];
         assert_eq!(node.firmware, [row[0].as_str()], "{}", node.key);
         assert_eq!(
             row[1].parse::<u64>().expect("a decimal lpar"),
