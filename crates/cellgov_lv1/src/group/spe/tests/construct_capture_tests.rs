@@ -5,7 +5,7 @@
 use super::*;
 use crate::{AddressSpace, AddressSpaceChange, MemoryRegion};
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::lv1::memory::region_address;
+use cellgov_ps3_abi::lv1::memory::{game_os_region_counter_at_boot, region_address};
 use cellgov_ps3_abi::lv1::spe::LOGICAL_SPE_OBJECT_CAPTURE;
 use cellgov_time::GuestTicks;
 

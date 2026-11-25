@@ -21,7 +21,6 @@ use cellgov_ps3_abi::hw::ppu_mmu::{
 };
 use cellgov_ps3_abi::lv1::address_space::{htab_size, HTAB_SIZE_EXP_MAX};
 use cellgov_ps3_abi::lv1::call::{MAP_HTAB, READ_HTAB_ENTRIES, WRITE_HTAB_ENTRY};
-use cellgov_ps3_abi::lv1::memory::game_os_region_counter_at_boot;
 use cellgov_ps3_abi::lv1::page_table::{
     duplicates, large, large_page_bits, large_page_index, other_group, page_table_entries,
     page_table_handlers, read_htab_low_halfwords, select_hid6_lb, select_sdr1, stored_doubleword1,
@@ -33,7 +32,7 @@ use cellgov_ps3_abi::lv1::page_table::{
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
 use super::address_space::{AddressSpace, AddressSpaceChange, AddressSpaceState};
-use super::allocator::{place, HeldRegions};
+use super::allocator::{CounterDraw, HeldRegions};
 use super::mmio_page::{self, MmioPage};
 use super::region as memory;
 use super::region::MemoryState;
@@ -654,7 +653,7 @@ fn write_entry_with(
 /// The answer gives the mapping's logical partition address in r4. The
 /// mapping takes the next value of the partition's region counter in
 /// `memory`, and skips each address in `held`, as an allocation does; see
-/// [`place`]. Its address encodes the page table's size exponent. The
+/// [`CounterDraw`]. Its address encodes the page table's size exponent. The
 /// answer carries the mapping, and the hypervisor keeps it. r5 to r10
 /// get 0: lv1 leaves data from its own stack there, and CellGov does not
 /// model that data.
@@ -664,7 +663,7 @@ fn write_entry_with(
 /// - the page table is already mapped, and no kernel call is shown to map
 ///   it twice;
 /// - no source gives the region counter for `firmware`;
-/// - [`place`] gives no address.
+/// - [`CounterDraw::place`] gives no address.
 pub(crate) fn map_table(
     request: &HypercallRequest,
     firmware: Option<&str>,
@@ -681,14 +680,13 @@ pub(crate) fn map_table(
     }
     // named_space refuses a call with no firmware version.
     let firmware = firmware.unwrap_or_default();
-    let Some(boot) = game_os_region_counter_at_boot(firmware) else {
+    let Some(mut draw) = CounterDraw::of(memory, firmware) else {
         return refuse(
             request,
             "a page table mapping at a firmware whose region counter no source gives",
         );
     };
-    let first = memory.next_counter().unwrap_or(boot);
-    let (lpar_address, counter) = match place(htab_size(space.htab_size_exp), first, boot, held) {
+    let (lpar_address, counter) = match draw.place(htab_size(space.htab_size_exp), held) {
         Ok(placement) => (placement.address, placement.counter),
         Err(missing) => return refuse(request, missing.what()),
     };

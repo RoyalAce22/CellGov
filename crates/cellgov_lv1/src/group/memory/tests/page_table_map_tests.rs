@@ -10,7 +10,7 @@ use cellgov_ps3_abi::lv1::call::{
     ALLOCATE_MEMORY, CONSTRUCT_VIRTUAL_ADDRESS_SPACE, MAP_HTAB, SELECT_VIRTUAL_ADDRESS_SPACE,
     WRITE_HTAB_ENTRY,
 };
-use cellgov_ps3_abi::lv1::memory::region_address;
+use cellgov_ps3_abi::lv1::memory::{game_os_region_counter_at_boot, region_address};
 use cellgov_ps3_abi::lv1::page_table::PTE_M;
 use cellgov_time::GuestTicks;
 

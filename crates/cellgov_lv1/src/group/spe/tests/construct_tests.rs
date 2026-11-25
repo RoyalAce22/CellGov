@@ -3,7 +3,7 @@ use crate::group::memory::allocator::NoPlacement;
 use crate::{AddressSpace, AddressSpaceChange, Hypervisor, SHADOW_STORAGE_BASE};
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::call::CONSTRUCT_VIRTUAL_ADDRESS_SPACE;
-use cellgov_ps3_abi::lv1::memory::region_address;
+use cellgov_ps3_abi::lv1::memory::{game_os_region_counter_at_boot, region_address};
 use cellgov_time::GuestTicks;
 
 /// The vas id of the 4.93 kernel's boot address space, which the console

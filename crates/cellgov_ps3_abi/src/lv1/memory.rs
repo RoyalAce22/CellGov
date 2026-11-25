@@ -112,10 +112,20 @@ pub const fn region_address(size: u64, counter: u64) -> Option<u64> {
 /// addresses of the kernel's two boot allocations from its boot record.
 /// They hold the counter values 2 and 3. The README of the capture gives
 /// the analysis.
+///
+/// The value is also the counter's value at the partition's start,
+/// because the kernel creates no region before its first allocation. A
+/// run of the 4.93 kernel from its entry makes only these hypercalls
+/// before that allocation:
+/// - `logical_console_construct` [OFW-4.93 lv2_kernel a:0x800000000000FC54];
+/// - `get_logical_partition_id` [OFW-4.93 lv2_kernel a:0x800000000000CBFC];
+/// - `read_repository_node` [OFW-4.93 lv2_kernel a:0x800000000000CE3C].
+///
+/// None of these calls gives a region address.
 pub const GAME_OS_REGION_COUNTER_AT_BOOT: &[(&str, u64)] = &[("4.93", 2)];
 
-/// The GameOS region counter at the kernel's first allocation at the
-/// firmware version `firmware`, or `None` when no source gives it.
+/// The GameOS region counter at the partition's start at the firmware
+/// version `firmware`, or `None` when no source gives it.
 pub fn game_os_region_counter_at_boot(firmware: &str) -> Option<u64> {
     GAME_OS_REGION_COUNTER_AT_BOOT
         .iter()

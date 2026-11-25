@@ -17,16 +17,15 @@ use std::collections::BTreeMap;
 use cellgov_mem::lanes::{self, LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::call::ALLOCATE_MEMORY;
 use cellgov_ps3_abi::lv1::memory::{
-    allocate_memory_checks_read, game_os_region_counter_at_boot, ALLOCATE_MEMORY_FLAGS_MASK,
-    ALLOCATE_MEMORY_FLAGS_R3, ALLOCATE_MEMORY_MAX_SIZE, ALLOCATE_MEMORY_PAGE_SIZE_EXP_MAX,
-    ALLOCATE_MEMORY_PAGE_SIZE_EXP_MIN, ALLOCATE_MEMORY_PAGE_SIZE_EXP_R3, ALLOCATE_MEMORY_R5_MAX,
-    ALLOCATE_MEMORY_R5_R3, ALLOCATE_MEMORY_SIZE_ALIGNMENT_R3, ALLOCATE_MEMORY_SIZE_TOO_LARGE_R3,
-    ALLOCATE_MEMORY_UNIT_ID,
+    allocate_memory_checks_read, ALLOCATE_MEMORY_FLAGS_MASK, ALLOCATE_MEMORY_FLAGS_R3,
+    ALLOCATE_MEMORY_MAX_SIZE, ALLOCATE_MEMORY_PAGE_SIZE_EXP_MAX, ALLOCATE_MEMORY_PAGE_SIZE_EXP_MIN,
+    ALLOCATE_MEMORY_PAGE_SIZE_EXP_R3, ALLOCATE_MEMORY_R5_MAX, ALLOCATE_MEMORY_R5_R3,
+    ALLOCATE_MEMORY_SIZE_ALIGNMENT_R3, ALLOCATE_MEMORY_SIZE_TOO_LARGE_R3, ALLOCATE_MEMORY_UNIT_ID,
 };
 use cellgov_ps3_abi::lv1::partition::LPAR_ID_GAME_OS;
 use cellgov_ps3_abi::lv1::repository::{field, first_field, lookup, RepositoryKey};
 
-use super::allocator::{place, HeldRegions};
+use super::allocator::{CounterDraw, HeldRegions};
 use super::storage::{self, ALLOCATED_STORAGE_BASE};
 use super::{REGION_COUNTER_SOURCE, REGION_SOURCE, REGION_STORAGE_SOURCE};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
@@ -97,7 +96,8 @@ impl MemoryState {
     }
 
     /// The counter value of the next region's first attempt, or `None`
-    /// before the first region.
+    /// while no region has taken a value. The counter then holds its value
+    /// at the partition's start.
     pub fn next_counter(&self) -> Option<u64> {
         self.next_counter
     }
@@ -237,9 +237,8 @@ fn lv1_argument_check(size: u64, exp: u64, r5: u64, flags: u64) -> Option<u64> {
 /// whose lv1 shows the checks. This assumes that lv1 writes no return
 /// slot on that path.
 ///
-/// The address takes the partition's region counter, which starts at the
-/// firmware's boot value, and skips each address in `held`; see
-/// [`place`]. The answer carries the region, and the hypervisor keeps
+/// The address takes the partition's region counter and skips each
+/// address in `held`; see [`CounterDraw`]. The answer carries the region, and the hypervisor keeps
 /// it. The call is a refusal in these cases:
 /// - no lv1 image read shows the argument checks for `firmware`;
 /// - r5 is 1, or r6 sets one of its low 4 bits, which lv1's checks pass;
@@ -249,7 +248,7 @@ fn lv1_argument_check(size: u64, exp: u64, r5: u64, flags: u64) -> Option<u64> {
 /// - no source gives the boot counter or the partition's memory for
 ///   `firmware`;
 /// - the regions would hold more than the partition's memory;
-/// - [`place`] gives no address.
+/// - [`CounterDraw::place`] gives no address.
 pub(crate) fn allocate(
     request: &HypercallRequest,
     firmware: Option<&str>,
@@ -287,10 +286,9 @@ pub(crate) fn allocate(
     if size == 0 {
         return refuse(request, "an allocation of size 0");
     }
-    let (Some(boot_counter), Some(pool)) = (
-        game_os_region_counter_at_boot(firmware),
-        partition_pool(firmware),
-    ) else {
+    let (Some(mut draw), Some(pool)) =
+        (CounterDraw::of(memory, firmware), partition_pool(firmware))
+    else {
         return refuse(
             request,
             "an allocation at a firmware whose region counter or partition memory no source gives",
@@ -299,8 +297,7 @@ pub(crate) fn allocate(
     if memory.allocated().saturating_add(size) > pool {
         return refuse(request, "an allocation past the partition's memory");
     }
-    let first = memory.next_counter().unwrap_or(boot_counter);
-    let (lpar_address, counter) = match place(size, first, boot_counter, held) {
+    let (lpar_address, counter) = match draw.place(size, held) {
         Ok(placement) => (placement.address, placement.counter),
         Err(missing) => return refuse(request, missing.what()),
     };

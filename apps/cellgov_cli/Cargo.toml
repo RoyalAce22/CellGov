@@ -118,6 +118,10 @@ name = "hypercall_census_run_firmware"
 required-features = ["installed-firmware-tests"]
 
 [[test]]
+name = "region_counter_boot_firmware"
+required-features = ["installed-firmware-tests"]
+
+[[test]]
 name = "ps3autotests"
 required-features = ["ps3autotests"]
 

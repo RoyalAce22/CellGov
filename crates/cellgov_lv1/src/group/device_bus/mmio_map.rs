@@ -15,13 +15,12 @@ use cellgov_ps3_abi::lv1::device_bus::{
     MMIO_MAP_PAGE_SHIFTS, MMIO_MAP_PAGE_SHIFT_R3, MMIO_MAP_SIZE_R3, OPEN_DEVICE_BUS_MAX,
     OPEN_DEVICE_READ_BUS,
 };
-use cellgov_ps3_abi::lv1::memory::game_os_region_counter_at_boot;
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
 use super::{DeviceBusChange, DeviceBusState, OpenDevice};
 use crate::answer::{HypercallAnswer, HypercallDisposition, UnmodelledError};
 use crate::group::hypercall::Hypercall;
-use crate::group::memory::allocator::{place, HeldRegions};
+use crate::group::memory::allocator::{CounterDraw, HeldRegions};
 use crate::group::memory::region::MemoryState;
 use crate::group::memory::MemoryChange;
 use crate::request::HypercallRequest;
@@ -121,9 +120,8 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// counter value that it took.
 ///
 /// lv1 gives the address of the region of the call's size at the next
-/// value of the partition's region counter in `memory`. Before the first
-/// region, that value is the firmware's boot value. The address skips
-/// each address in `held`; see [`place`].
+/// value of the partition's region counter in `memory`. The address skips
+/// each address in `held`; see [`CounterDraw`].
 ///
 /// A close of the device leaves the counter as it is. So a map after a
 /// close and a new open takes the next counter value. These reads show it:
@@ -164,7 +162,7 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// - r4 names a device of bus 1 above device 2;
 /// - the device is open, and no capture reads its regions;
 /// - no source gives the region counter for `firmware`;
-/// - [`place`] gives no address.
+/// - [`CounterDraw::place`] gives no address.
 pub(crate) fn map_mmio(
     request: &HypercallRequest,
     firmware: Option<&str>,
@@ -215,11 +213,10 @@ pub(crate) fn map_mmio(
     if size & ((1 << page_shift) - 1) != 0 {
         return lv1_answer(MMIO_MAP_SIZE_R3);
     }
-    let Some(boot) = game_os_region_counter_at_boot(firmware) else {
+    let Some(mut draw) = CounterDraw::of(memory, firmware) else {
         return NO_COUNTER.refusal(request);
     };
-    let first = memory.next_counter().unwrap_or(boot);
-    let (lpar_address, counter) = match place(size, first, boot, held) {
+    let (lpar_address, counter) = match draw.place(size, held) {
         Ok(placement) => (placement.address, placement.counter),
         Err(missing) => return UnmodelledError::new(missing.what()).refusal(request),
     };

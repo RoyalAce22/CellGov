@@ -7,7 +7,7 @@ use cellgov_mem::lanes;
 use cellgov_ps3_abi::hw::ppu_mmu::PTE_L;
 use cellgov_ps3_abi::lv1::address_space::game_os_boot_vas_id;
 use cellgov_ps3_abi::lv1::call::SELECT_VIRTUAL_ADDRESS_SPACE;
-use cellgov_ps3_abi::lv1::memory::region_address;
+use cellgov_ps3_abi::lv1::memory::{game_os_region_counter_at_boot, region_address};
 use cellgov_ps3_abi::lv1::page_table::PTE_M;
 use cellgov_time::GuestTicks;
 

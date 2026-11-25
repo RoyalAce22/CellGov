@@ -15,15 +15,22 @@
 //!   [OFW-4.93 lv1 a:0x2CEC88-0x2CEC94] [OFW-4.93 lv1 a:0x2CED2C-0x2CED30]
 //!   [OFW-4.93 lv1 a:0x2CEE3C-0x2CEE84]. A counter address holds an
 //!   exponent of 12 or more in bits 42 to 47, so it never equals 0.
-//! - The regions that lv1 made before the kernel's first allocation,
+//! - The regions that lv1 made before the partition's kernel started,
 //!   with the counter values below the boot value. No source gives their
 //!   sizes. So CellGov refuses a counter value whose address field holds
 //!   one of those values.
+//!
+//! Each call that creates a region draws from one [`CounterDraw`], so
+//! every such call shares the counter and its value at the partition's
+//! start.
 
 use std::collections::BTreeSet;
 
-use cellgov_ps3_abi::lv1::memory::{region_address, region_counter_values};
+use cellgov_ps3_abi::lv1::memory::{
+    game_os_region_counter_at_boot, region_address, region_counter_values,
+};
 
+use super::region::MemoryState;
 use crate::group::state::GroupStates;
 
 /// The logical partition addresses of the counter regions that CellGov
@@ -100,10 +107,50 @@ impl NoPlacement {
     }
 }
 
+/// The partition's region counter as one hypercall draws values from it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CounterDraw {
+    /// The counter value of the next region's first attempt.
+    next: u64,
+    /// The counter's value at the partition's start.
+    boot: u64,
+}
+
+impl CounterDraw {
+    /// The draw from the counter in `memory` at `firmware`, or `None` when
+    /// no source gives the counter's value at the partition's start.
+    ///
+    /// Until a region takes a value, the counter holds its value at the
+    /// partition's start. This is the firmware's boot value.
+    pub(crate) fn of(memory: &MemoryState, firmware: &str) -> Option<Self> {
+        let boot = game_os_region_counter_at_boot(firmware)?;
+        Some(Self {
+            next: memory.next_counter().unwrap_or(boot),
+            boot,
+        })
+    }
+
+    /// The placement of a region of `size` bytes from the draw's next
+    /// value. The draw then moves past the value that the region took.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`NoPlacement`] reason, and the draw stays as it was.
+    pub(crate) fn place(
+        &mut self,
+        size: u64,
+        held: &HeldRegions,
+    ) -> Result<Placement, NoPlacement> {
+        let placement = place(size, self.next, self.boot, held)?;
+        self.next = placement.counter.wrapping_add(1);
+        Ok(placement)
+    }
+}
+
 /// The address and counter value that lv1's region function gives a
 /// region of `size` bytes, from the counter value `first`.
 ///
-/// `boot` is the counter value at the kernel's first allocation. Each
+/// `boot` is the counter's value at the partition's start. Each
 /// attempt takes the next counter value, and an address in `held` is
 /// taken. The loop makes at most `held.len() + 1` attempts:
 /// - Attempts below the count of counter values give distinct
@@ -116,12 +163,7 @@ impl NoPlacement {
 /// Returns the [`NoPlacement`] reason. With a `boot` above 0, a run
 /// through every counter value meets a value below `boot` first. So only
 /// a `boot` of 0 gives [`NoPlacement::EveryAddressTaken`].
-pub(crate) fn place(
-    size: u64,
-    first: u64,
-    boot: u64,
-    held: &HeldRegions,
-) -> Result<Placement, NoPlacement> {
+fn place(size: u64, first: u64, boot: u64, held: &HeldRegions) -> Result<Placement, NoPlacement> {
     let Some(values) = region_counter_values(size) else {
         return Err(NoPlacement::TooLarge);
     };
@@ -147,3 +189,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/allocator_handler_tests.rs"]
 mod handler_tests;
+
+#[cfg(test)]
+#[path = "tests/allocator_draw_tests.rs"]
+mod draw_tests;

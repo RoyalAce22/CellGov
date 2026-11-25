@@ -18,7 +18,6 @@ use std::collections::BTreeMap;
 
 use cellgov_mem::lanes::{self, LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::call::CONSTRUCT_LOGICAL_SPE;
-use cellgov_ps3_abi::lv1::memory::game_os_region_counter_at_boot;
 use cellgov_ps3_abi::lv1::spe::{
     construct_logical_spe_handler, game_os_spe_call, LOGICAL_SPE_AREA_SIZE,
     LOGICAL_SPE_PRIV2_OFFSET, LOGICAL_SPE_PROBLEM_OFFSET,
@@ -31,7 +30,7 @@ use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::group::interrupt::event_port::EventReceivePort;
 use crate::group::interrupt::InterruptChange;
-use crate::group::memory::allocator::{place, HeldRegions};
+use crate::group::memory::allocator::{CounterDraw, HeldRegions};
 use crate::group::memory::{MemoryChange, MemoryGroupState};
 use crate::request::HypercallRequest;
 
@@ -158,7 +157,7 @@ fn kernel_inputs(request: &HypercallRequest, spe_type: u64) -> bool {
 ///
 /// The area takes the partition's next free region address, and the
 /// shadow page takes the next free one after it. Each address skips the
-/// addresses in `held`; see [`place`]. The area's size exponent is 19
+/// addresses in `held`; see [`CounterDraw`]. The area's size exponent is 19
 /// and the shadow page's is 12, so their addresses never match. The
 /// shadow page gets the next page of CellGov's shadow page storage. The
 /// answer carries these changes, and the hypervisor keeps each:
@@ -175,7 +174,8 @@ fn kernel_inputs(request: &HypercallRequest, spe_type: u64) -> bool {
 /// - the hypervisor already holds an SPE with that id;
 /// - the shadow page storage holds no page for one more SPE;
 /// - no source gives the region counter for `firmware`;
-/// - [`place`] gives no address for the area or the shadow page.
+/// - [`CounterDraw::place`] gives no address for the area or the shadow
+///   page.
 pub(crate) fn construct(
     request: &HypercallRequest,
     firmware: Option<&str>,
@@ -220,23 +220,20 @@ pub(crate) fn construct(
             "a logical SPE construct past CellGov's shadow page storage",
         );
     };
-    let Some(boot) = game_os_region_counter_at_boot(firmware) else {
+    let Some(mut draw) = CounterDraw::of(memory.regions(), firmware) else {
         return refuse(
             request,
             "a logical SPE construct at a firmware whose region counter no source gives",
         );
     };
-    let first = memory.regions().next_counter().unwrap_or(boot);
-    let area = match place(LOGICAL_SPE_AREA_SIZE, first, boot, held) {
-        Ok(area) => area,
+    let area = match draw.place(LOGICAL_SPE_AREA_SIZE, held) {
+        Ok(placement) => placement.address,
         Err(missing) => return refuse(request, missing.what()),
     };
-    let next = area.counter.wrapping_add(1);
-    let (shadow, shadow_counter) = match place(1 << SHADOW_PAGE_SHIFT, next, boot, held) {
+    let (shadow, shadow_counter) = match draw.place(1 << SHADOW_PAGE_SHIFT, held) {
         Ok(placement) => (placement.address, placement.counter),
         Err(missing) => return refuse(request, missing.what()),
     };
-    let area = area.address;
     let outputs = [
         area + LOGICAL_SPE_PRIV2_OFFSET,
         area + LOGICAL_SPE_PROBLEM_OFFSET,
