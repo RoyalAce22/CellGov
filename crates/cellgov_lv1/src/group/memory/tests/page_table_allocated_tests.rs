@@ -89,6 +89,7 @@ fn write(d0: u64, d1: u64, storage: &GuestMemory) -> HypercallDisposition {
         &spaces(),
         &LogicalSpeState::default(),
         &boot_regions(),
+        &DeviceBusState::default(),
         storage,
     )
 }

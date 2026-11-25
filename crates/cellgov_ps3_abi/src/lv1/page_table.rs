@@ -22,7 +22,9 @@
 //! entries there with translation off [OFW-4.93 lv1 a:0x2D17E8] [OFW-4.93 lv1 a:0x2D2F40].
 
 use crate::hw::ppu_interrupt::doubleword_bit;
-use crate::hw::ppu_mmu::{PTES_PER_PTEG, PTE_BYTES, PTE_H, PTE_L, PTE_PP, PTE_V, SMALL_PAGE_LOG2};
+use crate::hw::ppu_mmu::{
+    PTES_PER_PTEG, PTE_BYTES, PTE_G, PTE_H, PTE_I, PTE_L, PTE_PP, PTE_V, SMALL_PAGE_LOG2,
+};
 use crate::lv1::address_space::HTAB_SIZE_EXP_MIN;
 use crate::lv1::status::{zero_extended, LV1_DUPLICATE_ENTRY, LV1_RESOURCE_SHORTAGE};
 
@@ -251,7 +253,7 @@ pub const PTE_M: u64 = doubleword_bit(59);
 /// [`PTE_M`] alone [OFW-4.93 lv1 a:0x2D3108] [OFW-4.93 lv1 a:0x2D3110].
 ///
 /// For a higher address, the writer stores the WIMG of an I/O range
-/// [OFW-4.93 lv1 a:0x2D3178-0x2D32A0].
+/// [OFW-4.93 lv1 a:0x2D3178-0x2D32A0]; see [`stored_io_wimg`].
 pub const STORED_MEMORY_LIMIT: u64 = 0xFFFF_FFFF;
 
 /// Doubleword 1 that the writer stores for the doubleword 1
@@ -262,6 +264,66 @@ pub const STORED_MEMORY_LIMIT: u64 = 0xFFFF_FFFF;
 /// (V = 0), the writer maps no page and `real` is 0 [OFW-4.93 lv1 a:0x2D3050].
 pub const fn stored_doubleword1(doubleword1: u64, real: u64, large_page_bits: u64) -> u64 {
     real | large_page_bits | (doubleword1 & STORED_DOUBLEWORD1_KEPT) | PTE_M
+}
+
+/// The bits of a real address that the writer compares with
+/// [`STORED_IO_CALLER_G_BLOCK`]: bits 20:35
+/// [OFW-4.93 lv1 a:0x2D317C-0x2D3184].
+pub const STORED_IO_BLOCK_MASK: u64 = 0x0FFF_F000_0000;
+
+/// The 256 MB block of real addresses whose pages the writer stores with
+/// the caller's G [OFW-4.93 lv1 a:0x2D3178-0x2D3190]. The writer compares
+/// only the bits of [`STORED_IO_BLOCK_MASK`], so the block repeats every
+/// 2^44 bytes.
+pub const STORED_IO_CALLER_G_BLOCK: u64 = 0x280_8000_0000;
+
+/// The highest real address for which the writer reads
+/// [`STORED_IO_GUARDED_BIT`] [OFW-4.93 lv1 a:0x2D3194-0x2D31A8].
+pub const STORED_IO_LOW_LIMIT: u64 = 0x200_003F_FFFF;
+
+/// The bit of a real address at or below [`STORED_IO_LOW_LIMIT`] that
+/// makes the writer store I and G [OFW-4.93 lv1 a:0x2D31AC-0x2D31B4].
+pub const STORED_IO_GUARDED_BIT: u64 = 0x4_0000;
+
+/// The highest real address above [`STORED_MEMORY_LIMIT`] for which the
+/// writer stores I and G whatever the caller's G
+/// [OFW-4.93 lv1 a:0x2D31B8-0x2D31C4].
+pub const STORED_IO_GUARDED_LIMIT: u64 = 0x1FF_FFFF_FFFF;
+
+/// The WIMG that the writer stores for the doubleword 1 `doubleword1`
+/// of a write and a page at the real address `real`, above
+/// [`STORED_MEMORY_LIMIT`].
+///
+/// The writer stores [`PTE_I`] and the caller's [`PTE_G`]
+/// [OFW-4.93 lv1 a:0x2D3298-0x2D32A0] for these addresses:
+/// - an address in the block [`STORED_IO_CALLER_G_BLOCK`];
+/// - an address above [`STORED_IO_GUARDED_LIMIT`] and at or below
+///   [`STORED_IO_LOW_LIMIT`], with [`STORED_IO_GUARDED_BIT`] clear.
+///
+/// For each other address, it stores I and G
+/// [OFW-4.93 lv1 a:0x2D31C8-0x2D31D4].
+pub const fn stored_io_wimg(doubleword1: u64, real: u64) -> u64 {
+    let in_block = real & STORED_IO_BLOCK_MASK == STORED_IO_CALLER_G_BLOCK;
+    let in_low_range = real > STORED_IO_GUARDED_LIMIT
+        && real <= STORED_IO_LOW_LIMIT
+        && real & STORED_IO_GUARDED_BIT == 0;
+    if in_block || in_low_range {
+        PTE_I | (doubleword1 & PTE_G)
+    } else {
+        PTE_I | PTE_G
+    }
+}
+
+/// Doubleword 1 that the writer stores for the doubleword 1
+/// `doubleword1` of a write, a page at the real address `real` above
+/// [`STORED_MEMORY_LIMIT`], and the large page bits `large_page_bits`.
+///
+/// The writer keeps the bits of [`STORED_DOUBLEWORD1_KEPT`] and stores
+/// the WIMG of [`stored_io_wimg`] [OFW-4.93 lv1 a:0x2D3118-0x2D312C].
+pub const fn stored_io_doubleword1(doubleword1: u64, real: u64, large_page_bits: u64) -> u64 {
+    real | large_page_bits
+        | (doubleword1 & STORED_DOUBLEWORD1_KEPT)
+        | stored_io_wimg(doubleword1, real)
 }
 
 /// Whether a doubleword 0 is a valid entry. The worker maps the page
@@ -345,3 +407,7 @@ const fn lb_field(shifts: u64, index: u32) -> u8 {
 #[cfg(test)]
 #[path = "tests/page_table_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/page_table_io_wimg_tests.rs"]
+mod io_wimg_tests;

@@ -73,6 +73,7 @@ fn write(d0: u64, d1: u64, index: u64, storage: &GuestMemory) -> HypercallDispos
         &spaces(),
         &LogicalSpeState::default(),
         &MemoryState::default(),
+        &DeviceBusState::default(),
         storage,
     )
 }
@@ -243,6 +244,7 @@ fn a_write_with_no_address_space_or_storage_refuses() {
             &spaces,
             &LogicalSpeState::default(),
             &MemoryState::default(),
+            &DeviceBusState::default(),
             &storage(),
         );
         assert_eq!(

@@ -2,6 +2,7 @@
 //! its virtual address spaces and their page tables.
 
 pub(crate) mod address_space;
+mod mmio_page;
 pub(crate) mod page_table;
 pub(crate) mod region;
 mod registration;

@@ -23,18 +23,20 @@ use cellgov_ps3_abi::lv1::memory::{game_os_region_counter_at_boot, region_addres
 use cellgov_ps3_abi::lv1::page_table::{
     duplicates, large, large_page_bits, large_page_index, other_group, page_table_entries,
     page_table_handlers, read_htab_low_halfwords, select_hid6_lb, select_sdr1, stored_doubleword1,
-    valid, HTAB_NO_ENTRY_R3, LARGE_PAGE_FIELD, READ_HTAB_ENTRY_COUNT, READ_HTAB_INDEX_R3,
-    STORED_MEMORY_LIMIT, WRITE_HTAB_ALIGNMENT_R3, WRITE_HTAB_DOUBLEWORD0_R3,
+    stored_io_doubleword1, valid, HTAB_NO_ENTRY_R3, LARGE_PAGE_FIELD, READ_HTAB_ENTRY_COUNT,
+    READ_HTAB_INDEX_R3, STORED_MEMORY_LIMIT, WRITE_HTAB_ALIGNMENT_R3, WRITE_HTAB_DOUBLEWORD0_R3,
     WRITE_HTAB_DOUBLEWORD0_RESERVED, WRITE_HTAB_DOUBLEWORD1_R3, WRITE_HTAB_DOUBLEWORD1_RESERVED,
     WRITE_HTAB_DUPLICATE_R3, WRITE_HTAB_INDEX_R3, WRITE_HTAB_PAGE_SIZE_R3,
 };
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
 use super::address_space::{AddressSpace, AddressSpaceChange, AddressSpaceState};
+use super::mmio_page::{self, MmioPage};
 use super::region as memory;
 use super::region::MemoryState;
 use super::storage::{self, AllocatedPage};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal, PageTableLoad};
+use crate::group::device_bus::DeviceBusState;
 use crate::group::hypercall::Hypercall;
 use crate::group::spe::shadow::{region_page, SpeRegionPage};
 use crate::group::spe::LogicalSpeState;
@@ -54,6 +56,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[
                 memory.spaces(),
                 input.groups.spe().spes(),
                 memory.regions(),
+                input.groups.device_bus(),
                 input.storage,
             )
         },
@@ -359,22 +362,28 @@ struct Regions<'a> {
     spaces: &'a AddressSpaceState,
     spes: &'a LogicalSpeState,
     allocated: &'a MemoryState,
+    device_bus: &'a DeviceBusState,
 }
 
 /// The real address of `page`, or why the entry gets none.
 ///
 /// lv1 looks the logical partition address up in the partition's memory
 /// regions and maps the page there [OFW-4.93 lv1 a:0x2D2510]
-/// [OFW-4.93 lv1 a:0x2D30C4]. CellGov models four kinds of region:
+/// [OFW-4.93 lv1 a:0x2D30C4]. CellGov models five kinds of region:
 /// - the mapping of a page table that `regions` holds, whose page lies in
 ///   the page table storage at the same offset;
 /// - a region of a logical SPE, as [`region_page`] answers it for
 ///   `doubleword1`;
 /// - a region that `allocate_memory` created, as
 ///   [`storage::region_page`] answers it;
+/// - an MMIO mapping, as [`mmio_page::mapping_page`] answers it;
 /// - the real mode region of `firmware`, which CellGov holds at real
 ///   address 0 below the page table storage, so the real address is the
 ///   logical partition address.
+///
+/// The page of an MMIO mapping lies in a device's MMIO, which no CellGov
+/// storage holds. Each other page must lie in CellGov's storage. A page
+/// in an MMIO mapping and in another region is a refusal.
 fn real_page(
     firmware: &str,
     regions: Regions<'_>,
@@ -390,12 +399,25 @@ fn real_page(
         let inside = page.address >= mapping && end.is_some_and(|end| end <= mapping + table);
         inside.then(|| PAGE_TABLE_STORAGE_BASE + (page.address - mapping))
     });
+    let spe = region_page(regions.spes, page.address, page.shift, doubleword1);
+    let allocated = storage::region_page(regions.allocated, page.address, page.shift);
+    let mmio = mmio_page::mapping_page(firmware, regions.device_bus, page.address, page.shift);
+    // Each region of the partition takes its own value of the region
+    // counter, so no two lv1 regions share a page. CellGov gives an MMIO
+    // mapping its captured address and takes no counter value for it.
+    if mmio.is_some() && (in_mapping.is_some() || spe.is_some() || allocated.is_some()) {
+        return Err(NoRealPage::Refused(
+            "a valid entry whose page lies in an MMIO mapping and in another region",
+        ));
+    }
     let real = if let Some(real) = in_mapping {
         real
-    } else if let Some(answer) = region_page(regions.spes, page.address, page.shift, doubleword1) {
+    } else if let Some(answer) = spe {
         spe_real(answer)?
-    } else if let Some(answer) = storage::region_page(regions.allocated, page.address, page.shift) {
+    } else if let Some(answer) = allocated {
         allocated_real(answer)?
+    } else if let Some(answer) = mmio {
+        return mmio_real(answer);
     } else {
         real_mode_page(firmware, page.address, end)?
     };
@@ -429,6 +451,16 @@ fn allocated_real(answer: AllocatedPage) -> Result<u64, NoRealPage> {
     }
 }
 
+/// The real address of a page in an MMIO mapping, or why the entry gets
+/// none.
+fn mmio_real(answer: MmioPage) -> Result<u64, NoRealPage> {
+    match answer {
+        MmioPage::Io(real) => Ok(real),
+        MmioPage::Lv1(r3) => Err(NoRealPage::Lv1(r3)),
+        MmioPage::Refused(what) => Err(NoRealPage::Refused(what)),
+    }
+}
+
 /// The real address of a page at the logical partition address `address`
 /// that ends at `end` in the real mode region, or the refusal.
 fn real_mode_page(firmware: &str, address: u64, end: Option<u64>) -> Result<u64, NoRealPage> {
@@ -449,8 +481,13 @@ fn real_mode_page(firmware: &str, address: u64, end: Option<u64>) -> Result<u64,
 /// Hypercall 1: writes the entry at index r4 from doubleword 0 in r5 and doubleword 1 in r6.
 ///
 /// The answer clears r4 to r10. The stored doubleword 1 holds the page's
-/// real address and forces WIMG to M; see [`stored_doubleword1`]. The
-/// answer writes the 16 bytes of the entry to the storage.
+/// real address and the WIMG that lv1 gives the address:
+/// - M for an address at or below [`STORED_MEMORY_LIMIT`]; see
+///   [`stored_doubleword1`];
+/// - the WIMG of an I/O range for a higher address; see
+///   [`stored_io_doubleword1`].
+///
+/// The answer writes the 16 bytes of the entry to the storage.
 ///
 /// A call that fails one of lv1's checks gets lv1's own r3, with r4 to
 /// r10 cleared. See [`WRITE_HTAB_INDEX_R3`] for the checks and their
@@ -460,7 +497,9 @@ fn real_mode_page(firmware: &str, address: u64, end: Option<u64>) -> Result<u64,
 /// - a shadow page of a logical SPE in `spes`; see
 ///   [`cellgov_ps3_abi::lv1::spe`];
 /// - a region in `allocated`; see
-///   [`cellgov_ps3_abi::lv1::memory::WRITE_HTAB_ALLOCATED_PAGE_SIZE_R3`].
+///   [`cellgov_ps3_abi::lv1::memory::WRITE_HTAB_ALLOCATED_PAGE_SIZE_R3`];
+/// - an MMIO mapping in `device_bus`; see
+///   [`cellgov_ps3_abi::lv1::device_bus::WRITE_HTAB_MMIO_PAGE_SIZE_R3`].
 ///
 /// The call is a refusal in these cases:
 /// - [`named_space`] refuses it;
@@ -473,6 +512,7 @@ pub(crate) fn write_entry(
     spaces: &AddressSpaceState,
     spes: &LogicalSpeState,
     allocated: &MemoryState,
+    device_bus: &DeviceBusState,
     storage: &GuestMemory,
 ) -> HypercallDisposition {
     let space = match named_space(request, firmware, spaces) {
@@ -498,6 +538,7 @@ pub(crate) fn write_entry(
             spaces,
             spes,
             allocated,
+            device_bus,
         };
         // lv1 searches the group before it translates the page
         // [OFW-4.93 lv1 a:0x2D2F20-0x2D3038], so a duplicate answers before
@@ -514,7 +555,13 @@ pub(crate) fn write_entry(
             Err(NoRealPage::Refused(what)) => return refuse(request, what),
         };
     }
-    let stored = stored_doubleword1(doubleword1, real, page.large_page_bits);
+    // lv1's writer picks the WIMG by the real address
+    // [OFW-4.93 lv1 a:0x2D3114].
+    let stored = if real > STORED_MEMORY_LIMIT {
+        stored_io_doubleword1(doubleword1, real, page.large_page_bits)
+    } else {
+        stored_doubleword1(doubleword1, real, page.large_page_bits)
+    };
     let mut bytes = doubleword0.to_be_bytes().to_vec();
     bytes.extend_from_slice(&stored.to_be_bytes());
     let Some(range) = ByteRange::new(GuestAddr::new(entry_address(index)), PTE_BYTES as u64)
@@ -609,3 +656,7 @@ mod spe_tests;
 #[cfg(test)]
 #[path = "tests/page_table_allocated_tests.rs"]
 mod allocated_tests;
+
+#[cfg(test)]
+#[path = "tests/page_table_mmio_tests.rs"]
+mod mmio_tests;

@@ -96,6 +96,7 @@ fn write(index: u64, d0: u64, d1: u64, storage: &GuestMemory) -> HypercallDispos
         &spaces(),
         &spes(),
         &MemoryState::default(),
+        &DeviceBusState::default(),
         storage,
     )
 }

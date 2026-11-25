@@ -47,6 +47,7 @@ fn vas_id_0_before_a_selection_answers_lv1_no_entry() {
             &spaces,
             &LogicalSpeState::default(),
             &MemoryState::default(),
+            &DeviceBusState::default(),
             &storage,
         ),
         read_entries(&request(READ_HTAB_ENTRIES), firmware, &spaces, &storage),
