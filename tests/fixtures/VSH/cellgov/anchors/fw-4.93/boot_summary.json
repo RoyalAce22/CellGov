@@ -32,11 +32,11 @@
       "class": "exact"
     },
     "ldarx": {
-      "value": 28158,
+      "value": 28157,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 70843,
+      "value": 70841,
       "class": "at-least"
     },
     "lwmutex_acquires": {
@@ -108,11 +108,11 @@
       "class": "at-least"
     },
     "stdcx": {
-      "value": 28158,
+      "value": 28157,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 70842,
+      "value": 70840,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {
@@ -164,7 +164,7 @@
       "class": "absent"
     },
     "timer_sleeps": {
-      "value": 10678,
+      "value": 10677,
       "class": "at-least"
     },
     "uart_cids_distinct": {

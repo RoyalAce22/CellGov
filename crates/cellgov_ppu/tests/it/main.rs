@@ -107,6 +107,7 @@ mod console_ppu_lv2_call_refusals;
 mod console_ppu_lv2_call_sibling;
 mod console_ppu_lv2_call_sizes;
 mod console_ppu_lv2_call_untimed;
+mod console_ppu_lv2_call_wait_ends;
 mod console_ppu_may_trap;
 mod console_ppu_mcrfs_ox;
 mod console_ppu_mulhwu_high_bit;

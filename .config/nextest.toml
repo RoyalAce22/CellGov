@@ -93,6 +93,26 @@ filter = 'binary_id(cellgov_cli::microtests)'
 threads-required = "num-test-threads"
 slow-timeout = { period = "40s", terminate-after = 3 }
 
+# Each test of the contended-call suite boots one probe in a `cellgov`
+# process of its own. The wait-ends probe's boot retires about 79 million
+# guest instructions in 2.2 million steps, against 3.3 million
+# instructions for the contended probe. In the debug build the test took
+# 100 s alone in a 4-CPU Linux container and 101 s beside the suite's
+# other tests, and the boot alone took 96 s on Windows. The wait-ends
+# test gets SLOW at 150 s and a kill at 300 s.
+
+[[profile.ci-microtests.overrides]]
+filter = 'binary_id(cellgov_cli::lv2_call_contended_microtest) & test(/^wait_ends::/)'
+slow-timeout = { period = "150s", terminate-after = 2 }
+
+# The preempted-forms test of the same suite took 14 s alone on Linux
+# and on Windows, and 19 s beside the suite's other tests on Windows. It
+# gets SLOW at 20 s and a kill at 60 s.
+
+[[profile.ci-microtests.overrides]]
+filter = 'binary_id(cellgov_cli::lv2_call_contended_microtest) & test(/^preempted_forms::/)'
+slow-timeout = { period = "20s", terminate-after = 3 }
+
 [[profile.ci-data.overrides]]
 filter = 'binary_id(cellgov_cli::microtests)'
 threads-required = "num-test-threads"

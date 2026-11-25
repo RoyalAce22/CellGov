@@ -59,6 +59,9 @@ mod resumed_call_tests;
 #[cfg(test)]
 #[path = "tests/sized_call_tests.rs"]
 mod sized_call_tests;
+#[cfg(test)]
+#[path = "tests/timed_out_call_tests.rs"]
+mod timed_out_call_tests;
 
 /// The length of the ring of latest issue cycles that the fetch-ahead
 /// bound reads.

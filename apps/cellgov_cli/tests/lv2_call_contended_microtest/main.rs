@@ -22,7 +22,8 @@
 //! own cycles from every loop before it compares the two sides.
 //!
 //! The `ppu_lv2_call_preempted_forms` probe's tests are in
-//! [`preempted_forms`].
+//! [`preempted_forms`]. The `ppu_lv2_call_wait_ends` probe's tests are
+//! in [`wait_ends`].
 
 #![allow(
     clippy::unwrap_used,
@@ -30,6 +31,7 @@
 )]
 
 mod preempted_forms;
+mod wait_ends;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

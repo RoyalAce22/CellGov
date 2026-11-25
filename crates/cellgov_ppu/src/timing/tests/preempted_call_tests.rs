@@ -7,7 +7,7 @@ use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit, ResumeKind, YieldReason};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_ps3_abi::hw::ppu_issue as k;
-use cellgov_ps3_abi::lv2::errno::{CELL_ECANCELED, CELL_ETIMEDOUT};
+use cellgov_ps3_abi::lv2::errno::{CELL_ECANCELED, CELL_ESRCH};
 use cellgov_ps3_abi::lv2::syscall as sc;
 use cellgov_time::Budget;
 
@@ -148,7 +148,7 @@ fn a_cancelled_wait_takes_its_cancelled_trip() {
     // keep the woken trip.
     for (number, code) in [
         (sc::SEMAPHORE_WAIT, CELL_ECANCELED),
-        (sc::EVENT_FLAG_WAIT, CELL_ETIMEDOUT),
+        (sc::EVENT_FLAG_WAIT, CELL_ESRCH),
     ] {
         let base =
             cycle_after_call(number, false, false) - k::ppu_syscall_round_trip_cycles(number);

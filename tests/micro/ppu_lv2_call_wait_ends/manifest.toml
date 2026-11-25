@@ -1,0 +1,21 @@
+[test]
+name = "ppu_lv2_call_wait_ends"
+
+# A hardware probe of the waits that end by their timeout, of an event
+# queue receive that a forced destroy ends, and of a higher-priority wake
+# that takes a thread's hardware thread in user mode, each timed with
+# mftb. The console capture is the answer; ppu/main.c's header lists the
+# loops and the payload layout.
+
+[observe]
+# Big-endian u64 words, then u32 samples, at the offsets ppu/main.c
+# lists: 2688 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 2688 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

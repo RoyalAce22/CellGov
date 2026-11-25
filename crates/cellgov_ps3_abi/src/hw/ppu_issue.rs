@@ -535,12 +535,43 @@ pub const PPU_PREEMPTED_RESUME_CYCLES: u64 = 7100;
 
 /// The round trip of each cancelled wait, as `(syscall number, cycles)`.
 ///
-/// A cancelled wait blocks and then returns `CELL_ECANCELED`. The
-/// `ppu_lv2_call_preempted_forms` capture times an event flag handoff
-/// that `sys_event_flag_cancel` answers. Its round takes 65854 cycles,
-/// 4725 over the same handoff that a set answers. CellGov's run of the
-/// probe through the runtime takes the console's round at this trip.
-pub const PPU_SYSCALL_CANCELLED_ROUND_TRIPS: [(u64, u64); 1] = [(syscall::EVENT_FLAG_WAIT, 19692)];
+/// A cancelled wait blocks and then returns `CELL_ECANCELED`:
+/// - The `ppu_lv2_call_preempted_forms` capture times an event flag
+///   handoff that `sys_event_flag_cancel` answers. Its round takes 65854
+///   cycles, 4725 over the same handoff that a set answers. CellGov's run
+///   of the probe through the runtime takes the console's round at this
+///   trip.
+/// - The `ppu_lv2_call_wait_ends` capture times an event queue receive
+///   that `sys_event_queue_destroy` with the force flag ends. The time
+///   from the helper's `mftb` before the destroy to the receiver's `mftb`
+///   after its return is 29199 cycles on average. CellGov's run of the
+///   probe takes the console's average at this trip.
+///
+/// No LV2 call cancels a semaphore wait.
+pub const PPU_SYSCALL_CANCELLED_ROUND_TRIPS: [(u64, u64); 2] = [
+    (syscall::EVENT_FLAG_WAIT, 19692),
+    (syscall::EVENT_QUEUE_RECEIVE, 20625),
+];
+
+/// The round trip of each timed-out wait, as `(syscall number, cycles)`.
+///
+/// A timed-out wait blocks and then returns `CELL_ETIMEDOUT`. The trip
+/// runs from the timeout's deadline. The `ppu_lv2_call_wait_ends` capture
+/// times each wait alone with timeouts of 1 to 1000 us. Two `mftb` reads
+/// bracket each call. Each entry is the middle of three values from the
+/// wait's lower median samples at the 6, 10 and 100 us timeouts. Each
+/// value is a sample less its timeout, and less the cycles the bracket
+/// adds beside the cheapest call's round trip.
+///
+/// A timeout of 2 us or less returns sooner than its timeout plus this
+/// trip: a 1 us semaphore wait takes 14240 cycles in all. At 4 us each
+/// wait takes more than its timeout, this trip and the bracket, by under
+/// 5 percent.
+pub const PPU_SYSCALL_TIMED_OUT_ROUND_TRIPS: [(u64, u64); 3] = [
+    (syscall::SEMAPHORE_WAIT, 23289),
+    (syscall::EVENT_FLAG_WAIT, 29729),
+    (syscall::EVENT_QUEUE_RECEIVE, 24969),
+];
 
 /// The round trip of the call `number` when it returns after its thread left the PPE.
 ///
@@ -553,6 +584,8 @@ pub const PPU_SYSCALL_CANCELLED_ROUND_TRIPS: [(u64, u64); 1] = [(syscall::EVENT_
 ///   [`PPU_PREEMPTED_RESUME_CYCLES`];
 /// - the call's entry in [`PPU_SYSCALL_CANCELLED_ROUND_TRIPS`] when it
 ///   returns `CELL_ECANCELED`;
+/// - the call's entry in [`PPU_SYSCALL_TIMED_OUT_ROUND_TRIPS`] when it
+///   returns `CELL_ETIMEDOUT`;
 /// - the call's entry in [`PPU_SYSCALL_WOKEN_ROUND_TRIPS`];
 /// - [`PPU_SYSCALL_WOKEN_ROUND_TRIP_CYCLES`].
 ///
@@ -596,10 +629,13 @@ fn resumed_round_trip(number: u64, code: Option<u64>, preempted: bool, success: 
     if preempted {
         return returned_round_trip(number, code, success) + PPU_PREEMPTED_RESUME_CYCLES;
     }
-    let cancelled = code.is_some_and(|code| code as u32 == errno::CELL_ECANCELED.code);
-    PPU_SYSCALL_CANCELLED_ROUND_TRIPS
+    let ended: &[(u64, u64)] = match code.map(|code| code as u32) {
+        Some(c) if c == errno::CELL_ECANCELED.code => &PPU_SYSCALL_CANCELLED_ROUND_TRIPS,
+        Some(c) if c == errno::CELL_ETIMEDOUT.code => &PPU_SYSCALL_TIMED_OUT_ROUND_TRIPS,
+        _ => &[],
+    };
+    ended
         .iter()
-        .filter(|_| cancelled)
         .chain(&PPU_SYSCALL_WOKEN_ROUND_TRIPS)
         .find(|&&(n, _)| n == number)
         .map_or(PPU_SYSCALL_WOKEN_ROUND_TRIP_CYCLES, |&(_, cycles)| cycles)
