@@ -256,11 +256,10 @@ fn a_call_for_another_bus_or_device_is_a_refusal() {
     let cases = [
         (request(2, 0, KERNEL_PORT, 0), OTHER_BUS.what),
         (request(3, 0, KERNEL_PORT, 0), OTHER_BUS.what),
-        (request(4, 0, KERNEL_PORT, 0), OTHER_BUS.what),
         (request(1, 1, KERNEL_PORT, 0), OTHER_DEVICE.what),
         (request(1, 1 << 32, KERNEL_PORT, 0), OTHER_DEVICE.what),
     ];
-    assert_eq!(cases.len(), 5);
+    assert_eq!(cases.len(), 4);
     for (call, what) in cases {
         assert_eq!(held.connect(&call), refused(&call, what), "{call:?}");
     }

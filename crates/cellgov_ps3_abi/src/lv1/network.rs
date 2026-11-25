@@ -200,6 +200,88 @@
 //! The kernel's function returns 0 whatever r3 the call gets
 //! [OFW-4.93 lv2_kernel a:0x80000000000A2934-0x80000000000A2948].
 //!
+//! # The storage bus's interrupt port
+//!
+//! For bus 4, the connect function does these steps. The first failure
+//! is the answer:
+//! 1. The access check. For bus 4 it sets the mark 0 and finds the device
+//!    as the lookup does [OFW-4.93 lv1 a:0x236448-0x236450]
+//!    [OFW-4.93 lv1 a:0x2364E8-0x236508] [OFW-4.93 lv1 a:0x236554-0x23655C].
+//!    A device id above 6, other than -1, finds no device and gets
+//!    [`STORAGE_PORT_NO_DEVICE_R3`]. The check then calls the method at
+//!    +48 of the device's method table with the caller's partition
+//!    [OFW-4.93 lv1 a:0x23650C-0x236530]. A method that returns 0 gives
+//!    [`STORAGE_PORT_NOT_OPEN_R3`].
+//! 2. The device lookup [OFW-4.93 lv1 a:0x236970-0x236980]. It finds the
+//!    device that the access check found
+//!    [OFW-4.93 lv1 a:0x2365E0-0x23661C].
+//! 3. An r6 other than 0 gets [`STORAGE_PORT_R6_R3`]
+//!    [OFW-4.93 lv1 a:0x23698C-0x236998].
+//! 4. The storage connect [OFW-4.93 lv1 a:0x255254], with the device and
+//!    r5 [OFW-4.93 lv1 a:0x23699C-0x2369BC]. Its -6 gives
+//!    [`STORAGE_PORT_NO_PORT_R3`], and its -9 gives
+//!    [`STORAGE_PORT_BUSY_R3`]. It returns any other status zero-extended
+//!    [OFW-4.93 lv1 a:0x2369CC-0x2369F4].
+//!
+//! For device -1, the device is the storage bus object. The object's
+//! method at +48 [OFW-4.93 lv1 a:0x35DD60-0x35DD64]
+//! [OFW-4.93 lv1 a:0x338778-0x33877C] holds the lock at +2536. It returns
+//! 1 when a used slot of the object holds the caller's partition
+//! [OFW-4.93 lv1 a:0x25477C-0x2547FC]. The slots are the two slots of the
+//! open; see the storage bus section of [`super::device_bus`]. So a
+//! partition that did not open the storage bus gets
+//! [`STORAGE_PORT_NOT_OPEN_R3`].
+//!
+//! The storage connect holds the same lock
+//! [OFW-4.93 lv1 a:0x255280-0x2552A4] and does these steps:
+//! 1. It looks up r5 in the calling partition's object table at +88
+//!    [OFW-4.93 lv1 a:0x2552A8-0x2553B8]. A free id
+//!    [OFW-4.93 lv1 a:0x255300-0x255314] [OFW-4.93 lv1 a:0x2C9DB4-0x2C9E40],
+//!    an empty slot or an object of another class gets -6
+//!    [OFW-4.93 lv1 a:0x2553B8-0x2553D0]. The port class is the word that
+//!    the TOC slot r2 - 23160 holds, 0x329310
+//!    [OFW-4.93 lv1 a:0x3545C0-0x3545C4].
+//! 2. A port whose byte at +148 is 0 gets -6
+//!    [OFW-4.93 lv1 a:0x2554B8-0x2554E4].
+//! 3. It tests again the flag that is 1 only when the lookup gave a null
+//!    object [OFW-4.93 lv1 a:0x255460-0x25547C]
+//!    [OFW-4.93 lv1 a:0x2554E8-0x2554EC]. The lookup finds an id in each
+//!    segment of the table [OFW-4.93 lv1 a:0x255348-0x2553B4]. So a port
+//!    with an id at or above [`STORAGE_PORT_ID_LIMIT`], outside segment 0,
+//!    passes.
+//! 4. It takes slot 0 when slot 0 is used and holds the caller's
+//!    partition. Otherwise it takes slot 1 when slot 1 does. Otherwise it
+//!    returns -6 [OFW-4.93 lv1 a:0x2554F0-0x25551C]
+//!    [OFW-4.93 lv1 a:0x2555F8-0x255608].
+//! 5. The slot's handle is at +2568 + 64 x slot. When the handle holds a
+//!    port with a reference, it returns -9
+//!    [OFW-4.93 lv1 a:0x255520-0x255548].
+//! 6. When the handle holds a port, it calls the function
+//!    [OFW-4.93 lv1 a:0x2BEF4C] with that port and the handle. It then
+//!    gives the new port and the handle to the link function
+//!    [OFW-4.93 lv1 a:0x25554C-0x255570]. The link function keeps the port
+//!    at +16 of the handle [OFW-4.93 lv1 a:0x2BEDD4].
+//! 7. It allocates an 88-byte object, puts it on the port's list at +104
+//!    and keeps it at +2592 + 64 x slot. It returns 0, also when the
+//!    allocation fails [OFW-4.93 lv1 a:0x255574-0x2555F4].
+//!
+//! The 4.93 kernel's port setup sends the call with these inputs
+//! [OFW-4.93 lv2_kernel a:0x80000000000964B8-0x80000000000964CC]:
+//! - r3 and r4: the bus id 4 and the device id -1 of its interrupt
+//!   object;
+//! - r5: the port id that `construct_event_receive_port` gave it;
+//! - r6: the interrupt id 0.
+//!
+//! The setup goes on only when r3 is 0
+//! [OFW-4.93 lv2_kernel a:0x80000000000964D0-0x80000000000964DC]. The
+//! capture [`STORAGE_PORT_CAPTURE`] shows the port with that id at +16 of
+//! slot 1's handle after the boot. The capture
+//! [`STORAGE_BUS_OPEN_CAPTURE`] shows slot 1 used, with the game OS
+//! partition. So the call passed each check and took slot 1.
+//!
+//! [`STORAGE_PORT_CAPTURE`]: super::event_port::STORAGE_PORT_CAPTURE
+//! [`STORAGE_BUS_OPEN_CAPTURE`]: super::device_bus::STORAGE_BUS_OPEN_CAPTURE
+//!
 //! # `net_control`
 //!
 //! The handler [OFW-4.93 lv1 a:0x307D2C] keeps r3 to r8
@@ -546,6 +628,39 @@ pub const INTERRUPT_PORT_BUSY_R3: u64 = 0x0000_0008_FFFF_FFF7;
 /// The r3 for a port id that names no port: `LV1_NO_ENTRY` (-6), with r5
 /// marked [OFW-4.93 lv1 a:0x236BEC-0x236BF8].
 pub const INTERRUPT_PORT_NO_PORT_R3: u64 = 0x0000_0004_FFFF_FFFA;
+
+/// The r3 for a device id of bus 4 above 6, other than -1:
+/// `LV1_NO_ENTRY` (-6), with r4 marked [OFW-4.93 lv1 a:0x236464-0x236474]
+/// [OFW-4.93 lv1 a:0x236AFC-0x236B1C].
+pub const STORAGE_PORT_NO_DEVICE_R3: u64 = 0x0000_0002_FFFF_FFFA;
+
+/// The r3 when the calling partition did not open the storage bus:
+/// `LV1_WRONG_STATE` (-11), zero-extended
+/// [OFW-4.93 lv1 a:0x236534-0x236538] [OFW-4.93 lv1 a:0x236AFC-0x236B08].
+pub const STORAGE_PORT_NOT_OPEN_R3: u64 = zero_extended(LV1_WRONG_STATE);
+
+/// The r3 for a storage bus call with an r6 other than 0: `LV1_NO_ENTRY`
+/// (-6), with r6 marked [OFW-4.93 lv1 a:0x236994-0x236998]
+/// [OFW-4.93 lv1 a:0x236AB4-0x236AE0].
+pub const STORAGE_PORT_R6_R3: u64 = 0x0000_0008_FFFF_FFFA;
+
+/// The r3 when the storage connect returns -6: `LV1_NO_ENTRY`, with r5
+/// marked [OFW-4.93 lv1 a:0x2369C0-0x2369C4]
+/// [OFW-4.93 lv1 a:0x236BA0-0x236BAC].
+pub const STORAGE_PORT_NO_PORT_R3: u64 = 0x0000_0004_FFFF_FFFA;
+
+/// The r3 when the storage connect returns -9: `LV1_BUSY`, with r6 marked
+/// [OFW-4.93 lv1 a:0x2369C8-0x2369D0] [OFW-4.93 lv1 a:0x236B8C-0x236B98].
+pub const STORAGE_PORT_BUSY_R3: u64 = 0x0000_0008_FFFF_FFF7;
+
+/// The first port id outside segment 0 of the partition's object table.
+///
+/// Segment 0 holds the ids below 1 << the table's word at +32
+/// [OFW-4.93 lv1 a:0x255348-0x255370]. The capture
+/// [`NETWORK_PORT_CAPTURE`] reads 6 in that word after the 4.93 boot.
+///
+/// [`NETWORK_PORT_CAPTURE`]: super::event_port::NETWORK_PORT_CAPTURE
+pub const STORAGE_PORT_ID_LIMIT: u64 = 64;
 
 /// The handler of hypercall 194 in one firmware's lv1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

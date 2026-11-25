@@ -8,6 +8,10 @@
 //! - `net_control`, for the request that gives the MAC address;
 //! - `net_set_interrupt_mask`, whose mask the state holds.
 //!
+//! `connect_interrupt_event_receive_port` also connects a port to the
+//! storage bus object, device -1 of bus 4. The device bus state holds
+//! that port.
+//!
 //! CellGov models a network device with no link. So no answer raises a
 //! device interrupt, sends an event on the port or writes the indicator.
 
@@ -16,6 +20,7 @@ mod indicator;
 mod interrupt_mask;
 mod interrupt_port;
 mod registration;
+mod storage_port;
 
 pub(crate) use registration::GROUP;
 pub use registration::{NetworkChange, NetworkState};

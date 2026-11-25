@@ -3,9 +3,11 @@
 //!
 //! The handler answers the call for the network device; see
 //! [`cellgov_ps3_abi::lv1::network`]. lv1 keeps one port for that
-//! interrupt, and the state holds its id.
+//! interrupt, and the state holds its id. The handler gives a call for
+//! bus 4 to [`super::storage_port`].
 
 use cellgov_ps3_abi::lv1::call::CONNECT_INTERRUPT_EVENT_RECEIVE_PORT;
+use cellgov_ps3_abi::lv1::device_bus::STORAGE_BUS;
 use cellgov_ps3_abi::lv1::network::{
     interrupt_port_handler, INTERRUPT_PORT_BUSY_R3, INTERRUPT_PORT_BUS_RANGE_R3,
     INTERRUPT_PORT_NOT_OPEN_R3, INTERRUPT_PORT_NO_BUS_R3, INTERRUPT_PORT_NO_PORT_R3,
@@ -15,6 +17,7 @@ use cellgov_ps3_abi::lv1::ppe::game_os_logical_ppe_id;
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
 use super::indicator::NETWORK_DEVICE;
+use super::storage_port::connect_storage_port;
 use super::{NetworkChange, NetworkState};
 use crate::answer::{HypercallAnswer, HypercallDisposition, UnmodelledError};
 use crate::group::device_bus::DeviceBusState;
@@ -46,9 +49,9 @@ const UNREAD_FIRMWARE: UnmodelledError = UnmodelledError::new(
     "a connect_interrupt_event_receive_port at a firmware whose lv1 handler is not read",
 );
 
-/// The call for bus 2, 3 or 4.
+/// The call for bus 2 or 3.
 const OTHER_BUS: UnmodelledError = UnmodelledError::new(
-    "a connect_interrupt_event_receive_port for bus 2, 3 or 4, whose lv1 path is not read",
+    "a connect_interrupt_event_receive_port for bus 2 or 3, whose lv1 path is not read",
 );
 
 /// The call for a device of bus 1 other than the network device.
@@ -58,19 +61,20 @@ const OTHER_DEVICE: UnmodelledError = UnmodelledError::new(
 );
 
 /// The call for an irq outlet.
-const OUTLET: UnmodelledError = UnmodelledError::new(
+pub(super) const OUTLET: UnmodelledError = UnmodelledError::new(
     "a connect_interrupt_event_receive_port for an irq outlet, whose reference in the object \
      table no lv1 reading gives",
 );
 
 /// The call for an id that names no object of CellGov's hypervisor.
-const UNKNOWN_ID: UnmodelledError = UnmodelledError::new(
+pub(super) const UNKNOWN_ID: UnmodelledError = UnmodelledError::new(
     "a connect_interrupt_event_receive_port whose port id names no object CellGov holds",
 );
 
 /// The state that the hypervisor holds for the call.
 pub(crate) struct PortState<'a> {
-    /// The devices that the partition opened.
+    /// The devices that the partition opened, the storage bus open and
+    /// the storage bus's port.
     pub devices: &'a DeviceBusState,
     /// The network device's state, which holds the connected port.
     pub network: &'a NetworkState,
@@ -84,7 +88,7 @@ pub(crate) struct PortState<'a> {
 }
 
 /// lv1's own r3 with r4 to r10 cleared.
-fn lv1_answer(r3: u64) -> HypercallDisposition {
+pub(super) fn lv1_answer(r3: u64) -> HypercallDisposition {
     HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, []))
 }
 
@@ -104,9 +108,11 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 ///   it.
 /// - lv1's allocation of its 88-byte object succeeds.
 ///
+/// A call for bus 4 gets the disposition of [`connect_storage_port`].
+///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
-/// - r3 is bus 2, 3 or 4;
+/// - r3 is bus 2 or 3;
 /// - r4 names a device of bus 1 other than the network device;
 /// - r5 names an irq outlet;
 /// - r5 names no object that CellGov holds.
@@ -125,6 +131,9 @@ pub(crate) fn connect_port(
     if bus == 0 {
         return lv1_answer(INTERRUPT_PORT_NO_BUS_R3);
     }
+    if bus == STORAGE_BUS {
+        return connect_storage_port(request, firmware, state);
+    }
     if bus != STATUS_INDICATOR_BUS {
         return OTHER_BUS.refusal(request);
     }
@@ -141,7 +150,7 @@ pub(crate) fn connect_port(
         return lv1_answer(INTERRUPT_PORT_BUSY_R3);
     }
     if state.ports.port(port_id).is_none() {
-        return not_a_port(request, firmware, state, port_id);
+        return not_a_port(request, firmware, state, port_id, INTERRUPT_PORT_NO_PORT_R3);
     }
     let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []);
     answer.push_change(NetworkChange::InterruptPortConnected(port_id));
@@ -151,14 +160,14 @@ pub(crate) fn connect_port(
 /// The disposition for a port id `id` that names no port of the
 /// hypervisor.
 ///
-/// An id of an object of another class gets
-/// [`INTERRUPT_PORT_NO_PORT_R3`]. An irq outlet and an unknown id are
-/// refusals.
-fn not_a_port(
+/// An id of an object of another class gets `no_port_r3`. An irq outlet
+/// and an unknown id are refusals.
+pub(super) fn not_a_port(
     request: &HypercallRequest,
     firmware: &str,
     state: &PortState<'_>,
     id: u64,
+    no_port_r3: u64,
 ) -> HypercallDisposition {
     if state.ports.outlet(id).is_some() {
         return OUTLET.refusal(request);
@@ -167,7 +176,7 @@ fn not_a_port(
         || state.spaces.space(id).is_some()
         || state.spes.spe(id).is_some()
     {
-        return lv1_answer(INTERRUPT_PORT_NO_PORT_R3);
+        return lv1_answer(no_port_r3);
     }
     UNKNOWN_ID.refusal(request)
 }

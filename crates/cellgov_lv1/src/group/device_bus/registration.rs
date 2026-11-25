@@ -42,6 +42,11 @@ pub(crate) const GROUP: Group = Group {
             source: Some(STORAGE_BUS_OPEN_SOURCE),
             stamp: Stamp::Version(32),
         },
+        HashedSurface {
+            name: "the event receive port that lv1 connected to the storage bus",
+            source: Some(STORAGE_BUS_PORT_SOURCE),
+            stamp: Stamp::Pending,
+        },
     ],
 };
 
@@ -61,25 +66,38 @@ pub(crate) const DMA_MAPPING_SOURCE: u8 = 178;
 /// holds the storage bus open.
 pub(crate) const STORAGE_BUS_OPEN_SOURCE: u8 = 179;
 
+/// The lane source of the event receive port that lv1 connected to the
+/// storage bus: one object, whose field 1 holds the port id.
+pub(crate) const STORAGE_BUS_PORT_SOURCE: u8 = 180;
+
 /// The device bus group's state.
 ///
 /// The state holds these values:
 /// - each device that the partition opened;
 /// - each DMA region that lv1 gave the partition;
 /// - each mapping that lv1 made in those regions;
-/// - the storage bus open that the partition holds.
+/// - the storage bus open that the partition holds;
+/// - the event receive port that lv1 connected to the storage bus.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeviceBusState {
     open: BTreeSet<OpenDevice>,
     regions: BTreeSet<DmaRegion>,
     mappings: BTreeSet<DmaMapping>,
     storage_bus: Option<StorageBusOpen>,
+    storage_bus_port: Option<u64>,
 }
 
 impl DeviceBusState {
     /// The storage bus open that the partition holds, if any.
     pub fn storage_bus_open(&self) -> Option<StorageBusOpen> {
         self.storage_bus
+    }
+
+    /// The id of the event receive port that lv1 connected to the
+    /// partition's slot of the storage bus, or `None` when lv1 connected
+    /// no port.
+    pub fn storage_bus_port(&self) -> Option<u64> {
+        self.storage_bus_port
     }
 
     /// Each open device, in bus and device order.
@@ -129,6 +147,9 @@ impl DeviceBusState {
             DeviceBusChange::StorageBusOpened(open) => {
                 self.storage_bus = Some(open);
             }
+            DeviceBusChange::StorageBusPortConnected(id) => {
+                self.storage_bus_port = Some(id);
+            }
         }
     }
 
@@ -151,8 +172,11 @@ impl DeviceBusState {
             .fold(regions, |sum, (index, mapping)| {
                 sum.wrapping_add(lanes::value_term(DMA_MAPPING_SOURCE, index, &mapping))
             });
-        self.storage_bus.map_or(mappings, |open| {
+        let storage_bus = self.storage_bus.map_or(mappings, |open| {
             mappings.wrapping_add(lanes::value_term(STORAGE_BUS_OPEN_SOURCE, 0, &open))
+        });
+        self.storage_bus_port.map_or(storage_bus, |id| {
+            storage_bus.wrapping_add(lanes::value_term(STORAGE_BUS_PORT_SOURCE, 0, &id))
         })
     }
 }
@@ -168,6 +192,9 @@ pub enum DeviceBusChange {
     DmaRegionMapped(DmaMapping),
     /// The call opened the storage bus.
     StorageBusOpened(StorageBusOpen),
+    /// The call connected the event receive port with this id to the
+    /// partition's slot of the storage bus.
+    StorageBusPortConnected(u64),
 }
 
 impl From<DeviceBusChange> for StateChange {
@@ -191,3 +218,7 @@ mod dma_map_hash_tests;
 #[cfg(test)]
 #[path = "tests/storage_bus_open_hash_tests.rs"]
 mod storage_bus_open_hash_tests;
+
+#[cfg(test)]
+#[path = "tests/storage_bus_port_hash_tests.rs"]
+mod storage_bus_port_hash_tests;
