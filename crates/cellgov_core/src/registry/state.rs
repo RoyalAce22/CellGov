@@ -43,8 +43,8 @@ pub struct UnitRegistry {
     /// Per-unit register writes injected by HLE dispatch; drained
     /// alongside syscall returns.
     pub(super) pending_register_writes: BTreeMap<UnitId, Vec<(u8, u64)>>,
-    /// Per-unit CR fields that the hypervisor's compares set; drained
-    /// alongside syscall returns.
+    /// Per-unit CR fields that the hypervisor's compares set. The next
+    /// step drains them with the syscall return.
     pub(super) pending_compare_fields: BTreeMap<UnitId, CompareFields>,
     /// The unit-status hash accumulator. Every path that can change a
     /// unit's effective status marks the unit stale here; the hash read

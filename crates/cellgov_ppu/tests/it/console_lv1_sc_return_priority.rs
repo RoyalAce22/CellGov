@@ -1,8 +1,8 @@
 //! A thread with supervisor registers in problem state makes the eight
-//! `sc 1` calls of the `lv1_sc_return_priority` capture through the
-//! runtime's 4.93 hypervisor, each after the capture's priority form.
-//! Each call leaves r0 and r3 as the reference console's lv1 leaves
-//! them.
+//! `sc 1` calls of the `lv1_sc_return_priority` console capture. Each
+//! call follows the console capture's priority form, and the runtime's
+//! 4.93 hypervisor answers it. Each call leaves r0 and r3 as the
+//! reference console's lv1 leaves them.
 
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_ppu::supervisor::SupervisorState;
@@ -27,8 +27,8 @@ const HALT: u32 = 0x4800_0000;
 /// A problem-state MSR in real mode.
 const MSR: u64 = MSR_SF | MSR_PR | MSR_EE | MSR_RI;
 
-/// The bytes of one case in the payload: the number, the form, then r0
-/// and r3.
+/// The size in bytes of one case in the payload: the number, the form,
+/// then r0 and r3.
 const CASE_BYTES: usize = 32;
 
 /// One case as the console ran it.
@@ -76,8 +76,9 @@ fn console_cases() -> Vec<ConsoleCase> {
 }
 
 /// r0 and r3 after the thread runs priority form `form`, hypercall
-/// `number` and `or 2,2,2`, with r0 and r3 holding marks before the
-/// call.
+/// `number` and `or 2,2,2`.
+///
+/// Before the call, r0 and r3 hold marks.
 fn cellgov_after(number: u64, form: u64) -> [u64; 2] {
     let words = [priority_form(form), SC1, priority_form(2), HALT];
     let mut mem = GuestMemory::new(0x2000);

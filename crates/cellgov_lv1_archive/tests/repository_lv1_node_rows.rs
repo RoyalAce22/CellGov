@@ -46,7 +46,7 @@ fn every_lv1_node_row_is_the_node_its_capture_read_twice_alike() {
             NodeSource::PsdevwikiDump { .. } | NodeSource::ConsoleCapture { .. } => None,
         })
         .collect();
-    assert_eq!(rows.len(), 1);
+    assert_eq!(rows.len(), 2);
     for (node, capture, address) in rows {
         let captured = capture_rows(
             capture,
@@ -77,17 +77,26 @@ fn every_lv1_node_row_is_the_node_its_capture_read_twice_alike() {
 /// [OFW-4.93 lv2_kernel a:0x8000000000050a70-0x8000000000050a80].
 #[test]
 fn the_kernel_copy_of_debug_support_holds_the_lv1_node_values() {
-    let node = NODES
+    let cited: Vec<_> = NODES
         .iter()
-        .find(|node| {
-            matches!(
-                node.source,
-                NodeSource::Lv1NodeCapture { capture, .. } if capture == DEBUG_SUPPORT_CAPTURE
-            )
-        })
-        .expect("the ss.param.debug.support lv1 node row");
+        .filter(|node| node.source.citation() == DEBUG_SUPPORT_CAPTURE)
+        .collect();
+    assert_eq!(
+        cited.len(),
+        1,
+        "the ss.param.debug.support row that cites {DEBUG_SUPPORT_CAPTURE}"
+    );
+    let node = cited[0];
+    assert_eq!(
+        node.key.path(),
+        "ss.param.debug.support",
+        "the row that cites {DEBUG_SUPPORT_CAPTURE}"
+    );
     let NodeSource::Lv1NodeCapture { capture, .. } = node.source else {
-        unreachable!("the find matched an lv1 node row");
+        panic!(
+            "{} cites {DEBUG_SUPPORT_CAPTURE} as no lv1 node capture",
+            node.key
+        );
     };
     let SecondValue::Given(v2) = node.v2 else {
         panic!("{} has no second value", node.key);

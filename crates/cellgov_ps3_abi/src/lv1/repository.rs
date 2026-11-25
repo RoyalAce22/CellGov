@@ -231,8 +231,8 @@ const GAME_OS_341_DUMP: NodeSource = NodeSource::PsdevwikiDump {
 ///
 /// The dump is of firmware 3.41, which no logged boot is. No source gives
 /// the values for 1.50, 1.94 or 3.70. At 4.93 the console captures
-/// [`BOOT_RECORD_CAPTURE`] and [`DEBUG_SUPPORT_CAPTURE`] give each value
-/// that the 4.93 boot reads.
+/// [`BOOT_RECORD_CAPTURE`], [`DEBUG_SUPPORT_CAPTURE`] and
+/// [`FLASH_EXT_CAPTURE`] give each value that the 4.93 boot reads.
 const DUMP_FIRMWARE_BEFORE_4_93: &[&str] = &["1.50", "1.94", "3.70"];
 
 /// The console capture of the 4.93 kernel's boot repository record, on
@@ -247,7 +247,8 @@ pub const BOOT_RECORD_CAPTURE: &str = "tests/micro/lv2_repository_boot_nodes/ps3
 /// The address of the 4.93 kernel's boot repository record.
 pub const BOOT_RECORD_4_93: u64 = 0x8000_0000_0037_a5a0;
 
-/// The firmware of [`BOOT_RECORD_CAPTURE`] and [`DEBUG_SUPPORT_CAPTURE`].
+/// The firmware of [`BOOT_RECORD_CAPTURE`], [`DEBUG_SUPPORT_CAPTURE`] and
+/// [`FLASH_EXT_CAPTURE`].
 const CAPTURE_FIRMWARE: &[&str] = &["4.93"];
 
 /// The value at offset `offset` of the 4.93 boot record, as
@@ -288,6 +289,15 @@ pub const DEBUG_SUPPORT_CAPTURE: &str =
 /// The lv1 address of the first value of the node that
 /// [`DEBUG_SUPPORT_CAPTURE`] read.
 const DEBUG_SUPPORT_V1_ADDRESS: u64 = 0x0076_3d58;
+
+/// The console capture of lpar 1's `sys.flash.ext` node in lv1's
+/// repository, on the reference console at firmware 4.93. Its README
+/// gives the method.
+pub const FLASH_EXT_CAPTURE: &str = "tests/micro/lv1_repository_flash/peek/cech20-cex-493";
+
+/// The lv1 address of the first value of the node that
+/// [`FLASH_EXT_CAPTURE`] read.
+const FLASH_EXT_V1_ADDRESS: u64 = 0x0068_8d78;
 
 /// The second value of a node that [`BOOT_RECORD_CAPTURE`] gives. The
 /// capture does not observe it, and the reads at `discarded_by` discard
@@ -370,6 +380,28 @@ pub const NODES: &[RepositoryNode] = &[
         NodeSource::Lv1NodeCapture {
             capture: DEBUG_SUPPORT_CAPTURE,
             address: DEBUG_SUPPORT_V1_ADDRESS,
+        },
+    ),
+    // `sys.flash.ext`. The kernel keeps only r4, the first value. Its reader returns 1 for
+    // a status 0 answer only when bit 1 of r4 is clear
+    // [OFW-4.93 lv2_kernel a:0x8000000000050e18-0x8000000000050e48]. Only
+    // a return of 1 leads to the `sys.flash.boot` read
+    // [OFW-4.93 lv2_kernel a:0x800000000004f23c-0x800000000004f24c]. On
+    // the reference console, bit 1 of v1 is set.
+    node(
+        LPAR_ID_PME,
+        [
+            first_field(b"sys", 0),
+            field(b"flash", 0),
+            field(b"ext", 0),
+            0,
+        ],
+        0xfe,
+        SecondValue::Given(0),
+        CAPTURE_FIRMWARE,
+        NodeSource::Lv1NodeCapture {
+            capture: FLASH_EXT_CAPTURE,
+            address: FLASH_EXT_V1_ADDRESS,
         },
     ),
     // `bi.pu` at index 0: the logical PU id. Linux reads it in
@@ -513,3 +545,7 @@ mod second_value_tests;
 #[cfg(test)]
 #[path = "tests/repository_debug_support_tests.rs"]
 mod debug_support_tests;
+
+#[cfg(test)]
+#[path = "tests/repository_flash_ext_tests.rs"]
+mod flash_ext_tests;

@@ -12,9 +12,12 @@
 //! - the caller's real address space, which holds the page table.
 //!
 //! It returns a [`HypercallDisposition`]:
-//! - an answer, which the runtime applies as effects: r3, the values
-//!   for r4 to r10, memory writes, and the page table registers of the
-//!   caller;
+//! - an answer, which the runtime applies as effects:
+//!   - r3;
+//!   - r4 to r10, where lv1's return loads them;
+//!   - r0, r11, r12 and CR, as lv1's return leaves them;
+//!   - memory writes;
+//!   - the page table registers of the caller;
 //! - a typed refusal, which stops the run.
 //!
 //! No handler writes guest state. An answer carries a list of

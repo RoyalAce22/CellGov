@@ -9,15 +9,13 @@
 //!   problem-state refusal.
 //!
 //! The `lv1_sc_return_registers` capture shows both returns from a
-//! problem-state caller. The `hrfid` values here assume that two
-//! branches of the return are not taken:
+//! problem-state caller. CellGov's hypervisor gives no event and no
+//! decrementer request, so the `hrfid` values here assume that the
+//! return takes neither of these branches:
 //! - the call that delivers a pending event to the partition
 //!   [OFW-4.93 lv1 a:0x1010-0x101C];
 //! - the call that sets the decrementer to 0
 //!   [OFW-4.93 lv1 a:0x104C-0x1050].
-//!
-//! CellGov's hypervisor gives no event and no decrementer request, so
-//! neither branch runs.
 
 use cellgov_ps3_abi::lv1::dispatch::{CALLER_TSRL, HRFID_KEEPS_CR7_FIRMWARE};
 use cellgov_ps3_abi::lv1::table::HYPERCALL_TABLE_ENTRIES;
@@ -83,16 +81,16 @@ pub(crate) fn past_the_table(number: u64, table_base: u32) -> ReturnRegisters {
     }
 }
 
-/// The registers that the return through `hrfid` gives a caller in
-/// problem state when `problem_state` is true, from a hypervisor for the
-/// firmware version `firmware`.
+/// The registers that the return through `hrfid` gives the caller, from
+/// a hypervisor for the firmware version `firmware`.
 ///
 /// The return gives these values:
 /// - r0: [`CALLER_TSRL`].
 /// - r11 and r12: the saved SRR0 and SRR1 [OFW-4.93 lv1 a:0x1038-0x103C].
 /// - CR0: `EQ`, from the compare of the decrementer request with 0
 ///   [OFW-4.93 lv1 a:0x104C].
-/// - CR1: the signed compare of `MSR[PR]` with 1 [OFW-4.93 lv1 a:0x0F9C].
+/// - CR1: the signed compare of `MSR[PR]` with 1, where `problem_state`
+///   gives `MSR[PR]` [OFW-4.93 lv1 a:0x0F9C].
 /// - CR7: `GT`, except at a firmware of [`HRFID_KEEPS_CR7_FIRMWARE`].
 ///
 /// A handler can also change CR1, CR5 and CR6, and CellGov does not

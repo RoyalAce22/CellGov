@@ -1,5 +1,5 @@
-//! Per-unit pending message / syscall-return / register-write buffers,
-//! and the resume mark.
+//! Per-unit pending message / syscall-return / register-write / CR-field
+//! buffers, and the resume mark.
 //!
 //! Producers (the commit pipeline and HLE dispatch) deposit values here
 //! addressed by `UnitId`; the runtime drains the relevant entries into
@@ -101,7 +101,7 @@ impl UnitRegistry {
         self.pending_compare_fields.insert(id, fields);
     }
 
-    /// Drain the pending CR fields for `id`. Guard behaviour per
+    /// Drain the pending CR fields for `id`. Its guard matches
     /// [`Self::drain_receives`].
     #[inline]
     pub fn drain_compare_fields(&mut self, id: UnitId) -> Option<CompareFields> {

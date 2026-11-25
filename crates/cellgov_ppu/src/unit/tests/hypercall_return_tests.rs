@@ -4,26 +4,26 @@ use cellgov_exec::{CompareFields, CompareResult, ExecutionUnit, SaveRestore, Yie
 use cellgov_ps3_abi::hw::ppu_interrupt::SRR1_INTERRUPT_INFO;
 use cellgov_ps3_abi::lv1::table::HYPERCALL_TABLE_ENTRIES;
 
-/// The CR that the capture's probe sets before each call.
+/// The CR that the console probe sets before each call.
 const CR_IN: u32 = 0x6E7D_ACBF;
 
-/// The bytes of one case in the `lv1_sc_return_registers` payload: the
-/// number, the XER sent, an address, then r0, r3, r11, r12, CR, XER, LR
-/// and CTR.
+/// The size in bytes of one case in the `lv1_sc_return_registers`
+/// payload: the number, the XER sent, an address, then r0, r3, r11, r12,
+/// CR, XER, LR and CTR.
 const CASE_BYTES: usize = 88;
 
-/// One call of the `lv1_sc_return_registers` capture that lv1 answered
-/// through `hrfid`.
+/// One call of the `lv1_sc_return_registers` console capture that lv1
+/// answered through `hrfid`.
 struct HrfidCase {
-    /// The XER the probe sent.
+    /// The XER the console probe sent.
     xer: u64,
-    /// r12 after the call: the SRR1 of the probe's `sc`.
+    /// r12 after the call: the SRR1 of the console probe's `sc`.
     r12: u64,
     /// CR after the call.
     cr: u32,
 }
 
-/// The capture's calls with a number in the hypercall table, in
+/// The console capture's calls with a number in the hypercall table, in
 /// payload order.
 fn console_hrfid_cases() -> Vec<HrfidCase> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

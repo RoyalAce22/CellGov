@@ -125,3 +125,7 @@ mod debug_support_tests;
 #[cfg(test)]
 #[path = "tests/console_repository_debug_support_tests.rs"]
 mod console_tests;
+
+#[cfg(test)]
+#[path = "tests/console_repository_flash_ext_tests.rs"]
+mod console_flash_ext_tests;

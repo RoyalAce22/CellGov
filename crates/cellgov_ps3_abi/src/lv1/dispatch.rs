@@ -1,8 +1,9 @@
-//! What lv1's own `sc` (LEV=1) interrupt vector returns in r3 before it
-//! reaches a hypercall handler:
-//! - the value for a number past the end of the hypercall table;
-//! - the value for a problem-state call that the table entry does not
-//!   allow.
+//! What lv1's own `sc` (LEV=1) interrupt vector returns:
+//! - the r3 for a number past the end of the hypercall table;
+//! - the r3 for a problem-state call that the table entry does not
+//!   allow;
+//! - the r0 of every return;
+//! - the CR7 of the return through `hrfid`, by firmware.
 //!
 //! These values have no public source. They were read from the
 //! firmware's own `lv1.self`, decrypted offline and disassembled with
@@ -66,10 +67,10 @@ pub const UNKNOWN_HYPERCALL_R3: u64 = 0x0000_0000_FFFF_FFEC;
 ///   [OFW-1.94 lv1 a:0x09b0-0x0ad0] holds them at the same addresses.
 pub const PROBLEM_STATE_DENIED_R3: u64 = 0x0000_0000_FFFF_FFFD;
 
-/// The r0 that lv1 returns from every hypercall: the caller's TSRL, as
-/// the `lv1_sc_return_registers` capture shows it after each of its ten
-/// calls.
+/// The r0 that lv1 returns from every hypercall: the caller's TSRL.
 ///
+/// The `lv1_sc_return_registers` capture shows this value after each of
+/// its ten calls.
 /// The vector saves SPR 896 at entry [OFW-4.93 lv1 a:0x0c0c-0x0c10]. Each
 /// return loads the saved value into r0 and writes it back to SPR 896:
 /// - the past-the-table return [OFW-4.93 lv1 a:0x0c48-0x0c54];
@@ -96,7 +97,8 @@ pub const CALLER_TSRL: u64 = 0x0010_0000_0000_4000;
 pub const HRFID_CR7_FIRMWARE: &[&str] = &["3.15", "3.41", "3.70", "4.93"];
 
 /// The firmware versions whose return through `hrfid` does not call
-/// that function, and so leaves CR7 as the handler left it.
+/// the function of [`HRFID_CR7_FIRMWARE`], and so leaves CR7 as the
+/// handler left it.
 ///
 /// The 1.50 [OFW-1.50 lv1 a:0x09b0-0x0ac4] and 1.94
 /// [OFW-1.94 lv1 a:0x09b0-0x0ac4] returns hold the other compares of the

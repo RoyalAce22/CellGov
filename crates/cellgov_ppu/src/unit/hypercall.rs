@@ -2,11 +2,17 @@
 //!
 //! On such a thread, `sc` with LEV = 1 is a hypercall in either
 //! processor state. The thread yields it to the runtime, which answers
-//! as the hypervisor. The answer arrives as the runtime's committed inputs of
-//! the next batch: r3, the outputs from r4, r0, r11, r12, the CR fields
-//! of lv1's return, and the step past `sc`. The
-//! runtime names the request's PPE hardware thread from the thread's
-//! CTRL.
+//! as the hypervisor. The answer arrives as the runtime's committed
+//! inputs of the next batch:
+//!
+//! - r3
+//! - the outputs from r4
+//! - r0, r11 and r12
+//! - the CR fields of the hypervisor's return
+//! - the step past `sc`
+//!
+//! The runtime names the request's PPE hardware thread from the
+//! thread's CTRL.
 
 use cellgov_effects::Effect;
 use cellgov_exec::{

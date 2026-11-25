@@ -6,8 +6,8 @@
 //! [`cellgov_ps3_abi::lv1::spe`]. CellGov keeps the pages in guest
 //! storage at [`SHADOW_STORAGE_BASE`], so that the PPU reads them
 //! through the page table. Each SPE gets the next page of the storage,
-//! and no page is given twice. So each page that an SPE gets holds 0, as
-//! lv1's page does after the construct.
+//! and no two SPEs get the same page. So each page that an SPE gets
+//! holds 0, as lv1's page does after the construct.
 
 use cellgov_mem::{PageSize, Region};
 use cellgov_ps3_abi::lv1::page_table::{read_only, STORED_MEMORY_LIMIT};
@@ -66,15 +66,14 @@ pub(crate) enum SpeRegionPage {
     Refused(&'static str),
 }
 
-/// The answer for a valid entry with the doubleword 1 `doubleword1`,
-/// whose page at the logical partition address `address` holds
-/// 2^`shift` bytes, or `None` when no region of an SPE in `spes` holds
-/// the address.
+/// The answer for a valid entry whose page of 2^`shift` bytes lies at
+/// the logical partition address `address`.
 ///
-/// lv1 finds the region by the page's address alone, and its translation
-/// checks the page's size; see [`cellgov_ps3_abi::lv1::spe`]. The
-/// translation of an SPE's area is not read, so a page in an area is a
-/// refusal.
+/// The answer is `None` when no region of an SPE in `spes` holds the
+/// address. lv1 finds the region by the page's address alone, and its
+/// translation checks the page's size; see [`cellgov_ps3_abi::lv1::spe`].
+/// No lv1 image read shows the translation of an SPE's area, so a page
+/// in an area is a refusal.
 pub(crate) fn region_page(
     spes: &LogicalSpeState,
     address: u64,

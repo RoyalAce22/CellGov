@@ -40,7 +40,7 @@ const DUMP_FW: &str = "1.50";
 
 #[test]
 fn the_nodes_ascend_by_key_and_then_by_firmware() {
-    assert_eq!(NODES.len(), 12);
+    assert_eq!(NODES.len(), 13);
     for pair in NODES.windows(2) {
         assert!(
             (pair[0].key, pair[0].firmware) < (pair[1].key, pair[1].firmware),
@@ -132,14 +132,18 @@ fn every_node_cites_the_3_41_game_os_dump_by_its_alias_or_a_4_93_capture() {
                 capture += 1;
             }
             NodeSource::Lv1NodeCapture { address, .. } => {
-                assert_eq!(node.source.citation(), DEBUG_SUPPORT_CAPTURE);
+                assert!(
+                    [DEBUG_SUPPORT_CAPTURE, FLASH_EXT_CAPTURE].contains(&node.source.citation()),
+                    "{}",
+                    node.key
+                );
                 assert_eq!(node.source.section(), Some(format!("{address:#018x}")));
                 assert_eq!(node.firmware, ["4.93"], "{}", node.key);
                 lv1_capture += 1;
             }
         }
     }
-    assert_eq!((dump, capture, lv1_capture), (4, 7, 1));
+    assert_eq!((dump, capture, lv1_capture), (4, 7, 2));
 }
 
 #[test]

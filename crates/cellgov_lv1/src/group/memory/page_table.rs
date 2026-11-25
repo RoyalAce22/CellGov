@@ -339,25 +339,24 @@ fn duplicate(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NoRealPage {
     /// lv1's translation of the page's region refuses the entry with this
-    /// r3. lv1 translates after its duplicate search.
+    /// r3.
     Lv1(u64),
     /// CellGov refuses the entry for this reason.
     Refused(&'static str),
 }
 
-/// The real address of `page`, mapped by the doubleword 1 `doubleword1`,
-/// for the firmware version `firmware`, or why the entry gets none.
+/// The real address of `page`, or why the entry gets none.
 ///
 /// lv1 looks the logical partition address up in the partition's memory
 /// regions and maps the page there [OFW-4.93 lv1 a:0x2D2510]
 /// [OFW-4.93 lv1 a:0x2D30C4]. CellGov models three kinds of region:
 /// - the mapping of a page table that `spaces` holds, whose page lies in
 ///   the page table storage at the same offset;
-/// - a region of a logical SPE in `spes`, as `region_page` of the logical
-///   SPE group answers it;
-/// - the real mode region, which CellGov holds at real address 0 below
-///   the page table storage, so the real address is the logical
-///   partition address.
+/// - a region of a logical SPE in `spes`, as [`region_page`] answers it
+///   for `doubleword1`;
+/// - the real mode region of `firmware`, which CellGov holds at real
+///   address 0 below the page table storage, so the real address is the
+///   logical partition address.
 fn real_page(
     firmware: &str,
     spaces: &AddressSpaceState,
@@ -418,9 +417,9 @@ fn real_mode_page(firmware: &str, address: u64, end: Option<u64>) -> Result<u64,
 /// A call that fails one of lv1's checks gets lv1's own r3, with r4 to
 /// r10 cleared. See [`WRITE_HTAB_INDEX_R3`] for the checks and their
 /// order. lv1 checks the address space first, and CellGov answers it
-/// only as [`named_space`] allows. The translation of a shadow page of
-/// a logical SPE in `spes` checks the entry after the duplicate search;
-/// see [`cellgov_ps3_abi::lv1::spe`].
+/// only as [`named_space`] allows. lv1 checks an entry for a shadow page
+/// of a logical SPE in `spes` after the duplicate search; see
+/// [`cellgov_ps3_abi::lv1::spe`].
 ///
 /// The call is a refusal in these cases:
 /// - [`named_space`] refuses it;

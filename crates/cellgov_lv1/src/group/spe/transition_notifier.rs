@@ -119,7 +119,8 @@ fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDispositio
 /// The answers:
 /// - r5 = 0: success, and the SPE has no notifier. lv1 does not read r4.
 /// - r4 has a bit that a type 1 SPE does not accept:
-///   [`SET_SPE_TRANSITION_NOTIFIER_MASK_R3`], and no change.
+///   [`SET_SPE_TRANSITION_NOTIFIER_MASK_R3`], and the notifier does not
+///   change.
 /// - otherwise: success, and the SPE keeps the notifier.
 ///
 /// No call that CellGov answers changes the doubleword at +184 of an SPE.

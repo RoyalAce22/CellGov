@@ -1,6 +1,6 @@
 //! The hypervisor answers the 4.93 kernel's three calls for its boot SPE
-//! with the outlet ids that the reference console's kernel holds, read
-//! from the committed capture `tests/micro/lv2_logical_spe_object`.
+//! with the outlet ids that the reference console's kernel holds. The ids
+//! come from the committed capture `tests/micro/lv2_logical_spe_object`.
 
 use super::*;
 use crate::group::spe::LogicalSpe;

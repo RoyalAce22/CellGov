@@ -84,11 +84,11 @@ impl UnitRegistry {
     /// Each unit is object `id` of [`source::PENDING_UNIT_INPUT`], with no
     /// presence lane. Its fields are:
     ///
-    /// - 1: 1 when a syscall return is queued, and 2: that return.
+    /// - 1: 1 when the unit has a queued syscall return, and 2: that return.
     /// - 3: the count of received messages, and 4, slot `i`: message `i`.
     /// - 5: the count of register writes. Slot `i` of 6 holds the
     ///   register of write `i` plus 1, and slot `i` of 7 holds its value.
-    /// - 8: 1 when CR fields are queued. Slot `i` of 9 holds CR field
+    /// - 8: 1 when the unit has queued CR fields. Slot `i` of 9 holds CR field
     ///   `i`: 0 to keep it, 1 for LT, 2 for GT, 3 for EQ.
     ///
     /// A registry with no queued input adds 0.

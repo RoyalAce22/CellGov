@@ -28,8 +28,9 @@ fn boot_port_id() -> u64 {
 /// [OFW-4.93 lv2_kernel a:0x800000000004f22c].
 const BOOT_MASK: u64 = 1;
 
-/// The kernel's call with r3 to r5 as the 4.93 kernel's boot call sets
-/// them [OFW-4.93 lv2_kernel a:0x800000000004f228-0x800000000004f238].
+/// The kernel's call with `spe_id`, `mask` and `port` in r3 to r5, where
+/// the 4.93 kernel's boot call sets them
+/// [OFW-4.93 lv2_kernel a:0x800000000004f228-0x800000000004f238].
 fn request(spe_id: u64, mask: u64, port: u64) -> HypercallRequest {
     HypercallRequest {
         unit: UnitId::new(1),

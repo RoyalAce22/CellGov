@@ -93,9 +93,8 @@ impl HypercallAnswer {
     ///   from those slots.
     /// - A handler that lv1 calls directly writes only the slots of its
     ///   outputs, as hypercall 74 does [OFW-4.93 lv1 a:0x2EBDA8-0x2EBDC4].
-    ///
-    /// The `lv1_problem_state_sc` capture shows r4 to r10 at 0 after an
-    /// answer that writes only the r3 slot.
+    /// - The `lv1_problem_state_sc` capture shows r4 to r10 at 0 after an
+    ///   answer that writes only the r3 slot.
     ///
     /// lv1 sends some numbers to a service through its dispatcher. The
     /// dispatcher copies seven reply words into the slots
@@ -109,8 +108,8 @@ impl HypercallAnswer {
         Self::with_path(r3, ReturnPath::Table(registers))
     }
 
-    /// The exact `r3` of the past-the-table return, with the `registers`
-    /// it leaves, r4 to r10 as the caller had them, and no memory write.
+    /// The exact `r3` of the past-the-table return and the `registers` it
+    /// leaves, with r4 to r10 as the caller had them and no memory write.
     pub(crate) fn past_the_table(r3: u64, registers: ReturnRegisters) -> Self {
         Self::with_path(r3, ReturnPath::PastTheTable(registers))
     }

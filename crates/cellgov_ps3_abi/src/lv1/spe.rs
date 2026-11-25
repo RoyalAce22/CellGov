@@ -210,11 +210,11 @@
 //!   word in the TOC slot at r2 - 7896 [OFW-4.93 lv1 a:0x2E2538]. That
 //!   slot and the slot at r2 - 4680 hold the same word
 //!   [OFW-4.93 lv1 a:0x358160] [OFW-4.93 lv1 a:0x358DF0].
-//! - The byte at +148 is 1 after a successful construct.
+//! - The byte at +148 is 1 when the object constructor succeeds.
 //!
 //! An irq outlet fails step 3. Its constructor gives the port
 //! constructor the word in the TOC slot at r2 - 4472
-//! [OFW-4.93 lv1 a:0x2FF94C], which holds another word
+//! [OFW-4.93 lv1 a:0x2FF94C], which holds a different word
 //! [OFW-4.93 lv1 a:0x358EC0].
 //!
 //! The method [OFW-4.93 lv1 a:0x2FA4E8] does these steps in this order:
@@ -378,8 +378,8 @@ pub const LOGICAL_SPE_TYPE_1_TRANSITION_MASK: u64 = 0b111;
 /// marked [OFW-4.93 lv1 a:0x2FA4FC-0x2FA52C].
 pub const SET_SPE_TRANSITION_NOTIFIER_MASK_R3: u64 = 0x0000_0002_FFFF_FFEF;
 
-/// One `construct_logical_spe` call of the GameOS kernel, and the spe id
-/// that lv1 gave it on the console.
+/// One `construct_logical_spe` call of the GameOS kernel, with the spe id
+/// and the outlet ids that lv1 gave its SPE on the console.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GameOsSpeCall {
     /// The address of the call's `sc`.

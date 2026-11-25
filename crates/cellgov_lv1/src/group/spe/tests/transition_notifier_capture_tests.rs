@@ -36,8 +36,7 @@ fn captured(field: &str) -> u64 {
         .unwrap_or_else(|e| panic!("{name}: {field}: {e}"))
 }
 
-/// A thread 0 call of hypercall `number` at the `sc` address `pc` with
-/// the inputs `inputs`.
+/// A thread 0 call of hypercall `number` at the `sc` address `pc`.
 fn call(number: u64, pc: u64, inputs: [u64; 8]) -> HypercallRequest {
     HypercallRequest {
         unit: UnitId::new(1),

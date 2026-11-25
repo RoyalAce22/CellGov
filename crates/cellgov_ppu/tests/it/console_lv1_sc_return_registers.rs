@@ -1,7 +1,7 @@
 //! A thread with supervisor registers in problem state makes the ten
-//! `sc 1` calls of the `lv1_sc_return_registers` capture through the
-//! runtime's 4.93 hypervisor. Each call leaves r0, r3, r11, r12, CR and
-//! XER as the reference console's lv1 leaves them, and each call past
+//! `sc 1` calls of the `lv1_sc_return_registers` console capture through
+//! the runtime's 4.93 hypervisor. Each call leaves r0, r3, r11, r12, CR
+//! and XER as the reference console's lv1 leaves them. Each call past
 //! the end of the table also leaves LR and CTR as the console does.
 
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
@@ -22,12 +22,12 @@ const WORDS: [u32; 2] = [0x4400_0022, 0x4800_0000];
 /// A problem-state MSR in real mode.
 const MSR: u64 = MSR_SF | MSR_PR | MSR_EE | MSR_RI;
 
-/// The CR the probe sets before each call.
+/// The CR the console probe sets before each call.
 const CR_IN: u32 = 0x6E7D_ACBF;
 
-/// The bytes of one case in the payload: the number, the XER sent, the
-/// address 20 bytes before the `sc`, then r0, r3, r11, r12, CR, XER, LR
-/// and CTR.
+/// The size in bytes of one case in the payload: the number, the XER
+/// sent, the address 20 bytes before the `sc`, then r0, r3, r11, r12, CR,
+/// XER, LR and CTR.
 const CASE_BYTES: usize = 88;
 
 /// The registers the calls leave, in the order r0, r3, r11, r12, CR,
@@ -77,8 +77,10 @@ fn console_cases() -> Vec<ConsoleCase> {
 }
 
 /// The registers, then LR and CTR, after the thread makes hypercall
-/// `number` with XER `xer`, r0, r3 and r12 holding marks, and LR and CTR
-/// holding the probe's marks for case `case`.
+/// `number` with XER `xer`.
+///
+/// Before the call, r0, r3 and r12 hold marks, and LR and CTR hold the
+/// console probe's marks for case `case`.
 fn cellgov_after(number: u64, xer: u64, case: usize) -> (Registers, [u64; 2]) {
     let mut mem = GuestMemory::new(0x2000);
     for (i, w) in WORDS.iter().enumerate() {
@@ -159,8 +161,9 @@ fn each_hypercall_return_leaves_r0_r3_r11_r12_cr_and_xer_as_the_console_does() {
             case.number, case.xer
         );
         // The return through hrfid also changes LR and CTR, and CellGov
-        // does not give those values. The rfid return leaves them as the
-        // caller had them.
+        // does not write those values. A call past the end of the table
+        // returns through rfid, which leaves LR and CTR as the caller had
+        // them.
         if case.number >= HYPERCALL_TABLE_ENTRIES {
             assert_eq!(lr_ctr, case.lr_ctr, "case {i}: LR and CTR");
         }

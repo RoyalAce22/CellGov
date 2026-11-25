@@ -130,8 +130,8 @@ fn the_kernels_boot_entry_maps_the_shadow_page_at_its_storage_page() {
 }
 
 /// lv1's translation checks the page's size before the read only flag
-/// [OFW-4.93 lv1 a:0x2FF7C0-0x2FF7E0], and the writer's flag is set for
-/// PP = 0b11 alone [OFW-4.93 lv1 a:0x2D308C-0x2D30B0].
+/// [OFW-4.93 lv1 a:0x2FF7C0-0x2FF7E0], and lv1's writer sets that flag
+/// for PP = 0b11 alone [OFW-4.93 lv1 a:0x2D308C-0x2D30B0].
 #[test]
 fn shadow_page_entries_that_lv1s_translation_refuses_get_its_r3() {
     let cases = [
@@ -183,9 +183,9 @@ fn a_writable_shadow_page_entry_that_duplicates_another_answers_duplicate_entry(
 }
 
 /// lv1 finds the region by the page's address alone
-/// [OFW-4.93 lv1 a:0x2D2510] [OFW-4.93 lv1 a:0x2D2614-0x2D262C], so a
+/// [OFW-4.93 lv1 a:0x2D2510] [OFW-4.93 lv1 a:0x2D2614-0x2D262C]. So a
 /// 64 KB page that starts below the boot SPE's shadow page and covers it
-/// is not a shadow page, and CellGov holds no region for it.
+/// is not a shadow page. CellGov holds no region for it.
 #[test]
 fn a_large_page_that_covers_a_shadow_page_from_below_is_refused() {
     let below = SHADOW & !0xFFFF;
