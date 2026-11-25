@@ -277,6 +277,62 @@
 //! For an r3 other than 0 or an r4 of 0, the kernel's function returns
 //! 0x80010005. Otherwise it keeps r4 at +56 of the record
 //! [OFW-4.93 lv2_kernel a:0x80000000000A36A0-0x80000000000A36D8].
+//!
+//! # `net_set_interrupt_mask`
+//!
+//! The handler [OFW-4.93 lv1 a:0x307FE0] keeps r3 to r6
+//! [OFW-4.93 lv1 a:0x307FEC] [OFW-4.93 lv1 a:0x308000-0x30800C] and
+//! checks them in this order. The first failure is the answer:
+//! 1. a bus id above [`INTERRUPT_MASK_BUS_MAX`] gets
+//!    [`INTERRUPT_MASK_BUS_RANGE_R3`];
+//! 2. a bus id other than [`INTERRUPT_MASK_BUS`] gets
+//!    [`INTERRUPT_MASK_NO_BUS_R3`];
+//! 3. a device id other than [`INTERRUPT_MASK_DEVICE`] gets
+//!    [`INTERRUPT_MASK_NO_DEVICE_R3`];
+//! 4. the network device's state word, see below;
+//! 5. an r6 other than 0 gets [`INTERRUPT_MASK_R6_R3`].
+//!
+//! For device 0 of bus 1, the handler takes the lock at +40 of the
+//! network device's global object and reads the object at +16 of it
+//! [OFW-4.93 lv1 a:0x308088-0x3080C4]. The handler loads that global
+//! object from the TOC slot at r2 - 1848, as
+//! `net_set_interrupt_status_indicator` does [OFW-4.93 lv1 a:0x308088].
+//! A state word at +8 of the object at +16 other than 2 gets
+//! [`INTERRUPT_MASK_WRONG_STATE_R3`] [OFW-4.93 lv1 a:0x3080C8-0x3080DC].
+//! `open_device` sets that word to 2; see the state word section above.
+//!
+//! A call that passes every check does these steps:
+//! 1. It stores r5 at +32 of the object at +16
+//!    [OFW-4.93 lv1 a:0x3081CC].
+//! 2. It returns 0 [OFW-4.93 lv1 a:0x3081C8] [OFW-4.93 lv1 a:0x30817C].
+//!
+//! The handler checks no bit of r5, and each call replaces the doubleword
+//! at +32. The handler writes no return slot, and the vector's entry
+//! zeroes the slots [OFW-4.93 lv1 a:0x0C08]. So r4 to r10 return 0.
+//!
+//! # The 4.93 kernel's calls of `net_set_interrupt_mask`
+//!
+//! The kernel has six calls. Each call passes the bus id and the device
+//! id at +16 and +8 of its device record in r3 and r4, and 0 in r6. The
+//! kernel ignores the r3 that each call gets. The calls differ in r5:
+//! - [OFW-4.93 lv2_kernel a:0x80000000000A319C] passes 0
+//!   [OFW-4.93 lv2_kernel a:0x80000000000A3160-0x80000000000A3198];
+//! - [OFW-4.93 lv2_kernel a:0x80000000000A3784] and
+//!   [OFW-4.93 lv2_kernel a:0x80000000000A37A4] pass the record's
+//!   doubleword at +64 with more bits set
+//!   [OFW-4.93 lv2_kernel a:0x80000000000A3764-0x80000000000A37A0];
+//! - [OFW-4.93 lv2_kernel a:0x80000000000A4A04] passes the doubleword at
+//!   +64 with bits set from r12
+//!   [OFW-4.93 lv2_kernel a:0x80000000000A49B8-0x80000000000A4A00];
+//! - [OFW-4.93 lv2_kernel a:0x80000000000A568C] passes the doubleword at
+//!   +64 OR 0x1002000000006000
+//!   [OFW-4.93 lv2_kernel a:0x80000000000A565C-0x80000000000A5688];
+//! - [OFW-4.93 lv2_kernel a:0x80000000000A7FF0] passes the doubleword at
+//!   +64 OR 0xC0000000
+//!   [OFW-4.93 lv2_kernel a:0x80000000000A7FCC-0x80000000000A7FEC].
+//!
+//! Each call that sets bits stores r5 back at +64 of the record before
+//! its `sc`.
 
 use super::status::{zero_extended, LV1_DUPLICATE_ENTRY, LV1_NOT_IMPLEMENTED, LV1_WRONG_STATE};
 
@@ -366,9 +422,9 @@ pub const STATUS_INDICATOR_SET_R3: u64 = zero_extended(LV1_DUPLICATE_ENTRY);
 /// The checks run in this order:
 /// 1. a bus id above [`STATUS_INDICATOR_BUS_MAX`] gets
 ///    [`STATUS_INDICATOR_BUS_RANGE_R3`];
-/// 2. another bus id than [`STATUS_INDICATOR_BUS`] gets
+/// 2. a bus id other than [`STATUS_INDICATOR_BUS`] gets
 ///    [`STATUS_INDICATOR_NO_BUS_R3`];
-/// 3. another device id than [`STATUS_INDICATOR_DEVICE`] gets
+/// 3. a device id other than [`STATUS_INDICATOR_DEVICE`] gets
 ///    [`STATUS_INDICATOR_NO_DEVICE_R3`].
 pub const fn status_indicator_device_r3(bus: u64, device: u64) -> Option<u64> {
     if bus > STATUS_INDICATOR_BUS_MAX {
@@ -534,9 +590,9 @@ pub const NET_CONTROL_MAC_ADDRESS_BITS: u32 = 48;
 /// The checks run in this order:
 /// 1. a bus id above [`NET_CONTROL_BUS_MAX`] gets
 ///    [`NET_CONTROL_BUS_RANGE_R3`];
-/// 2. another bus id than [`NET_CONTROL_BUS`] gets
+/// 2. a bus id other than [`NET_CONTROL_BUS`] gets
 ///    [`NET_CONTROL_NO_BUS_R3`];
-/// 3. another device id than [`NET_CONTROL_DEVICE`] gets
+/// 3. a device id other than [`NET_CONTROL_DEVICE`] gets
 ///    [`NET_CONTROL_NO_DEVICE_R3`].
 pub const fn net_control_device_r3(bus: u64, device: u64) -> Option<u64> {
     if bus > NET_CONTROL_BUS_MAX {
@@ -573,9 +629,96 @@ pub const fn net_control_request_range_r3(request: u64, privileged: bool) -> Opt
     }
 }
 
+/// The handler of hypercall 193 in one firmware's lv1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InterruptMaskHandler {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The address of the `net_set_interrupt_mask` handler.
+    pub handler: u32,
+}
+
+/// Each firmware whose lv1 image shows the handler, ascending.
+///
+/// The address is the entry of hypercall 193 in the live 4.93 hypercall
+/// table ([`super::table::LIVE_TABLE_HANDLERS`]).
+pub const INTERRUPT_MASK_HANDLERS: &[InterruptMaskHandler] = &[InterruptMaskHandler {
+    firmware: "4.93",
+    handler: 0x307FE0,
+}];
+
+/// The handler of the firmware version `firmware`, or `None` when no lv1
+/// image read shows it.
+pub fn interrupt_mask_handler(firmware: &str) -> Option<&'static InterruptMaskHandler> {
+    INTERRUPT_MASK_HANDLERS
+        .iter()
+        .find(|handler| handler.firmware == firmware)
+}
+
+/// The largest bus id that the handler's first check passes, unsigned
+/// [OFW-4.93 lv1 a:0x308070-0x308074].
+pub const INTERRUPT_MASK_BUS_MAX: u64 = 4;
+
+/// The bus id of the network device [OFW-4.93 lv1 a:0x308078-0x30807C].
+pub const INTERRUPT_MASK_BUS: u64 = 1;
+
+/// The device id of the network device on [`INTERRUPT_MASK_BUS`]
+/// [OFW-4.93 lv1 a:0x308080-0x308084].
+pub const INTERRUPT_MASK_DEVICE: u64 = 0;
+
+/// The r3 for a bus id above [`INTERRUPT_MASK_BUS_MAX`]:
+/// `LV1_ILLEGAL_PARAMETER_VALUE` (-17), with r3 marked
+/// [OFW-4.93 lv1 a:0x3081D4-0x3081E0].
+pub const INTERRUPT_MASK_BUS_RANGE_R3: u64 = 0x0000_0001_FFFF_FFEF;
+
+/// The r3 for a bus id other than [`INTERRUPT_MASK_BUS`] that passes the
+/// range check: `LV1_NO_ENTRY` (-6), with r3 marked
+/// [OFW-4.93 lv1 a:0x3081B4-0x3081C0].
+pub const INTERRUPT_MASK_NO_BUS_R3: u64 = 0x0000_0001_FFFF_FFFA;
+
+/// The r3 for a device id other than [`INTERRUPT_MASK_DEVICE`] on
+/// [`INTERRUPT_MASK_BUS`]: `LV1_NO_ENTRY` (-6), with r4 marked
+/// [OFW-4.93 lv1 a:0x308108-0x308114].
+pub const INTERRUPT_MASK_NO_DEVICE_R3: u64 = 0x0000_0002_FFFF_FFFA;
+
+/// The r3 for a network device whose state word is not 2:
+/// `LV1_WRONG_STATE` (-11), zero-extended
+/// [OFW-4.93 lv1 a:0x3080D4-0x3080DC].
+pub const INTERRUPT_MASK_WRONG_STATE_R3: u64 = zero_extended(LV1_WRONG_STATE);
+
+/// The r3 for an r6 other than 0: `LV1_ILLEGAL_PARAMETER_VALUE` (-17),
+/// with r6 marked [OFW-4.93 lv1 a:0x308198-0x3081AC].
+pub const INTERRUPT_MASK_R6_R3: u64 = 0x0000_0008_FFFF_FFEF;
+
+/// The r3 of the handler's bus and device checks for device `device` of
+/// bus `bus`, or `None` when the network device passes them.
+///
+/// The checks run in this order:
+/// 1. a bus id above [`INTERRUPT_MASK_BUS_MAX`] gets
+///    [`INTERRUPT_MASK_BUS_RANGE_R3`];
+/// 2. a bus id other than [`INTERRUPT_MASK_BUS`] gets
+///    [`INTERRUPT_MASK_NO_BUS_R3`];
+/// 3. a device id other than [`INTERRUPT_MASK_DEVICE`] gets
+///    [`INTERRUPT_MASK_NO_DEVICE_R3`].
+pub const fn interrupt_mask_device_r3(bus: u64, device: u64) -> Option<u64> {
+    if bus > INTERRUPT_MASK_BUS_MAX {
+        Some(INTERRUPT_MASK_BUS_RANGE_R3)
+    } else if bus != INTERRUPT_MASK_BUS {
+        Some(INTERRUPT_MASK_NO_BUS_R3)
+    } else if device != INTERRUPT_MASK_DEVICE {
+        Some(INTERRUPT_MASK_NO_DEVICE_R3)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 #[path = "tests/network_status_indicator_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/network_interrupt_mask_tests.rs"]
+mod interrupt_mask_tests;
 
 #[cfg(test)]
 #[path = "tests/network_interrupt_port_tests.rs"]

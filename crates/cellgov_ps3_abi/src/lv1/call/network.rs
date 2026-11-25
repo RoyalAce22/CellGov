@@ -11,6 +11,16 @@
 /// form; see [`crate::lv1::network`].
 pub const NET_SET_INTERRUPT_STATUS_INDICATOR: u64 = 191;
 
+/// `net_set_interrupt_mask`: four inputs and no output.
+/// - r3 is the id of a bus.
+/// - r4 is the id of a device on that bus.
+/// - r5 is the device's interrupt mask.
+/// - r6 is a fourth input, which must be 0.
+///
+/// The lv1 handler [OFW-4.93 lv1 a:0x307FE0] reads the inputs in this
+/// form; see [`crate::lv1::network`].
+pub const NET_SET_INTERRUPT_MASK: u64 = 193;
+
 /// `net_control`: six inputs and two outputs.
 /// - r3 is the id of a bus.
 /// - r4 is the id of a device on that bus.
