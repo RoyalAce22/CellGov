@@ -1,5 +1,5 @@
 use cellgov_event::UnitId;
-use cellgov_lv2::hypervisor::{HypercallRefusal, RepositoryRead};
+use cellgov_lv1::{HypercallRefusal, RepositoryRead};
 use cellgov_ps3_abi::format::core_os::LV2_KERNEL_LINK_BASE;
 use cellgov_ps3_abi::hw::ppu::CELL_BP_VR;
 use cellgov_ps3_abi::lv1::repository::{field, first_field, RepositoryKey};
@@ -170,12 +170,13 @@ const LIS_R3_0400: u32 = 0x3c60_0400;
 const STW_R4_M4_R3: u32 = 0x9083_fffc;
 
 #[test]
-fn a_kernel_store_over_the_sibling_word_stops_the_run_at_a_sibling_fault() {
+fn a_kernel_store_over_the_sibling_word_stops_the_run_at_a_sibling_fault_on_that_word() {
     // Writes 0 over real 0x3fffffc, the sibling's `b .`, then spins.
     let code = &[LI_R4_0, LIS_R3_0400, STW_R4_M4_R3, B_SELF];
+    let stored_word = 0x0400_0000 - 4;
     let run = run_kernel_from_entry(&kernel_elf(code), FW, 10_000).unwrap();
     assert!(
-        matches!(run.stop, KernelRunStop::SiblingFault { .. }),
+        matches!(run.stop, KernelRunStop::SiblingFault { pc: Some(pc), .. } if pc == stored_word),
         "the run stopped at {:?}",
         run.stop
     );

@@ -1,6 +1,6 @@
 use super::*;
-use crate::hypervisor::answer::PageTableLoad;
-use crate::hypervisor::page_table::{page_table_storage, PAGE_TABLE_STORAGE_BASE};
+use crate::answer::PageTableLoad;
+use crate::page_table::{page_table_storage, PAGE_TABLE_STORAGE_BASE};
 use cellgov_event::UnitId;
 use cellgov_mem::{PageSize, Region};
 use cellgov_ps3_abi::lv1::call::SELECT_VIRTUAL_ADDRESS_SPACE;

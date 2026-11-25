@@ -134,17 +134,16 @@ fn refusing(refusal: StepError) -> Runtime {
         }
         StepError::HypercallRefused => {
             let mut rt = Runtime::new(GuestMemory::new(64), Budget::new(4), 100);
-            rt.hypervisor
-                .dispatch(&cellgov_lv2::hypervisor::HypercallRequest {
-                    unit: UnitId::new(0),
-                    number: 0,
-                    inputs: [0; 8],
-                    pc: 0,
-                    lr: 0,
-                    thread: None,
-                    problem_state: false,
-                    tick: GuestTicks::ZERO,
-                });
+            rt.hypervisor.dispatch(&cellgov_lv1::HypercallRequest {
+                unit: UnitId::new(0),
+                number: 0,
+                inputs: [0; 8],
+                pc: 0,
+                lr: 0,
+                thread: None,
+                problem_state: false,
+                tick: GuestTicks::ZERO,
+            });
             rt
         }
     }

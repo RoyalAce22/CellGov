@@ -20,7 +20,7 @@ graph BT
     exec; trace
   end
   subgraph Models and interpreters
-    lv2; ppu; spu
+    lv1; lv2; ppu; spu
   end
   subgraph Runtime
     core
@@ -46,14 +46,17 @@ graph BT
   sync --> effects
   effects --> exec
   effects --> trace
+  effects --> lv1
   effects --> lv2
   exec --> ppu
   float --> ppu
   exec --> spu
   float --> spu
   exec --> core
+  lv1 --> core
   lv2 --> core
   trace --> core
+  lv1 --> lv2_archive
   lv2 --> lv2_archive
   core --> testkit
   ppu --> testkit
@@ -104,6 +107,8 @@ Eight structural rules:
   reaches back. Nor does `cellgov_lv2` share a build edge with
   `cellgov_ppu`; only `cellgov_ppu`'s tests use it. The LV2 archive is
   a separate crate; see [The LV2 archive crate](#the-lv2-archive-crate).
+  CellGov's hypervisor, `cellgov_lv1`, keeps the same rules, and
+  neither of `cellgov_lv1` and `cellgov_lv2` depends on the other.
 - `cellgov_ppu` and `cellgov_spu` are leaves of the library DAG. They
   plug in through the `ExecutionUnit` trait in `cellgov_exec`. The
   runtime drives any `T: ExecutionUnit` without naming concrete types.
@@ -133,8 +138,8 @@ Eight structural rules:
 - `runner_ps3` links no runtime. It reaches the console over
   `std::net` and depends on `cellgov_observation` and
   `cellgov_ps3_abi` alone; `runner_footprint_guard` fails if its normal
-  dependencies reach `cellgov_core`, `cellgov_ppu`, `cellgov_lv2` or
-  `cellgov_testkit`. `cellgov_cli` depends on it for `cellgov ps3`.
+  dependencies reach `cellgov_core`, `cellgov_ppu`, `cellgov_lv1`,
+  `cellgov_lv2` or `cellgov_testkit`. `cellgov_cli` depends on it for `cellgov ps3`.
   *Why:* the runner sits beside a console and runs no guest code.
 
 ### The LV2 archive crate
@@ -239,6 +244,7 @@ dependencies are intentionally absent. The workspace compiles under
 | `cellgov_exec`         | strum, thiserror                                                           |
 | `cellgov_trace`        | num_enum, strum, thiserror                                                 |
 | `cellgov_core`         | strum, thiserror                                                           |
+| `cellgov_lv1`          | thiserror                                                                  |
 | `cellgov_lv2`          | num_enum, strum, thiserror                                                 |
 | `cellgov_testkit`      | tempfile, thiserror                                                        |
 | `cellgov_ppu`          | derive_more, strum, thiserror                                              |
@@ -272,6 +278,7 @@ dependencies are intentionally absent. The workspace compiles under
 | `cellgov_effects`              | The `Effect` enum and inline `WritePayload` (16-byte stack buffer, heap fallback above).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `cellgov_exec`                 | `ExecutionUnit` trait, `ExecutionContext`, `ExecutionStepResult`: the boundary between architecture interpreters and the runtime. Effects flow through a caller-owned `&mut Vec<Effect>` passed to `run_until_yield`, not the result struct.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `cellgov_trace`                | Binary trace format with a strict tag/layout contract (decision-level records, `PpuStateHash` / `PpuStateFull` per-step divergence trace, `HostInvariantBreak` side-channel, `SyscallEntered` / `SyscallReturned` syscall entry and return, `ReservedRegionRead` locating each provisional zero-read by step and address); see [runtime_pipeline.md](runtime_pipeline.md#effects-and-trace-records).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `cellgov_lv1`                  | CellGov's hypervisor: the answers to the LV1 hypercalls that a thread in supervisor state makes, from the `cellgov_ps3_abi::lv1` facts. It answers in lv1's place and does not run or emulate lv1. It keeps the partition's memory regions, virtual address spaces and interrupt state bitmaps, and a witness of each number with no handler. The runtime in `cellgov_core` sends each hypercall to it. |
 | `cellgov_lv2`                  | LV2 model: image / content registry, loaded-PRX registry, thread-group table, PPU thread table, in-memory filesystem store, LV2 sync primitives (mutex, cond, semaphore, lwmutex, event-flag, event-queue), syscall classification (`Lv2Request`) and dispatch (`Lv2Dispatch`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `cellgov_lv2_archive`          | The LV2 syscall archive under `docs/lv2/`: the table specs and their loader, the census, caller and name rows with the rules that merge and check them, the route and arm tables rendered from `cellgov_lv2`'s classification, the `pup.tsv` rows, the SQL forms and the operator-local oracle-gap overlay's text form. Text in, text out; no I/O. The runtime never calls it. `pup.rs` holds the `pup.tsv` rows only; the PUP container layout stays in `cellgov_ps3_abi::format::pup`. |
 | `cellgov_core`                 | The runtime: deterministic step loop, commit pipeline, syscall response table, SPU factory hook.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |

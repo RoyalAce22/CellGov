@@ -1,5 +1,5 @@
 use cellgov_event::UnitId;
-use cellgov_lv2::hypervisor::{page_table_storage, HypercallDisposition, HypercallRequest};
+use cellgov_lv1::{page_table_storage, HypercallDisposition, HypercallRequest};
 use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::lv1::call::{CONSTRUCT_VIRTUAL_ADDRESS_SPACE, SELECT_VIRTUAL_ADDRESS_SPACE};
 use cellgov_time::{Budget, GuestTicks};

@@ -1,5 +1,5 @@
 use cellgov_event::UnitId;
-use cellgov_lv2::hypervisor::{HypercallDisposition, HypercallRequest};
+use cellgov_lv1::{HypercallDisposition, HypercallRequest};
 use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::lv1::call::CONFIGURE_IRQ_STATE_BITMAP;
 use cellgov_time::{Budget, GuestTicks};

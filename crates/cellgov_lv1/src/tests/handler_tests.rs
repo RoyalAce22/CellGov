@@ -1,5 +1,5 @@
 use super::*;
-use crate::hypervisor::{AddressSpaceState, HypercallRefusal, IrqStateBitmapState};
+use crate::{AddressSpaceState, HypercallRefusal, IrqStateBitmapState};
 use cellgov_event::UnitId;
 use cellgov_mem::GuestMemory;
 use cellgov_time::GuestTicks;

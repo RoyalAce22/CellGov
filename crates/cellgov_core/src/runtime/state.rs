@@ -65,7 +65,7 @@ pub struct Runtime {
     pub(super) lv2_host: Lv2Host,
     /// CellGov's hypervisor, which answers the hypercalls of threads in
     /// supervisor state. Its first refusal stops the run.
-    pub(super) hypervisor: cellgov_lv2::hypervisor::Hypervisor,
+    pub(super) hypervisor: cellgov_lv1::Hypervisor,
     pub(super) syscall_responses: SyscallResponseTable,
     pub(super) spu_factory: Option<SpuFactory>,
     pub(super) ppu_factory: Option<PpuFactory>,

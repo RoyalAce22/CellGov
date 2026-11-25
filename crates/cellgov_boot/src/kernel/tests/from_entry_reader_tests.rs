@@ -1,11 +1,51 @@
-use cellgov_lv2::hypervisor::HypercallRefusal;
-use cellgov_ps3_abi::lv1::repository::{field, first_field, RepositoryKey, READ_WRAPPER_SC_4_93};
+use std::path::Path;
+
+use cellgov_lv1::HypercallRefusal;
+use cellgov_ps3_abi::lv1::repository::{
+    field, first_field, RepositoryKey, BOOT_RECORD_4_93, BOOT_RECORD_CAPTURE, READ_WRAPPER_SC_4_93,
+};
 
 use super::{kernel_elf, run_kernel_from_entry, KernelRunStop, BASE, B_SELF, LI_R11_91, SC_1};
 use super::{LIS_R4_BI, LI_R3_2, SLDI_R5_32};
 
-/// The return address of the 4.93 kernel's `bi.rgntotal` accessor.
+/// The return address of the 4.93 kernel's `bi.rgntotal` accessor
+/// [OFW-4.93 lv2_kernel a:0x800000000000c94c].
 const RGNTOTAL_READER: u64 = 0x8000_0000_0000_c94c;
+
+/// The offset of `bi.rgntotal` in the 4.93 kernel's boot repository
+/// record [OFW-4.93 lv2_kernel a:0x800000000000CD00].
+const RGNTOTAL_RECORD_OFFSET: u64 = 0x68;
+
+/// The doubleword that the capture [`BOOT_RECORD_CAPTURE`] read at
+/// `address`. Its `cgov_frame.bin` is the magic `CGOV`, a big-endian
+/// payload length, and 16-byte (address, doubleword) pairs.
+fn captured_doubleword(address: u64) -> u64 {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(BOOT_RECORD_CAPTURE)
+        .join("cgov_frame.bin");
+    let name = path.display().to_string();
+    let frame = std::fs::read(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
+    let Some((header, body)) = frame.split_at_checked(8) else {
+        panic!("{name}: {} bytes, short of the frame header", frame.len());
+    };
+    assert_eq!(&header[..4], b"CGOV", "{name}: frame magic");
+    let len = u32::from_be_bytes([header[4], header[5], header[6], header[7]]);
+    assert_eq!(u64::from(len), body.len() as u64, "{name}: frame length");
+    assert_eq!(body.len() % 16, 0, "{name}: whole pairs");
+    let word = |bytes: &[u8]| u64::from_be_bytes(bytes.try_into().expect("8 bytes"));
+    let hits: Vec<u64> = body
+        .chunks_exact(16)
+        .filter(|pair| word(&pair[..8]) == address)
+        .map(|pair| word(&pair[8..]))
+        .collect();
+    assert_eq!(
+        hits.len(),
+        1,
+        "{name}: the capture reads {address:#018x} once"
+    );
+    hits[0]
+}
 
 /// `lis r5, 0x7267`, `ori r5, r5, 0x6e74`, `sldi r5, r5, 32`,
 /// `oris r5, r5, 0x6f74`, `ori r5, r5, 0x616c`: r5 = `rgntotal`.
@@ -58,10 +98,9 @@ fn rgntotal_key() -> RepositoryKey {
     }
 }
 
-/// The 4.93 value is the console capture
-/// `tests/micro/lv2_repository_boot_nodes/ps3/cech20-cex-493`.
 #[test]
 fn a_4_93_kernel_read_from_the_discarding_accessor_answers_the_captured_first_value() {
+    let captured = captured_doubleword(BOOT_RECORD_4_93 + RGNTOTAL_RECORD_OFFSET);
     let run = run_kernel_from_entry(&rgntotal_kernel(RGNTOTAL_READER - 4), "4.93", 200).unwrap();
     assert_eq!(run.stop, KernelRunStop::StepCap);
     let reads: Vec<_> = run
@@ -69,7 +108,7 @@ fn a_4_93_kernel_read_from_the_discarding_accessor_answers_the_captured_first_va
         .iter()
         .map(|r| (r.key, r.values))
         .collect();
-    assert_eq!(reads, [(rgntotal_key(), Some((0x0f9a_0000, 0)))]);
+    assert_eq!(reads, [(rgntotal_key(), Some((captured, 0)))]);
 }
 
 #[test]

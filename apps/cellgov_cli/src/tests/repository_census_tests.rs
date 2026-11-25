@@ -98,7 +98,7 @@ fn boot_stopped_by(stop: KernelRunStop) -> KernelRun {
     KernelRun {
         steps: 100,
         stop,
-        repository_reads: vec![cellgov_lv2::hypervisor::RepositoryRead {
+        repository_reads: vec![cellgov_lv1::RepositoryRead {
             key: bi_rgntotal(),
             values: None,
             unit: cellgov_event::UnitId::new(1),

@@ -113,7 +113,7 @@ impl Runtime {
     /// CellGov's hypervisor: the partition's memory regions, its
     /// witnesses, its TTY sink and the refusal that stopped the run.
     #[inline]
-    pub fn hypervisor(&self) -> &cellgov_lv2::hypervisor::Hypervisor {
+    pub fn hypervisor(&self) -> &cellgov_lv1::Hypervisor {
         &self.hypervisor
     }
 

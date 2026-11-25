@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use cellgov_lv2::hypervisor::RepositoryRead;
+use cellgov_lv1::RepositoryRead;
 use cellgov_ps3_abi::lv1::repository::{RepositoryKey, RepositoryNode, SecondValue};
 
 use super::pup::PupRow;
@@ -186,7 +186,7 @@ pub fn repository_rows(
         let served = nodes
             .iter()
             .find(|node| node.key == read.key && node.firmware.contains(fw));
-        // crates/cellgov_lv2 hypervisor `read_node` refuses an unobserved
+        // crates/cellgov_lv1 `read_node` refuses an unobserved
         // second value at every read site the node does not list.
         if let (
             false,

@@ -5,7 +5,7 @@
 use cellgov_event::UnitId;
 use cellgov_time::GuestTicks;
 
-use crate::hypervisor::{HypercallDisposition, HypercallRequest, Hypervisor};
+use crate::{HypercallDisposition, HypercallRequest, Hypervisor};
 
 const PROBE: &str = "lv1_problem_state_sc";
 

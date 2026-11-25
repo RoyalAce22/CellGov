@@ -1,6 +1,6 @@
 use super::*;
-use crate::hypervisor::address_space::AddressSpaceChange;
-use crate::hypervisor::state::Hypervisor;
+use crate::address_space::AddressSpaceChange;
+use crate::state::Hypervisor;
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::call::{
     CONSTRUCT_VIRTUAL_ADDRESS_SPACE, READ_HTAB_ENTRIES, SELECT_VIRTUAL_ADDRESS_SPACE,

@@ -11,7 +11,7 @@ use cellgov_ps3_abi::lv1::table::{
 use cellgov_time::GuestTicks;
 
 use super::{null_backend, vector_disposition};
-use crate::hypervisor::{
+use crate::{
     answer, AddressSpaceState, HypercallAnswer, HypercallDisposition, HypercallRefusal,
     HypercallRequest, HypercallWitness, Hypervisor, IrqStateBitmapState, MemoryState, ANSWERED,
 };

@@ -98,7 +98,7 @@ gives it beside what the other committed sources say.
 
 - `Hypercall` -- a request with LEV != 0. The PPU yields LEV=1 only
   from a thread with supervisor registers, and the runtime sends that
-  call to CellGov's hypervisor (`crates/cellgov_lv2/src/hypervisor/`)
+  call to CellGov's hypervisor (`crates/cellgov_lv1/`)
   before it classifies anything, so no such request reaches LV2. If one does, it
   returns CELL_EINVAL with an invariant break.
 - `Malformed` -- a request whose fields the classifier could not

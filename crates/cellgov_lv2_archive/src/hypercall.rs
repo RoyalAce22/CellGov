@@ -227,7 +227,7 @@ pub fn hypercall_rows(
     let numbers: BTreeSet<u64> = called
         .keys()
         .copied()
-        .chain(cellgov_lv2::hypervisor::ANSWERED.iter().copied())
+        .chain(cellgov_lv1::ANSWERED.iter().copied())
         .collect();
     Ok(numbers
         .into_iter()
@@ -249,7 +249,7 @@ pub fn hypercall_rows(
                     .and_then(|m| m.values().next_back().copied())
                     .unwrap_or(0),
                 lv1_493: Lv1Entry::of(number),
-                state: if cellgov_lv2::hypervisor::answers(number) {
+                state: if cellgov_lv1::answers(number) {
                     HypercallState::Answered
                 } else {
                     HypercallState::NullBackend

@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 const FORBIDDEN: &[&str] = &[
     "cellgov_core",
     "cellgov_ppu",
+    "cellgov_lv1",
     "cellgov_lv2",
     "cellgov_testkit",
 ];

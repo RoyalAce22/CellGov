@@ -1,5 +1,5 @@
 use super::*;
-use crate::hypervisor::state::Hypervisor;
+use crate::state::Hypervisor;
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::call::{CONSTRUCT_VIRTUAL_ADDRESS_SPACE, SELECT_VIRTUAL_ADDRESS_SPACE};
 use cellgov_time::GuestTicks;

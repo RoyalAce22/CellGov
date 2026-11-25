@@ -1,4 +1,4 @@
-use cellgov_lv2::hypervisor::HypercallRefusal;
+use cellgov_lv1::HypercallRefusal;
 use cellgov_ps3_abi::lv1::repository::{field, first_field, lookup, RepositoryKey, SecondValue};
 
 use super::{kernel_elf, run_kernel_from_entry, KernelRunStop};

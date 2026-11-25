@@ -67,7 +67,7 @@ pub struct RuntimeSnapshot {
     pub(super) dma_queue: DmaQueue,
     pub(super) timer_wakes: crate::timer_queue::TimerWakeQueue,
     pub(super) lv2_host: Lv2Host,
-    pub(super) hypervisor: cellgov_lv2::hypervisor::Hypervisor,
+    pub(super) hypervisor: cellgov_lv1::Hypervisor,
     pub(super) syscall_responses: SyscallResponseTable,
     pub(super) commit_pipeline: CommitPipeline,
     pub(super) memory: GuestMemory,

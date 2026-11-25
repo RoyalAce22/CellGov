@@ -10,7 +10,7 @@ use cellgov_event::UnitId;
 use cellgov_exec::{
     ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
 };
-use cellgov_lv2::hypervisor::{HypercallRefusal, HypercallWitness};
+use cellgov_lv1::{HypercallRefusal, HypercallWitness};
 use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::lv1::dispatch::{PROBLEM_STATE_DENIED_R3, UNKNOWN_HYPERCALL_R3};
 use cellgov_ps3_abi::lv1::table::INVALID_HYPERCALL_R3;

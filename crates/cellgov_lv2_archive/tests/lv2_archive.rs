@@ -1456,7 +1456,7 @@ fn hypercall_site_rows_are_well_formed() {
         );
     }
     // Every number CellGov's hypervisor answers is one each kernel calls.
-    for &number in cellgov_lv2::hypervisor::ANSWERED {
+    for &number in cellgov_lv1::ANSWERED {
         let callers: BTreeSet<&str> = sites
             .iter()
             .filter(|row| row.number == number)

@@ -93,7 +93,7 @@ impl Runtime {
             spu_thread_failure: None,
             mfc_exception: None,
             lv2_host: Lv2Host::new(),
-            hypervisor: cellgov_lv2::hypervisor::Hypervisor::new(),
+            hypervisor: cellgov_lv1::Hypervisor::new(),
             syscall_responses: SyscallResponseTable::new(),
             spu_factory: None,
             ppu_factory: None,

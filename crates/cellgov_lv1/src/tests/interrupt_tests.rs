@@ -1,5 +1,5 @@
 use super::*;
-use crate::hypervisor::Hypervisor;
+use crate::Hypervisor;
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::call::CONFIGURE_IRQ_STATE_BITMAP;
 use cellgov_time::GuestTicks;

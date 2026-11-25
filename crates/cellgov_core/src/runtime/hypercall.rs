@@ -17,7 +17,7 @@
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::ExecutionStepResult;
-use cellgov_lv2::hypervisor::{
+use cellgov_lv1::{
     cost, HypercallAnswer, HypercallDisposition, HypercallRefusal, HypercallRequest, PageTableLoad,
 };
 use cellgov_ps3_abi::lv1::call::{LOGICAL_CONSOLE_SEND_MAX, MAX_OUTPUTS};

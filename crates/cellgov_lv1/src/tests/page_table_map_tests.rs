@@ -1,6 +1,6 @@
 use super::*;
-use crate::hypervisor::memory::MemoryRegion;
-use crate::hypervisor::state::Hypervisor;
+use crate::memory::MemoryRegion;
+use crate::state::Hypervisor;
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::hw::ppu_mmu::PTE_L;
 use cellgov_ps3_abi::lv1::call::{

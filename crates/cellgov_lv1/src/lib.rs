@@ -1,5 +1,7 @@
-//! CellGov's hypervisor: the answers to the LV1 hypercalls that a thread
-//! in supervisor state makes.
+//! CellGov's hypervisor answers LV1 hypercalls in lv1's place, and does
+//! not run or emulate lv1.
+//!
+//! It answers the hypercalls that a thread in supervisor state makes.
 //!
 //! A handler is a pure function of these inputs:
 //! - the [`HypercallRequest`];
@@ -24,6 +26,18 @@
 //! lv1's invalid-entry status where lv1's table marks the number
 //! invalid, and refuses the number otherwise. [`Hypervisor`] keeps a
 //! witness of each number with no handler.
+
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+#![cfg_attr(
+    not(test),
+    forbid(
+        clippy::disallowed_methods,
+        clippy::disallowed_macros,
+        clippy::print_stdout,
+        clippy::print_stderr,
+        clippy::dbg_macro
+    )
+)]
 
 mod address_space;
 mod answer;

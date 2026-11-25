@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use cellgov_boot::kernel::{run_kernel_from_entry, KernelRun, KernelRunError, KernelRunStop};
-use cellgov_lv2::hypervisor::HypercallRefusal;
+use cellgov_lv1::HypercallRefusal;
 use cellgov_lv2_archive::{self as archive, ExtractionError, RepositoryReadRow, REPOSITORY_READ};
 
 use crate::cli::exit::CommandError;

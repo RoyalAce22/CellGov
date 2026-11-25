@@ -10,7 +10,7 @@ use cellgov_ps3_abi::lv1::memory::{
 };
 use cellgov_time::GuestTicks;
 
-use crate::hypervisor::{
+use crate::{
     HypercallAnswer, HypercallDisposition, HypercallRefusal, HypercallRequest, Hypervisor,
 };
 

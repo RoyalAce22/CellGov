@@ -95,8 +95,8 @@ fn a_logged_refusal_of_a_site_gated_node_names_the_site_and_not_only_a_stale_log
     );
 }
 
-fn boot_read(values: Option<(u64, u64)>) -> cellgov_lv2::hypervisor::RepositoryRead {
-    cellgov_lv2::hypervisor::RepositoryRead {
+fn boot_read(values: Option<(u64, u64)>) -> cellgov_lv1::RepositoryRead {
+    cellgov_lv1::RepositoryRead {
         key: rgntotal(),
         values,
         unit: cellgov_event::UnitId::new(1),

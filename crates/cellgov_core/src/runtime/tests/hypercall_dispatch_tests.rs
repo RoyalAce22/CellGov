@@ -6,7 +6,7 @@ use cellgov_event::UnitId;
 use cellgov_exec::{
     ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
 };
-use cellgov_lv2::hypervisor::{HypercallRefusal, HypercallWitness};
+use cellgov_lv1::{HypercallRefusal, HypercallWitness};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_time::{Budget, GuestTicks, InstructionCost};
 use cellgov_trace::{HostWriter, TraceReader, TraceRecord, TracedHypercallDisposition};

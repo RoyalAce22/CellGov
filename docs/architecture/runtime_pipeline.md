@@ -25,7 +25,8 @@ eight-step deterministic loop:
    enqueue, reservations, wakes, block transitions, RSX flip
    requests) in emission order.
 6. Dispatch the unit's syscall through `Lv2Host`, or its hypercall
-   through CellGov's hypervisor, if the yield reason was `Syscall`.
+   through CellGov's hypervisor in `cellgov_lv1`, if the yield reason
+   was `Syscall`.
 7. Advance the commit epoch, then fire due DMA completions and timer
    wakes, settle a finished unit, and run the RSX FIFO advance pass.
    See [DMA and timer wakes](#dma-and-timer-wakes) through

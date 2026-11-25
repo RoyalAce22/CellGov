@@ -7,7 +7,7 @@
 use cellgov_core::{Runtime, RuntimeMode, StepError};
 use cellgov_effects::FaultKind;
 use cellgov_event::UnitId;
-use cellgov_lv2::hypervisor::{page_table_storage, HypercallRefusal, RepositoryRead};
+use cellgov_lv1::{page_table_storage, HypercallRefusal, RepositoryRead};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, MemError, PageSize, Region};
 use cellgov_ppu::loader::checked_pt_loads;
 use cellgov_ppu::supervisor::SupervisorState;

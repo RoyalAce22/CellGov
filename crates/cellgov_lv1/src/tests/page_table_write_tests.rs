@@ -1,5 +1,5 @@
 use super::*;
-use crate::hypervisor::address_space::AddressSpaceChange;
+use crate::address_space::AddressSpaceChange;
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::hw::ppu_mmu::{PPE_PTE_LP, PTE_C, PTE_G, PTE_H, PTE_I, PTE_L, PTE_PP, PTE_R};
 use cellgov_ps3_abi::lv1::call::WRITE_HTAB_ENTRY;

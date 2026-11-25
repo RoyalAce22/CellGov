@@ -35,6 +35,7 @@ ppu-microtests = []
 [dev-dependencies]
 cellgov_compare = { path = "../cellgov_compare" }
 cellgov_core = { path = "../cellgov_core", features = ["test-support"] }
+cellgov_lv1 = { path = "../cellgov_lv1" }
 cellgov_lv2 = { path = "../cellgov_lv2" }
 cellgov_spu = { path = "../cellgov_spu" }
 cellgov_testkit = { path = "../cellgov_testkit" }

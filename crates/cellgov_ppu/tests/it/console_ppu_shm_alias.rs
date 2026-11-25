@@ -19,7 +19,7 @@
 //! other cases through X.
 
 use cellgov_event::UnitId;
-use cellgov_lv2::hypervisor::HypercallRefusal;
+use cellgov_lv1::HypercallRefusal;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_ppu::mmu::Partition;
 use cellgov_ppu::supervisor::{SlbEntry, SupervisorState};

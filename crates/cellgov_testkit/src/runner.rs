@@ -42,7 +42,7 @@ pub enum ScenarioOutcome {
     CommitRefused(CommitError),
     /// CellGov's hypervisor refused a hypercall, and the caller saw no
     /// answer. The run stops here.
-    HypercallRefused(cellgov_lv2::hypervisor::HypercallRefusal),
+    HypercallRefused(cellgov_lv1::HypercallRefusal),
 }
 
 /// Structured result of a scenario run; the assertion surface for tests.

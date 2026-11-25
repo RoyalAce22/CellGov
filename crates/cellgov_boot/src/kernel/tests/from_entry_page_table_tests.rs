@@ -1,5 +1,6 @@
 use cellgov_ps3_abi::hw::ppu_mmu::{PTE_C, PTE_R};
 use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_DR, SLB_VALID};
+use cellgov_ps3_abi::lv1::address_space::game_os_boot_vas_id;
 use cellgov_ps3_abi::lv1::call::{
     CONSTRUCT_VIRTUAL_ADDRESS_SPACE, LOGICAL_CONSOLE_SEND, READ_HTAB_ENTRIES,
     SELECT_VIRTUAL_ADDRESS_SPACE, WRITE_HTAB_ENTRY,
@@ -21,7 +22,10 @@ const PP_READ_WRITE: u32 = 0x2;
 /// VSID XOR the page index, in a 256 KB table of 2^11 groups.
 const SLOT: u32 = ((VSID ^ 1) & 0x7FF) * 8;
 /// The vas id that the 4.93 hypervisor gives the kernel's address space.
-const VAS_ID: u32 = 2;
+fn vas_id() -> u32 {
+    let id = game_os_boot_vas_id("4.93").expect("the 4.93 boot vas id");
+    u32::try_from(id).expect("the vas id fits a 32-bit word")
+}
 
 fn li(rd: u32, value: u32) -> u32 {
     0x3800_0000 | (rd << 21) | value
@@ -73,7 +77,7 @@ fn read_and_send() -> Vec<u32> {
 fn program() -> Vec<u32> {
     let mut code = vec![li(3, 0), li(4, 2), lis(5, 0x1014), SLDI_R5_32];
     code.extend(hypercall(CONSTRUCT_VIRTUAL_ADDRESS_SPACE));
-    code.push(li(3, VAS_ID));
+    code.push(li(3, vas_id()));
     code.extend(hypercall(SELECT_VIRTUAL_ADDRESS_SPACE));
     // slbmte r13, r12: ESID 0xC, valid, entry 0; VSID 0x123.
     let slb_valid_high = (SLB_VALID >> 16) as u32;
