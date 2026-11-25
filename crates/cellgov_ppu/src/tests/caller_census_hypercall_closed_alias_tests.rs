@@ -35,7 +35,7 @@ fn bctr() -> u32 {
 
 /// A stub at [`VECTOR`], where control enters in real mode, that builds
 /// `KERNEL + offset` in r3 and runs `mtctr r3; bctr`. The `bctr` reaches
-/// only that constant, so it is closed. No segment holds the kernel
+/// only that constant, so the scan closes it. No segment holds the kernel
 /// address, and real mode fetches from its real address, `offset`.
 fn vector(offset: u64) -> Segment {
     code(
@@ -78,8 +78,8 @@ fn sites(offset: u64) -> Vec<(u64, Option<u16>)> {
 }
 
 /// The vector's closed `bctr` in real mode enters the `mtctr r4` at real
-/// address [`MTCTR`] with the r4 of the interrupt, which the scan does not
-/// know. So the low `bctr` can reach any named address in real mode, and
+/// address [`MTCTR`] with the r4 of the interrupt. The scan does not know
+/// that r4. So the low `bctr` can reach any named address in real mode, and
 /// the window's `nop` is an entry. Entered at [`LOW`], the low code
 /// loads r4 itself, so its `bctr` reaches only 0x1000 and the window
 /// keeps r11 = 75.

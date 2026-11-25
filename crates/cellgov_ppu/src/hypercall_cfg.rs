@@ -390,12 +390,12 @@ fn return_points(code: &Code) -> impl Iterator<Item = u64> + '_ {
         .filter_map(|(address, _)| address.checked_add(4))
 }
 
-/// Each word at a real address of the word after a branch of `code` that
-/// links, other than that word itself, for each such branch whose address
+/// Each word at a real address of a return point of `code`, other than
+/// the return point itself, for each branch that links and whose address
 /// `calls` takes.
 ///
 /// A `bclr` in real mode that returns from such a call enters these
-/// words.
+/// words. The return point is the word after the branch.
 ///
 /// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.
 /// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00.
@@ -499,11 +499,11 @@ fn direct_targets(code: &Code, address: u64, raw: u32, real_mode: bool) -> BTree
 /// holds.
 ///
 /// The walk also follows LR. After a real-mode branch that links, LR
-/// holds a return point: the word after a branch that links. A `bclr`
-/// that each real-mode path reaches with a return point in LR is closed.
-/// It reaches only the words at the real address of a return point, and
-/// the walk reaches those words from the call. LR can hold any other
-/// value in these cases:
+/// holds a return point: the word after a branch that links. The walk
+/// closes a `bclr` that each real-mode path reaches with a return point
+/// in LR. Such a `bclr` reaches only the words at the real address of a
+/// return point, and the walk reaches those words from the call. LR can
+/// hold any other value in these cases:
 /// - at a word of `starts`, which an interrupt or a switch enters;
 /// - after an `mtlr`, an `sc`, a word that does not decode or a word
 ///   that the PPE does not implement;

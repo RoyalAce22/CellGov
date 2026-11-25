@@ -303,8 +303,8 @@ const REFINEMENTS: usize = 16;
 /// The named words only grow, so the rounds end.
 ///
 /// The rounds step only the words of a [`Reach`] set. It starts at the
-/// ELF entry, the interrupt vectors and each value that a load of the
-/// file bytes gives. Each round adds the words that the named words
+/// ELF entry, the first word of each interrupt vector and each value that
+/// a load of the file bytes gives. Each round adds the words that the named words
 /// reach. After the rounds, the bound adds the words that the targets and
 /// the switches reach, and runs the rounds again until the set stops
 /// growing. The set only grows, so this ends.
@@ -634,8 +634,8 @@ impl Bound<'_> {
             closed_branches.extend(&self.closed_bclrs);
             let mut entries = self.real_mode.clone();
             entries.extend(&self.named);
-            // The switch scan takes no word of a closed gate as a join, as
-            // the entry words do.
+            // The switch scan takes a word of `real_named` or `low_named`
+            // as a join only when its flag is set, as the entry words do.
             let gated = |open: bool, words: &BTreeSet<u64>| {
                 if open {
                     words.clone()
@@ -857,12 +857,12 @@ impl Bound<'_> {
         self.target_aliases.len() != before
     }
 
-    /// Opens each closed gate that `indirect` shows a branch for, and
-    /// returns whether a gate opened.
+    /// Sets each of [`Self::real_branches`] and [`Self::low_branches`] that
+    /// `indirect` shows a branch for, and returns whether it set one.
     ///
-    /// The bound starts with both gates closed, so it reaches the least
-    /// set of entry words that the branches it finds need. A gate only
-    /// opens, so the bound runs again at most twice.
+    /// The bound starts with both flags unset, so it reaches the least
+    /// set of entry words that the branches it finds need. No round clears
+    /// a flag, so the bound runs again at most twice.
     fn open_alias_gates(&mut self, indirect: &IndirectBound) -> bool {
         let code = self.code;
         let real = !self.real_branches && branches_in_real_mode(code, indirect, &self.real_mode);
