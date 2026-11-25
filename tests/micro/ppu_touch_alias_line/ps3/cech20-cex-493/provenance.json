@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "capture_id": "micro:ppu_touch_alias_line#6ec2cbdefc7d",
+  "captured_at": "2026-11-14T13:53:05Z",
+  "console": {
+    "profile": "cech20-cex-493",
+    "model": "CECH-2001A",
+    "kernel": "cex",
+    "firmware": "4.93",
+    "cfw": "EvilNAT 4.93 PEX",
+    "cobra": "8.5",
+    "webman": "1.47.48t",
+    "debugger_attached": false,
+    "load_at_start": {
+      "cpu_c": 67,
+      "rsx_c": 63,
+      "fan_percent": 42
+    }
+  },
+  "transport": {
+    "kind": "webman-filedrop"
+  },
+  "harness": {
+    "runner": "runner_ps3",
+    "revision": "f72d9d1fa66f977233da258226edbfc688148f3f",
+    "link": "https://github.com/RoyalAce22/CellGov/commit/f72d9d1fa66f977233da258226edbfc688148f3f"
+  },
+  "microtest": {
+    "name": "ppu_touch_alias_line",
+    "manifest_sha256": "925a6bd80560ceb67fd8a620fe2f9cae029bdf7ff6c53d90a0bae69417f9e65f",
+    "sources": {
+      "../common/cgov_cases.h": "2cc9df4e06e27071ec36fd32a33acdec781c8ed863f2871ccc1b31e8b30b3f78",
+      "../common/cgov_lv2.h": "18efe6e4e763676e4b215a12af9d37a68f82a01f93e6ee816a882abee5132c0e",
+      "../common/cgov_out.h": "dcd53f330ba62b8aba0acd9cff2a580b5bfdcdc4f18c9e4d5ac64caee4efab9a",
+      "../common/cgov_spu_load.h": "999392b83cb8965f4cd5612632a73b8021861a6a588d9e3ebb2c405cfdf726c3",
+      "../common/crt0.S": "a0e5c9e27431ef06df31507e0320d001b10098b154b59c3a6639b7916d76b8d9",
+      "../common/package_ps3.sh": "78e6be20e91352ffd7afa3e89e06d7ce57bc9842181c3c59e0b86670ecbd8abf",
+      "../common/param_sfo.xml": "0fe1608eeeb92cc1e033cd012a07991997cc91c7c8eac3bc8c31b212ef892c97",
+      "../common/patch_ctrl_flags.py": "86a0ec46658144b0a50e9179ac3e2323b96532a89227612e6a640a469ea4bf4d",
+      "../common/patch_toc.py": "6218bae28d718aeb19ab94b5fc464e526dbb46270e2614ed10922a8773edd229",
+      "../common/test_patch_toc.py": "9bb95d499c2e7c9da88bcaf56ee34fb724edfb17a8fc566189b79fad48d4f5b6",
+      "build.sh": "624833d08b323409e53423d10ec16d877f8a5d2964eeb7ef2bef7df165c8f2dc",
+      "ppu/main.c": "5edfb5a27c32c3e10ed1eef2627b58aa297eb3766d6a3bc718ecc423de451c28"
+    }
+  },
+  "artifacts": {
+    "eboot_sha256": "553c6bd68aae55ea0912b95fd794d8a5d8dfcd0a1acb4d2f70c0be65e7c34f2d",
+    "ps3_elf_sha256": "4926259887495e97e234bec004493601efc1f93290be343666fe0132b0b637a4",
+    "reference_elf_sha256": "eac83176995722488e69e2ffcf7b65e0631b5c066d6686c6bceac0b81fc073d5",
+    "siblings": {},
+    "param_sfo_sha256": "81b28b1d5e7bdec8efd56368c71cd93c1323ad75a079f39ee1a40926c3ad46ca"
+  },
+  "frame": {
+    "file": "cgov_frame.bin",
+    "sha256": "6ec2cbdefc7d4bef6af9a099c1124d98dc11a39548522618785015ff613e021a",
+    "bytes": 88,
+    "result_path": "/dev_hdd0/tmp/cgov_ppu_touch_alias_line.bin"
+  },
+  "digest": "6ec2cbdefc7d4bef6af9a099c1124d98dc11a39548522618785015ff613e021a  micro:ppu_touch_alias_line  88",
+  "recapture_reason": null
+}
