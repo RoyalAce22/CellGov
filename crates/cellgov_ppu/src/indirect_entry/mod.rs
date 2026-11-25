@@ -29,6 +29,14 @@
 //! knows. It holds the word that the `rfid` fetches under each MSR\[SF\]
 //! that SRR1 can give.
 //!
+//! An indirect branch in 32-bit mode, with MSR\[SF\] and MSR bit 1 at 0,
+//! ignores the high-order 32 bits of its target. An `rfid` or `mtmsrd`
+//! that can clear both bits starts 32-bit mode. A `bcctr` or `bclr` that
+//! control can reach from such a start by fall-throughs and direct
+//! branches can enter the word at the low-order 32 bits of each address
+//! that it can reach in 64-bit mode. The bound keeps that word for each
+//! named address, also when no segment holds the address itself.
+//!
 //! Real mode also ignores EA bits 0 and 1. So an indirect branch in real
 //! mode can reach the word at the real address of a named address. For
 //! each doubleword and each 32-bit word of the file bytes, and for each

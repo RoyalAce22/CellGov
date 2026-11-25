@@ -222,6 +222,33 @@ impl Constants {
             .collect()
     }
 
+    /// Where the word `raw` at `address` can put control into 32-bit
+    /// mode with MSR\[IR\] at `ir`.
+    ///
+    /// In 32-bit mode, MSR\[SF\] and MSR bit 1 are 0. An `mtmsr` leaves
+    /// both bits as they are, so it gives no address.
+    ///
+    /// [PPC-Book3 p:13 s:2.3] `rfid` places the OR of SRR1 bits 0 and 1 into MSR\[SF\].
+    /// [PPC-Book3 p:22 s:3.4] `mtmsrd` with L = 0 sets MSR\[IR\] to RS\[IR\] | RS\[PR\] and MSR\[SF\] to RS bit 0 | RS bit 1.
+    /// [PPC-Book3 p:91 s:8.3] `mtmsr` with L = 0 sets MSR\[IR\] to RS\[IR\] | RS\[PR\] and leaves MSR bits 0:31 unchanged.
+    pub(super) fn mode32_switch(&self, address: u64, raw: u32, ir: bool) -> Switch {
+        let Some((msr, next, true)) = self.msr_write(address, raw) else {
+            return Switch::None;
+        };
+        if !fetch_kinds(msr, ir).contains(&0) {
+            return Switch::None;
+        }
+        let Some(next) = next else {
+            return Switch::Unbounded;
+        };
+        Switch::To(
+            next.constants()
+                .iter()
+                .map(|&next| fetch_address(next, 0))
+                .collect(),
+        )
+    }
+
     /// What the word `raw` at `address` does to MSR and to the next fetch.
     ///
     /// The result is `None` for a word that does not set MSR\[IR\]. Else

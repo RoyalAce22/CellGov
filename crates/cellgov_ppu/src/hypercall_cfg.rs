@@ -5,7 +5,9 @@
 //! A path steps back over a fall-through or over a direct branch, and a
 //! direct branch may come from another segment. An absolute branch that
 //! may run in real mode also reaches the word at the real address of its
-//! target. Each path must end at an `li r11` that loads the same
+//! target. A `bcctr` or `bclr` that may run in 32-bit mode also reaches
+//! the word at the low-order 32 bits of its target. Each path must end at
+//! an `li r11` that loads the same
 //! constant. Some paths end where the walk cannot see r11:
 //! - a word that may write r11;
 //! - a call, which may change r11 before it returns;
@@ -126,9 +128,11 @@ enum Flow {
 /// An unbounded switch of `bound` can put control into real mode at any
 /// word, so then every word may run in real mode. A `bcctr` or `bclr`
 /// that may run in real mode can reach each word that
-/// [`real_indirect_words`] gives. A `bcctr` or `bclr` whose target
-/// `bound` lost can enter any word in either mode, so it leaves every
-/// site unresolved.
+/// [`real_indirect_words`] gives. A `bcctr` or `bclr` that may run in
+/// 32-bit mode, and an unbounded 32-bit switch of `bound`, can reach each
+/// word that [`low_indirect_words`] gives. A
+/// `bcctr` or `bclr` whose target `bound` lost can enter any word in
+/// either mode, so it leaves every site unresolved.
 pub(crate) fn scan(
     code: &Code,
     bound: &IndirectBound,
@@ -143,7 +147,13 @@ pub(crate) fn scan(
     };
     let lost = !bound.lost_targets.is_empty();
     let branches = branch_sources(code, &real_mode);
-    let entries = entered(code, bound, &real_mode);
+    let mut entries = entered(code, bound, &real_mode);
+    // [PPC-Book3 p:13 s:2.3] `rfid` fetches from 32 zeros || SRR0 32:61 || 0b00 when SF = 0 in the new MSR.
+    // An unbounded 32-bit switch itself enters the low word of an SRR0
+    // that the image names, also when the code has no `bcctr` or `bclr`.
+    if !bound.unbounded_mode32_switches.is_empty() || branches_in_mode32(code, bound) {
+        entries.extend(low_indirect_words(code, bound));
+    }
     code.segments
         .iter()
         .flat_map(CodeSegment::addressed)
@@ -253,6 +263,90 @@ pub(crate) fn real_indirect_words<'a>(
         .copied()
         .chain(return_points(code))
         .flat_map(|address| code.real_aliases(address))
+}
+
+/// The words that a `bcctr` or `bclr` may reach in 32-bit mode with
+/// MSR\[IR\] at 1.
+///
+/// The set holds the word at the low-order 32 bits of each of these:
+/// - an entry of `bound`, or an address that the image names, for a
+///   branch that no CTR or LR write of `bound` reaches;
+/// - a target of `bound`;
+/// - the word after a branch that links, with the LR that the branch
+///   wrote.
+///
+/// [PPC-Book1 p:20 s:2.4.1] In 32-bit mode a branch sets the high-order 32 bits of its target address to 0.
+pub(crate) fn low_indirect_words<'a>(
+    code: &'a Code,
+    bound: &'a IndirectBound,
+) -> impl Iterator<Item = u64> + 'a {
+    bound
+        .entries
+        .iter()
+        .chain(bound.targets.values().flatten())
+        .copied()
+        .chain(return_points(code))
+        .map(low_word)
+        .filter(|&word| code.holds(word))
+        .chain(bound.low_named.iter().copied())
+}
+
+/// The word at the low-order 32 bits of `address`, with bits 62 and 63
+/// at 0: the word that a `bcctr` or `bclr` to `address` reaches in
+/// 32-bit mode.
+///
+/// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00, and `bcctr` reaches CTR0:61 || 0b00.
+/// [PPC-Book1 p:20 s:2.4.1] In 32-bit mode a branch sets the high-order 32 bits of its target address to 0.
+pub(crate) fn low_word(address: u64) -> u64 {
+    address & u64::from(u32::MAX) & !0b11
+}
+
+/// Whether a `bcctr` or `bclr` of `code` may run in 32-bit mode, with
+/// MSR\[SF\] and MSR bit 1 at 0.
+///
+/// Only an `rfid`, an `hrfid` or an `mtmsrd` can clear the two bits. The
+/// scan does not follow HSRR0 and HSRR1, so it takes no `hrfid` as a
+/// switch, as for real mode. A branch, an `mtmsr` and the return of an
+/// `sc` keep the bits, and an interrupt sets MSR\[SF\] to 1. The kernel
+/// run starts thread 0 with MSR\[SF\] at 1.
+/// So a branch may run in 32-bit mode in one of these cases:
+/// - control can reach it from a word of
+///   [`IndirectBound::mode32_switches`] by fall-throughs and direct
+///   branches;
+/// - an unbounded 32-bit switch of `bound` can put control at any word.
+///
+/// A path from a switch word leaves the fall-throughs and direct
+/// branches only at a `bcctr` or `bclr`, so the walk stops at the first
+/// one.
+///
+/// [PPC-Book3 p:13 s:2.3] `hrfid` places the OR of HSRR1 bits 0 and 1 into MSR\[SF\].
+/// [PPC-Book3 p:62 s:5.4] An interrupt sets MSR bits IR and DR to 0 and MSR bit SF to 1.
+/// [PPC-Book1 p:25 s:2.4] The registers that `bclr` and `bcctr` alter are CTR and LR, so the MSR at the target is the MSR at the branch.
+fn branches_in_mode32(code: &Code, bound: &IndirectBound) -> bool {
+    if !bound.unbounded_mode32_switches.is_empty() {
+        return code
+            .segments
+            .iter()
+            .flat_map(CodeSegment::addressed)
+            .any(|(_, raw)| is_indirect_branch(raw));
+    }
+    let mut reached = BTreeSet::new();
+    let mut pending: Vec<u64> = bound.mode32_switches.iter().copied().collect();
+    while let Some(at) = pending.pop() {
+        if !reached.insert(at) {
+            continue;
+        }
+        for raw in code.words_at(at) {
+            if is_indirect_branch(raw) {
+                return true;
+            }
+            if flow(raw) != Flow::Stops {
+                pending.extend(at.checked_add(4));
+            }
+            pending.extend(direct_targets(code, at, raw, true));
+        }
+    }
+    false
 }
 
 /// The address of the word after each branch of `code` that links.

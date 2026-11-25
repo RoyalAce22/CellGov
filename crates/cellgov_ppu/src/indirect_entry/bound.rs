@@ -12,7 +12,7 @@ use super::join_flow::{JoinFlow, JoinWords};
 use super::real_mode::{real_mode_entries, Switches};
 use super::toc::{function_tocs, FunctionToc, FunctionWords};
 use crate::caller_census::CallerScanError;
-use crate::hypercall_cfg::{Code, CodeSegment};
+use crate::hypercall_cfg::{low_word, Code, CodeSegment};
 use crate::instruction::PpuInstruction;
 
 /// Most entries the bound reads from one relative jump table. The scan
@@ -96,6 +96,12 @@ pub(crate) struct IndirectBound {
     /// CTR or LR that the scan does not record. A branch in virtual mode
     /// reaches only the word at the named address itself.
     pub(crate) real_named: BTreeSet<u64>,
+    /// Each word at the low-order 32 bits of a doubleword or a 32-bit
+    /// word of the file bytes, or of a constant that the code builds.
+    ///
+    /// A `bcctr` or a `bclr` in 32-bit mode can reach these words with a
+    /// CTR or LR that the scan does not record.
+    pub(crate) low_named: BTreeSet<u64>,
     /// The address of each word that writes a constant into CTR or LR,
     /// with each address that an indirect branch reaches from it.
     ///
@@ -127,6 +133,12 @@ pub(crate) struct IndirectBound {
     /// The address of each `rfid`, `mtmsr` or `mtmsrd` that can put
     /// control into real mode at an address that the scan does not know.
     pub(crate) unbounded_switches: BTreeSet<u64>,
+    /// Each word where an `rfid` or `mtmsrd` can put control into 32-bit
+    /// mode, with MSR\[SF\] and MSR bit 1 at 0.
+    pub(crate) mode32_switches: BTreeSet<u64>,
+    /// The address of each `rfid` or `mtmsrd` that can put control into
+    /// 32-bit mode at an address that the scan does not know.
+    pub(crate) unbounded_mode32_switches: BTreeSet<u64>,
 }
 
 /// The words of `code` that control can enter other than by a direct
@@ -158,6 +170,7 @@ pub(crate) fn indirect_entries(
         files,
         named: BTreeSet::new(),
         real_named: BTreeSet::new(),
+        low_named: BTreeSet::new(),
         tables: BTreeSet::new(),
         targets: BTreeMap::new(),
         ctr_writes: BTreeMap::new(),
@@ -180,8 +193,14 @@ pub(crate) fn indirect_entries(
     let mut words = FunctionWords::new(code, &functions);
     let join_words = JoinWords::new(code);
     loop {
-        let before = (bound.named.len(), bound.real_named.len());
-        let reached: BTreeSet<u64> = bound.named.union(&bound.real_named).copied().collect();
+        let before = bound.named_lens();
+        let reached: BTreeSet<u64> = bound
+            .named
+            .iter()
+            .chain(&bound.real_named)
+            .chain(&bound.low_named)
+            .copied()
+            .collect();
         words.grow(&reached);
         bound.targets.clear();
         bound.ctr_writes.clear();
@@ -196,7 +215,7 @@ pub(crate) fn indirect_entries(
             bound.code_constants(index, segment, tocs, &every, Some(&joins));
         }
         bound.jump_tables()?;
-        if (bound.named.len(), bound.real_named.len()) == before {
+        if bound.named_lens() == before {
             break;
         }
     }
@@ -209,6 +228,7 @@ pub(crate) fn indirect_entries(
     let mut indirect = IndirectBound {
         entries,
         real_named: bound.real_named,
+        low_named: bound.low_named,
         targets: bound.targets,
         lost_targets,
         ..IndirectBound::default()
@@ -216,6 +236,8 @@ pub(crate) fn indirect_entries(
     let switches = Switches::find(code, &words.tocs, &every, &indirect);
     indirect.real_mode_switches = switches.targets;
     indirect.unbounded_switches = switches.unbounded;
+    indirect.mode32_switches = switches.mode32;
+    indirect.unbounded_mode32_switches = switches.unbounded_mode32;
     Ok(indirect)
 }
 
@@ -245,6 +267,8 @@ pub(super) struct Bound<'a> {
     named: BTreeSet<u64>,
     /// The [`IndirectBound::real_named`].
     real_named: BTreeSet<u64>,
+    /// The [`IndirectBound::low_named`].
+    low_named: BTreeSet<u64>,
     /// The addresses that a relative jump table can start at, which the
     /// next call to [`Self::jump_tables`] reads. A later round can add
     /// an address again.
@@ -266,6 +290,16 @@ pub(super) struct Bound<'a> {
 }
 
 impl Bound<'_> {
+    /// The sizes of the sets of named words, which grow until a round
+    /// names no new word.
+    fn named_lens(&self) -> [usize; 3] {
+        [
+            self.named.len(),
+            self.real_named.len(),
+            self.low_named.len(),
+        ]
+    }
+
     /// Adds the word that an indirect branch to `address` reaches to the
     /// bound, when it is a word of the code.
     ///
@@ -282,14 +316,21 @@ impl Bound<'_> {
     /// - an indirect branch can reach it;
     /// - an indirect branch in real mode can reach each word at its real
     ///   address, also when no segment holds the address itself;
+    /// - an indirect branch in 32-bit mode can reach the word at its
+    ///   low-order 32 bits;
     /// - a relative jump table can start at it.
     ///
     /// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00, and `bcctr` reaches CTR0:61 || 0b00.
     /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
+    /// [PPC-Book1 p:20 s:2.4.1] In 32-bit mode a branch sets the high-order 32 bits of its target address to 0.
     fn name(&mut self, address: u64) {
         self.enter(address);
         let code = self.code;
         self.real_named.extend(code.real_aliases(address & !0b11));
+        let low = low_word(address);
+        if code.holds(low) {
+            self.low_named.insert(low);
+        }
         if address.is_multiple_of(4)
             && self
                 .files

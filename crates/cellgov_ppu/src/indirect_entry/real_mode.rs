@@ -11,7 +11,7 @@ use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_BIT1, MSR_SF, SPR_SRR0, SPR_SRR1};
 use super::bound::IndirectBound;
 use super::constants::{Constants, Value};
 use super::toc::{FunctionSteps, WordTocs};
-use crate::hypercall_cfg::{real_indirect_words, Code, CodeSegment};
+use crate::hypercall_cfg::{low_indirect_words, real_indirect_words, Code, CodeSegment};
 use crate::instruction::spr_number;
 
 /// The real-mode switches of the code.
@@ -25,6 +25,14 @@ pub(super) struct Switches {
     ///
     /// [`IndirectBound::unbounded_switches`]: super::IndirectBound::unbounded_switches
     pub(super) unbounded: BTreeSet<u64>,
+    /// The [`IndirectBound::mode32_switches`].
+    ///
+    /// [`IndirectBound::mode32_switches`]: super::IndirectBound::mode32_switches
+    pub(super) mode32: BTreeSet<u64>,
+    /// The [`IndirectBound::unbounded_mode32_switches`].
+    ///
+    /// [`IndirectBound::unbounded_mode32_switches`]: super::IndirectBound::unbounded_mode32_switches
+    pub(super) unbounded_mode32: BTreeSet<u64>,
 }
 
 impl Switches {
@@ -72,10 +80,35 @@ impl Switches {
                         switches.unbounded.insert(address);
                     }
                 }
+                switches.add_mode32(code, address, &constants, raw);
                 constants.step(address, raw);
             }
         }
         switches
+    }
+
+    /// Adds where the word `raw` at `address` can put control into
+    /// 32-bit mode, with the `constants` of the paths to it.
+    ///
+    /// With MSR\[IR\] at 1 the word at the fetch address runs. With
+    /// MSR\[IR\] at 0 each word at its real address runs.
+    fn add_mode32(&mut self, code: &Code, address: u64, constants: &Constants, raw: u32) {
+        for ir in [true, false] {
+            match constants.mode32_switch(address, raw, ir) {
+                Switch::None => {}
+                Switch::To(addresses) if ir => self
+                    .mode32
+                    .extend(addresses.into_iter().filter(|&next| code.holds(next))),
+                Switch::To(addresses) => self.mode32.extend(
+                    addresses
+                        .into_iter()
+                        .flat_map(|next| code.real_aliases(next)),
+                ),
+                Switch::Unbounded => {
+                    self.unbounded_mode32.insert(address);
+                }
+            }
+        }
     }
 }
 
@@ -90,7 +123,9 @@ impl Switches {
 ///
 /// Real mode ignores EA bits 0 and 1, so the set also holds each word at
 /// the real address of each of these. Apart from the direct targets,
-/// these are the words that [`real_indirect_words`] gives. The set omits
+/// these are the words that [`real_indirect_words`] gives. The set also
+/// holds each word that [`low_indirect_words`] gives, which a `bcctr` or
+/// `bclr` in 32-bit mode can enter. The set omits
 /// the word after a direct branch as a target of that branch. The branch
 /// reaches that word with the constants of the fall-through. A branch
 /// that links still makes that word a join, as a return point.
@@ -111,7 +146,10 @@ fn joins(code: &Code, bound: &IndirectBound) -> BTreeSet<u64> {
                 .flat_map(|target| code.real_aliases(target))
                 .filter(move |&alias| Some(alias) != next)
         });
-    real_indirect_words(code, bound).chain(direct).collect()
+    real_indirect_words(code, bound)
+        .chain(low_indirect_words(code, bound))
+        .chain(direct)
+        .collect()
 }
 
 /// Where one `rfid`, `mtmsr` or `mtmsrd` can put control into real mode.

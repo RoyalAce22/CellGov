@@ -154,6 +154,13 @@ pub fn scan_syscalls(elf: &[u8]) -> Result<Vec<CallerSite>, CallerScanError> {
 ///   real address of an address that the image names, of a constant that
 ///   the code builds in its CTR or LR, or of the word after a branch that
 ///   links;
+/// - an indirect branch that may run in 32-bit mode, to the word at the
+///   low-order 32 bits of each of those addresses. A branch may run in
+///   32-bit mode when control can reach it from an `rfid` or `mtmsrd`
+///   that can clear MSR\[SF\] and MSR bit 1;
+/// - an `rfid` that can clear MSR\[SF\] and MSR bit 1 at an SRR0 that the
+///   scan does not know, to the word at the low-order 32 bits of each of
+///   those addresses;
 /// - an `rfid`, `mtmsr` or `mtmsrd` that can clear MSR\[IR\], to the word
 ///   at the real address where it puts control;
 /// - an `rfid` that can clear MSR\[IR\] at an SRR0 that the scan does not
@@ -929,3 +936,11 @@ mod invalid_form_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_rfid_low_word_tests.rs"]
 mod hypercall_rfid_low_word_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_mode32_branch_tests.rs"]
+mod hypercall_mode32_branch_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_mode32_review_tests.rs"]
+mod hypercall_mode32_review_tests;
