@@ -142,11 +142,9 @@ fn each_failed_bus_check_gets_its_marked_status_for_any_device() {
 
 #[test]
 fn an_open_of_another_device_on_a_bus_that_passes_the_checks_is_a_refusal() {
-    let what = "an open of a device other than device 0 of bus 1, which lv1 finds through state \
-                that CellGov does not model";
+    let what = "an open of a device other than devices 0, 1 and 2 of bus 1, which lv1 finds \
+                through state that CellGov does not model";
     let cases = [
-        (1, 1),
-        (1, 2),
         (1, 3),
         (1, 4),
         (2, 0),
@@ -155,7 +153,7 @@ fn an_open_of_another_device_on_a_bus_that_passes_the_checks_is_a_refusal() {
         (4, 9),
         (1, 0x0000_0001_0000_0000),
     ];
-    assert_eq!(cases.len(), 9);
+    assert_eq!(cases.len(), 7);
     for (bus, device) in cases {
         let call = request(bus, device, 0);
         assert_eq!(

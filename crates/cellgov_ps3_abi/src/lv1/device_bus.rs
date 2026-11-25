@@ -81,6 +81,58 @@
 //! [OFW-4.93 lv2_kernel a:0x8000000000095704-0x8000000000095718]. Its
 //! caller does not test the result
 //! [OFW-4.93 lv2_kernel a:0x80000000000936F0-0x800000000009370C].
+//!
+//! # Device 1 of bus 1
+//!
+//! The lookup reads device 1 from slot 3 of the system bus object
+//! [OFW-4.93 lv1 a:0x235DA4-0x235DAC] [OFW-4.93 lv1 a:0x235DC8-0x235DE8].
+//! lv1's init fills that slot with the constructor of slot 0
+//! [OFW-4.93 lv1 a:0x3A9A4C-0x3A9A70] [OFW-4.93 lv1 a:0x3A9758-0x3A9780].
+//! The device's method table is therefore the table of device 0.
+//!
+//! The open function does not call the device's open entry for device 1
+//! [OFW-4.93 lv1 a:0x237758-0x23775C]. It does these steps instead
+//! [OFW-4.93 lv1 a:0x2377DC-0x2377F0]:
+//! 1. It gets the controller object from slot 0 of an array
+//!    [OFW-4.93 lv1 a:0x23D0F8-0x23D104]. lv1's init makes the
+//!    controller for slot 3 and stores it there
+//!    [OFW-4.93 lv1 a:0x23DA60-0x23DAC4] [OFW-4.93 lv1 a:0x23DBC8-0x23DBD0].
+//!    A later init step keeps the device of slot 3 in the controller
+//!    [OFW-4.93 lv1 a:0x3AB040-0x3AB068].
+//! 2. It calls the controller's open with the caller's partition.
+//! 3. It returns that open's r3 zero-extended.
+//!
+//! The controller's open holds the controller's lock and does these steps:
+//! - It calls the device's entry at +16 with the partition
+//!   [OFW-4.93 lv1 a:0x23DC54-0x23DC74]. That entry is the open entry of
+//!   device 0 [OFW-4.93 lv1 a:0x2280A0-0x2280BC].
+//! - When the entry fails, it returns the entry's r3 sign-extended
+//!   [OFW-4.93 lv1 a:0x23DC78-0x23DCBC].
+//! - Otherwise it asks the device's entry at +48 whether the partition
+//!   holds the device open [OFW-4.93 lv1 a:0x23DCC0-0x23DCE0]. That entry
+//!   returns 1 when the open flag is set and the stored partition is the
+//!   caller's [OFW-4.93 lv1 a:0x228120-0x228144]. A 0 gives -5
+//!   [OFW-4.93 lv1 a:0x23DCE4-0x23DCF4].
+//! - After a 1, it sets the controller's state word to 2 and returns 0
+//!   [OFW-4.93 lv1 a:0x23DD14-0x23DD28]. When the state word was 3, it
+//!   first writes the controller's registers
+//!   [OFW-4.93 lv1 a:0x23DD2C-0x23DD94].
+//!
+//! The entry at +48 runs right after the entry at +16 opened the device
+//! for the same partition, so it returns 1. No step reads r5, and no hook
+//! runs after the open.
+//!
+//! # Device 2 of bus 1
+//!
+//! Device 2 takes the path of device 1 with the next slot and the next
+//! controller:
+//! - the lookup reads it from slot 4 [OFW-4.93 lv1 a:0x235DB0-0x235DB8];
+//! - lv1's init fills that slot with the same constructor
+//!   [OFW-4.93 lv1 a:0x3A9AA0-0x3A9AC4];
+//! - the open function calls the open of the controller in slot 1 of the
+//!   array [OFW-4.93 lv1 a:0x237760-0x23777C], which lv1's init makes for
+//!   slot 4 [OFW-4.93 lv1 a:0x23DB28-0x23DB54]
+//!   [OFW-4.93 lv1 a:0x23DBD4-0x23DBDC].
 
 use super::status::{zero_extended, LV1_BUSY};
 
@@ -130,16 +182,25 @@ pub const OPEN_DEVICE_NO_DEVICE_R3: u64 = 0x0000_0002_FFFF_FFFA;
 /// The r3 of `open_device` for a device that is open: `LV1_BUSY` (-9),
 /// zero-extended.
 ///
-/// The device's open entry returns -9 [OFW-4.93 lv1 a:0x2280A4], and the
-/// open function clears the high word [OFW-4.93 lv1 a:0x2376C4].
+/// The device's open entry returns -9 [OFW-4.93 lv1 a:0x2280A4]. The open
+/// function clears the high word on each path:
+/// - for device 0 of bus 1 [OFW-4.93 lv1 a:0x2376C4];
+/// - for device 1 of bus 1, after the controller's open passes the -9 on
+///   [OFW-4.93 lv1 a:0x23DC9C] [OFW-4.93 lv1 a:0x2377EC];
+/// - for device 2 of bus 1, on the same terms [OFW-4.93 lv1 a:0x237778].
 pub const OPEN_DEVICE_BUSY_R3: u64 = zero_extended(LV1_BUSY);
 
-/// The bus of the one device whose open path CellGov read.
+/// The bus of the devices whose open path CellGov read.
 pub const OPEN_DEVICE_READ_BUS: u64 = 1;
 
-/// The device id, on [`OPEN_DEVICE_READ_BUS`], of the one device whose
-/// open path CellGov read.
-pub const OPEN_DEVICE_READ_DEVICE: u64 = 0;
+/// The device ids, on [`OPEN_DEVICE_READ_BUS`], whose open path CellGov
+/// read, ascending.
+pub const OPEN_DEVICE_READ_DEVICES: &[u64] = &[0, 1, 2];
+
+/// Whether CellGov read lv1's open path for device `device` of bus `bus`.
+pub fn open_device_path_read(bus: u64, device: u64) -> bool {
+    bus == OPEN_DEVICE_READ_BUS && OPEN_DEVICE_READ_DEVICES.contains(&device)
+}
 
 /// The r3 of the handler's bus checks for the bus id `bus`, or `None`
 /// when `bus` passes them:
@@ -159,3 +220,7 @@ pub const fn open_device_bus_r3(bus: u64) -> Option<u64> {
 #[cfg(test)]
 #[path = "tests/device_bus_open_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/device_bus_open_device_1_tests.rs"]
+mod device_1_tests;

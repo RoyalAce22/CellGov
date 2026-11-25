@@ -1,8 +1,8 @@
 //! Hypercall 170, `open_device`: lv1 opens a device of a bus for the
 //! calling partition.
 //!
-//! The handler answers the call for device 0 of bus 1 and for the bus
-//! ids that the handler's checks refuse; see
+//! The handler answers the call for devices 0, 1 and 2 of bus 1 and for
+//! the bus ids that the handler's checks refuse; see
 //! [`cellgov_ps3_abi::lv1::device_bus`]. lv1 finds each other device
 //! through state that CellGov does not model, so a call for one is a
 //! refusal.
@@ -10,8 +10,7 @@
 use cellgov_mem::lanes::{LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::call::OPEN_DEVICE;
 use cellgov_ps3_abi::lv1::device_bus::{
-    open_device_bus_r3, open_device_handler, OPEN_DEVICE_BUSY_R3, OPEN_DEVICE_READ_BUS,
-    OPEN_DEVICE_READ_DEVICE,
+    open_device_bus_r3, open_device_handler, open_device_path_read, OPEN_DEVICE_BUSY_R3,
 };
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
@@ -49,10 +48,10 @@ impl LaneValue for OpenDevice {
     }
 }
 
-/// The open of a device that is not device 0 of bus 1.
+/// The open of a device that is not device 0, 1 or 2 of bus 1.
 const OTHER_DEVICE: UnmodelledError = UnmodelledError::new(
-    "an open of a device other than device 0 of bus 1, which lv1 finds through state that \
-     CellGov does not model",
+    "an open of a device other than devices 0, 1 and 2 of bus 1, which lv1 finds through state \
+     that CellGov does not model",
 );
 
 /// The open at a firmware whose handler is not read.
@@ -63,9 +62,9 @@ const UNREAD_FIRMWARE: UnmodelledError =
 ///
 /// The answer clears r4 to r10. Its r3 is one of these values:
 /// - the r3 of a failed bus check, from [`open_device_bus_r3`];
-/// - for device 0 of bus 1 that is open, [`OPEN_DEVICE_BUSY_R3`];
-/// - for device 0 of bus 1 that is not open, 0, and the answer opens
-///   the device.
+/// - for device 0, 1 or 2 of bus 1 that is open, [`OPEN_DEVICE_BUSY_R3`];
+/// - for device 0, 1 or 2 of bus 1 that is not open, 0, and the answer
+///   opens the device.
 ///
 /// lv1 reads no r5 on these paths. The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
@@ -85,7 +84,7 @@ pub(crate) fn open_device(
         bus: request.r(3),
         device: request.r(4),
     };
-    if (device.bus, device.device) != (OPEN_DEVICE_READ_BUS, OPEN_DEVICE_READ_DEVICE) {
+    if !open_device_path_read(device.bus, device.device) {
         return OTHER_DEVICE.refusal(request);
     }
     if state.is_open(device) {
@@ -106,3 +105,19 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/console_open_device_tests.rs"]
 mod console_tests;
+
+#[cfg(test)]
+#[path = "tests/open_device_1_tests.rs"]
+mod device_1_tests;
+
+#[cfg(test)]
+#[path = "tests/console_open_device_1_tests.rs"]
+mod console_device_1_tests;
+
+#[cfg(test)]
+#[path = "tests/open_device_2_tests.rs"]
+mod device_2_tests;
+
+#[cfg(test)]
+#[path = "tests/console_open_device_2_tests.rs"]
+mod console_device_2_tests;

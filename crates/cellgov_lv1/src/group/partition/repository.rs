@@ -3,7 +3,9 @@
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::call::READ_REPOSITORY_NODE;
-use cellgov_ps3_abi::lv1::repository::{lookup, ReadSite, RepositoryKey, SecondValue};
+use cellgov_ps3_abi::lv1::repository::{
+    lookup, lookup_absent, ReadSite, RepositoryKey, SecondValue, NO_NODE_R3,
+};
 
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
@@ -22,8 +24,8 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
 pub struct RepositoryRead {
     /// The partition and the raw key words of the read.
     pub key: RepositoryKey,
-    /// The two values the read answered, or `None` when the hypervisor
-    /// refused the read.
+    /// The r4 and r5 of the answer, or `None` when the hypervisor refused
+    /// the read. A read of an absent key answers 0 and 0.
     pub values: Option<(u64, u64)>,
     /// The unit that made the call.
     pub unit: UnitId,
@@ -45,26 +47,29 @@ fn key_of(request: &HypercallRequest) -> RepositoryKey {
 /// Answers the node that r3 to r7 name at the firmware version
 /// `firmware`, with its two values in r4 and r5.
 ///
-/// The key compares as raw words, the partition included. The read is a
-/// refusal that names the key in these cases:
-/// - no source gives the node's values for `firmware`;
+/// The key compares as raw words, the partition included. A key that a
+/// walk of the whole repository shows absent gets [`NO_NODE_R3`] with r4
+/// and r5 cleared. The read is a refusal that names the key in these
+/// cases:
+/// - no source gives the node's values or its absence for `firmware`;
 /// - `firmware` is `None`;
 /// - the source does not observe the second value, and the read site is
 ///   not one that discards it.
 ///
-/// At a site that discards an unobserved second value, r5 gets 0. The
-/// read never answers `LV1_NO_ENTRY` on its own.
+/// At a site that discards an unobserved second value, r5 gets 0.
 pub(crate) fn read_node(
     request: &HypercallRequest,
     firmware: Option<&str>,
 ) -> HypercallDisposition {
     let key = key_of(request);
-    let Some(node) = firmware.and_then(|firmware| lookup(&key, firmware)) else {
-        return HypercallDisposition::Refused(HypercallRefusal::RepositoryNode {
-            key,
-            unit: request.unit,
-            pc: request.pc,
-        });
+    let Some(firmware) = firmware else {
+        return unsourced(key, request);
+    };
+    let Some(node) = lookup(&key, firmware) else {
+        if lookup_absent(&key, firmware).is_some() {
+            return HypercallDisposition::Answered(HypercallAnswer::lv1_status(NO_NODE_R3, []));
+        }
+        return unsourced(key, request);
     };
     let site = ReadSite {
         sc: request.pc,
@@ -86,6 +91,15 @@ pub(crate) fn read_node(
             })
         }
     }
+}
+
+/// The refusal of the read of `key` that `request` made.
+fn unsourced(key: RepositoryKey, request: &HypercallRequest) -> HypercallDisposition {
+    HypercallDisposition::Refused(HypercallRefusal::RepositoryNode {
+        key,
+        unit: request.unit,
+        pc: request.pc,
+    })
 }
 
 /// The record of the read `request` made, which `read_node` answered
@@ -137,3 +151,7 @@ mod console_bus_tests;
 #[cfg(test)]
 #[path = "tests/console_repository_bus_device_tests.rs"]
 mod console_bus_device_tests;
+
+#[cfg(test)]
+#[path = "tests/console_repository_device_1_tests.rs"]
+mod console_device_1_tests;

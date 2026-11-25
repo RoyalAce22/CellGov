@@ -412,12 +412,141 @@ pub const NODES: &[RepositoryNode] = &[
     // reads it and gives it to the device object
     // [OFW-4.93 lv2_kernel a:0x8000000000093648-0x8000000000093664].
     bus_node(1, [field(b"dev", 1), field(b"id", 0), 0], 1, 0, 0x0068_a378),
+    // `bus.1.dev.1.intr.<i>` for i = 0, 1: the interrupt nodes of device 1.
+    // The handler of type 4 reads them until a read fails. It keeps v2 at
+    // +128 of the device object for type 3 and at +136 for type 4
+    // [OFW-4.93 lv2_kernel a:0x800000000009356c-0x80000000000935d4]
+    // [OFW-4.93 lv2_kernel a:0x8000000000093624-0x800000000009362c].
+    bus_node(
+        1,
+        [field(b"dev", 1), field(b"intr", 0), 0],
+        3,
+        0x10,
+        0x0068_a478,
+    ),
+    bus_node(
+        1,
+        [field(b"dev", 1), field(b"intr", 1), 0],
+        4,
+        0x0a,
+        0x0068_a4f8,
+    ),
+    // `bus.1.dev.1.reg.<r>.data` and `.type` for r = 0, 1: the register
+    // regions of device 1. The handler of type 4 reads the type and then
+    // the data until a type read fails
+    // [OFW-4.93 lv2_kernel a:0x80000000000934d4-0x8000000000093568]. It
+    // maps a region of type 3 as region 1 and a region of type 4 as
+    // region 2, with v1 as the address and v2 as the size
+    // [OFW-4.93 lv2_kernel a:0x8000000000093518-0x8000000000093538]
+    // [OFW-4.93 lv2_kernel a:0x8000000000093600-0x800000000009360c].
+    bus_node(
+        1,
+        [field(b"dev", 1), field(b"reg", 0), field(b"data", 0)],
+        0x0301_0000,
+        0x0001_0000,
+        0x0068_a5f8,
+    ),
+    bus_node(
+        1,
+        [field(b"dev", 1), field(b"reg", 0), field(b"type", 0)],
+        3,
+        0,
+        0x0068_a578,
+    ),
+    bus_node(
+        1,
+        [field(b"dev", 1), field(b"reg", 1), field(b"data", 0)],
+        0x0381_0000,
+        0x0001_0000,
+        0x0068_a6f8,
+    ),
+    bus_node(
+        1,
+        [field(b"dev", 1), field(b"reg", 1), field(b"type", 0)],
+        4,
+        0,
+        0x0068_a678,
+    ),
     bus_node(
         1,
         [field(b"dev", 1), field(b"type", 0), 0],
         4,
         0,
         0x0068_a3f8,
+    ),
+    // `bus.1.dev.2.id`: the handler of a later device of type 4 reads it
+    // and gives it to its device object
+    // [OFW-4.93 lv2_kernel a:0x8000000000093484-0x8000000000093490].
+    bus_node(1, [field(b"dev", 2), field(b"id", 0), 0], 2, 0, 0x0068_a778),
+    // The interrupt nodes and the register regions of device 2, which the
+    // handler of type 4 reads as it reads those of device 1.
+    bus_node(
+        1,
+        [field(b"dev", 2), field(b"intr", 0), 0],
+        3,
+        0x11,
+        0x0068_a878,
+    ),
+    bus_node(
+        1,
+        [field(b"dev", 2), field(b"intr", 1), 0],
+        4,
+        0x0b,
+        0x0068_a8f8,
+    ),
+    bus_node(
+        1,
+        [field(b"dev", 2), field(b"reg", 0), field(b"data", 0)],
+        0x0302_0000,
+        0x0001_0000,
+        0x0068_a9f8,
+    ),
+    bus_node(
+        1,
+        [field(b"dev", 2), field(b"reg", 0), field(b"type", 0)],
+        3,
+        0,
+        0x0068_a978,
+    ),
+    bus_node(
+        1,
+        [field(b"dev", 2), field(b"reg", 1), field(b"data", 0)],
+        0x0382_0000,
+        0x0001_0000,
+        0x0068_aaf8,
+    ),
+    bus_node(
+        1,
+        [field(b"dev", 2), field(b"reg", 1), field(b"type", 0)],
+        4,
+        0,
+        0x0068_aa78,
+    ),
+    bus_node(
+        1,
+        [field(b"dev", 2), field(b"type", 0), 0],
+        4,
+        0,
+        0x0068_a7f8,
+    ),
+    // `bus.1.dev.3.id` and `.intr.0`: the handler of type 6 reads the id
+    // [OFW-4.93 lv2_kernel a:0x8000000000093318-0x8000000000093328], and
+    // then interrupt 0. It keeps v2 at +128 of its device object when v1
+    // is 5 [OFW-4.93 lv2_kernel a:0x8000000000093380-0x80000000000933ac].
+    bus_node(1, [field(b"dev", 3), field(b"id", 0), 0], 3, 0, 0x0068_ab78),
+    bus_node(
+        1,
+        [field(b"dev", 3), field(b"intr", 0), 0],
+        5,
+        0x2f,
+        0x0068_ac78,
+    ),
+    bus_node(
+        1,
+        [field(b"dev", 3), field(b"type", 0), 0],
+        6,
+        0,
+        0x0068_abf8,
     ),
     // `bus.1.id`: the bus id. The bus search reads it for the bus it finds
     // [OFW-4.93 lv2_kernel a:0x800000000027786c]. The kernel reads it again
@@ -605,6 +734,78 @@ pub fn lookup(key: &RepositoryKey, firmware: &str) -> Option<&'static Repository
         .find(|node| node.key == *key && node.firmware.contains(&firmware))
 }
 
+/// The r3 of a read whose key names no node: `LV1_NO_ENTRY` (-6) with
+/// 0x1E in the high word.
+///
+/// lv1's lookup returns it when the walk finds no node of the key
+/// [OFW-4.93 lv1 a:0x2E3D38-0x2E3D40] [OFW-4.93 lv1 a:0x2E3E9C-0x2E3EB8].
+/// The handler returns it with the values that it cleared before the
+/// lookup, so r4 and r5 are 0 [OFW-4.93 lv1 a:0x2E52E0-0x2E5300]
+/// [OFW-4.93 lv1 a:0x2E53A4-0x2E53B8].
+pub const NO_NODE_R3: u64 = 0x0000_001E_FFFF_FFFA;
+
+/// A key that a walk of the whole repository of a partition found no node
+/// for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AbsentNode {
+    /// The read that names no node.
+    pub key: RepositoryKey,
+    /// The firmware versions whose read CellGov answers with
+    /// [`NO_NODE_R3`], ascending.
+    pub firmware: &'static [&'static str],
+    /// The capture directory of the walk, relative to the workspace root.
+    pub capture: &'static str,
+}
+
+/// A key of lpar 1's bus `bus` whose last three key words are `n`, which
+/// the walk of [`BUS_CAPTURE`] found no node for.
+const fn absent_bus_node(bus: u64, n: [u64; 3]) -> AbsentNode {
+    AbsentNode {
+        key: RepositoryKey {
+            lpar: LPAR_ID_PME,
+            n1: first_field(b"bus", bus),
+            n2: n[0],
+            n3: n[1],
+            n4: n[2],
+        },
+        firmware: CAPTURE_FIRMWARE,
+        capture: BUS_CAPTURE,
+    }
+}
+
+/// Each key that a logged kernel boot reads and that a walk of the whole
+/// repository found no node for, ascending by key.
+///
+/// The walk of [`BUS_CAPTURE`] went from the first dummy node to the
+/// list's last node, and the capture keeps every node of buses 0 to 3.
+/// A key of those buses that the capture does not hold therefore names no
+/// node on the reference console.
+pub const ABSENT_NODES: &[AbsentNode] = &[
+    // `bus.1.dev.1.intr.2`: the read after the last interrupt node of
+    // device 1 ends the handler's interrupt loop
+    // [OFW-4.93 lv2_kernel a:0x80000000000935cc-0x80000000000935d4].
+    absent_bus_node(1, [field(b"dev", 1), field(b"intr", 2), 0]),
+    // `bus.1.dev.1.reg.2.type`: the read after the last region of device 1
+    // ends the handler's region loop
+    // [OFW-4.93 lv2_kernel a:0x8000000000093550-0x800000000009356c].
+    absent_bus_node(1, [field(b"dev", 1), field(b"reg", 2), field(b"type", 0)]),
+    // The same two reads for device 2.
+    absent_bus_node(1, [field(b"dev", 2), field(b"intr", 2), 0]),
+    absent_bus_node(1, [field(b"dev", 2), field(b"reg", 2), field(b"type", 0)]),
+    // `bus.1.dev.3.reg.0.type`: the handler of type 6 reads it after the
+    // id. A failed read skips the region and goes on to interrupt 0
+    // [OFW-4.93 lv2_kernel a:0x8000000000093364-0x8000000000093380].
+    absent_bus_node(1, [field(b"dev", 3), field(b"reg", 0), field(b"type", 0)]),
+];
+
+/// The absent key `key` at the firmware version `firmware`, or `None` when
+/// no walk shows that the key names no node at that firmware.
+pub fn lookup_absent(key: &RepositoryKey, firmware: &str) -> Option<&'static AbsentNode> {
+    ABSENT_NODES
+        .iter()
+        .find(|absent| absent.key == *key && absent.firmware.contains(&firmware))
+}
+
 #[cfg(test)]
 #[path = "tests/repository_tests.rs"]
 mod tests;
@@ -636,3 +837,7 @@ mod bus_tests;
 #[cfg(test)]
 #[path = "tests/repository_bus_device_tests.rs"]
 mod bus_device_tests;
+
+#[cfg(test)]
+#[path = "tests/repository_device_1_tests.rs"]
+mod device_1_tests;

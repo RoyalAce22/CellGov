@@ -12,7 +12,7 @@ use cellgov_lv1_archive::{
     REPOSITORY_SOURCES,
 };
 use cellgov_lv2_archive::{self as lv2_archive, KERNEL, PUP};
-use cellgov_ps3_abi::lv1::repository::{NodeSource, NODES};
+use cellgov_ps3_abi::lv1::repository::{NodeSource, ABSENT_NODES, NODES};
 
 fn archive_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/lv1")
@@ -146,6 +146,7 @@ fn repository_rows_are_well_formed() {
         }
     }
 
-    // The node table serves exactly the answered reads.
-    archive::repository_rows(NODES, &reads, &pups).unwrap_or_else(|e| panic!("{e}"));
+    // The node table and the absent-key table answer exactly the answered
+    // reads.
+    archive::repository_rows(NODES, ABSENT_NODES, &reads, &pups).unwrap_or_else(|e| panic!("{e}"));
 }

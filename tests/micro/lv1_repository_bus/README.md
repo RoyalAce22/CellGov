@@ -72,6 +72,17 @@ wrapper, which sets r3 = 1 and makes hypercall 91
      [OFW-4.93 lv2_kernel a:0x8000000000093648-0x8000000000093654];
    - for a later device of type 4, the read is at
      [OFW-4.93 lv2_kernel a:0x8000000000093484-0x8000000000093490].
+8. After the open, the handler of a device of type 4 reads
+   `bus.<n>.dev.<m>.reg.<r>.type` and then `.data` for r = 0, 1 and on,
+   until a type read fails. Then it reads `bus.<n>.dev.<m>.intr.<i>` for
+   i = 0, 1 and on, until a read fails
+   [OFW-4.93 lv2_kernel a:0x80000000000934d4-0x80000000000935d4]. Then
+   the device loop reads the type of the next device.
+9. The handler of a device of type 6 reads `bus.<n>.dev.<m>.id`
+   [OFW-4.93 lv2_kernel a:0x8000000000093318-0x8000000000093328] and
+   then `bus.<n>.dev.<m>.reg.0.type`. When that read fails, it reads
+   `bus.<n>.dev.<m>.intr.0`, and keeps v2 when v1 is 5
+   [OFW-4.93 lv2_kernel a:0x8000000000093364-0x80000000000933ac].
 
 The accessor of the `intr` read builds its key from the `bus` and `dev`
 words and the word `intr` with an index, and returns v1 and v2
@@ -85,8 +96,10 @@ The accessors build the key words from TOC strings: `bus`
 [OFW-4.93 lv2_kernel a:0x80000000002fa1e0], `id`
 [OFW-4.93 lv2_kernel a:0x80000000002d66d8], `type`
 [OFW-4.93 lv2_kernel a:0x80000000002d92d0], `num_dev`
-[OFW-4.93 lv2_kernel a:0x80000000002d92f8] and `intr`
-[OFW-4.93 lv2_kernel a:0x80000000002d92c8]. Linux
+[OFW-4.93 lv2_kernel a:0x80000000002d92f8], `intr`
+[OFW-4.93 lv2_kernel a:0x80000000002d92c8], `reg`
+[OFW-4.93 lv2_kernel a:0x80000000002d92c0] and `data`
+[OFW-4.93 lv2_kernel a:0x80000000002d92d8]. Linux
 `arch/powerpc/platforms/ps3/repository.c` uses the same key layouts.
 
 ## Where lv1 keeps the nodes
@@ -134,6 +147,49 @@ The served nodes:
 | `bus.1.dev.0.intr.0` | 0x2F7E7173 | 3 | 0xCE8E7EF5 | 0x68A290 |
 | `bus.1.dev.1.type` | 0x32697565 | 5 | 0xA6AE964D | 0x68A390 |
 | `bus.1.dev.1.id` | 0x2F740500 | 0 | 0x00A02EF5 | 0x68A310 |
+| `bus.1.dev.1.reg.0.type` | 0x000C1265 | 5 | 0xA6483001 | 0x68A510 |
+| `bus.1.dev.1.reg.0.data` | 0x10141661 | 1 | 0x86682809 | 0x68A590 |
+| `bus.1.dev.1.reg.1.type` | 0x000C1264 | 4 | 0x26483001 | 0x68A610 |
+| `bus.1.dev.1.reg.1.data` | 0x10141660 | 0 | 0x06682809 | 0x68A690 |
+| `bus.1.dev.1.intr.0` | 0x2F7E7172 | 2 | 0x4E8E7EF5 | 0x68A410 |
+| `bus.1.dev.1.intr.1` | 0x2F7E7173 | 3 | 0xCE8E7EF5 | 0x68A490 |
+| `bus.1.dev.2.type` | 0x32697566 | 6 | 0x66AE964D | 0x68A790 |
+| `bus.1.dev.2.id` | 0x2F740503 | 3 | 0xC0A02EF5 | 0x68A710 |
+| `bus.1.dev.2.reg.0.type` | 0x000C1266 | 6 | 0x66483001 | 0x68A910 |
+| `bus.1.dev.2.reg.0.data` | 0x10141662 | 2 | 0x46682809 | 0x68A990 |
+| `bus.1.dev.2.reg.1.type` | 0x000C1267 | 7 | 0xE6483001 | 0x68AA10 |
+| `bus.1.dev.2.reg.1.data` | 0x10141663 | 3 | 0xC6682809 | 0x68AA90 |
+| `bus.1.dev.2.intr.0` | 0x2F7E7171 | 1 | 0x8E8E7EF5 | 0x68A810 |
+| `bus.1.dev.2.intr.1` | 0x2F7E7170 | 0 | 0x0E8E7EF5 | 0x68A890 |
+| `bus.1.dev.3.type` | 0x32697567 | 7 | 0xE6AE964D | 0x68AB90 |
+| `bus.1.dev.3.id` | 0x2F740502 | 2 | 0x40A02EF5 | 0x68AB10 |
+| `bus.1.dev.3.intr.0` | 0x2F7E7170 | 0 | 0x0E8E7EF5 | 0x68AC10 |
+
+Two pairs of nodes have one hash: `bus.1.dev.1.intr.1` and
+`bus.1.dev.0.intr.0`, and `bus.1.dev.3.intr.0` and
+`bus.1.dev.2.intr.1`. The walk tells them apart by the four key words
+[OFW-4.93 lv1 a:0x2E39D4-0x2E39F8].
+
+## Keys with no node
+
+The walk went over the whole list, and the capture keeps every node of
+buses 0 to 3. So a key of those buses that neither file holds names no
+node on the reference console. The 4.93 boot reads five such keys:
+
+- `bus.1.dev.1.reg.2.type` and `bus.1.dev.2.reg.2.type`, which end the
+  handler's region loop for devices 1 and 2;
+- `bus.1.dev.1.intr.2` and `bus.1.dev.2.intr.2`, which end the
+  handler's interrupt loop for devices 1 and 2;
+- `bus.1.dev.3.reg.0.type`, after which the handler of type 6 goes on
+  to interrupt 0.
+
+lv1's lookup returns r3 = 0x0000001EFFFFFFFA when the walk finds no
+node [OFW-4.93 lv1 a:0x2E3D38-0x2E3D40]
+[OFW-4.93 lv1 a:0x2E3E9C-0x2E3EB8]. The handler clears the two values
+before the lookup, so r4 and r5 are 0
+[OFW-4.93 lv1 a:0x2E52E0-0x2E5300] [OFW-4.93 lv1 a:0x2E53A4-0x2E53B8].
+CellGov's hypervisor answers the five keys so, through
+`cellgov_ps3_abi::lv1::repository::ABSENT_NODES`.
 
 ## What writes the nodes
 
@@ -146,11 +202,11 @@ depend on the unit. Its values are those of one CECH-2001A.
 
 | File | Rows | Holds |
 |---|---|---|
-| `node.tsv` | 9 | the nodes that the 4.93 boot reads: the firmware, the key, the lv1 address of v1, the number of reads, whether they agree, and v1 and v2 |
-| `unread_node.tsv` | 27 | the other bus nodes of buses 0 to 3, in the same columns, for a later boot that reads them |
+| `node.tsv` | 26 | the nodes that the 4.93 boot reads: the firmware, the key, the lv1 address of v1, the number of reads, whether they agree, and v1 and v2 |
+| `unread_node.tsv` | 10 | the other bus nodes of buses 0 to 3, in the same columns, for a later boot that reads them |
 
-The rows of `bus.1.dev.0.intr.0`, `bus.1.dev.1.type` and
-`bus.1.dev.1.id` moved from `unread_node.tsv` to `node.tsv` when the
+The rows of `bus.1.dev.0.intr.0` and of the nodes of devices 1 to 3 of
+bus 1 moved from `unread_node.tsv` to `node.tsv` when the
 4.93 boot came to read them. Their values are those of the one walk on
 2026-11-14.
 
@@ -168,6 +224,19 @@ The rows of `bus.1.dev.0.intr.0`, `bus.1.dev.1.type` and
 - `bus.1.dev.1.type` holds 4, so the device loop runs the handler of
   type 4 for device 1.
 - `bus.1.dev.1.id` holds 1.
+- `bus.1.dev.1.reg.0` holds type 3, at 0x3010000 with size 0x10000.
+  `bus.1.dev.1.reg.1` holds type 4, at 0x3810000 with size 0x10000.
+- `bus.1.dev.1.intr.0` holds v1 = 3 and v2 = 0x10, and
+  `bus.1.dev.1.intr.1` holds v1 = 4 and v2 = 0xA.
+- `bus.1.dev.2.type` holds 4, so the device loop runs the handler of
+  type 4 for device 2. `bus.1.dev.2.id` holds 2.
+- `bus.1.dev.2.reg.0` holds type 3, at 0x3020000 with size 0x10000.
+  `bus.1.dev.2.reg.1` holds type 4, at 0x3820000 with size 0x10000.
+- `bus.1.dev.2.intr.0` holds v1 = 3 and v2 = 0x11, and
+  `bus.1.dev.2.intr.1` holds v1 = 4 and v2 = 0xB.
+- `bus.1.dev.3.type` holds 6, so the device loop runs the handler of
+  type 6 for device 3. `bus.1.dev.3.id` holds 3, and
+  `bus.1.dev.3.intr.0` holds v1 = 5 and v2 = 0x2F.
 
-Every other served value is 0 in v2. lv1 answers each read with r3 = 0
+The other served values are 0 in v2. lv1 answers each read with r3 = 0
 and the node's two values.

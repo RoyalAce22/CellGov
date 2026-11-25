@@ -25,7 +25,7 @@ use cellgov_lv1_archive::{
 };
 use cellgov_lv2_archive::{self as lv2_archive, KernelRow, OwnerClass, PupRow, KERNEL, PUP};
 use cellgov_ps3_abi::lv1::call::UNLISTED_ALIASES;
-use cellgov_ps3_abi::lv1::repository::NODES;
+use cellgov_ps3_abi::lv1::repository::{ABSENT_NODES, NODES};
 use cellgov_ps3_abi::lv1::table::{HYPERCALL_TABLE_ENTRIES, HYPERCALL_TABLE_SITES};
 
 const README_TEMPLATE: &str = include_str!("templates/README.md.template");
@@ -257,7 +257,7 @@ fn rendered() -> BTreeMap<String, String> {
     )
     .expect("every committed hypercall site row names a committed PUP");
     let repository_reads = committed_repository_reads();
-    let repository = archive::repository_rows(NODES, &repository_reads, &pups)
+    let repository = archive::repository_rows(NODES, ABSENT_NODES, &repository_reads, &pups)
         .unwrap_or_else(|e| panic!("{e}; regenerate with:\n  {REPOSITORY_REGENERATE}"));
     let mut files = BTreeMap::new();
     files.insert(

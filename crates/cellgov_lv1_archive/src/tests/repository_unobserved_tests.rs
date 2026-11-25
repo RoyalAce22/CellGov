@@ -54,7 +54,7 @@ fn read_row() -> RepositoryReadRow {
 
 #[test]
 fn an_unobserved_second_value_renders_as_the_unobserved_label_and_never_as_0() {
-    let rows = repository_rows(&[captured_node()], &[read_row()], &[pup_row()]).unwrap();
+    let rows = repository_rows(&[captured_node()], &[], &[read_row()], &[pup_row()]).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].v2, None);
     let text = repository_tsv(&rows).unwrap();
@@ -71,7 +71,7 @@ fn an_unobserved_second_value_renders_as_the_unobserved_label_and_never_as_0() {
 
 #[test]
 fn the_v2_column_refuses_a_label_other_than_unobserved() {
-    let rows = repository_rows(&[captured_node()], &[read_row()], &[pup_row()]).unwrap();
+    let rows = repository_rows(&[captured_node()], &[], &[read_row()], &[pup_row()]).unwrap();
     let text = repository_tsv(&rows).unwrap();
     let other = text.replace(REPOSITORY_UNOBSERVED, "unknown");
     assert!(matches!(
@@ -87,7 +87,7 @@ fn a_logged_refusal_of_a_site_gated_node_names_the_site_and_not_only_a_stale_log
         ..read_row()
     };
     assert_eq!(
-        repository_rows(&[captured_node()], &[refused], &[pup_row()]),
+        repository_rows(&[captured_node()], &[], &[refused], &[pup_row()]),
         Err(RepositoryTableError::RefusedAtUnlistedSite {
             pup_sha256: PUP.to_string(),
             key: rgntotal(),

@@ -85,7 +85,8 @@ fn the_bus_checks_refuse_0_and_each_id_above_4() {
 /// The 4.93 kernel's call names bus 1 and device 0
 /// [OFW-4.93 lv2_kernel a:0x80000000000936CC-0x80000000000936EC].
 #[test]
-fn the_read_open_path_is_device_0_of_bus_1() {
-    assert_eq!((OPEN_DEVICE_READ_BUS, OPEN_DEVICE_READ_DEVICE), (1, 0));
+fn device_0_of_bus_1_has_a_read_open_path() {
+    assert_eq!(OPEN_DEVICE_READ_BUS, 1);
+    assert!(open_device_path_read(OPEN_DEVICE_READ_BUS, 0));
     assert_eq!(open_device_bus_r3(OPEN_DEVICE_READ_BUS), None);
 }

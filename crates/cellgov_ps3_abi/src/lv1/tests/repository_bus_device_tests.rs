@@ -69,14 +69,6 @@ fn device_1_of_bus_1_answers_type_4_and_id_1_from_the_lv1_capture() {
     );
 }
 
-/// The handler of a device of type 4 reads `reg.0.type` of the device
-/// after its open [OFW-4.93 lv2_kernel a:0x80000000000934d4-0x80000000000934ec].
-/// No logged boot reaches that read.
-#[test]
-fn the_region_0_type_of_device_1_has_no_served_node() {
-    assert!(lookup(&device(1, [field(b"reg", 0), field(b"type", 0)]), "4.93").is_none());
-}
-
 #[test]
 fn a_floor_read_of_a_device_node_is_refused() {
     for fw in ["1.50", "1.94", "3.70"] {

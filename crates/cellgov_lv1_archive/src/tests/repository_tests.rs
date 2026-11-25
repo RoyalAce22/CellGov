@@ -98,6 +98,7 @@ fn a_node_row_lists_the_firmware_the_node_names() {
     ];
     let rows = repository_rows(
         &[node_at(bi(b"pun", 0), 1, &["1.50", "4.93"])],
+        &[],
         &reads,
         &pups,
     )
@@ -128,7 +129,7 @@ fn two_nodes_of_one_key_give_two_rows_ascending_by_firmware() {
         node_at(bi(b"pun", 0), 2, &["4.93"]),
         node_at(bi(b"pun", 0), 1, &["1.50"]),
     ];
-    let rows = repository_rows(&nodes, &reads, &pups).unwrap();
+    let rows = repository_rows(&nodes, &[], &reads, &pups).unwrap();
     let cells: Vec<(u64, Vec<String>)> = rows.into_iter().map(|r| (r.v1, r.fw)).collect();
     assert_eq!(
         cells,
@@ -142,7 +143,7 @@ fn a_node_no_boot_reads_is_refused() {
     let reads = [read_row(1, bi(b"pun", 0), 0, true)];
     let nodes = [node(bi(b"pun", 0), 1), node(bi(b"spun", 0), 6)];
     assert_eq!(
-        repository_rows(&nodes, &reads, &pups),
+        repository_rows(&nodes, &[], &reads, &pups),
         Err(RepositoryTableError::UnreadNode {
             key: bi(b"spun", 0),
             fw: "1.50".to_string(),
@@ -159,7 +160,7 @@ fn a_node_that_names_a_firmware_whose_boot_does_not_read_it_is_refused() {
     ];
     let nodes = [node_at(bi(b"pun", 0), 1, &["1.50", "4.93"])];
     assert_eq!(
-        repository_rows(&nodes, &reads, &pups),
+        repository_rows(&nodes, &[], &reads, &pups),
         Err(RepositoryTableError::UnreadNode {
             key: bi(b"pun", 0),
             fw: "4.93".to_string(),
@@ -175,7 +176,7 @@ fn a_read_answered_at_a_firmware_the_node_does_not_name_is_stale() {
         read_row(2, bi(b"pun", 0), 0, true),
     ];
     assert_eq!(
-        repository_rows(&[node(bi(b"pun", 0), 1)], &reads, &pups),
+        repository_rows(&[node(bi(b"pun", 0), 1)], &[], &reads, &pups),
         Err(RepositoryTableError::StaleRead {
             pup_sha256: pup(2),
             key: bi(b"pun", 0),
@@ -189,7 +190,7 @@ fn a_logged_state_the_node_table_contradicts_is_stale() {
     let pups = [pup_row(1, "1.50")];
     let answered_without_row = [read_row(1, bi(b"pu", 0), 0, true)];
     assert_eq!(
-        repository_rows(&[], &answered_without_row, &pups),
+        repository_rows(&[], &[], &answered_without_row, &pups),
         Err(RepositoryTableError::StaleRead {
             pup_sha256: pup(1),
             key: bi(b"pu", 0),
@@ -198,7 +199,7 @@ fn a_logged_state_the_node_table_contradicts_is_stale() {
     );
     let refused_with_row = [read_row(1, bi(b"pu", 0), 0, false)];
     assert_eq!(
-        repository_rows(&[node(bi(b"pu", 0), 1)], &refused_with_row, &pups),
+        repository_rows(&[node(bi(b"pu", 0), 1)], &[], &refused_with_row, &pups),
         Err(RepositoryTableError::StaleRead {
             pup_sha256: pup(1),
             key: bi(b"pu", 0),
@@ -211,7 +212,12 @@ fn a_logged_state_the_node_table_contradicts_is_stale() {
 fn a_read_of_an_unknown_pup_is_refused() {
     let reads = [read_row(9, bi(b"pun", 0), 0, true)];
     assert_eq!(
-        repository_rows(&[node(bi(b"pun", 0), 1)], &reads, &[pup_row(1, "1.50")]),
+        repository_rows(
+            &[node(bi(b"pun", 0), 1)],
+            &[],
+            &reads,
+            &[pup_row(1, "1.50")]
+        ),
         Err(RepositoryTableError::UnknownPup { pup_sha256: pup(9) })
     );
 }

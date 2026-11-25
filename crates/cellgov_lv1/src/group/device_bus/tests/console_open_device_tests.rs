@@ -16,16 +16,16 @@ const SLOT_0: u64 = 32;
 
 /// The open flag byte and the partition doubleword of the device
 /// [OFW-4.93 lv1 a:0x2280B0-0x2280BC].
-const OPEN_FLAG: u64 = 108;
-const PARTITION: u64 = 112;
+pub(super) const OPEN_FLAG: u64 = 108;
+pub(super) const PARTITION: u64 = 112;
 
 /// The method table that the device's constructor stores at +0
 /// [OFW-4.93 lv1 a:0x22DDC0-0x22DDD4] [OFW-4.93 lv1 a:0x353480-0x353484].
-const DEVICE_METHOD_TABLE: u64 = 0x35_C878;
+pub(super) const DEVICE_METHOD_TABLE: u64 = 0x35_C878;
 
 /// The address and value of each row of the capture's file `name`, whose
 /// value column is `column`. Each row must hold two reads that agree.
-fn captured(name: &str, column: &str) -> Vec<(u64, u64)> {
+pub(super) fn captured(name: &str, column: &str) -> Vec<(u64, u64)> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join(CAPTURE)
@@ -54,12 +54,12 @@ fn hex(cell: &str) -> u64 {
     u64::from_str_radix(digits, 16).unwrap_or_else(|e| panic!("{cell}: {e}"))
 }
 
-fn one(rows: Vec<(u64, u64)>) -> (u64, u64) {
+pub(super) fn one(rows: Vec<(u64, u64)>) -> (u64, u64) {
     assert_eq!(rows.len(), 1, "{rows:?}");
     rows[0]
 }
 
-fn kernel_request(number: u64, inputs: [u64; 8]) -> HypercallRequest {
+pub(super) fn kernel_request(number: u64, inputs: [u64; 8]) -> HypercallRequest {
     HypercallRequest {
         unit: UnitId::new(0),
         number,

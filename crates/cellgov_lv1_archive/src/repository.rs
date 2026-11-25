@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use cellgov_lv1::RepositoryRead;
-use cellgov_ps3_abi::lv1::repository::{RepositoryKey, RepositoryNode, SecondValue};
+use cellgov_ps3_abi::lv1::repository::{AbsentNode, RepositoryKey, RepositoryNode, SecondValue};
 
 use cellgov_lv2_archive::{self as archive, ArchiveError, PupRow, Table, NONE};
 
@@ -68,6 +68,18 @@ pub enum RepositoryTableError {
         /// The node.
         key: RepositoryKey,
         /// The firmware the node names.
+        fw: String,
+    },
+    /// The absent-key table holds a key for a firmware whose logged boot
+    /// does not read it.
+    #[error(
+        "the absent-key table holds {key} for firmware {fw}, whose logged kernel boot does not \
+         read it"
+    )]
+    UnreadAbsentKey {
+        /// The key.
+        key: RepositoryKey,
+        /// The firmware the entry names.
         fw: String,
     },
     /// A logged read's state disagrees with the node table: the log is
@@ -160,15 +172,21 @@ pub fn repository_read_rows_of(
 /// One row per node of `nodes`, with the firmware it names, ascending by
 /// key and then by firmware.
 ///
+/// The hypervisor answers a key of `absent` with lv1's no-node status, so
+/// an answered read of that key needs no row of `nodes`.
+///
 /// # Errors
 ///
 /// Returns the first [`RepositoryTableError`]:
 /// - a read row that names a PUP `pups` does not hold;
-/// - a read whose state disagrees with `nodes` at the read's firmware;
+/// - a read whose state disagrees with `nodes` and `absent` at the read's
+///   firmware;
 /// - a refused read of a node whose second value no source observes;
+/// - an absent key that names a firmware whose read rows do not name it;
 /// - a node that names a firmware whose read rows do not name it.
 pub fn repository_rows(
     nodes: &[RepositoryNode],
+    absent: &[AbsentNode],
     reads: &[RepositoryReadRow],
     pups: &[PupRow],
 ) -> Result<Vec<RepositoryRow>, RepositoryTableError> {
@@ -201,7 +219,10 @@ pub fn repository_rows(
                 key: read.key,
             });
         }
-        if read.answered != served.is_some() {
+        let shown_absent = absent
+            .iter()
+            .any(|absent| absent.key == read.key && absent.firmware.contains(fw));
+        if read.answered != (served.is_some() || shown_absent) {
             return Err(RepositoryTableError::StaleRead {
                 pup_sha256: read.pup_sha256.clone(),
                 key: read.key,
@@ -209,6 +230,19 @@ pub fn repository_rows(
             });
         }
         read_at.insert((read.key, fw));
+    }
+    let unread_absent = absent.iter().find_map(|absent| {
+        absent
+            .firmware
+            .iter()
+            .find(|fw| !read_at.contains(&(absent.key, **fw)))
+            .map(|fw| (absent.key, fw))
+    });
+    if let Some((key, fw)) = unread_absent {
+        return Err(RepositoryTableError::UnreadAbsentKey {
+            key,
+            fw: (*fw).to_string(),
+        });
     }
     let mut rows = Vec::with_capacity(nodes.len());
     for node in nodes {
@@ -347,3 +381,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/repository_unobserved_tests.rs"]
 mod unobserved_tests;
+
+#[cfg(test)]
+#[path = "tests/repository_absent_tests.rs"]
+mod absent_tests;
