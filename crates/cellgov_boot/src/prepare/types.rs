@@ -137,6 +137,8 @@ pub struct ExecutionOptions<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EngineOptions {
     /// The predecode passes of the primary unit's instruction shadow.
+    ///
+    /// [`PpuShadow`] names the threads that share the shadow.
     pub ppu_shadow: PpuShadow,
     /// Whether the runtime may take its trivial-commit fast path.
     pub trivial_commit_fast_path: bool,
@@ -152,6 +154,9 @@ impl Default for EngineOptions {
 }
 
 /// The predecode passes of the primary unit's instruction shadow.
+///
+/// Each thread that the boot process creates before its first process
+/// spawn fetches through a clone of the same shadow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PpuShadow {
     /// No shadow: the unit decodes each instruction it fetches.

@@ -1,6 +1,8 @@
-//! Pins the per-unit predecoded shadow non-aliasing invariant for
-//! `Runtime::snapshot`: a switch to `Arc`-shared `slots`/`stale`
-//! storage would let branch A's `invalidate_range` corrupt branch B.
+//! Two `Runtime::snapshot` branches whose shadows are clones of one
+//! shadow:
+//! - a refresh in one clone never reaches the other;
+//! - an invalidation in one clone makes the other miss, so the other
+//!   decodes its own memory.
 
 #![allow(
     clippy::unwrap_used,
@@ -42,8 +44,6 @@ fn build_shadow_pair() -> (PredecodedShadow, PredecodedShadow) {
     (original, clone)
 }
 
-/// Guards the aliasing tests against silent drift in the test fixture
-/// encodings into a different valid PPC64 instruction.
 #[test]
 fn encoding_decodes_to_expected() {
     match decode(PPC_ADDI_R3_R3_1) {
@@ -71,44 +71,52 @@ fn encoding_decodes_to_expected() {
 }
 
 #[test]
-fn cloned_shadow_unaffected_by_invalidate_on_original() {
-    let (mut original, clone) = build_shadow_pair();
-    let unaffected_pre = clone.get(SHADOW_BASE);
+fn a_rewrite_in_the_original_never_runs_in_the_clone() {
+    let (mut original, mut clone) = build_shadow_pair();
 
-    // Mutate the original (simulates SMC / CRT0 reloc on a snapshot's host).
     original.invalidate_range(SHADOW_BASE, 4);
-
+    let rewritten = original.refresh(SHADOW_BASE, PPC_BLR).flatten();
     assert!(
-        original.get(SHADOW_BASE).is_none(),
-        "test setup: invalidate_range must stale the slot in the original",
+        rewritten.is_some() && original.get(SHADOW_BASE) == rewritten,
+        "test setup: the original must run its refreshed word",
     );
 
-    // Aliasing canary: if slots / stale ever share storage via Arc,
-    // this fires.
     assert_eq!(
         clone.get(SHADOW_BASE),
-        unaffected_pre,
-        "shadow `slots`/`stale` aliased the original -- \
-         branch A invalidate leaked into branch B (via slot lookup)",
+        None,
+        "the clone read a decode from the original's branch",
+    );
+    clone.refresh(SHADOW_BASE, PPC_ADDI_R3_R3_1);
+    assert_eq!(
+        clone.get(SHADOW_BASE),
+        Some(PpuInstruction::Addi {
+            rt: 3,
+            ra: 3,
+            imm: 1
+        }),
+        "the clone must run the word of its own memory",
     );
 }
 
 #[test]
-fn cloned_shadow_invalidate_does_not_propagate_to_original() {
+fn a_rewrite_in_the_clone_never_runs_in_the_original() {
     let (original, mut clone) = build_shadow_pair();
-    let unaffected_pre = original.get(SHADOW_BASE);
 
     clone.invalidate_range(SHADOW_BASE, 4);
-
+    let rewritten = clone.refresh(SHADOW_BASE, PPC_BLR).flatten();
     assert!(
-        clone.get(SHADOW_BASE).is_none(),
-        "test setup: invalidate_range must stale the slot in the clone",
+        rewritten.is_some() && clone.get(SHADOW_BASE) == rewritten,
+        "test setup: the clone must run its refreshed word",
     );
 
     assert_eq!(
         original.get(SHADOW_BASE),
-        unaffected_pre,
-        "shadow `slots`/`stale` aliased the clone -- \
-         branch B invalidate leaked into branch A (via slot lookup)",
+        None,
+        "the original read a decode from the clone's branch",
+    );
+    let untouched = original.get(SHADOW_BASE + 8);
+    assert!(
+        untouched.is_some() && untouched == clone.get(SHADOW_BASE + 8),
+        "a slot neither branch wrote must keep the shared decode",
     );
 }

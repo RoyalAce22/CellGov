@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use cellgov_core::Runtime;
+use cellgov_ppu::shadow::PredecodedShadow;
 use cellgov_ppu::PpuExecutionUnit;
 use cellgov_ps3_abi::hw::address_space::{PS3_PRIMARY_STACK_SIZE_MAX, PS3_RSX_IOMAP_BASE};
 
@@ -22,27 +23,103 @@ type ExportMap = BTreeMap<String, BTreeMap<u32, u32>>;
 
 /// Install the factories the runtime materializes execution units from.
 ///
-/// Both fire again for every child the guest creates, so `debug_opts`
-/// is captured by the closure.
-pub(super) fn install_unit_factories(rt: &mut Runtime, debug_opts: BootDebugOptions) {
+/// Both fire again for every child the guest creates, so the PPU
+/// closure captures `debug_opts` and `thread_shadow`.
+pub(super) fn install_unit_factories(
+    rt: &mut Runtime,
+    debug_opts: BootDebugOptions,
+    thread_shadow: ThreadShadow,
+) {
     rt.set_ppu_factory(move |id, init| {
-        let mut unit = PpuExecutionUnit::new(id);
-        {
-            let state = unit.state_mut();
-            state.pc = init.entry_code;
-            state.set_gpr(1, init.stack_top);
-            state.set_gpr(2, init.entry_toc);
-            state.set_gpr(3, init.arg);
-            for (i, value) in init.extra_args.iter().enumerate() {
-                state.set_gpr(4 + i, *value);
-            }
-            state.set_gpr(13, init.tls_base);
-            state.set_lr(init.lr_sentinel);
-        }
-        debug_opts.apply(&mut unit);
-        Box::new(unit)
+        Box::new(ppu_thread_unit(id, &init, &debug_opts, &thread_shadow))
     });
     rt.set_spu_factory(spu_unit);
+}
+
+/// The PPU unit of a thread the guest creates, for
+/// [`Runtime::set_ppu_factory`].
+///
+/// The unit takes a clone of the shadow that `thread_shadow` offers.
+/// The clone shares the build-time decode of the primary unit's shadow.
+fn ppu_thread_unit(
+    id: cellgov_event::UnitId,
+    init: &cellgov_lv2::PpuThreadInitState,
+    debug_opts: &BootDebugOptions,
+    thread_shadow: &ThreadShadow,
+) -> PpuExecutionUnit {
+    let mut unit = PpuExecutionUnit::new(id);
+    {
+        let state = unit.state_mut();
+        state.pc = init.entry_code;
+        state.set_gpr(1, init.stack_top);
+        state.set_gpr(2, init.entry_toc);
+        state.set_gpr(3, init.arg);
+        for (i, value) in init.extra_args.iter().enumerate() {
+            state.set_gpr(4 + i, *value);
+        }
+        state.set_gpr(13, init.tls_base);
+        state.set_lr(init.lr_sentinel);
+    }
+    if let Some(shadow) = thread_shadow.shadow() {
+        unit.set_instruction_shadow(shadow);
+    }
+    debug_opts.apply(&mut unit);
+    unit
+}
+
+/// The boot space's predecode shadow, for the PPU threads that the
+/// factory builds.
+///
+/// The factory builds a unit before the runtime places it in an address
+/// space, so the factory does not know the space of the unit. The shadow
+/// decodes the text of the boot space, and only a spawned process owns
+/// another space. Thus the first spawn withdraws the shadow permanently.
+/// Each thread that the factory builds after that spawn decodes on fetch.
+#[derive(Clone, Default)]
+pub(super) struct ThreadShadow(Rc<RefCell<ShadowOffer>>);
+
+/// What [`ThreadShadow`] gives the next thread.
+#[derive(Default)]
+enum ShadowOffer {
+    /// The boot did not build the shadow yet.
+    #[default]
+    Pending,
+    /// Each thread takes a clone.
+    Offered(PredecodedShadow),
+    /// No thread takes a shadow, for one of these causes:
+    ///
+    /// - The boot built none.
+    /// - The guest spawned a process.
+    Withdrawn,
+}
+
+impl ThreadShadow {
+    /// Offers `shadow` to each thread the factory builds from now on.
+    ///
+    /// A spawn before the offer keeps the shadow withdrawn.
+    pub(super) fn offer(&self, shadow: Option<&PredecodedShadow>) {
+        let mut offer = self.0.borrow_mut();
+        if matches!(*offer, ShadowOffer::Pending) {
+            *offer = shadow.map_or(ShadowOffer::Withdrawn, |shadow| {
+                ShadowOffer::Offered(shadow.clone())
+            });
+        }
+    }
+
+    /// Withdraws the shadow from each thread the factory builds from now
+    /// on.
+    fn withdraw(&self) {
+        *self.0.borrow_mut() = ShadowOffer::Withdrawn;
+    }
+
+    /// Returns a clone of the shadow on offer, or `None` while none is
+    /// on offer.
+    fn shadow(&self) -> Option<PredecodedShadow> {
+        match &*self.0.borrow() {
+            ShadowOffer::Offered(shadow) => Some(shadow.clone()),
+            ShadowOffer::Pending | ShadowOffer::Withdrawn => None,
+        }
+    }
 }
 
 /// The SPU unit a thread-group image materializes as, for
@@ -122,27 +199,70 @@ pub fn spu_unit(
 ///
 /// `profile_mode` turns on retirement counting in the child's
 /// `module_start` units.
+///
+/// Each spawn withdraws `thread_shadow` before the child's image loads,
+/// for the reason that [`ThreadShadow`] gives. A spawn that fails keeps
+/// the shadow withdrawn.
 pub(super) fn install_spawn_loader(
     rt: &mut Runtime,
     title: &TitleOptions<'_>,
     services: &BootServices,
     profile_mode: bool,
+    thread_shadow: ThreadShadow,
 ) -> ChildInitPlans {
     let child_init = ChildInitPlans::default();
     let overrides = title.identity.overrides;
-    let firmware = SpawnFirmware {
-        dir: title.firmware_dir.map(str::to_string),
-        // Scanned and decrypted on the first spawn; a boot that never
-        // spawns pays nothing.
-        candidates: RefCell::new(None),
-        prx_base: overrides.prx_base,
+    let loader = SpawnLoader {
+        thread_shadow,
+        firmware: SpawnFirmware {
+            dir: title.firmware_dir.map(str::to_string),
+            // Scanned and decrypted on the first spawn; a boot that never
+            // spawns pays nothing.
+            candidates: RefCell::new(None),
+            prx_base: overrides.prx_base,
+        },
+        plans: child_init.clone(),
+        run_hle_stubbed: overrides.disable_module_start_hle_stubs,
+        profile_mode,
+        sink: Rc::clone(&services.sink),
+        keys: Rc::clone(&services.keys),
+        taps: Rc::clone(&services.taps),
     };
-    let loader_plans = child_init.clone();
-    let sink: Rc<dyn crate::BootSink> = Rc::clone(&services.sink);
-    let keys: Rc<dyn crate::KeyVaultSource> = Rc::clone(&services.keys);
-    let taps: Rc<dyn crate::DebugTaps> = Rc::clone(&services.taps);
-    rt.set_process_spawn_loader(move |elf_bytes, mem, space| {
-        let plaintext = decrypt_child_self(keys.as_ref(), elf_bytes)?;
+    rt.set_process_spawn_loader(move |elf_bytes, mem, space| loader.load(elf_bytes, mem, space));
+    child_init
+}
+
+/// What the loader of [`install_spawn_loader`] keeps from one spawn to
+/// the next.
+struct SpawnLoader {
+    thread_shadow: ThreadShadow,
+    firmware: SpawnFirmware,
+    /// The `module_start` plans that the step loop runs before it
+    /// releases each child's primary thread.
+    plans: ChildInitPlans,
+    run_hle_stubbed: bool,
+    profile_mode: bool,
+    sink: Rc<dyn crate::BootSink>,
+    keys: Rc<dyn crate::KeyVaultSource>,
+    taps: Rc<dyn crate::DebugTaps>,
+}
+
+impl SpawnLoader {
+    /// Loads the child image `elf_bytes` into `mem`, the memory of the
+    /// child's new address space `space`.
+    ///
+    /// # Errors
+    ///
+    /// A [`cellgov_core::ProcessSpawnLoadError`] for each refusal that
+    /// [`install_spawn_loader`] lists.
+    fn load(
+        &self,
+        elf_bytes: &[u8],
+        mem: &mut cellgov_mem::GuestMemory,
+        space: cellgov_core::AddressSpaceId,
+    ) -> Result<cellgov_core::SpawnedProcessImage, cellgov_core::ProcessSpawnLoadError> {
+        self.thread_shadow.withdraw();
+        let plaintext = decrypt_child_self(self.keys.as_ref(), elf_bytes)?;
         let elf_bytes: &[u8] = &plaintext;
         let required = cellgov_ppu::loader::required_memory_size(elf_bytes)
             .map_err(|e| image_parse(e.to_string()))?;
@@ -158,38 +278,38 @@ pub(super) fn install_spawn_loader(
             }
         })?;
         let (prx_modules, child_exports) = load_child_firmware(
-            &firmware,
-            keys.as_ref(),
+            &self.firmware,
+            self.keys.as_ref(),
             &imports,
             mem,
             code_floor,
-            sink.as_ref(),
+            self.sink.as_ref(),
         )?;
         let resident = ChildResident {
             image_end: required as u64,
             exit_stub_addr,
             region_size: child_mem_size as u64,
         };
-        let tls = finish_child_space(elf_bytes, mem, &prx_modules, resident, sink.as_ref())?;
+        let tls = finish_child_space(elf_bytes, mem, &prx_modules, resident, self.sink.as_ref())?;
         // This report follows the last refusal above. On a refusal the
         // runtime removes the child's address space (`cellgov_core`
         // `process_spawn.rs` `handle_process_spawn`). An earlier report
         // can name OPDs in a space that the runtime then removes.
         if let Some(exports) = &child_exports {
-            taps.firmware_bound(space.raw(), exports, mem);
+            self.taps.firmware_bound(space.raw(), exports, mem);
         }
 
         let stack_top = (child_mem_size as u64) - 0x1000;
-        let init_token = loader_plans.stage(ChildInitPlan {
+        let init_token = self.plans.stage(ChildInitPlan {
             prx_modules,
             tls,
             // A full primary-stack reservation below the child's SP:
             // the child's own stack grows down from `stack_top`, the
             // transient module_start stacks from here.
             stack_pointer: stack_top - u64::from(PS3_PRIMARY_STACK_SIZE_MAX),
-            run_hle_stubbed: overrides.disable_module_start_hle_stubs,
-            ppu_tap: taps.ppu(),
-            profile_mode,
+            run_hle_stubbed: self.run_hle_stubbed,
+            ppu_tap: self.taps.ppu(),
+            profile_mode: self.profile_mode,
         });
         Ok(cellgov_core::SpawnedProcessImage {
             entry_code: state.pc,
@@ -198,8 +318,7 @@ pub(super) fn install_spawn_loader(
             lr_sentinel: exit_stub_addr,
             init_token: Some(init_token),
         })
-    });
-    child_init
+    }
 }
 
 /// Where a spawned child's firmware set comes from: the firmware
@@ -471,3 +590,11 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/child_fence_tests.rs"]
 mod child_fence_tests;
+
+#[cfg(test)]
+#[path = "tests/thread_shadow_tests.rs"]
+mod thread_shadow_tests;
+
+#[cfg(test)]
+#[path = "tests/spawn_shadow_tests.rs"]
+mod spawn_shadow_tests;

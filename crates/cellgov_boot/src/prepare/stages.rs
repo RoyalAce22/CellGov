@@ -97,11 +97,17 @@ pub fn prepare(opts: PrepareOptions<'_>) -> Result<PreparedBoot, BootError> {
         profile_pairs: diagnostics.profile_pairs,
         ppu_tap: services.taps.ppu(),
     };
-    loaders::install_unit_factories(&mut rt, debug_opts.clone());
+    let thread_shadow = loaders::ThreadShadow::default();
+    loaders::install_unit_factories(&mut rt, debug_opts.clone(), thread_shadow.clone());
 
     // 8. Spawned-child image loader.
-    let child_init =
-        loaders::install_spawn_loader(&mut rt, &title, &services, diagnostics.profile_pairs);
+    let child_init = loaders::install_spawn_loader(
+        &mut rt,
+        &title,
+        &services,
+        diagnostics.profile_pairs,
+        thread_shadow.clone(),
+    );
 
     // 9. Guest-visible content, mounts last.
     providers::register_sibling_images(&mut rt, title.elf_path)?;
@@ -124,7 +130,8 @@ pub fn prepare(opts: PrepareOptions<'_>) -> Result<PreparedBoot, BootError> {
     )?;
 
     // 11. Predecode shadow over the entry state's executable code,
-    // with the passes the engine options name.
+    // with the passes the engine options name. Each thread that the boot
+    // process creates before its first process spawn shares it.
     let shadow = entry::build_instruction_shadow(
         &rt,
         &elf_data,
@@ -133,6 +140,7 @@ pub fn prepare(opts: PrepareOptions<'_>) -> Result<PreparedBoot, BootError> {
         execution.engine.ppu_shadow,
         sink,
     )?;
+    thread_shadow.offer(shadow.as_ref());
     let entry_r1 = state.gpr[1];
 
     // 12. The primary unit, held non-runnable until module_start ends.

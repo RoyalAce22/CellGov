@@ -9,7 +9,7 @@ use crate::instruction::PpuInstruction;
 use crate::shadow::semantics_support::reg;
 
 /// Guest address of the shadowed range.
-const BASE: u64 = 0x1000;
+pub(super) const BASE: u64 = 0x1000;
 
 /// Words that quicken and fuse, with plain fillers between them.
 fn word() -> impl Strategy<Value = u32> {
@@ -43,12 +43,12 @@ fn word() -> impl Strategy<Value = u32> {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum Op {
+pub(super) enum Op {
     Invalidate { offset: i64, len: u64 },
     Refresh { slot: usize, raw: u32 },
 }
 
-fn op(slots: usize) -> impl Strategy<Value = Op> {
+pub(super) fn op(slots: usize) -> impl Strategy<Value = Op> {
     let span = slots as i64 * 4;
     prop_oneof![
         3 => (-16i64..span + 16, 0u64..=24).prop_map(|(offset, len)| Op::Invalidate { offset, len }),
@@ -88,7 +88,7 @@ fn pair_words() -> impl Strategy<Value = [u32; 2]> {
 
 /// Random words with one fusable pair spliced in, so every program
 /// carries at least one pair for the partition to protect.
-fn program() -> impl Strategy<Value = Vec<u32>> {
+pub(super) fn program() -> impl Strategy<Value = Vec<u32>> {
     (
         proptest::collection::vec(word(), 0..44),
         pair_words(),
@@ -101,7 +101,7 @@ fn program() -> impl Strategy<Value = Vec<u32>> {
         })
 }
 
-fn build(words: &[u32]) -> PredecodedShadow {
+pub(super) fn build(words: &[u32]) -> PredecodedShadow {
     let mut bytes = Vec::with_capacity(words.len() * 4);
     for w in words {
         bytes.extend_from_slice(&w.to_be_bytes());

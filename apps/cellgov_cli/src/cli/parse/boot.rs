@@ -238,8 +238,10 @@ pub(crate) struct BootRunArgs {
     /// One guest argv entry; repeat for more. Values may spell a flag.
     #[arg(long, value_name = "VALUE", allow_hyphen_values = true, action = clap::ArgAction::Append)]
     pub guest_arg: Vec<String>,
-    /// The predecode passes of the primary PPU thread's instruction
-    /// shadow. Every choice must run the guest the same way.
+    /// The predecode passes of the instruction shadow that the primary
+    /// PPU thread and each thread the guest creates before its first
+    /// process spawn fetch through. Every choice must run the guest the
+    /// same way.
     #[arg(long, value_enum, value_name = "PASSES", default_value_t = PpuShadowArg::Fused)]
     pub ppu_shadow: PpuShadowArg,
     /// Commit every step through the full commit path. The guest must

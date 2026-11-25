@@ -67,7 +67,8 @@ fn a_number_is_unnamed_exactly_when_no_source_names_it() {
         .filter(|number| hypercall_name(*number).is_none())
         .collect();
     assert!(nameless.contains(&5), "5 has no name");
-    // 256 numbers, less the 137 call table rows and the 6 unlisted aliases.
+    // The 137 call table rows and the 6 unlisted aliases name 143 of
+    // the 256 numbers.
     assert_eq!(nameless.len(), 113);
     assert_eq!(unnamed, nameless);
 }

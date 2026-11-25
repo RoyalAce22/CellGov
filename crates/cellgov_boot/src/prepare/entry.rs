@@ -209,10 +209,11 @@ fn shadow_extent(
     Ok(code_end.min(alloc_floor).min(memory_len))
 }
 
-/// Build the predecode shadow the primary unit registers with.
+/// Build the predecode shadow that the primary unit registers with.
 ///
 /// The shadow covers `[0, shadow_extent)` and runs the passes that
-/// `passes` names. [`PpuShadow::Off`] gives `None`.
+/// `passes` names. [`PpuShadow::Off`] gives `None`. Each thread that the
+/// boot process creates before its first process spawn shares a clone.
 ///
 /// Built before `module_start`, which only mutates data segments
 /// (mutex tables, allocator state), so the shadow still holds for the

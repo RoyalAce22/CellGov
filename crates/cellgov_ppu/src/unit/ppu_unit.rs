@@ -233,6 +233,10 @@ impl PpuExecutionUnit {
     /// Install the predecoded shadow. Caller must build it after all
     /// boot-time code writes (ELF/PRX load, HLE stub planting) and
     /// before the step loop begins; stale slots re-decode on every fetch.
+    ///
+    /// The units of one address space can each take a clone of one
+    /// shadow. For a unit of another address space, build a shadow from
+    /// the text of that space.
     pub fn set_instruction_shadow(&mut self, shadow: shadow::PredecodedShadow) {
         self.instruction_shadow = Some(shadow);
     }

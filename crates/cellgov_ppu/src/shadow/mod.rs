@@ -14,6 +14,9 @@
 //! memory.
 //!
 //! [Bala2000 p:7 s:6 Fragment Cache Management] flushable code cache.
+//!
+//! The units of one address space share one build-time decode through
+//! clones of one shadow. Each clone refreshes stale slots for itself.
 
 mod model;
 mod quicken;
@@ -26,5 +29,9 @@ mod test_support;
 #[cfg(test)]
 #[path = "tests/semantics_support.rs"]
 mod semantics_support;
+
+#[cfg(test)]
+#[path = "tests/shared_unit_tests.rs"]
+mod shared_unit_tests;
 
 pub use model::PredecodedShadow;

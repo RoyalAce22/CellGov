@@ -6,10 +6,11 @@
 //!
 //! # Cost
 //!
-//! Dominated by [`cellgov_mem::GuestMemory`] (COW: cheap until a
-//! post-snapshot write forks the touched region) and each
-//! `PpuExecutionUnit`'s predecoded shadow (deep-cloned per
-//! branching point).
+//! [`cellgov_mem::GuestMemory`] dominates the cost. It is copy-on-write,
+//! so it stays cheap until a write after the snapshot forks the touched
+//! region. The predecoded code of a `PpuExecutionUnit` costs little. Its
+//! clone shares the build-time decode and the written flag of each slot.
+//! The clone copies only the slots that the source shadow refreshed.
 //!
 //! # Cross-module contracts
 //!
