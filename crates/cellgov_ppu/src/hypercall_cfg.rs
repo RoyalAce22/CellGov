@@ -184,7 +184,9 @@ pub(crate) fn scan(
 ///   is in `real_mode`;
 /// - each word at the real address of a real-mode switch of `bound`;
 /// - when a `bcctr` or `bclr` may run in real mode, each word that
-///   [`real_indirect_words`] gives.
+///   [`real_indirect_words`] gives;
+/// - each word that [`return_aliases`] gives for a branch in
+///   `real_mode`, where a `bclr` in real mode returns from that call.
 ///
 /// An indirect branch in real mode and a real-mode switch reach the word
 /// at the real address of their target. The entries of `bound` miss that
@@ -196,6 +198,7 @@ pub(crate) fn scan(
 fn entered(code: &Code, bound: &IndirectBound, real_mode: &RealMode) -> BTreeSet<u64> {
     let mut entries = bound.entries.clone();
     entries.extend(switched_words(code, bound));
+    entries.extend(return_aliases(code, |call| real_mode.contains(call)));
     if real_mode.branches_indirectly() {
         entries.extend(real_indirect_words(code, bound));
     }
@@ -387,6 +390,28 @@ fn return_points(code: &Code) -> impl Iterator<Item = u64> + '_ {
         .filter_map(|(address, _)| address.checked_add(4))
 }
 
+/// Each word at a real address of the word after a branch of `code` that
+/// links, other than that word itself, for each such branch whose address
+/// `calls` takes.
+///
+/// A `bclr` in real mode that returns from such a call enters these
+/// words.
+///
+/// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.
+/// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00.
+/// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
+pub(crate) fn return_aliases<'a>(
+    code: &'a Code,
+    calls: impl Fn(u64) -> bool + 'a,
+) -> impl Iterator<Item = u64> + 'a {
+    code.segments
+        .iter()
+        .flat_map(CodeSegment::addressed)
+        .filter(move |&(address, raw)| links(raw) && calls(address))
+        .filter_map(|(address, _)| address.checked_add(4))
+        .flat_map(|next| code.real_aliases(next).filter(move |&alias| alias != next))
+}
+
 /// Whether the word `raw` is a branch that writes LR.
 fn links(raw: u32) -> bool {
     matches!(
@@ -473,33 +498,132 @@ fn direct_targets(code: &Code, address: u64, raw: u32, real_mode: bool) -> BTree
 /// real mode only as the target of a real-mode switch, which `starts`
 /// holds.
 ///
+/// The walk also follows LR. After a real-mode branch that links, LR
+/// holds a return point: the word after a branch that links. A `bclr`
+/// that each real-mode path reaches with a return point in LR is closed.
+/// It reaches only the words at the real address of a return point, and
+/// the walk reaches those words from the call. LR can hold any other
+/// value in these cases:
+/// - at a word of `starts`, which an interrupt or a switch enters;
+/// - after an `mtlr`, an `sc`, a word that does not decode or a word
+///   that the PPE does not implement;
+/// - at a word at a real address of a target of `bound`, also when the
+///   walk does not reach the CTR or LR writer of that target;
+/// - at a word that an open `bcctr` or `bclr` can reach.
+///
+/// A routine that a real-mode call enters returns to the word after
+/// the call with that return point in LR, as the bound takes a call to
+/// return.
+///
 /// [PPC-Book1 p:25 s:2.4] The registers that `bclr` and `bcctr` alter are CTR and LR, so the MSR at the target is the MSR at the branch.
+/// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.
+/// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00.
+/// [PPC-Book1 p:81 s:3.3.13] `mtlr` copies RS into LR.
 fn real_mode_words(code: &Code, starts: &BTreeSet<u64>, bound: &IndirectBound) -> RealMode {
     let mut reached = BTreeSet::new();
+    let mut any_lr = BTreeSet::new();
+    // A closed branch whose writer ran outside real mode can enter one
+    // of these words in real mode with any LR.
+    let targets: BTreeSet<u64> = bound
+        .targets
+        .values()
+        .flatten()
+        .flat_map(|&target| code.real_aliases(target))
+        .collect();
     let mut indirect = false;
-    let mut pending: Vec<u64> = starts.iter().copied().collect();
-    while let Some(at) = pending.pop() {
-        if !code.holds(at) || !reached.insert(at) {
+    let mut pending: Vec<(u64, Lr)> = starts.iter().map(|&start| (start, Lr::Any)).collect();
+    while let Some((at, lr)) = pending.pop() {
+        if !code.holds(at) {
             continue;
         }
+        let first = reached.insert(at);
+        let widened = (lr == Lr::Any || targets.contains(&at)) && any_lr.insert(at);
+        if !first && !widened {
+            continue;
+        }
+        let lr = if any_lr.contains(&at) {
+            Lr::Any
+        } else {
+            Lr::Return
+        };
         for raw in code.words_at(at) {
+            let after = lr.after(raw);
             if flow(raw) != Flow::Stops && !returns_from_interrupt(raw) {
-                pending.extend(at.checked_add(4));
+                pending.extend(at.checked_add(4).map(|next| (next, after)));
             }
-            pending.extend(direct_targets(code, at, raw, true));
-            let open = !bound.closed_branches.contains(&at);
-            if !indirect && open && is_indirect_branch(raw) {
+            pending.extend(
+                direct_targets(code, at, raw, true)
+                    .into_iter()
+                    .map(|target| (target, after)),
+            );
+            if links(raw) {
+                let returns = at.checked_add(4).into_iter();
+                pending.extend(
+                    returns
+                        .flat_map(|next| code.real_aliases(next))
+                        .map(|alias| (alias, Lr::Return)),
+                );
+            }
+            let closed = bound.closed_branches.contains(&at) || lr.closes(raw);
+            if !indirect && !closed && is_indirect_branch(raw) {
                 indirect = true;
-                pending.extend(real_indirect_words(code, bound));
+                pending.extend(real_indirect_words(code, bound).map(|word| (word, Lr::Any)));
             }
         }
         for &target in bound.targets.get(&at).into_iter().flatten() {
-            pending.extend(code.real_aliases(target));
+            pending.extend(code.real_aliases(target).map(|alias| (alias, Lr::Any)));
         }
     }
     RealMode::Words {
         words: reached,
         indirect,
+    }
+}
+
+/// What LR can hold on a real-mode path, as [`real_mode_words`] follows
+/// it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Lr {
+    /// The return point of a real-mode call: the word after a branch
+    /// that links.
+    Return,
+    /// Any value.
+    Any,
+}
+
+impl Lr {
+    /// What LR holds after the word `raw`, on its fall-through and on its
+    /// taken path.
+    ///
+    /// An `sc`, a word that does not decode and a word that the PPE does
+    /// not implement pass control to a handler before the next word, and
+    /// that handler can write LR.
+    ///
+    /// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4 whether or not it branches.
+    /// [PPC-Book1 p:81 s:3.3.13] `mtlr` copies RS into LR.
+    /// [PPC-Book3 p:73 s:5.5.13] A System Call interrupt sets SRR0 to the address of the word after the `sc`.
+    /// [CBE-Handbook p:739 s:A.2.4.1] An attempt to execute `popcntb`, `mcrxr` or another word that the PPE does not implement causes an illegal instruction exception.
+    fn after(self, raw: u32) -> Self {
+        if links(raw) {
+            return Self::Return;
+        }
+        match crate::decode::decode(raw) {
+            Ok(
+                PpuInstruction::Mtlr { .. }
+                | PpuInstruction::Sc { .. }
+                | PpuInstruction::Popcntb { .. }
+                | PpuInstruction::Mcrxr { .. }
+                | PpuInstruction::PpeIllegal { .. },
+            )
+            | Err(_) => Self::Any,
+            Ok(_) => self,
+        }
+    }
+
+    /// Whether the word `raw` is a `bclr` that this LR closes.
+    fn closes(self, raw: u32) -> bool {
+        self == Self::Return
+            && matches!(crate::decode::decode(raw), Ok(PpuInstruction::Bclr { .. }))
     }
 }
 

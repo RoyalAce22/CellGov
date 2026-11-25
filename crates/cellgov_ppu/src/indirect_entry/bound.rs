@@ -16,7 +16,8 @@ use super::real_mode::{real_mode_entries, Switches};
 use super::toc::{function_tocs, FunctionToc, FunctionWords};
 use crate::caller_census::{CallerScanError, JoinDrop};
 use crate::hypercall_cfg::{
-    branches_in_mode32, branches_in_real_mode, low_word, real_forms, Code, CodeSegment,
+    branches_in_mode32, branches_in_real_mode, low_word, real_forms, return_aliases, Code,
+    CodeSegment,
 };
 use crate::instruction::PpuInstruction;
 
@@ -366,6 +367,7 @@ pub(crate) fn indirect_entries(
         low_branches: false,
         switched: BTreeSet::new(),
         target_aliases: BTreeSet::new(),
+        return_aliases: return_aliases(code, |_| true).collect(),
     };
     // A real-mode branch to a loaded value enters the word at its real
     // address too.
@@ -390,6 +392,7 @@ pub(crate) fn indirect_entries(
     let join_words = JoinWords::new(code);
     let mut reach = Reach::new(code);
     reach.grow(bound.real_mode.iter().copied());
+    reach.grow(bound.return_aliases.iter().copied());
     // The bound does not name the value of an unaligned load, a byte
     // load, a halfword load or a byte-reversed load. Each can be a code
     // address, so the reach set starts at each such value.
@@ -569,6 +572,12 @@ pub(super) struct Bound<'a> {
     /// mode, and then enters these words. So the entry words hold them
     /// whatever [`Self::real_branches`] is. The set only grows.
     target_aliases: BTreeSet<u64>,
+    /// Each word that [`return_aliases`] gives: a word at a real address
+    /// of a return point, other than the return point itself.
+    ///
+    /// A `bclr` in real mode that returns from a call enters these words,
+    /// also when the bound takes the `bclr` as closed.
+    return_aliases: BTreeSet<u64>,
 }
 
 /// How an `mtctr` or a `bclr` takes a lost value.
@@ -771,7 +780,8 @@ impl Bound<'_> {
     ///   [`Self::real_named`] and of [`Self::loaded_real`];
     /// - when [`Self::low_branches`] is set, each word of
     ///   [`Self::low_named`];
-    /// - each word of [`Self::target_aliases`].
+    /// - each word of [`Self::target_aliases`];
+    /// - each word of [`Self::return_aliases`].
     ///
     /// Only an indirect branch in real mode reaches a word at the real
     /// address of a named address. A branch whose targets the bound holds
@@ -801,6 +811,7 @@ impl Bound<'_> {
                 .chain(&self.real_mode)
                 .chain(&self.switched)
                 .chain(&self.target_aliases)
+                .chain(&self.return_aliases)
                 .copied()
                 .chain(code.real_aliases(0)),
         );

@@ -59,7 +59,9 @@
 //! branch whose targets the scan holds can also run in real mode, and
 //! then enters the word at the real address of each target. So the flows
 //! take each word at a real address of a target that the scan holds as
-//! an entry, whatever the gate.
+//! an entry, whatever the gate. A `bclr` in real mode that returns from
+//! a call enters the word at each real address of its return point, so
+//! the flows take each such word as an entry too.
 //!
 //! The scan cannot tell a code address from another value of the same
 //! size. So each 32-bit word names an address, also a count or a flag

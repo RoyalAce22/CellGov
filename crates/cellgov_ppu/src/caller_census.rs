@@ -1145,3 +1145,7 @@ mod hypercall_hrfid_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_closed_alias_tests.rs"]
 mod hypercall_closed_alias_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_real_return_tests.rs"]
+mod hypercall_real_return_tests;
