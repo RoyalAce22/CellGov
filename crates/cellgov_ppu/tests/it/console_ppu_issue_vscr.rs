@@ -108,3 +108,25 @@ fn the_issue_model_times_each_vscr_loop_at_most_its_gap_below_the_console() {
         );
     }
 }
+
+#[test]
+fn a_vaddubm_that_reads_the_mfvscr_result_adds_four_cycles_to_the_mfvscr_loop() {
+    // Loop 1 is an `mfvscr` alone and loop 2 adds a `vaddubm` that reads
+    // its result. The console's step is 4.06 cycles.
+    let w = console_words();
+    let bodies = bodies();
+    for (who, alone, dependent) in [
+        ("the console", console_cycles(&w, 1), console_cycles(&w, 2)),
+        (
+            "CellGov",
+            cellgov_cycles(1, &bodies[1]),
+            cellgov_cycles(2, &bodies[2]),
+        ),
+    ] {
+        assert!(
+            (dependent - alone - 4.0).abs() < 0.5,
+            "{who}: an mfvscr alone {alone:.2} cycles an iteration, with a dependent \
+             vaddubm {dependent:.2}",
+        );
+    }
+}

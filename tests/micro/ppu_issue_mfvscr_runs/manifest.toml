@@ -1,0 +1,20 @@
+[test]
+name = "ppu_issue_mfvscr_runs"
+
+# A hardware probe of how a run of independent vector-scalar ops after an
+# mfvscr issues, and when the next mfvscr issues after it: 1 to 8
+# vaddubm or fadd after an mfvscr, timed with mftb. The console capture
+# is the answer; ppu/main.c's header lists the loops and the payload
+# layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 248 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 248 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

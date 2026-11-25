@@ -157,10 +157,14 @@ fn each_held_loop_lies_within_the_band() {
 /// - each run of `li` with a store after an `mfvscr`.
 ///
 /// A second run of the probe took 71.13 and 46.85 cycles an iteration for
-/// the first two loops, within the band of the model's 69 and 47. Loop 10
-/// has the words of loop 3 of the `ppu_issue_store_drain_distance` probe
-/// at a different address. That loop takes 67.00 cycles an iteration, and
-/// the model holds it. In the `ppu_issue_mfvscr_place` capture the same
+/// the first two loops, and the model gives 69 and 44. In the
+/// `ppu_issue_mfvscr_runs` capture, loop 10 has the words of loop 9 and
+/// takes 45.95 cycles an iteration, within the band of the model's 44.
+///
+/// In this capture, loop 10 has the words of loop 3 of the
+/// `ppu_issue_store_drain_distance` probe at a different address. That
+/// loop takes 67.00 cycles an iteration, and the model holds it. In the
+/// `ppu_issue_mfvscr_place` capture the same
 /// words take 67.00 to 68.29 at 0, 32, 64 and 96 bytes past a 128-byte
 /// boundary, so the loop's place in its line does not explain its 72.24
 /// cycles in this capture. Loops 11 and 12 run 48 `li`. The model also

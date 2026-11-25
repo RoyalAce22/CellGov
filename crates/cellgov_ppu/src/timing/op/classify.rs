@@ -516,7 +516,7 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
         // younger vector-scalar instructions wait for an `mtvscr`. The
         // `ppu_issue_vscr` capture gives the cycles the table leaves out.
         I::Mfvscr { vt } => {
-            one(vector(unit::VSU1, false, k::PPU_MFVSCR_LATENCY_CYCLES, vt, &[]).kind(Kind::Drain))
+            one(vector(unit::VSU1, false, k::PPU_MFVSCR_RESULT_CYCLES, vt, &[]).kind(Kind::Drain))
         }
         I::Mtvscr { vb } => one(Op::on(unit::VSU1).src(vr(vb)).kind(Kind::VscrWrite)),
         I::Lvlx { vt, ra, rb }

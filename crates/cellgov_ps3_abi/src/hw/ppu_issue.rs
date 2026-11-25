@@ -928,13 +928,25 @@ pub const PPU_VMX_PERMUTE_LATENCY_CYCLES: u64 = 4;
 /// [CBE-Handbook p:741 s:A.3.2] simple: latency 4.
 pub const PPU_VMX_SIMPLE_LATENCY_CYCLES: u64 = 4;
 
-/// The cycles from an `mfvscr` to a dependent instruction.
+/// The cycles from an `mfvscr` to the cycle it completes, for a younger
+/// `mfvscr` or floating-point store.
 ///
 /// [CBE-Handbook p:742 s:A.3.2] Table A-8 gives `mfvscr` no latency.
 ///
 /// In the `ppu_issue_vscr` capture a loop of one `mfvscr` takes 40.25
-/// cycles an iteration. The next `mfvscr` waits for the result at issue.
+/// cycles an iteration. The next `mfvscr` waits at issue for the older one
+/// to complete.
 pub const PPU_MFVSCR_LATENCY_CYCLES: u64 = 40;
+
+/// The cycles from an `mfvscr` to a dependent instruction.
+///
+/// [CBE-Handbook p:742 s:A.3.2] Table A-8 gives `mfvscr` no latency.
+///
+/// In the `ppu_issue_vscr` capture an `mfvscr v1` and a dependent
+/// `vaddubm v2, v1, v1` take 44.31 cycles an iteration. The `vaddubm`
+/// runs 23 cycles after the `mfvscr`, and the next `mfvscr` issues
+/// [`PPU_MFVSCR_VSU_COMPLETE_CYCLES`] after it.
+pub const PPU_MFVSCR_RESULT_CYCLES: u64 = 23;
 
 /// The cycles from an `mfvscr` to the first younger instruction that can
 /// issue.
@@ -946,6 +958,19 @@ pub const PPU_MFVSCR_LATENCY_CYCLES: u64 = 40;
 /// 64 independent `li` take 53.00, 70.92 and 86.17 cycles an iteration.
 /// The `li` issue one a cycle, from about 20 cycles after the `mfvscr`.
 pub const PPU_MFVSCR_YOUNGER_HOLD_CYCLES: u64 = 20;
+
+/// The cycles from the cycle a vector-scalar op runs to the cycle it
+/// completes, for a younger `mfvscr`.
+///
+/// [CBE-Handbook p:742 s:A.3.2] `mfvscr` stalls at issue until every
+/// older instruction completes.
+///
+/// In the `ppu_issue_mfvscr_gap` capture an `mfvscr` alone takes 40.00
+/// cycles an iteration. With an independent `fadd` it takes 41.00, and
+/// with an independent `vaddubm` it takes 41.03. The younger op runs
+/// [`PPU_MFVSCR_YOUNGER_HOLD_CYCLES`] after the `mfvscr`, and the next
+/// `mfvscr` issues 21 cycles after it.
+pub const PPU_MFVSCR_VSU_COMPLETE_CYCLES: u64 = 21;
 
 /// The cycles from the cycle a fixed-point store issues to the cycle it
 /// completes, for a younger `mfvscr`.

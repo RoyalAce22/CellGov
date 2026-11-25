@@ -103,18 +103,10 @@ fn cellgov_cycles(k: usize) -> f64 {
 /// side of it.
 const BAND: f64 = 0.06;
 
-/// The loops the model does not hold: an `mfvscr`, a `b` and an `fadd`,
-/// with the `fadd` at an even word and at an odd word. The console takes
-/// 42.00 cycles an iteration and the model gives 50.
-const OVER: [usize; 2] = [12, 13];
-
 #[test]
-fn each_held_loop_lies_within_the_band() {
+fn each_loop_lies_within_the_band() {
     let w = console_words();
-    let held: Vec<usize> = (0..LOOPS).filter(|k| !OVER.contains(k)).collect();
-    assert_eq!(held.len(), LOOPS - OVER.len());
-    let misses: Vec<String> = held
-        .into_iter()
+    let misses: Vec<String> = (0..LOOPS)
         .map(|k| (k, cellgov_cycles(k), console_cycles(&w, k)))
         .filter(|&(_, cellgov, console)| (cellgov - console).abs() / console > BAND)
         .map(|(k, cellgov, console)| {
@@ -173,20 +165,5 @@ fn an_fadd_chain_costs_the_same_at_an_odd_word_with_no_mffs() {
                 cycles(odd),
             );
         }
-    }
-}
-
-/// The test fails when the model comes within the band of the console.
-/// Then drop the loop from `OVER`.
-#[test]
-fn each_mfvscr_loop_is_a_known_difference() {
-    let w = console_words();
-    for k in OVER {
-        let (cellgov, console) = (cellgov_cycles(k), console_cycles(&w, k));
-        assert!(
-            cellgov > (1.0 + BAND) * console,
-            "loop {k}: CellGov {cellgov:.2} cycles an iteration, the console's fastest \
-             {console:.2}",
-        );
     }
 }

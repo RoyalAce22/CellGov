@@ -1,0 +1,20 @@
+[test]
+name = "ppu_issue_mfvscr_gap"
+
+# A hardware probe of what part of a younger instruction's wait after an
+# mfvscr follows the mfvscr's issue and what part its result: an fadd, a
+# vaddubm or a second mfvscr after 0 to 8 li or a taken branch, timed
+# with mftb. The console capture is the answer; ppu/main.c's header
+# lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 312 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 312 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

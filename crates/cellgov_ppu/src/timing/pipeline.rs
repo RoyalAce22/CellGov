@@ -133,12 +133,13 @@ pub(crate) struct Core {
     /// The first and the last doubleword the last store wrote, as their
     /// addresses divided by 8.
     store_dwords: (u64, u64),
-    /// The cycle the last `mfvscr` or `mffs` result is ready. A younger
-    /// floating-point store sends its data no earlier.
+    /// The cycle the last `mffs` result is ready, or the last `mfvscr`
+    /// completes. A younger floating-point store sends its data no earlier.
     status_read: u64,
-    /// The cycle the last `mfvscr` result is ready. A younger VSU op other
-    /// than a load or store runs no earlier.
-    vscr_read: u64,
+    /// The cycle every older vector-scalar instruction other than a load
+    /// or store completes, for a younger `mfvscr`. It includes the last
+    /// `mfvscr`, which completes `PPU_MFVSCR_LATENCY_CYCLES` after it runs.
+    vscr_done: u64,
     /// The address of the instruction right after the last op, when that
     /// op is an `mffs` at an even word, so that the two share a pair. A VSU
     /// op at that address runs no earlier than the `mffs` result
@@ -390,7 +391,7 @@ impl PpeTiming {
                 store_done: 0,
                 store_dwords: (0, 0),
                 status_read: 0,
-                vscr_read: 0,
+                vscr_done: 0,
                 fpscr_partner: None,
                 odd_target_floor: 0,
                 fpscr_queue_floor: 0,
@@ -609,8 +610,14 @@ impl PpeTiming {
                 c.fp_store_done
             };
             // [CBE-Handbook p:742 s:A.3.2] an `mfvscr` waits at issue for
-            // older stores to complete as well.
-            let store = if op.is_vscr_read() { c.store_done } else { 0 };
+            // older stores to complete as well. It also waits for older
+            // vector-scalar instructions to complete, which is later than
+            // their results (`vscr_done`).
+            let store = if op.is_vscr_read() {
+                c.store_done.max(c.vscr_done)
+            } else {
+                0
+            };
             let drained = t
                 .max(all.unwrap_or(0))
                 .max(after_queue)
@@ -672,9 +679,10 @@ impl PpeTiming {
         } else {
             t
         };
-        // A VSU op younger than an `mfvscr` runs no earlier than its
-        // result. In the `ppu_issue_mfvscr_younger` capture an `mfvscr` and
-        // four independent `vaddubm` take 51.48 cycles an iteration.
+        // An independent VSU op younger than an `mfvscr` runs at the
+        // `mfvscr`'s hold, before the `mfvscr` result. In the
+        // `ppu_issue_mfvscr_gap` capture an `mfvscr` and an `fadd` take
+        // 41.00 cycles an iteration, one more than an `mfvscr` alone.
         // [CBE-Handbook p:757 s:A.6.2] IS2 sends instructions to the VSU
         // issue queue in pairs. [CBE-Handbook p:722 s:A.1.2] an `mffs`
         // stalls at VQ8. Only the op in the `mffs`'s own pair waits for the
@@ -686,7 +694,7 @@ impl PpeTiming {
         // store leaves at issue, beside the VSU issue queue, so the wait
         // leaves it out; `retire` delays a floating-point store's data.
         let exec = if uses_vsu(op) && !matches!(op.kind, Kind::Load { .. } | Kind::Store { .. }) {
-            exec.max(c.vscr_read).max(fpscr_floor(c, pc, opens))
+            exec.max(fpscr_floor(c, pc, opens))
         } else {
             exec
         };
@@ -786,8 +794,11 @@ impl PpeTiming {
             c.vsu_queue = exec + 1;
         }
         mark_destinations(c, op, exec);
-        if let Some(done) = vsu_completion(op, exec) {
+        if let Some(done) = vsu_completion(op, exec, k::PPU_MFFS_VSU_COMPLETE_CYCLES) {
             c.vsu_done = c.vsu_done.max(done);
+        }
+        if let Some(done) = vsu_completion(op, exec, k::PPU_MFVSCR_VSU_COMPLETE_CYCLES) {
+            c.vscr_done = c.vscr_done.max(done);
         }
         if let Kind::Unpipelined(cycles) = op.kind {
             for u in unit_slots(op.units) {
@@ -808,11 +819,11 @@ impl PpeTiming {
         // waits for the store to complete, as the `ppu_issue_fp_store_drain`
         // capture shows (`PPU_FP_STORE_COMPLETE_CYCLES`).
         //
-        // The store sends its data no earlier than an older `mfvscr`'s or
-        // `mffs`'s result is ready. In the `ppu_issue_fp_store_drain` and
-        // `ppu_issue_fp_store_vscr` captures a loop of a floating-point
-        // store and an `mfvscr` takes 53.00 cycles an iteration, 13 more
-        // than with an `std`.
+        // The store sends its data no earlier than an older `mffs`'s result
+        // is ready or an older `mfvscr` completes. In the
+        // `ppu_issue_fp_store_drain` and `ppu_issue_fp_store_vscr` captures
+        // a loop of a floating-point store and an `mfvscr` takes 53.00
+        // cycles an iteration, 13 more than with an `std`.
         //
         // For a younger `mffs`, the store's data is a vector-scalar op like
         // any other. It takes the floors of the last `mffs` (`fpscr_floor`)
@@ -838,7 +849,7 @@ impl PpeTiming {
         }
         if op.is_vscr_read() {
             c.status_read = exec + k::PPU_MFVSCR_LATENCY_CYCLES;
-            c.vscr_read = c.status_read;
+            c.vscr_done = c.vscr_done.max(c.status_read);
             c.vscr_hold = t + k::PPU_MFVSCR_YOUNGER_HOLD_CYCLES;
         }
 
@@ -1178,18 +1189,20 @@ fn fpscr_floor(c: &Core, pc: u64, opens: bool) -> u64 {
 }
 
 /// The cycle the vector-scalar op `op`, run at `exec`, completes for a
-/// younger `mffs`.
+/// younger `mffs` or `mfvscr`: no earlier than `complete` cycles after it
+/// runs.
 ///
 /// Returns `None` when `op`:
 /// - is a load or store;
 /// - uses no VSU unit;
 /// - writes no register.
-fn vsu_completion(op: &Op, exec: u64) -> Option<u64> {
+fn vsu_completion(op: &Op, exec: u64, complete: u64) -> Option<u64> {
     if !uses_vsu(op) || matches!(op.kind, Kind::Load { .. } | Kind::Store { .. }) {
         return None;
     }
     // [CBE-Handbook p:722 s:A.1.2] an `mffs` waits for every older
-    // vector-scalar op to complete, which is later than its result. A
+    // vector-scalar op to complete, which is later than its result.
+    // [CBE-Handbook p:742 s:A.3.2] so does an `mfvscr`. A
     // recording op completes as many cycles later as its CR field
     // follows its result.
     let lats = || {
@@ -1198,7 +1211,7 @@ fn vsu_completion(op: &Op, exec: u64) -> Option<u64> {
             .map(|&(_, lat)| u64::from(lat))
     };
     let (first, last) = (lats().min()?, lats().max()?);
-    Some(exec + first.max(k::PPU_MFFS_VSU_COMPLETE_CYCLES) + (last - first))
+    Some(exec + first.max(complete) + (last - first))
 }
 
 /// The cycles from the last cycle the store `op` issues in to the cycle it
