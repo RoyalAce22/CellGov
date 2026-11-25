@@ -12,7 +12,7 @@
 #0012 > TYPE I
 #0013 < 200 TYPE OK
 #0014 > PASV
-#0015 < 227 Entering Passive Mode (10,77,0,2,224,47)
+#0015 < 227 Entering Passive Mode (<host>,224,47)
 #0016 > NLST /dev_hdd0/game
 #0017 < 150 OK
 #0018 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 62C]
@@ -48,7 +48,7 @@
 #0048 > TYPE I
 #0049 < 200 TYPE OK
 #0050 > PASV
-#0051 < 227 Entering Passive Mode (10,77,0,2,232,223)
+#0051 < 227 Entering Passive Mode (<host>,232,223)
 #0052 > STOR /dev_hdd0/game/CGOV00001/PARAM.SFO (1040 bytes)
 #0053 < 150 OK
 #0054 < 226 OK
@@ -62,7 +62,7 @@
 #0062 > TYPE I
 #0063 < 200 TYPE OK
 #0064 > PASV
-#0065 < 227 Entering Passive Mode (10,77,0,2,236,197)
+#0065 < 227 Entering Passive Mode (<host>,236,197)
 #0066 > STOR /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN (7792 bytes)
 #0067 < 150 OK
 #0068 < 226 OK
@@ -76,7 +76,7 @@
 #0076 > TYPE I
 #0077 < 200 TYPE OK
 #0078 > PASV
-#0079 < 227 Entering Passive Mode (10,77,0,2,240,85)
+#0079 < 227 Entering Passive Mode (<host>,240,85)
 #0080 > STOR /dev_hdd0/game/CGOV00001/USRDIR/spu_main.elf (6111 bytes)
 #0081 < 150 OK
 #0082 < 226 OK
@@ -164,7 +164,7 @@
 #0164 > TYPE I
 #0165 < 200 TYPE OK
 #0166 > PASV
-#0167 < 227 Entering Passive Mode (10,77,0,2,154,235)
+#0167 < 227 Entering Passive Mode (<host>,154,235)
 #0168 > NLST /dev_hdd0/game
 #0169 < 150 OK
 #0170 < 226 [/dev_hdd0/game/] [ 97.5 GB free CPU: 67C | RSX: 60C]
@@ -178,7 +178,7 @@
 #0178 > TYPE I
 #0179 < 200 TYPE OK
 #0180 > PASV
-#0181 < 227 Entering Passive Mode (10,77,0,2,158,210)
+#0181 < 227 Entering Passive Mode (<host>,158,210)
 #0182 > NLST /dev_hdd0/game/CGOV00001
 #0183 < 150 OK
 #0184 < 226 [/dev_hdd0/game/CGOV00001/] [ 97.5 GB free CPU: 66C | RSX: 60C]
@@ -192,7 +192,7 @@
 #0192 > TYPE I
 #0193 < 200 TYPE OK
 #0194 > PASV
-#0195 < 227 Entering Passive Mode (10,77,0,2,162,223)
+#0195 < 227 Entering Passive Mode (<host>,162,223)
 #0196 > NLST /dev_hdd0/game/CGOV00001/USRDIR
 #0197 < 150 OK
 #0198 < 226 [/dev_hdd0/game/CGOV00001/USRDIR/] [ 0.0 MB free CPU: 67C | RSX: 60C]

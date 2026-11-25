@@ -22,7 +22,7 @@
 #0022 > TYPE I
 #0023 < 200 TYPE OK
 #0024 > PASV
-#0025 < 227 Entering Passive Mode (10,77,0,2,128,40)
+#0025 < 227 Entering Passive Mode (<host>,128,40)
 #0026 > STOR /dev_hdd0/tmp/cellgov_lease/holder (71 bytes)
 #0027 < 150 OK
 #0028 < 226 OK
@@ -38,7 +38,7 @@
 #0038 > TYPE I
 #0039 < 200 TYPE OK
 #0040 > PASV
-#0041 < 227 Entering Passive Mode (10,77,0,2,130,103)
+#0041 < 227 Entering Passive Mode (<host>,130,103)
 #0042 > NLST /dev_hdd0/game
 #0043 < 150 OK
 #0044 < 226 [/dev_hdd0/game/] [ 97.4 GB free CPU: 67C | RSX: 62C]
@@ -74,7 +74,7 @@
 #0074 > TYPE I
 #0075 < 200 TYPE OK
 #0076 > PASV
-#0077 < 227 Entering Passive Mode (10,77,0,2,138,227)
+#0077 < 227 Entering Passive Mode (<host>,138,227)
 #0078 > STOR /dev_hdd0/game/CGOV00001/PARAM.SFO (1040 bytes)
 #0079 < 150 OK
 #0080 < 226 OK
@@ -88,7 +88,7 @@
 #0088 > TYPE I
 #0089 < 200 TYPE OK
 #0090 > PASV
-#0091 < 227 Entering Passive Mode (10,77,0,2,142,161)
+#0091 < 227 Entering Passive Mode (<host>,142,161)
 #0092 > STOR /dev_hdd0/game/CGOV00001/USRDIR/EBOOT.BIN (7872 bytes)
 #0093 < 150 OK
 #0094 < 226 OK
@@ -102,7 +102,7 @@
 #0102 > TYPE I
 #0103 < 200 TYPE OK
 #0104 > PASV
-#0105 < 227 Entering Passive Mode (10,77,0,2,146,247)
+#0105 < 227 Entering Passive Mode (<host>,146,247)
 #0106 > STOR /dev_hdd0/game/CGOV00001/USRDIR/spu_main.elf (6344 bytes)
 #0107 < 150 OK
 #0108 < 226 OK
@@ -246,7 +246,7 @@
 #0246 > TYPE I
 #0247 < 200 TYPE OK
 #0248 > PASV
-#0249 < 227 Entering Passive Mode (10,77,0,2,134,95)
+#0249 < 227 Entering Passive Mode (<host>,134,95)
 #0250 > NLST /dev_hdd0/game
 #0251 < 150 OK
 #0252 < 226 [/dev_hdd0/game/] [ 97.4 GB free CPU: 66C | RSX: 61C]
@@ -260,7 +260,7 @@
 #0260 > TYPE I
 #0261 < 200 TYPE OK
 #0262 > PASV
-#0263 < 227 Entering Passive Mode (10,77,0,2,138,75)
+#0263 < 227 Entering Passive Mode (<host>,138,75)
 #0264 > NLST /dev_hdd0/game/CGOV00001
 #0265 < 150 OK
 #0266 < 226 [/dev_hdd0/game/CGOV00001/] [ 97.4 GB free CPU: 66C | RSX: 61C]
@@ -274,7 +274,7 @@
 #0274 > TYPE I
 #0275 < 200 TYPE OK
 #0276 > PASV
-#0277 < 227 Entering Passive Mode (10,77,0,2,140,212)
+#0277 < 227 Entering Passive Mode (<host>,140,212)
 #0278 > NLST /dev_hdd0/game/CGOV00001/USRDIR
 #0279 < 150 OK
 #0280 < 226 [/dev_hdd0/game/CGOV00001/USRDIR/] [ 0.0 MB free CPU: 67C | RSX: 61C]
