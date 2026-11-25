@@ -265,7 +265,8 @@ pub(crate) struct Core {
 // `Core::in_order_writes` holds one bit for each tracked register.
 const _: () = assert!(REGS <= u128::BITS as usize);
 
-/// An `sc` the thread retired, charged when the thread resumes after it.
+/// The LV2 call of an `sc` the thread retired, charged when the thread
+/// resumes after it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PendingSyscall {
     /// The cycle the `sc` issued at.
@@ -1135,6 +1136,12 @@ impl PpeTiming {
             self.end_block(next);
         }
         t
+    }
+
+    /// Drop the pending LV2 call: the `sc` took the system call interrupt,
+    /// so no LV2 round trip follows it.
+    pub(crate) fn drop_pending_syscall(&mut self) {
+        self.core.syscall = None;
     }
 
     /// Note the code the pending LV2 call returned.

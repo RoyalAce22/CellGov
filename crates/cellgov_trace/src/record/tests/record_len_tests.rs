@@ -152,6 +152,12 @@ fn one_of_each() -> Vec<TraceRecord> {
             sequence: SEQUENCE_DCBST | SEQUENCE_ICBI,
             patch_class: true,
         },
+        TraceRecord::InterruptDelivered {
+            unit: UnitId::new(6),
+            vector: 61,
+            srr0: 62,
+            time: GuestTicks::new(63),
+        },
     ]
 }
 
@@ -178,10 +184,10 @@ fn every_known_tag_has_a_sample_and_the_next_tag_is_free() {
     assert_eq!(sampled, declared, "a variant is missing from one_of_each");
     assert_eq!(
         declared.iter().copied().collect::<Vec<_>>(),
-        (0..=TAG_UNSYNCED_CODE_FETCH).collect::<Vec<_>>(),
+        (0..=TAG_INTERRUPT_DELIVERED).collect::<Vec<_>>(),
         "tags are dense and append-only"
     );
-    assert_eq!(TraceRecord::encoded_len(TAG_UNSYNCED_CODE_FETCH + 1), None);
+    assert_eq!(TraceRecord::encoded_len(TAG_INTERRUPT_DELIVERED + 1), None);
 }
 
 #[test]

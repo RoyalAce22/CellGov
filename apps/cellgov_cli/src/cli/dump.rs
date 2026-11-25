@@ -274,6 +274,18 @@ fn dump_trace(result: &ScenarioResult) -> Result<(), CommandError> {
                     writer.raw()
                 );
             }
+            TraceRecord::InterruptDelivered {
+                unit,
+                vector,
+                srr0,
+                time,
+            } => {
+                println!(
+                    "{i:4}  InterruptDelivered unit={} vector=0x{vector:x} srr0=0x{srr0:016x} time={}",
+                    unit.raw(),
+                    time.raw()
+                );
+            }
         }
     }
     println!("--- {count} records total ---");

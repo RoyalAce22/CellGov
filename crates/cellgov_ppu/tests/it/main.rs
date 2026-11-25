@@ -122,6 +122,7 @@ mod console_ppu_quickened_lis;
 mod console_ppu_reservation_lv2;
 mod console_ppu_rsx_local;
 mod console_ppu_sc_reserved_bits;
+mod console_ppu_sc_reserved_bits_kernel;
 mod console_ppu_shm_alias;
 mod console_ppu_span_shm_maps;
 mod console_ppu_spu_reserved_loads;

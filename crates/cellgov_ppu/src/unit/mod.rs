@@ -1,12 +1,13 @@
 //! The PPU execution unit: its state, the batch loop, address
-//! translation, fetch-run tracking, fault rollback, and the
-//! `ExecutionUnit` impl.
+//! translation, interrupt delivery, fetch-run tracking, fault rollback,
+//! and the `ExecutionUnit` impl.
 
 mod batch;
 mod code_events;
 mod exec_unit;
 mod fault;
 mod fetch;
+mod interrupt;
 mod load_probe;
 mod ppu_unit;
 mod translation;

@@ -275,6 +275,9 @@ impl Runtime {
                 });
             }
         }
+        if self.mode != RuntimeMode::FaultDriven {
+            self.record_delivered_interrupt(unit_id, &result, time_after);
+        }
 
         // Fresh empty Vec avoids allocating in the common zero-effects
         // FaultDriven case.
@@ -338,6 +341,26 @@ impl Runtime {
                 return Ok(id);
             }
         }
+    }
+
+    /// Record the interrupt the step of `unit_id` delivered, if any.
+    fn record_delivered_interrupt(
+        &mut self,
+        unit_id: UnitId,
+        result: &cellgov_exec::ExecutionStepResult,
+        time: GuestTicks,
+    ) {
+        let (cellgov_exec::YieldReason::InterruptBoundary, Some(interrupt)) =
+            (result.yield_reason, result.local_diagnostics.interrupt)
+        else {
+            return;
+        };
+        self.trace.record(&TraceRecord::InterruptDelivered {
+            unit: unit_id,
+            vector: interrupt.vector,
+            srr0: interrupt.srr0,
+            time,
+        });
     }
 
     /// Turn the retired state a traced step drained from `unit_id` into

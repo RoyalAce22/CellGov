@@ -34,8 +34,9 @@ pub enum YieldReason {
     /// route through LV2 dispatch. `syscall_args` on the step
     /// result carries the syscall number and argument registers.
     Syscall = 5,
-    /// Clean point at which the runtime may inject pending
-    /// interrupts before resuming.
+    /// The unit took an interrupt at its vector and stays runnable.
+    ///
+    /// `LocalDiagnostics::interrupt` names the interrupt.
     InterruptBoundary = 6,
     /// Fault raised. The step's effects are discarded wholesale,
     /// the fault is recorded in the trace, and the unit moves to

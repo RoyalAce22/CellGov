@@ -28,6 +28,8 @@ pub(super) struct BatchEntry {
     /// The issue model's scalar state at entry, taken when a step can
     /// retire ahead of a fault.
     pub(super) timing: Option<crate::timing::Core>,
+    /// Whether the batch records code events.
+    pub(super) trace: bool,
 }
 
 /// What a translating thread does after an access missed every view.
@@ -83,7 +85,7 @@ impl PpuExecutionUnit {
     ///
     /// A tick is one core cycle. The second instruction of a pair that
     /// issues with the first costs nothing.
-    fn cost(&self, entry: &BatchEntry) -> InstructionCost {
+    pub(super) fn cost(&self, entry: &BatchEntry) -> InstructionCost {
         InstructionCost::new(self.timing.now() - entry.cycle)
     }
 
@@ -117,6 +119,7 @@ impl PpuExecutionUnit {
             retired: self.retirement_counter,
             cycle: self.timing.now(),
             timing: (max_budget > 1).then(|| self.timing.core()),
+            trace: ctx.trace_per_step(),
         };
         // The round trip of the LV2 call the last batch yielded at counts
         // toward this batch, which runs after it returns.
@@ -172,6 +175,14 @@ impl PpuExecutionUnit {
                 .is_some_and(|span| translating || self.fetches_buffered_store(span, step_pc))
             {
                 return self.budget_yield(&entry, effects, last_retired);
+            }
+
+            // A thread with supervisor registers takes an external or
+            // decrementer interrupt ahead of the instruction.
+            if translating {
+                if let Some(interrupt) = self.boundary_interrupt(ctx, &entry, step_pc) {
+                    return self.boundary_interrupt_yield(&entry, effects, step_pc, interrupt);
+                }
             }
 
             // Diagnostics are taken before the rollback so they carry
@@ -312,8 +323,8 @@ impl PpuExecutionUnit {
                 None
             };
             // An `lwarx` or `ldarx` counts its execution before its access,
-            // so an attempt that misses in the translation cache gives its
-            // count back before the instruction runs again.
+            // so an attempt that misses in the translation cache or faults
+            // gives its count back before the instruction runs again.
             let witnesses =
                 translating.then_some((self.state.lwarx_executed, self.state.ldarx_executed));
             let mut fault = match exec::execute(
@@ -332,9 +343,9 @@ impl PpuExecutionUnit {
                 ExecuteVerdict::Syscall { lev } => {
                     // `sc` retires at the yield like any other instruction
                     // [PPC-Book1 p:26 s:2.4.2]: counted, hashed and charged.
-                    // Its records hold the state at the yield. The next
-                    // batch applies the return value and the step past it,
-                    // and charges the call's round trip.
+                    // Its records hold the state at the yield. For an LV2
+                    // call, the next batch applies the return value and the
+                    // step past it, and charges the call's round trip.
                     self.note_fetch(step_pc);
                     self.timing.retire_instruction(step_pc, ops, step_pc + 4);
                     if self.profile_mode {
@@ -346,6 +357,11 @@ impl PpuExecutionUnit {
                         self.note_syscall_code_events(step_pc);
                     }
                     self.record_retirement(step_pc);
+                    // A thread with supervisor registers takes the system
+                    // call interrupt at the kernel's vector instead.
+                    if translating {
+                        return self.system_call_yield(&entry, effects, step_pc, lev);
+                    }
                     self.close_block(effects);
                     let args = state::ppu_syscall_args(&self.state);
                     return ExecutionStepResult {
@@ -425,6 +441,11 @@ impl PpuExecutionUnit {
                 }
             }
             if let Some(exit) = fault {
+                // The instruction did not retire, and it runs again: in the
+                // next batch, or after the kernel's handler returns. So its
+                // `lwarx` or `ldarx` count goes back, as after a miss.
+                // [PPC-Book3 p:62 s:5.3.1] Depending on the interrupt type, the instruction that causes a precise interrupt may appear not to have begun execution.
+                self.restore_witnesses(witnesses);
                 if pair {
                     let boundary = (effects_before, stores_before, reads_before);
                     self.undo_fused_attempt(ctx.memory(), effects, boundary, step_pc);
@@ -680,10 +701,11 @@ impl PpuExecutionUnit {
     }
 
     /// Puts back the `lwarx` and `ldarx` execution counts an attempt
-    /// changed before its access missed in the translation cache.
+    /// changed before its access missed in the translation cache or
+    /// faulted.
     ///
-    /// The rerun counts the instruction, so a miss counts it once, as a
-    /// hit does.
+    /// The attempt that runs again counts the instruction. So a miss
+    /// counts it once, as a hit does, and a faulted attempt counts nothing.
     fn restore_witnesses(&mut self, witnesses: Option<(u64, u64)>) {
         if let Some((lwarx, ldarx)) = witnesses {
             self.state.lwarx_executed = lwarx;
@@ -703,6 +725,10 @@ impl PpuExecutionUnit {
     /// The next batch runs that instruction with no retired instruction
     /// ahead of it. Its fault then discards no instruction that completed
     /// before it [PPC-Book3 p:61 s:5.2].
+    ///
+    /// When no instruction of the batch retired, the thread ends at the
+    /// fault, or takes its interrupt at the kernel's vector
+    /// ([`Self::delivered_interrupt`]).
     fn end_at_fault(
         &mut self,
         entry: &BatchEntry,
@@ -723,7 +749,10 @@ impl PpuExecutionUnit {
             return self.budget_yield(entry, effects, last_retired);
         }
         match exit {
-            FaultExit::Verdict(f) => self.fault_yield(entry, effects, step_pc, &f),
+            FaultExit::Verdict(f) => match self.delivered_interrupt(&f) {
+                Some(interrupt) => self.interrupt_yield(entry, effects, step_pc, &interrupt),
+                None => self.fault_yield(entry, effects, step_pc, &f),
+            },
             FaultExit::Mem(e, store) => self.mem_fault_yield(entry, effects, step_pc, e, store),
         }
     }
@@ -797,9 +826,6 @@ impl PpuExecutionUnit {
 
     /// Gives an `mftb` / `mftbu`, or a move to or from the decrementer,
     /// the time base at its issue cycle.
-    ///
-    /// The run has one time base: a read returns no less than any read
-    /// before it, on this unit or another.
     #[inline]
     fn align_clock_read_to_issue(
         &mut self,
@@ -820,13 +846,28 @@ impl PpuExecutionUnit {
         let (true, [op]) = (reads_time_base, ops) else {
             return;
         };
+        self.state.tb = self.time_base_at_issue(ctx, entry, step_pc, op);
+    }
+
+    /// The time base that `op` at `step_pc` reads at its issue cycle.
+    ///
+    /// The run has one time base: a read returns no less than any read
+    /// before it, on this unit or another.
+    #[inline]
+    pub(super) fn time_base_at_issue(
+        &self,
+        ctx: &ExecutionContext<'_>,
+        entry: &BatchEntry,
+        step_pc: u64,
+        op: &crate::timing::Op,
+    ) -> u64 {
         let issue = self.timing.issue_cycle(step_pc, op);
         let tick = ctx
             .current_tick()
             .raw()
             .saturating_add(issue.saturating_sub(entry.cycle));
         let tb = PPU_TIME_BASE_ORIGIN.wrapping_add(cellgov_time::ticks_to_tb(tick));
-        self.state.tb = self.state.tb.max(tb).max(ctx.time_base());
+        self.state.tb.max(tb).max(ctx.time_base())
     }
 
     /// Records one retirement at `step_pc`: the full-state window entry,
@@ -890,7 +931,8 @@ impl PpuExecutionUnit {
     }
 
     /// Yields the data storage interrupt for the memory fault an
-    /// instruction reported, then counts it.
+    /// instruction reported, or takes it at the kernel's vector, then
+    /// counts it.
     #[inline]
     fn mem_fault_yield(
         &mut self,
@@ -913,7 +955,11 @@ impl PpuExecutionUnit {
                 PpuFault::Internal("memory fault without an address")
             }
         };
-        let mut result = self.fault_yield(entry, effects, step_pc, &fault);
+        let mut result = match self.delivered_interrupt(&fault) {
+            Some(interrupt) => self.interrupt_yield(entry, effects, step_pc, &interrupt),
+            None => self.fault_yield(entry, effects, step_pc, &fault),
+        };
+        // Only the terminal fault's diagnostics carry the data access.
         if let Some(access) = result.local_diagnostics.data_access.as_mut() {
             access.refused_by = refused_by;
         }
@@ -1091,3 +1137,7 @@ fn touches_window(
 #[cfg(test)]
 #[path = "tests/translation_hit_miss_tests.rs"]
 mod translation_hit_miss_tests;
+
+#[cfg(test)]
+#[path = "tests/faulted_reserve_count_tests.rs"]
+mod faulted_reserve_count_tests;

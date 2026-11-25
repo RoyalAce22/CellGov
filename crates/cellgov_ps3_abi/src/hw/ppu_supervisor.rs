@@ -32,10 +32,35 @@ pub const MSR_EE: u64 = doubleword_bit(48);
 /// [PPC-Book3 p:10 s:2.2.3] See [`MSR_SF`].
 pub const MSR_PR: u64 = doubleword_bit(49);
 
+/// MSR bit 50: floating-point instructions available.
+///
+/// [PPC-Book3 p:10 s:2.2.3] See [`MSR_SF`].
+pub const MSR_FP: u64 = doubleword_bit(50);
+
 /// MSR bit 51: machine check interrupts enabled.
 ///
 /// [PPC-Book3 p:10 s:2.2.3] See [`MSR_SF`].
 pub const MSR_ME: u64 = doubleword_bit(51);
+
+/// MSR bit 52: floating-point exception mode 0.
+///
+/// [PPC-Book3 p:10 s:2.2.3] MSR bit 52 is FE0, bit 53 SE, bit 54 BE and bit 55 FE1.
+pub const MSR_FE0: u64 = doubleword_bit(52);
+
+/// MSR bit 53: single-step trace enabled.
+///
+/// [PPC-Book3 p:10 s:2.2.3] See [`MSR_FE0`].
+pub const MSR_SE: u64 = doubleword_bit(53);
+
+/// MSR bit 54: branch trace enabled.
+///
+/// [PPC-Book3 p:10 s:2.2.3] See [`MSR_FE0`].
+pub const MSR_BE: u64 = doubleword_bit(54);
+
+/// MSR bit 55: floating-point exception mode 1.
+///
+/// [PPC-Book3 p:10 s:2.2.3] See [`MSR_FE0`].
+pub const MSR_FE1: u64 = doubleword_bit(55);
 
 /// MSR bit 58: instruction address translation enabled.
 ///
@@ -47,10 +72,32 @@ pub const MSR_IR: u64 = doubleword_bit(58);
 /// [PPC-Book3 p:10 s:2.2.3] See [`MSR_SF`].
 pub const MSR_DR: u64 = doubleword_bit(59);
 
+/// MSR bit 61: the performance monitor mark.
+///
+/// [PPC-Book3 p:108 s:E.1] MSR bit 61 is PMM, the performance monitor mark.
+/// [CBE-Handbook p:304 s:10.4.1] The PPE's MSR has PMM at bit 61.
+pub const MSR_PMM: u64 = doubleword_bit(61);
+
 /// MSR bit 62: the interrupt is recoverable.
 ///
 /// [PPC-Book3 p:22 s:3.4] `mtmsrd` with L = 1 writes MSR bits 48 and 62 and leaves the rest.
 pub const MSR_RI: u64 = doubleword_bit(62);
+
+/// The MSR bits that every interrupt clears.
+///
+/// [CBE-Handbook p:292 s:9.12] Table 9-40: an interrupt clears BE, EE, FE0, FE1, FP, PR, SE, DR, IR and RI, sets SF, keeps ME, and keeps HV when LPCR\[LPES\] bits 0 and 1 are 1.
+/// [PPC-Book3 p:65 s:5.5] Figure 35: every interrupt also sets PMM to 0, which Table 9-40 does not list.
+pub const MSR_INTERRUPT_CLEARED: u64 = MSR_BE
+    | MSR_EE
+    | MSR_FE0
+    | MSR_FE1
+    | MSR_FP
+    | MSR_PR
+    | MSR_SE
+    | MSR_DR
+    | MSR_IR
+    | MSR_RI
+    | MSR_PMM;
 
 /// Entries in each PPE hardware thread's SLB.
 ///
@@ -115,3 +162,11 @@ pub const SPR_SPRG0: u16 = 272;
 #[cfg(test)]
 #[path = "tests/ppu_supervisor_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/ppu_msr_trace_fp_bits_tests.rs"]
+mod msr_trace_fp_bits_tests;
+
+#[cfg(test)]
+#[path = "tests/ppu_msr_pmm_bit_tests.rs"]
+mod msr_pmm_bit_tests;

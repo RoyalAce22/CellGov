@@ -18,21 +18,21 @@ use cellgov_time::Budget;
 const CONSOLE: &str = "../../tests/micro/ppu_sc_reserved_bits/ps3/cech20-cex-493/observation.json";
 
 /// The number of `sc` words the probe runs.
-const WORDS: usize = 5;
+pub(crate) const WORDS: usize = 5;
 
 /// Where the program stores each word's getpid and getppid answers.
 const RESULT: u64 = 0x1000;
 
 /// One `sc` word with the getpid and getppid answers it gave.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Answer {
-    word: u32,
+pub(crate) struct Answer {
+    pub(crate) word: u32,
     pid: u64,
     ppid: u64,
 }
 
 /// Returns each word's answers from the capture.
-fn console() -> [Answer; WORDS] {
+pub(crate) fn console() -> [Answer; WORDS] {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(CONSOLE);
     let observation = cellgov_compare::baseline::load(&path)
         .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
@@ -110,7 +110,7 @@ fn run(words: [u32; WORDS]) -> [Answer; WORDS] {
 }
 
 /// For each word, whether its answers equal the first (plain) word's.
-fn same_as_plain(answers: &[Answer; WORDS]) -> [bool; WORDS] {
+pub(crate) fn same_as_plain(answers: &[Answer; WORDS]) -> [bool; WORDS] {
     std::array::from_fn(|i| (answers[i].pid, answers[i].ppid) == (answers[0].pid, answers[0].ppid))
 }
 

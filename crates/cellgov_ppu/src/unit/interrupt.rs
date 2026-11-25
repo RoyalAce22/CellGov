@@ -1,0 +1,323 @@
+//! Interrupt delivery for a thread with supervisor registers.
+//!
+//! Such a thread runs the console's kernel, which handles its own
+//! interrupts. The thread takes each interrupt at the kernel's vector:
+//! - an interrupt its instruction causes, except a machine check and
+//!   `sc` with LEV = 1;
+//! - the system call interrupt of `sc` with any other LEV;
+//! - the external and decrementer interrupts, between two instructions.
+//!
+//! Interrupt entry ends the batch. The next batch follows the new MSR,
+//! whose IR and DR are 0. A thread with no supervisor registers keeps
+//! the terminal fault of every interrupt.
+
+use cellgov_effects::Effect;
+use cellgov_exec::{
+    CodeEvent, ExecutionContext, ExecutionStepResult, InterruptRecord, LocalDiagnostics,
+    YieldReason,
+};
+use cellgov_ps3_abi::hw::ppu_interrupt::{
+    SRR1_INTERRUPT_INFO, VECTOR_DECREMENTER, VECTOR_EXTERNAL,
+};
+use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_EE, MSR_INTERRUPT_CLEARED, MSR_SF};
+
+use super::batch::BatchEntry;
+use super::ppu_unit::PpuExecutionUnit;
+use crate::exec::{PpuFault, PpuInterrupt};
+use crate::instruction::PpuInstruction;
+
+/// The MSR at the vector of an interrupt taken with MSR `msr`.
+///
+/// CellGov declares LPCR\[LPES\] = 0b11 for the kernel's partition. So an
+/// interrupt that the kernel takes does not change MSR\[HV\]. ME does not
+/// change either.
+///
+/// [CBE-Handbook p:292 s:9.12] Table 9-40: an interrupt clears BE, EE, FE0, FE1, FP, PR, SE, DR, IR and RI, sets SF, keeps ME, and keeps HV when LPCR\[LPES\] bits 0 and 1 are 1.
+fn entry_msr(msr: u64) -> u64 {
+    (msr & !MSR_INTERRUPT_CLEARED) | MSR_SF
+}
+
+/// The SRR1 of an interrupt taken with MSR `msr`, whose own information
+/// is `cause`.
+///
+/// [PPC-Book3 p:62 s:5.4] SRR1 bits 33:36 and 42:47 hold the interrupt's information, and every other bit holds the MSR.
+fn entry_srr1(msr: u64, cause: u64) -> u64 {
+    (msr & !SRR1_INTERRUPT_INFO) | (cause & SRR1_INTERRUPT_INFO)
+}
+
+/// An interrupt that no instruction causes, which the thread takes
+/// between two instructions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum BoundaryInterrupt {
+    /// An external exception exists.
+    External,
+    /// The decrementer is negative.
+    Decrementer,
+}
+
+impl BoundaryInterrupt {
+    /// The interrupt registers when the thread takes this interrupt
+    /// ahead of the instruction at `pc`.
+    ///
+    /// [PPC-Book3 p:69 s:5.5.7] An external interrupt sets SRR0 to the instruction the processor would execute next, and SRR1 bits 33:36 and 42:47 to 0.
+    /// [CBE-Handbook p:255 s:9.5.11] A decrementer interrupt sets SRR0 to the instruction the processor would execute next.
+    fn record(self, pc: u64) -> InterruptRecord {
+        InterruptRecord {
+            vector: match self {
+                Self::External => VECTOR_EXTERNAL,
+                Self::Decrementer => VECTOR_DECREMENTER,
+            },
+            srr0: pc,
+            srr1: 0,
+            dsisr: None,
+            dar: None,
+        }
+    }
+}
+
+impl PpuExecutionUnit {
+    /// The interrupt the thread takes at the kernel's vector for `fault`,
+    /// or `None` when `fault` ends the thread.
+    ///
+    /// These faults end the thread:
+    /// - every fault of a thread with no supervisor registers;
+    /// - a CellGov stop;
+    /// - a machine check: the 4.93 kernel's machine check vector loops on
+    ///   itself, so CellGov keeps the stop;
+    /// - `sc` with LEV = 1: CellGov's hypervisor does not answer it.
+    pub(super) fn delivered_interrupt(&self, fault: &PpuFault) -> Option<PpuInterrupt> {
+        if !self.translates() {
+            return None;
+        }
+        match fault.interrupt()? {
+            PpuInterrupt::MachineCheck | PpuInterrupt::SystemCall { .. } => None,
+            interrupt => Some(*interrupt),
+        }
+    }
+
+    /// Takes `interrupt`, which the instruction at `pc` caused, at its
+    /// vector, and yields at the interrupt boundary.
+    ///
+    /// The instruction is the first of its batch. The unit puts back the
+    /// state at batch entry, so the instruction leaves no state and no
+    /// effect. The reservation stays.
+    ///
+    /// [PPC-Book3 p:63 s:5.4] Interrupts do not clear reservations.
+    pub(super) fn interrupt_yield(
+        &mut self,
+        entry: &BatchEntry,
+        effects: &mut Vec<Effect>,
+        pc: u64,
+        interrupt: &PpuInterrupt,
+    ) -> ExecutionStepResult {
+        debug_assert_eq!(
+            self.retirement_counter, entry.retired,
+            "a retired instruction would be rewound"
+        );
+        // The boundary test ahead of the instruction read the time base,
+        // and the read stays.
+        let clock = (self.state.clock_read, self.state.tb);
+        self.rewind_batch(entry, effects);
+        (self.state.clock_read, self.state.tb) = clock;
+        self.hand_back_break_skip(pc);
+        self.note_entry_context_sync(entry);
+        let record = interrupt.record(pc);
+        self.boundary_yield(entry, effects, pc, record)
+    }
+
+    /// Takes the system call interrupt of the `sc` at `pc`, which
+    /// retired with LEV `lev`, and yields at the interrupt boundary.
+    ///
+    /// The kernel runs the call in its own instructions, so the issue
+    /// model charges no LV2 round trip.
+    pub(super) fn system_call_yield(
+        &mut self,
+        entry: &BatchEntry,
+        effects: &mut Vec<Effect>,
+        pc: u64,
+        lev: u8,
+    ) -> ExecutionStepResult {
+        self.timing.drop_pending_syscall();
+        let record = PpuInterrupt::SystemCall { lev }.record(pc);
+        self.boundary_yield(entry, effects, pc, record)
+    }
+
+    /// The interrupt the thread takes ahead of the instruction at `pc`,
+    /// or `None`.
+    ///
+    /// The external and decrementer exceptions wait while MSR\[EE\] = 0.
+    /// A move of the MSR ends the batch. After a move that sets EE, the
+    /// thread takes a waiting exception ahead of the first instruction of
+    /// the next batch.
+    ///
+    /// When both exceptions exist, the thread takes the external one
+    /// first, as the PPE does. A thread that waits for the decrementer
+    /// does not wake at its deadline: CellGov's hypervisor owns that wait.
+    ///
+    /// [PPC-Book3 p:76 s:5.8] External, decrementer and hypervisor decrementer exceptions have equal priority, and the processor may take any one of them.
+    /// [CBE-Handbook p:291 s:9.10] Table 9-39: the PPE ranks the external interrupt above the decrementer interrupt.
+    /// [PPC-Book3 p:81 s:6.3] A decrementer exception exists while DEC bit 0 is 1.
+    pub(super) fn boundary_interrupt(
+        &mut self,
+        ctx: &ExecutionContext<'_>,
+        entry: &BatchEntry,
+        pc: u64,
+    ) -> Option<BoundaryInterrupt> {
+        let sup = self.state.supervisor()?;
+        if sup.msr & MSR_EE == 0 {
+            return None;
+        }
+        if sup.external {
+            return Some(BoundaryInterrupt::External);
+        }
+        let tb = self.boundary_time_base(ctx, entry, pc);
+        // The test reads the time base, so the step publishes a clock read.
+        self.state.tb = tb;
+        self.state.clock_read = true;
+        let dec = self.state.supervisor()?.dec_at(tb);
+        ((dec as i32) < 0).then_some(BoundaryInterrupt::Decrementer)
+    }
+
+    /// Takes `interrupt` ahead of the instruction at `pc`, and yields at
+    /// the interrupt boundary. The instructions the batch retired commit.
+    pub(super) fn boundary_interrupt_yield(
+        &mut self,
+        entry: &BatchEntry,
+        effects: &mut Vec<Effect>,
+        pc: u64,
+        interrupt: BoundaryInterrupt,
+    ) -> ExecutionStepResult {
+        self.note_entry_context_sync(entry);
+        self.boundary_yield(entry, effects, pc, interrupt.record(pc))
+    }
+
+    /// Records the context synchronization of interrupt entry, when the
+    /// batch records code events. The `sc` of a system call interrupt
+    /// records its own.
+    ///
+    /// [PPC-Book3 p:61 s:5.2] Every interrupt except system reset and machine check is context synchronizing.
+    fn note_entry_context_sync(&mut self, entry: &BatchEntry) {
+        if entry.trace {
+            self.code_events.push(CodeEvent::ContextSync);
+        }
+    }
+
+    /// The time base that an `mftb` at `pc` reads.
+    fn boundary_time_base(&self, ctx: &ExecutionContext<'_>, entry: &BatchEntry, pc: u64) -> u64 {
+        let (ops, _) = crate::timing::classify(&PpuInstruction::Mftb { rt: 0 }, &self.state);
+        self.time_base_at_issue(ctx, entry, pc, &ops[0])
+    }
+
+    /// Sets the interrupt registers from `record`, whose `srr1` holds
+    /// the cause bits only, and moves the thread to the vector. Returns
+    /// the record with the whole SRR1.
+    fn enter_interrupt(&mut self, mut record: InterruptRecord) -> InterruptRecord {
+        let Some(msr) = self.state.supervisor().map(|s| s.msr) else {
+            debug_assert!(
+                false,
+                "interrupt entry on a thread with no supervisor registers"
+            );
+            return record;
+        };
+        record.srr1 = entry_srr1(msr, record.srr1);
+        self.state.update_supervisor(|s| {
+            s.srr0 = record.srr0;
+            s.srr1 = record.srr1;
+            if let Some(dar) = record.dar {
+                s.dar = dar;
+            }
+            if let Some(dsisr) = record.dsisr {
+                s.dsisr = dsisr;
+            }
+            s.msr = entry_msr(msr);
+        });
+        // With IR = 0 the fetch at the vector goes through the real mode
+        // offset.
+        self.state.pc = record.vector;
+        record
+    }
+
+    /// Publishes the block, takes the interrupt `record` names, and
+    /// yields at the interrupt boundary with the whole interrupt record.
+    fn boundary_yield(
+        &mut self,
+        entry: &BatchEntry,
+        effects: &mut Vec<Effect>,
+        pc: u64,
+        record: InterruptRecord,
+    ) -> ExecutionStepResult {
+        self.close_block(effects);
+        let record = self.enter_interrupt(record);
+        ExecutionStepResult {
+            yield_reason: YieldReason::InterruptBoundary,
+            consumed_cost: self.cost(entry),
+            local_diagnostics: LocalDiagnostics {
+                pc: Some(pc),
+                lr: Some(self.state.lr()),
+                syscall_lev: None,
+                faulting_ea: None,
+                fault_regs: None,
+                data_access: None,
+                interrupt: Some(record),
+            },
+            fault: None,
+            syscall_args: None,
+        }
+    }
+
+    /// Hands back a break skip spent at `pc`, whose instruction did not
+    /// retire and runs again after the interrupt handler returns.
+    fn hand_back_break_skip(&mut self, pc: u64) {
+        if self.break_pc == Some(pc) {
+            self.break_skip += 1;
+        }
+    }
+
+    /// Raises an external exception for the thread. Returns `false`, and
+    /// changes nothing, when the thread has no supervisor registers.
+    ///
+    /// The exception exists until [`Self::clear_external_exception`].
+    #[must_use]
+    pub fn raise_external_exception(&mut self) -> bool {
+        self.state
+            .update_supervisor(|s| s.external = true)
+            .is_some()
+    }
+
+    /// Clears the thread's external exception. Returns `false`, and
+    /// changes nothing, when the thread has no supervisor registers.
+    #[must_use]
+    pub fn clear_external_exception(&mut self) -> bool {
+        self.state
+            .update_supervisor(|s| s.external = false)
+            .is_some()
+    }
+}
+
+#[cfg(test)]
+#[path = "tests/interrupt_entry_tests.rs"]
+mod interrupt_entry_tests;
+
+#[cfg(test)]
+#[path = "tests/interrupt_support.rs"]
+mod interrupt_support;
+
+#[cfg(test)]
+#[path = "tests/interrupt_class_tests.rs"]
+mod interrupt_class_tests;
+
+#[cfg(test)]
+#[path = "tests/interrupt_batch_tests.rs"]
+mod interrupt_batch_tests;
+
+#[cfg(test)]
+#[path = "tests/interrupt_boundary_tests.rs"]
+mod interrupt_boundary_tests;
+
+#[cfg(test)]
+#[path = "tests/interrupt_system_call_tests.rs"]
+mod interrupt_system_call_tests;
+
+#[cfg(test)]
+#[path = "tests/interrupt_code_event_tests.rs"]
+mod interrupt_code_event_tests;

@@ -1,5 +1,5 @@
-//! The PPE interrupts problem-state code can cause: their vector
-//! addresses, and the SRR1 and DSISR bits that record their cause.
+//! The PPE interrupts a PPU thread can take: their vector addresses, and
+//! the SRR1 and DSISR bits that record their cause.
 //!
 //! The bit numbers are the ones the ISA prints: bit 0 is the most
 //! significant bit of the 64-bit SRR1 and of the 32-bit DSISR.
@@ -39,6 +39,11 @@ pub const VECTOR_INSTRUCTION_STORAGE: u64 = 0x400;
 /// [PPC-Book3 p:65 s:5.5] Figure 36.
 pub const VECTOR_INSTRUCTION_SEGMENT: u64 = 0x480;
 
+/// External interrupt vector.
+///
+/// [PPC-Book3 p:65 s:5.5] Figure 36.
+pub const VECTOR_EXTERNAL: u64 = 0x500;
+
 /// Alignment interrupt vector.
 ///
 /// [PPC-Book3 p:65 s:5.5] Figure 36.
@@ -54,6 +59,11 @@ pub const VECTOR_PROGRAM: u64 = 0x700;
 /// [PPC-Book3 p:65 s:5.5] Figure 36.
 pub const VECTOR_FP_UNAVAILABLE: u64 = 0x800;
 
+/// Decrementer interrupt vector.
+///
+/// [PPC-Book3 p:65 s:5.5] Figure 36.
+pub const VECTOR_DECREMENTER: u64 = 0x900;
+
 /// System call interrupt vector.
 ///
 /// [PPC-Book3 p:65 s:5.5] Figure 36.
@@ -63,6 +73,12 @@ pub const VECTOR_SYSTEM_CALL: u64 = 0xC00;
 ///
 /// [CBE-Handbook p:258 s:9.5.15] The PPE's VXU unavailable interrupt is at 0xF20.
 pub const VECTOR_VXU_UNAVAILABLE: u64 = 0xF20;
+
+/// SRR1 bits 33:36 and 42:47: the interrupt's own information. An
+/// interrupt copies the remaining SRR1 bits from the MSR.
+///
+/// [PPC-Book3 p:62 s:5.4] An interrupt loads SRR1 bits 33:36 and 42:47 with information specific to its type, and bits 0:32, 37:41 and 48:63 with the MSR.
+pub const SRR1_INTERRUPT_INFO: u64 = 0x0000_0000_783F_0000;
 
 /// SRR1 bit 33: an instruction fetch found no translation.
 ///
@@ -122,3 +138,7 @@ pub const DSISR_SEGMENT: u32 = word_bit(10);
 #[cfg(test)]
 #[path = "tests/ppu_interrupt_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/ppu_interrupt_delivery_tests.rs"]
+mod delivery_tests;

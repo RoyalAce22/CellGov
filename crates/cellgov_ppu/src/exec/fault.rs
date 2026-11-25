@@ -52,12 +52,19 @@ pub enum PpuFault {
 
 /// A PPE interrupt that a PPU thread's instruction causes, with its cause
 /// fields.
+///
+/// On a thread with no supervisor registers every one of them ends the
+/// thread. A thread with supervisor registers takes each one at the
+/// kernel's vector, except [`Self::MachineCheck`] and `sc` with LEV = 1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum PpuInterrupt {
     /// A caching-inhibited load, with MSR\[ME\] = 1, whose translation
     /// reaches a real address no storage holds. Only a thread with
     /// supervisor registers translates. Every other access to such an
     /// address is a [`PpuFault::Checkstop`].
+    ///
+    /// A thread with supervisor registers also stops, because the 4.93
+    /// kernel's machine check vector loops on itself.
     ///
     /// [PPC-Book3 p:66 s:5.5.2] An access to a storage location that does not exist causes a machine check, or the checkstop state when MSR\[ME\] = 0.
     /// [CBE-Handbook p:247 s:9.5.2] The PPE takes the machine check for a data error on a caching-inhibited load, such as one to a nonexistent memory address.
@@ -134,12 +141,16 @@ pub enum PpuInterrupt {
     /// [CBE-Handbook p:258 s:9.5.15] VXU unavailable needs MSR\[VXU\] = 0, and SRR0 holds the instruction the processor would have attempted to execute next.
     #[error("PPU VXU unavailable interrupt")]
     VxuUnavailable,
-    /// `sc` with LEV = 1, which invokes the hypervisor. An `sc` with
-    /// LEV = 0 is a syscall the unit yields.
+    /// `sc` with LEV = 1, which invokes the hypervisor. An `sc` with any
+    /// other LEV is one of these:
+    /// - on a thread with no supervisor registers, a syscall the unit
+    ///   yields;
+    /// - on a thread with supervisor registers, the system call interrupt
+    ///   at the kernel's vector, whose record this variant also gives.
     ///
-    /// The thread stops, and LV2 receives no request. No document or
-    /// console capture shows what LV1 does with this call from a game
-    /// process.
+    /// For LEV = 1 the thread stops, and LV2 receives no request. No
+    /// document or console capture shows what LV1 does with this call
+    /// from a game process.
     ///
     /// [PPC-Book3 p:12 s:2.3.1] `sc` with LEV = 1 invokes the hypervisor, even from problem state, and the architecture calls that a programming error.
     /// [CBE-Handbook p:256 s:9.5.13] On the PPE, LEV = 1 sets MSR\[HV\].
@@ -287,7 +298,7 @@ impl PpuInterrupt {
     }
 
     /// The interrupt registers after the instruction at `pc` takes the
-    /// interrupt.
+    /// interrupt. SRR1 holds the cause bits only.
     pub(crate) fn record(&self, pc: u64) -> InterruptRecord {
         // [PPC-Book3 p:12 s:2.3.1] A system call interrupt sets SRR0 to the instruction after `sc`.
         // Every other class sets SRR0 to the instruction that caused it.

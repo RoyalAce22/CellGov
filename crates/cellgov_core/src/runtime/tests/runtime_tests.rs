@@ -26,6 +26,8 @@ mod dma;
 mod fast_path;
 #[path = "runtime_flip_flags_tests.rs"]
 mod flip_flags;
+#[path = "runtime_interrupt_trace_tests.rs"]
+mod interrupt_trace;
 #[path = "runtime_invariant_channel_tests.rs"]
 mod invariant_channel;
 #[path = "runtime_large_page_area_tests.rs"]

@@ -18,11 +18,12 @@
 //! holds the stored value. Case 2 reads that target through Y, and the
 //! other cases through X.
 
+use cellgov_effects::FaultKind;
 use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_ppu::mmu::Partition;
 use cellgov_ppu::supervisor::{SlbEntry, SupervisorState};
-use cellgov_ppu::PpuExecutionUnit;
+use cellgov_ppu::{PpuExecutionUnit, FAULT_SYSTEM_CALL};
 use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_DR, MSR_IR, MSR_SF, SLB_VALID};
 use cellgov_testkit::fixtures::ScenarioFixture;
 use cellgov_testkit::runner::{self, ScenarioOutcome};
@@ -101,7 +102,7 @@ fn segment_address(p: &mut Vec<u32>, rt: u32, low: u16) {
 }
 
 /// Assembles every case's trial loop, each trial's record stored through
-/// page 3, and an unconditional trap at the end.
+/// page 3, and an `sc 1` at the end.
 fn program(trials: u64) -> Vec<u32> {
     let mut p = Vec::new();
     // r20 the fill: lis, ori, rldimi r20,r20,32,0.
@@ -144,7 +145,9 @@ fn program(trials: u64) -> Vec<u32> {
         let back = (head as i32 - p.len() as i32) * 4;
         p.push(16 << 26 | 16 << 21 | (back as u32 & 0xFFFC)); // bdnz head
     }
-    p.push(0x7FE0_0008); // tw 31,0,0
+    // A trap takes the program interrupt at the kernel's vector, and the
+    // run continues. `sc 1` stops the thread.
+    p.push(0x4400_0022); // sc 1
     p
 }
 
@@ -209,8 +212,13 @@ fn run(trials: u64) -> [[u64; 2]; CASES] {
     assert_eq!(
         result.outcome,
         ScenarioOutcome::Faulted,
-        "the program ends at its trap: {:?}",
+        "the program ends at its hypervisor call: {:?}",
         result.first_fault
+    );
+    assert_eq!(
+        result.first_fault.map(|(_, kind)| kind),
+        Some(FaultKind::Guest(FAULT_SYSTEM_CALL | 1)),
+        "the program ends at its hypervisor call"
     );
     let m = &result.final_memory;
     let mut counts = [[0u64; 2]; CASES];

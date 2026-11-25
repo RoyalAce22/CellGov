@@ -37,9 +37,15 @@ impl PpuExecutionUnit {
         diag
     }
 
-    /// Fault-discards-all: restore the batch-entry state, drop staged
-    /// stores, fetch runs and effects, rewind the per-step trace to
-    /// the batch entry, and mark the unit faulted.
+    /// Fault-discards-all: [`Self::rewind_batch`], then mark the unit
+    /// faulted.
+    fn discard_batch(&mut self, entry: &BatchEntry, effects: &mut Vec<Effect>) {
+        self.rewind_batch(entry, effects);
+        self.status = UnitStatus::Faulted;
+    }
+
+    /// Restore the batch-entry state, drop staged stores, fetch runs and
+    /// effects, and rewind the per-step trace to the batch entry.
     ///
     /// Retirements discarded by the rollback never reach the trace
     /// stream: the rollback truncates their `PpuStateHash` /
@@ -47,7 +53,7 @@ impl PpuExecutionUnit {
     /// `retirement_counter` and the issue model's scalar state. The caches
     /// and the branch predictor keep the changes of the discarded
     /// instructions.
-    fn discard_batch(&mut self, entry: &BatchEntry, effects: &mut Vec<Effect>) {
+    pub(super) fn rewind_batch(&mut self, entry: &BatchEntry, effects: &mut Vec<Effect>) {
         if let Some(snap) = entry.snapshot.as_ref() {
             self.state = snap.clone();
         }
@@ -62,7 +68,6 @@ impl PpuExecutionUnit {
         self.barriers.truncate(entry.barriers);
         self.code_events.truncate(entry.code_events);
         self.retirement_counter = entry.retired;
-        self.status = UnitStatus::Faulted;
     }
 
     /// Roll the batch back and yield `fault` at `pc`.

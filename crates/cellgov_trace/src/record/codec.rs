@@ -33,6 +33,7 @@ pub(super) const TAG_SPU_STATE_HASH: u8 = 0x12;
 pub(super) const TAG_SPU_STATE_FULL: u8 = 0x13;
 pub(super) const TAG_SPU_REGISTERS: u8 = 0x14;
 pub(super) const TAG_UNSYNCED_CODE_FETCH: u8 = 0x15;
+pub(super) const TAG_INTERRUPT_DELIVERED: u8 = 0x16;
 
 impl TraceRecord {
     /// Append the binary encoding to `buf`.
@@ -286,6 +287,17 @@ impl TraceRecord {
                 write_u64(buf, *store_step);
                 buf.push(*sequence);
                 buf.push(u8::from(*patch_class));
+            }
+            TraceRecord::InterruptDelivered {
+                unit,
+                vector,
+                srr0,
+                time,
+            } => {
+                write_u64(buf, unit.raw());
+                write_u64(buf, *vector);
+                write_u64(buf, *srr0);
+                write_u64(buf, time.raw());
             }
         }
         debug_assert_eq!(
@@ -609,6 +621,18 @@ impl TraceRecord {
                     store_step,
                     sequence,
                     patch_class,
+                }
+            }
+            TAG_INTERRUPT_DELIVERED => {
+                let unit = UnitId::new(read_u64(bytes, &mut pos)?);
+                let vector = read_u64(bytes, &mut pos)?;
+                let srr0 = read_u64(bytes, &mut pos)?;
+                let time = GuestTicks::new(read_u64(bytes, &mut pos)?);
+                TraceRecord::InterruptDelivered {
+                    unit,
+                    vector,
+                    srr0,
+                    time,
                 }
             }
             other => return Err(DecodeError::UnknownTag(other)),

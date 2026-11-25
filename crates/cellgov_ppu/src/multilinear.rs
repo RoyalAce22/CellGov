@@ -266,7 +266,7 @@ pub const KEYS: [u128; KEY_COUNT] = [
 /// - [`lanes`], [`accumulate_with`] or [`finish`]
 /// - [`SUPERVISOR_KEYS`] or [`supervisor_lane`]
 /// - the word order of [`crate::supervisor::SupervisorState::words`]
-pub const SCHEME_TAG: &[u8] = b"cellgov-ppu-multilinear/v3";
+pub const SCHEME_TAG: &[u8] = b"cellgov-ppu-multilinear/v4";
 
 /// The id of the multilinear hash scheme.
 pub const SCHEME_ID: u64 = scheme_id(SCHEME_TAG, &KEYS);
@@ -335,9 +335,9 @@ pub fn lanes(fp: &PpuFingerprint) -> [u64; LANE_COUNT] {
 /// block.
 ///
 /// [`crate::supervisor::SupervisorState::words`] gives the order: 11
-/// register words, two words for each of the 64 SLB entries, then 4
-/// partition words.
-pub const SUPERVISOR_WORDS: usize = 11 + 2 * 64 + 4;
+/// register words, two words for each of the 64 SLB entries, 4
+/// partition words, then the external exception word.
+pub const SUPERVISOR_WORDS: usize = 11 + 2 * 64 + 4 + 1;
 
 /// The seed of the SplitMix64 stream that [`SUPERVISOR_KEYS`] comes from.
 pub const SUPERVISOR_KEY_SEED: u64 = 1;

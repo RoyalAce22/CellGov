@@ -5,7 +5,7 @@ use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_PR, PPE_SLB_ENTRIES, SLB_VALID};
 use crate::mmu::Partition;
 use crate::multilinear::{supervisor_lane, SUPERVISOR_WORDS};
 
-const _: () = assert!(SUPERVISOR_WORDS == 11 + 2 * PPE_SLB_ENTRIES + 4);
+const _: () = assert!(SUPERVISOR_WORDS == 11 + 2 * PPE_SLB_ENTRIES + 4 + 1);
 
 /// One SLB entry: the effective half `slbmte` takes from RB and the
 /// virtual half it takes from RS.
@@ -67,12 +67,17 @@ pub struct SupervisorState {
     /// The translation resources the hypervisor set for the thread's
     /// partition.
     pub partition: Partition,
+    /// An external exception exists for the thread. CellGov's
+    /// hypervisor sets it and clears it.
+    ///
+    /// [PPC-Book3 p:69 s:5.5.7] The external interrupt does not cause the external exception to cease to exist.
+    pub external: bool,
 }
 
 impl SupervisorState {
     /// The registers at the entry of supervisor code: `msr` as given,
-    /// every other register 0, every SLB entry invalid, and the
-    /// partition at [`Partition::INITIAL`].
+    /// every other register 0, every SLB entry invalid, the partition at
+    /// [`Partition::INITIAL`], and no external exception.
     pub fn new(msr: u64) -> Self {
         Self {
             msr,
@@ -85,6 +90,7 @@ impl SupervisorState {
             sprg: [0; 4],
             slb: [SlbEntry::default(); PPE_SLB_ENTRIES],
             partition: Partition::INITIAL,
+            external: false,
         }
     }
 
@@ -115,6 +121,8 @@ impl SupervisorState {
     /// 2. the real mode limit
     /// 3. the real mode offset
     /// 4. HID6\[LB\]
+    ///
+    /// The last word is 1 while an external exception exists, else 0.
     pub fn words(&self) -> [u64; SUPERVISOR_WORDS] {
         let mut out = [0u64; SUPERVISOR_WORDS];
         let head = [
@@ -136,7 +144,13 @@ impl SupervisorState {
             out[head.len() + 2 * k + 1] = e.vsid_flags;
         }
         let p = &self.partition;
-        let tail = [p.sdr1(), p.rm_limit(), p.rm_offset(), u64::from(p.lb())];
+        let tail = [
+            p.sdr1(),
+            p.rm_limit(),
+            p.rm_offset(),
+            u64::from(p.lb()),
+            u64::from(self.external),
+        ];
         out[SUPERVISOR_WORDS - tail.len()..].copy_from_slice(&tail);
         out
     }

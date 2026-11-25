@@ -22,7 +22,8 @@ pub struct LocalDiagnostics {
     pub lr: Option<u64>,
     /// LEV of the `sc` instruction, which the PPU reads from bit 26 alone.
     /// Set on `YieldReason::Syscall`, where it is always 0: `sc` with
-    /// LEV = 1 stops the thread and yields no syscall.
+    /// LEV = 1 stops the thread and yields no syscall. A thread with
+    /// supervisor registers yields no syscall either.
     ///
     /// [PPC-Book1 p:26 s:2.4.2 System Call Instruction] LEV=0 user-mode kernel syscall path.
     /// [PPC-Book3 p:12 s:2.3.1] LEV=1 invokes the hypervisor; LEV>1 reserved.
@@ -38,23 +39,30 @@ pub struct LocalDiagnostics {
     /// access. Its `faulting_ea` is then the first byte of that access,
     /// which is where the DAR points.
     pub data_access: Option<DataAccessFault>,
-    /// The interrupt registers a PPE interrupt sets, when the fault is
-    /// one. A CellGov stop and an SPU fault leave it `None`.
+    /// The interrupt registers a PPE interrupt sets.
+    ///
+    /// A PPU unit sets it on:
+    /// - a fault that is a PPE interrupt;
+    /// - `YieldReason::InterruptBoundary`.
+    ///
+    /// A CellGov stop and an SPU fault leave it `None`.
     pub interrupt: Option<InterruptRecord>,
 }
 
-/// What the PPE's interrupt registers hold after an interrupt that
-/// problem-state code caused.
+/// What the PPE's interrupt registers hold after a PPE interrupt.
 ///
-/// SRR1 holds only the cause bits. CellGov does not model the MSR copy
-/// that the PPE also saves in SRR1.
+/// The SRR1 field depends on the yield:
+/// - On `YieldReason::Fault`, it holds only the cause bits. The thread
+///   ends, and CellGov does not model the MSR copy.
+/// - On `YieldReason::InterruptBoundary`, it holds the whole SRR1: the
+///   cause bits and the MSR copy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InterruptRecord {
     /// The effective address of the interrupt vector. It names the class.
     pub vector: u64,
     /// SRR0: the instruction the interrupt addresses.
     pub srr0: u64,
-    /// The SRR1 cause bits the interrupt sets.
+    /// SRR1, as the type documentation describes.
     pub srr1: u64,
     /// DSISR, which the data storage and data segment interrupts set.
     pub dsisr: Option<u32>,

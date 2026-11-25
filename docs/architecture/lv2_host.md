@@ -15,7 +15,9 @@ How a guest `sc` reaches an answer:
 flowchart TD
   sc["guest sc"] --> lev{"LEV = 0?"}
   lev -->|no| hyp["PPU fault: the thread stops, no request"]
-  lev -->|yes| timer{"141 / 142?"}
+  lev -->|yes| sup{"thread has supervisor registers?"}
+  sup -->|yes| vec["system call interrupt at the kernel's vector, no request"]
+  sup -->|no| timer{"141 / 142?"}
   timer -->|yes| fast["runtime timer fast path: TimerWakeQueue, no classify arm"]
   timer -->|no| classify["classify into Lv2Request"]
   classify -->|malformed| mal["Malformed: CELL_EINVAL + invariant break"]

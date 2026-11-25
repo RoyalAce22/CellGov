@@ -48,3 +48,7 @@ mod scheme_tests;
 #[cfg(test)]
 #[path = "tests/record_code_fetch_tests.rs"]
 mod code_fetch_tests;
+
+#[cfg(test)]
+#[path = "tests/record_interrupt_delivered_tests.rs"]
+mod interrupt_delivered_tests;

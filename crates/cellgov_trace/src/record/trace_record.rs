@@ -7,10 +7,10 @@ use cellgov_time::{Budget, Epoch, GuestTicks, InstructionCost};
 
 use super::codec::{
     TAG_BARRIER, TAG_COMMIT_APPLIED, TAG_EFFECT_EMITTED, TAG_HOST_INVARIANT_BREAK, TAG_HOST_WRITE,
-    TAG_PPU_STATE_FULL, TAG_PPU_STATE_HASH, TAG_RESERVED_REGION_READ, TAG_RUN_IDENTITY,
-    TAG_SPU_REGISTERS, TAG_SPU_STATE_FULL, TAG_SPU_STATE_HASH, TAG_STATE_HASH_CHECKPOINT,
-    TAG_STATE_HASH_SCHEME, TAG_STEP_COMPLETED, TAG_SYSCALL_ENTERED, TAG_SYSCALL_RETURNED,
-    TAG_UNIT_BLOCKED, TAG_UNIT_SCHEDULED, TAG_UNIT_STOPPED, TAG_UNIT_WOKEN,
+    TAG_INTERRUPT_DELIVERED, TAG_PPU_STATE_FULL, TAG_PPU_STATE_HASH, TAG_RESERVED_REGION_READ,
+    TAG_RUN_IDENTITY, TAG_SPU_REGISTERS, TAG_SPU_STATE_FULL, TAG_SPU_STATE_HASH,
+    TAG_STATE_HASH_CHECKPOINT, TAG_STATE_HASH_SCHEME, TAG_STEP_COMPLETED, TAG_SYSCALL_ENTERED,
+    TAG_SYSCALL_RETURNED, TAG_UNIT_BLOCKED, TAG_UNIT_SCHEDULED, TAG_UNIT_STOPPED, TAG_UNIT_WOKEN,
     TAG_UNSYNCED_CODE_FETCH,
 };
 use super::reasons::{
@@ -23,7 +23,7 @@ use super::reasons::{
 ///
 /// A stream whose first record is not `RunIdentity` is version 1 and
 /// carries no run identity.
-pub const TRACE_FORMAT_VERSION: u32 = 9;
+pub const TRACE_FORMAT_VERSION: u32 = 10;
 
 /// [`TraceRecord::UnsyncedCodeFetch`] `sequence` bit: a `dcbst` on the
 /// line ran after the store.
@@ -374,6 +374,19 @@ pub enum TraceRecord {
         /// with another [PPC-Book2 p:13 s:1.8.1].
         patch_class: bool,
     },
+    /// A PPU thread took a PPE interrupt at its vector, at the end of a
+    /// step.
+    InterruptDelivered {
+        /// Unit that took the interrupt.
+        unit: UnitId,
+        /// Effective address of the interrupt vector, which names the
+        /// interrupt class.
+        vector: u64,
+        /// The SRR0 the interrupt set.
+        srr0: u64,
+        /// Guest-time clock of the unit when it took the interrupt.
+        time: GuestTicks,
+    },
 }
 
 impl TraceRecord {
@@ -402,6 +415,7 @@ impl TraceRecord {
             TraceRecord::SpuStateFull { .. } => TAG_SPU_STATE_FULL,
             TraceRecord::SpuRegisters { .. } => TAG_SPU_REGISTERS,
             TraceRecord::UnsyncedCodeFetch { .. } => TAG_UNSYNCED_CODE_FETCH,
+            TraceRecord::InterruptDelivered { .. } => TAG_INTERRUPT_DELIVERED,
         }
     }
 
@@ -433,6 +447,7 @@ impl TraceRecord {
             TAG_SPU_STATE_FULL => 1 + 8 * 3 + 16 + 4 + 1 + 4 + 1 + 8,
             TAG_SPU_REGISTERS => 1 + 8 + 8 + 1 + 16 * 16,
             TAG_UNSYNCED_CODE_FETCH => 1 + 8 + 8 + 4 + 8 + 8 + 8 + 1 + 1,
+            TAG_INTERRUPT_DELIVERED => 1 + 8 * 4,
             _ => return None,
         })
     }
@@ -445,7 +460,8 @@ impl TraceRecord {
             | TraceRecord::StepCompleted { .. }
             | TraceRecord::UnitBlocked { .. }
             | TraceRecord::UnitWoken { .. }
-            | TraceRecord::UnitStopped { .. } => TraceLevel::Scheduling,
+            | TraceRecord::UnitStopped { .. }
+            | TraceRecord::InterruptDelivered { .. } => TraceLevel::Scheduling,
             TraceRecord::CommitApplied { .. } => TraceLevel::Commits,
             TraceRecord::StateHashCheckpoint { .. }
             | TraceRecord::PpuStateHash { .. }

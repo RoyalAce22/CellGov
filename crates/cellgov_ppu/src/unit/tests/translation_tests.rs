@@ -2,9 +2,7 @@
 //! publishes real ones: through real addressing mode, and through its SLB
 //! and the page table, with the interrupts translation raises.
 
-use crate::fault_codes::{
-    FAULT_ALIGNMENT, FAULT_CHECKSTOP, FAULT_DATA_STORAGE, FAULT_MACHINE_CHECK, FAULT_UNMODELLED,
-};
+use crate::fault_codes::{FAULT_CHECKSTOP, FAULT_MACHINE_CHECK, FAULT_UNMODELLED};
 use crate::mmu::Partition;
 use crate::supervisor::{SlbEntry, SupervisorState};
 use crate::*;
@@ -182,13 +180,13 @@ fn a_load_from_a_page_no_entry_maps_takes_the_data_storage_interrupt() {
     let mut unit = kernel_unit(MSR_SF | MSR_IR | MSR_DR);
     unit.state_mut().set_gpr(5, HOLE_EA);
     let (r, _) = run(&mut unit, &mem, 1);
-    assert_eq!(r.yield_reason, YieldReason::Fault);
+    assert_eq!(r.yield_reason, YieldReason::InterruptBoundary);
     assert_eq!(
         r.local_diagnostics.interrupt,
         Some(InterruptRecord {
             vector: irq::VECTOR_DATA_STORAGE,
             srr0: SEGMENT,
-            srr1: 0,
+            srr1: MSR_SF | MSR_IR | MSR_DR,
             dsisr: Some(irq::DSISR_NOT_FOUND),
             dar: Some(HOLE_EA),
         })
@@ -209,6 +207,7 @@ fn a_load_from_a_segment_no_slb_entry_maps_takes_the_data_segment_interrupt() {
 }
 
 /// [PPC-Book3 p:45 s:4.10.1] With key 0, PP 11 is read only: a store takes the data storage interrupt with DSISR bits 4 and 6.
+/// [PPC-Book3 p:67 s:5.5.3] A data storage interrupt sets SRR1 bits 33:36 and 42:47 to 0 and loads the other bits from the MSR.
 #[test]
 fn a_store_to_a_read_only_page_takes_the_protection_data_storage_interrupt() {
     let mem = memory(&[lwz(4, 0, 5), stw(4, 0, 5)]);
@@ -228,7 +227,7 @@ fn a_store_to_a_read_only_page_takes_the_protection_data_storage_interrupt() {
         Some(InterruptRecord {
             vector: irq::VECTOR_DATA_STORAGE,
             srr0: SEGMENT + 4,
-            srr1: 0,
+            srr1: MSR_SF | MSR_IR | MSR_DR,
             dsisr: Some(irq::DSISR_PROTECTION | irq::DSISR_STORE),
             dar: Some(RO_EA),
         })
@@ -247,7 +246,7 @@ fn a_fetch_from_a_page_no_entry_maps_takes_the_instruction_storage_interrupt() {
         Some(InterruptRecord {
             vector: irq::VECTOR_INSTRUCTION_STORAGE,
             srr0: HOLE_EA,
-            srr1: irq::SRR1_FETCH_NOT_FOUND,
+            srr1: MSR_SF | MSR_IR | MSR_DR | irq::SRR1_FETCH_NOT_FOUND,
             dsisr: None,
             dar: None,
         })
@@ -271,7 +270,7 @@ fn a_fetch_past_the_real_mode_limit_takes_the_instruction_storage_interrupt_with
         Some(InterruptRecord {
             vector: irq::VECTOR_INSTRUCTION_STORAGE,
             srr0: 0x8000_0000_0001_0000,
-            srr1: irq::SRR1_FETCH_PROTECTION,
+            srr1: MSR_SF | irq::SRR1_FETCH_PROTECTION,
             dsisr: None,
             dar: None,
         })
@@ -657,7 +656,9 @@ fn an_instruction_stored_through_one_alias_runs_after_isync_through_the_other() 
 /// A real address past the 512 KB the test memory holds.
 const UNBACKED_RA: u64 = 0x9_0000;
 
-/// The stop a run ended with, and the interrupt it recorded.
+/// The guest fault code of a run's terminal stop, and the vector of the
+/// interrupt it recorded. An interrupt the thread takes at its vector has
+/// no fault code.
 fn stop(r: &ExecutionStepResult) -> (Option<u32>, Option<u64>) {
     let code = match r.fault {
         Some(cellgov_effects::FaultKind::Guest(code)) => Some(code),
@@ -1005,21 +1006,20 @@ fn a_miss_that_finds_no_entry_in_the_primary_group_reads_the_secondary_group_too
     );
 }
 
+/// [PPC-Book3 p:62 s:5.4] An interrupt sets MSR bits IR and DR to 0 and MSR bit SF to 1.
 #[test]
 fn a_batch_that_ends_at_a_fault_leaves_no_page_table_read_to_the_next() {
     // The fetch miss reads page 0's group and the load takes the data
-    // storage interrupt. The thread then runs a nop at real 0x300 in real
-    // mode, as the handler would.
+    // storage interrupt. The thread then runs a nop at the vector, real
+    // 0x300, in real mode.
     let mut mem = memory(&[lwz(4, 0, 5)]);
     put(&mut mem, 0x300, &NOP.to_be_bytes());
     let mut unit = kernel_unit(MSR_SF | MSR_IR | MSR_DR);
     unit.state_mut().set_gpr(5, HOLE_EA);
     let (r, _) = run(&mut unit, &mem, 1);
-    assert_eq!(r.yield_reason, YieldReason::Fault);
-    unit.state_mut()
-        .update_supervisor(|s| s.msr = MSR_SF)
-        .unwrap();
-    unit.state_mut().pc = 0x300;
+    assert_eq!(r.yield_reason, YieldReason::InterruptBoundary);
+    assert_eq!(unit.state().pc, 0x300);
+    assert_eq!(unit.state().supervisor().map(|s| s.msr), Some(MSR_SF));
     let (r, effects) = run(&mut unit, &mem, 1);
     assert_eq!(
         r.yield_reason,
@@ -1184,7 +1184,8 @@ const PTE_C: u64 = 0x80;
 
 /// Three parts of how a run stopped:
 ///
-/// - the class of its stop;
+/// - the class of its terminal stop, or `None` for an interrupt the
+///   thread takes at its vector;
 /// - the vector of the interrupt it recorded;
 /// - whether that interrupt names a protection cause.
 fn stop_class(r: &ExecutionStepResult) -> (Option<u32>, Option<u64>, bool) {
@@ -1200,12 +1201,8 @@ fn stop_class(r: &ExecutionStepResult) -> (Option<u32>, Option<u64>, bool) {
 /// [CBE-Handbook p:290 s:9.10] A store's alignment interrupt in caching-inhibited storage precedes the page-protection data storage interrupt when the entry's C bit is 1, and follows it when C is 0.
 #[test]
 fn a_caching_inhibited_store_to_a_read_only_page_orders_its_two_refusals_by_the_change_bit() {
-    let alignment = (Some(FAULT_ALIGNMENT), Some(irq::VECTOR_ALIGNMENT), false);
-    let protection = (
-        Some(FAULT_DATA_STORAGE),
-        Some(irq::VECTOR_DATA_STORAGE),
-        true,
-    );
+    let alignment = (None, Some(irq::VECTOR_ALIGNMENT), false);
+    let protection = (None, Some(irq::VECTOR_DATA_STORAGE), true);
     // Each case runs an unaligned sth, a stwcx. or a dcbz at page 4, which
     // is read-only and caching-inhibited at real 0x6000. A faulting store
     // runs first in its batch, so it always misses.
@@ -1225,12 +1222,8 @@ fn a_caching_inhibited_store_to_a_read_only_page_orders_its_two_refusals_by_the_
 /// [CBE-Handbook p:253 s:9.5.8] The alignment interrupt is taken when the data access cannot be performed in caching-inhibited storage, so it reaches no storage.
 #[test]
 fn an_access_the_ppe_refuses_in_caching_inhibited_storage_takes_that_refusal_where_no_storage_is() {
-    let alignment = (Some(FAULT_ALIGNMENT), Some(irq::VECTOR_ALIGNMENT), false);
-    let protection = (
-        Some(FAULT_DATA_STORAGE),
-        Some(irq::VECTOR_DATA_STORAGE),
-        true,
-    );
+    let alignment = (None, Some(irq::VECTOR_ALIGNMENT), false);
+    let protection = (None, Some(irq::VECTOR_DATA_STORAGE), true);
     let machine_check = (
         Some(FAULT_MACHINE_CHECK),
         Some(irq::VECTOR_MACHINE_CHECK),
@@ -1263,17 +1256,9 @@ fn an_access_the_ppe_refuses_in_caching_inhibited_storage_takes_that_refusal_whe
 /// [CBE-Handbook p:290 s:9.10] The page-fault data storage interrupt outranks the alignment interrupt of caching-inhibited storage, and a store's page-protection interrupt follows it when C is 1 and precedes it when C is 0.
 #[test]
 fn an_unaligned_access_out_of_an_unbacked_inhibited_page_meets_the_next_page_first() {
-    let alignment = (Some(FAULT_ALIGNMENT), Some(irq::VECTOR_ALIGNMENT), false);
-    let not_found = (
-        Some(FAULT_DATA_STORAGE),
-        Some(irq::VECTOR_DATA_STORAGE),
-        false,
-    );
-    let protection = (
-        Some(FAULT_DATA_STORAGE),
-        Some(irq::VECTOR_DATA_STORAGE),
-        true,
-    );
+    let alignment = (None, Some(irq::VECTOR_ALIGNMENT), false);
+    let not_found = (None, Some(irq::VECTOR_DATA_STORAGE), false);
+    let protection = (None, Some(irq::VECTOR_DATA_STORAGE), true);
     // Page 4 is caching-inhibited at a real address no storage holds.
     // Each operand starts in its last bytes and runs into page 5, which
     // is at real 0x7000 or has no entry. (instruction, page 5's PTE bits,
@@ -1306,18 +1291,8 @@ fn a_store_out_of_a_read_only_unbacked_inhibited_page_with_c_1_meets_the_next_pa
     // no storage holds. The sth runs into page 5, which is read/write at
     // real 0x7000 or has no entry.
     let cases = [
-        (
-            Some(0b10),
-            (Some(FAULT_ALIGNMENT), Some(irq::VECTOR_ALIGNMENT), false),
-        ),
-        (
-            None,
-            (
-                Some(FAULT_DATA_STORAGE),
-                Some(irq::VECTOR_DATA_STORAGE),
-                false,
-            ),
-        ),
+        (Some(0b10), (None, Some(irq::VECTOR_ALIGNMENT), false)),
+        (None, (None, Some(irq::VECTOR_DATA_STORAGE), false)),
     ];
     for (next, want) in cases {
         let mut mem = memory(&[sth(4, 0xFFF, 5)]);
@@ -1359,16 +1334,13 @@ fn an_unaligned_load_inside_an_unbacked_large_inhibited_page_takes_the_alignment
         .unwrap();
     unit.state_mut().set_gpr(5, LARGE_EA);
     let (r, _) = run(&mut unit, &mem, 1);
-    assert_eq!(
-        stop_class(&r),
-        (Some(FAULT_ALIGNMENT), Some(irq::VECTOR_ALIGNMENT), false)
-    );
+    assert_eq!(stop_class(&r), (None, Some(irq::VECTOR_ALIGNMENT), false));
 }
 
 /// [CBE-Handbook p:253 s:9.5.8] An unaligned operand in caching-inhibited storage takes the alignment interrupt, so the access reaches no storage.
 #[test]
 fn an_unaligned_access_with_one_inhibited_page_takes_alignment_where_the_other_is_unbacked() {
-    let alignment = (Some(FAULT_ALIGNMENT), Some(irq::VECTOR_ALIGNMENT), false);
+    let alignment = (None, Some(irq::VECTOR_ALIGNMENT), false);
     // Each operand starts in the last bytes of page 4 and runs into page
     // 5. One page is caching-inhibited; the other is not, and is at real
     // memory or at a real address no storage holds. (page 4's real

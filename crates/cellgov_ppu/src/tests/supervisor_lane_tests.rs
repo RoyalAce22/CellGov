@@ -60,7 +60,8 @@ fn counting_partition() -> Partition {
 }
 
 /// The block whose register and SLB words, in [`SupervisorState::words`]
-/// order, are 1 through 139, with [`counting_partition`] after them.
+/// order, are 1 through 139, with [`counting_partition`] and an external
+/// exception after them.
 fn counting_block() -> SupervisorState {
     let mut s = SupervisorState::new(1);
     s.srr0 = 2;
@@ -75,13 +76,14 @@ fn counting_block() -> SupervisorState {
         e.vsid_flags = 13 + 2 * k as u64;
     }
     s.partition = counting_partition();
+    s.external = true;
     s
 }
 
 #[test]
 fn supervisor_lane_wire_format_golden() {
     let mut counting: [u64; SUPERVISOR_WORDS] = std::array::from_fn(|i| i as u64 + 1);
-    counting[SUPERVISOR_WORDS - 4..].copy_from_slice(&[0x0100_0002, 1 << 28, 1 << 28, 0b1001]);
+    counting[SUPERVISOR_WORDS - 5..].copy_from_slice(&[0x0100_0002, 1 << 28, 1 << 28, 0b1001, 1]);
     assert_eq!(
         counting_block().words(),
         counting,
@@ -94,14 +96,14 @@ fn supervisor_lane_wire_format_golden() {
     );
     assert_eq!(
         counting_block().digest(),
-        0xB2F6_D3E3_4E1A_948F,
+        0xD74A_E178_4C24_286D,
         "written by hand in the same commit as the change that moves it"
     );
     let mut state = PpuState::new();
     state.set_supervisor(Some(counting_block()));
     assert_eq!(
         state.state_hash(),
-        0x3FB6_7FDD_BBEF_58C8,
+        0xA590_6685_3822_0B2D,
         "written by hand in the same commit as the change that moves it"
     );
 }
@@ -128,6 +130,7 @@ fn field_flips() -> Vec<FieldFlip> {
         field("dsisr".into(), 32, |s, b| s.dsisr ^= 1u32 << b),
         field("dec".into(), 32, |s, b| s.dec ^= 1u32 << b),
         field("dec_tb".into(), 64, |s, b| s.dec_tb ^= 1u64 << b),
+        field("external".into(), 1, |s, _| s.external = !s.external),
     ];
     for k in 0..4 {
         out.push(field(format!("sprg{k}"), 64, move |s, b| {
@@ -164,8 +167,12 @@ fn every_bit_of_every_supervisor_field_moves_the_state_hash() {
             hashes.push(h);
         }
     }
-    // Nine 64-bit registers, DSISR and DEC, and two words per SLB entry.
-    assert_eq!(hashes.len(), 1 + 9 * 64 + 2 * 32 + 2 * 64 * PPE_SLB_ENTRIES);
+    // Nine 64-bit registers, DSISR and DEC, the external exception, and
+    // two words per SLB entry.
+    assert_eq!(
+        hashes.len(),
+        1 + 9 * 64 + 2 * 32 + 1 + 2 * 64 * PPE_SLB_ENTRIES
+    );
     let n = hashes.len();
     hashes.sort_unstable();
     hashes.dedup();

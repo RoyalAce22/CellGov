@@ -410,7 +410,10 @@ The full vocabulary of guest-visible operations:
     step, sequence steps, patch class), one per fetch from a
     stored-to code line before the instruction-modification sequence
     completed for that unit; see
-    [synchronization](synchronization.md).
+    [synchronization](synchronization.md);
+  - `InterruptDelivered` (unit, vector, SRR0, guest time), one per step
+    that ends with a PPU thread taking a PPE interrupt at its vector.
+    Only a thread with supervisor registers takes one.
 
 ### Trace gating
 
