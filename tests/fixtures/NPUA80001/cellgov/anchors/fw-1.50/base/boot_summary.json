@@ -3,7 +3,7 @@
     "kind": "process_exit"
   },
   "outcome": "ProcessExit",
-  "steps": 6791,
+  "steps": 6790,
   "budget": 256,
   "host_invariant_breaks": 0,
   "witnesses": {

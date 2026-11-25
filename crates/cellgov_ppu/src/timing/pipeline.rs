@@ -46,6 +46,10 @@ use cellgov_ps3_abi::hw::ppu_issue as k;
 #[path = "tests/mffs_record_wait_tests.rs"]
 mod mffs_record_wait_tests;
 
+#[cfg(test)]
+#[path = "tests/kernel_share_tests.rs"]
+mod kernel_share_tests;
+
 /// The length of the ring of latest issue cycles that the fetch-ahead
 /// bound reads.
 const AHEAD_RING: usize = 32;
@@ -196,6 +200,9 @@ pub(crate) struct Core {
     gate: u64,
     /// The LV2 call whose round trip the thread has yet to charge.
     syscall: Option<PendingSyscall>,
+    /// The share of this thread's recent cycles, out of [`SHARE_ONE`],
+    /// spent in LV2 calls, over a window of [`KERNEL_WINDOW_CYCLES`].
+    kernel_share: u32,
 }
 
 // `Core::in_order_writes` holds one bit for each tracked register.
@@ -219,6 +226,10 @@ const SHARE_ONE: u32 = 1 << 16;
 /// The cycles [`Core::divide_share`] and [`Core::alone_share`]
 /// average over.
 const PRESSURE_WINDOW_CYCLES: u64 = 64;
+
+/// The cycles [`Core::kernel_share`] averages over: long enough to span an
+/// LV2 call and the instructions between two calls.
+const KERNEL_WINDOW_CYCLES: u64 = 4096;
 
 /// The instructions [`Core::operand_wait`] and [`Core::interval`] average
 /// over.
@@ -407,6 +418,7 @@ impl PpeTiming {
                 interval: 0,
                 gate: 0,
                 syscall: None,
+                kernel_share: 0,
             },
             tables: Box::new(Tables {
                 caches: Caches::new(),
@@ -481,6 +493,7 @@ impl PpeTiming {
             },
             queue_cycles: whole(u64::from(c.queue_wait), cap),
             fence_cycles: whole(u64::from(c.fence_wait), cap),
+            kernel_share: (c.kernel_share * 256 + SHARE_ONE / 2) / SHARE_ONE,
             issue_interval: c.interval,
         }
     }
@@ -924,7 +937,8 @@ impl PpeTiming {
     /// Charge the pending LV2 call's round trip, by its outcome: the next
     /// instruction issues no earlier than the round trip after the `sc`.
     /// A call with no committed return takes the round trip of its success
-    /// path.
+    /// path. A runnable sibling adds [`Self::sibling_call_cycles`] to the
+    /// round trip.
     pub(crate) fn charge_syscall(&mut self) {
         let Some(call) = self.core.syscall.take() else {
             return;
@@ -933,7 +947,29 @@ impl PpeTiming {
             Some(code) => k::ppu_syscall_outcome_round_trip_cycles(call.number, code),
             None => k::ppu_syscall_round_trip_cycles(call.number),
         };
+        let trip = trip + self.sibling_call_cycles(trip);
+        let c = &mut self.core;
+        c.kernel_share = weigh_over(c.kernel_share, trip, true, KERNEL_WINDOW_CYCLES);
         self.return_from_call(call.issue + trip);
+    }
+
+    /// The cycles a runnable sibling adds to an LV2 call whose round trip
+    /// alone is `trip`.
+    ///
+    /// The added share of `trip` grows linearly with the sibling's
+    /// `kernel_share`. It goes from `PPU_SMT_SYSCALL_SIBLING_SHARE` for a
+    /// sibling with no LV2 calls to `PPU_SMT_SYSCALL_KERNEL_SIBLING_SHARE`
+    /// for a sibling in LV2 calls all its recent cycles.
+    fn sibling_call_cycles(&self, trip: u64) -> u64 {
+        if self.hold == 0 {
+            return 0;
+        }
+        let per = |(num, den): (u64, u64)| 256 * num / den;
+        let user = per(k::PPU_SMT_SYSCALL_SIBLING_SHARE);
+        let kernel = per(k::PPU_SMT_SYSCALL_KERNEL_SIBLING_SHARE);
+        let share = u64::from(self.shared_stall.kernel_share).min(256);
+        let share = user + (kernel.saturating_sub(user)) * share / 256;
+        trip * share / 256
     }
 
     /// Hold the next instruction until cycle `back`, when the call
@@ -1328,10 +1364,15 @@ fn sibling_stall(op: &Op, s: &PpeIssuePressure, own_vscr: bool, own_wait: u64) -
 /// [`PRESSURE_WINDOW_CYCLES`]: toward [`SHARE_ONE`] when `counts`, toward
 /// zero otherwise.
 fn weigh(share: u32, w: u64, counts: bool) -> u32 {
-    let w = w.min(PRESSURE_WINDOW_CYCLES);
-    let kept = u64::from(share) * (PRESSURE_WINDOW_CYCLES - w);
+    weigh_over(share, w, counts, PRESSURE_WINDOW_CYCLES)
+}
+
+/// [`weigh`] over a window of `window` cycles.
+fn weigh_over(share: u32, w: u64, counts: bool, window: u64) -> u32 {
+    let w = w.min(window);
+    let kept = u64::from(share) * (window - w);
     let added = if counts { u64::from(SHARE_ONE) * w } else { 0 };
-    ((kept + added) / PRESSURE_WINDOW_CYCLES) as u32
+    ((kept + added) / window) as u32
 }
 
 /// Delays each pending time by the length of the sibling's stall.
@@ -1583,6 +1624,7 @@ fn note_pressure(c: &mut Core, op: &Op, own: u64, queued: u64, head: (u64, u64))
     let alone = issues_alone_for_long(op);
     c.divide_share = weigh(c.divide_share, own, divide);
     c.alone_share = weigh(c.alone_share, own, alone);
+    c.kernel_share = weigh_over(c.kernel_share, own, false, KERNEL_WINDOW_CYCLES);
     // An `mtvscr` that drains its own thread's held vector work leaves the
     // sibling most of its issue slots, so the drain counts in a share of
     // its own (`PPU_SMT_MTVSCR_DRAIN_STALL_SHARE`). In the

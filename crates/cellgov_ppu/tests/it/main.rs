@@ -97,6 +97,7 @@ mod console_ppu_lv2_call_cost;
 mod console_ppu_lv2_call_live_errors;
 mod console_ppu_lv2_call_paths;
 mod console_ppu_lv2_call_refusals;
+mod console_ppu_lv2_call_sibling;
 mod console_ppu_may_trap;
 mod console_ppu_mcrfs_ox;
 mod console_ppu_mulhwu_high_bit;

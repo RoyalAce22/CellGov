@@ -20,6 +20,7 @@ const DIVIDES: PpeIssuePressure = PpeIssuePressure {
     drain_cycles: 0,
     queue_cycles: 0,
     fence_cycles: 0,
+    kernel_share: 0,
     issue_interval: 0,
 };
 

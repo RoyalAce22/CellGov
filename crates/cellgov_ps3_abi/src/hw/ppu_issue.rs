@@ -928,6 +928,22 @@ pub const PPU_VMX_PERMUTE_LATENCY_CYCLES: u64 = 4;
 /// [CBE-Handbook p:741 s:A.3.2] simple: latency 4.
 pub const PPU_VMX_SIMPLE_LATENCY_CYCLES: u64 = 4;
 
+/// The share of an LV2 call's round trip a runnable sibling thread adds
+/// when it makes no LV2 calls of its own.
+///
+/// In the `ppu_lv2_call_sibling` capture the cheapest call takes 952
+/// cycles alone and 1120 beside a sibling of `addi`. A yield that does not
+/// switch threads takes 1444 and 1811.
+pub const PPU_SMT_SYSCALL_SIBLING_SHARE: (u64, u64) = (1, 5);
+
+/// The share of an LV2 call's round trip a runnable sibling thread adds
+/// when it spends all its recent cycles in LV2 calls of its own.
+///
+/// In the `ppu_lv2_call_sibling` capture the cheapest call takes 1670
+/// cycles beside a sibling that makes the same call, and 1688 beside one
+/// that yields. A yield that does not switch threads takes 2689 and 2535.
+pub const PPU_SMT_SYSCALL_KERNEL_SIBLING_SHARE: (u64, u64) = (4, 5);
+
 /// The cycles from an `mfvscr` to the cycle it completes, for a younger
 /// `mfvscr` or floating-point store.
 ///

@@ -3,7 +3,7 @@
     "kind": "process_exit"
   },
   "outcome": "MaxSteps",
-  "steps": 389480,
+  "steps": 389474,
   "budget": 256,
   "host_invariant_breaks": 79,
   "witnesses": {
@@ -32,11 +32,11 @@
       "class": "exact"
     },
     "ldarx": {
-      "value": 29309,
+      "value": 29345,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 71107,
+      "value": 71283,
       "class": "at-least"
     },
     "lwmutex_acquires": {
@@ -108,11 +108,11 @@
       "class": "at-least"
     },
     "stdcx": {
-      "value": 29309,
+      "value": 29345,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 71106,
+      "value": 71282,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {
@@ -164,7 +164,7 @@
       "class": "absent"
     },
     "timer_sleeps": {
-      "value": 10456,
+      "value": 10492,
       "class": "at-least"
     },
     "uart_cids_distinct": {
@@ -199,31 +199,31 @@
   "unsupported_syscalls": {
     "45": {
       "hits": 2,
-      "first_hit": 2108238945
+      "first_hit": 2108277512
     },
     "133": {
       "hits": 4,
-      "first_hit": 2108155069
+      "first_hit": 2108182954
     },
     "230": {
       "hits": 1,
-      "first_hit": 192175272
+      "first_hit": 192189284
     },
     "248": {
       "hits": 1,
-      "first_hit": 463856
+      "first_hit": 464092
     },
     "380": {
       "hits": 5,
-      "first_hit": 192763111
+      "first_hit": 192777123
     },
     "382": {
       "hits": 1,
-      "first_hit": 2108115611
+      "first_hit": 2108142804
     },
     "398": {
       "hits": 1,
-      "first_hit": 65948264239
+      "first_hit": 65948302947
     },
     "465": {
       "hits": 1,
@@ -231,23 +231,23 @@
     },
     "563": {
       "hits": 1,
-      "first_hit": 569724
+      "first_hit": 574255
     },
     "610": {
       "hits": 21,
-      "first_hit": 2108214266
+      "first_hit": 2108252237
     },
     "612": {
       "hits": 1,
-      "first_hit": 2108196431
+      "first_hit": 2108231367
     },
     "635": {
       "hits": 1,
-      "first_hit": 2191429772
+      "first_hit": 2191482480
     },
     "650": {
       "hits": 1,
-      "first_hit": 539908
+      "first_hit": 540273
     },
     "699": {
       "hits": 3,
@@ -255,23 +255,23 @@
     },
     "811": {
       "hits": 3,
-      "first_hit": 2108362864
+      "first_hit": 2108407518
     },
     "817": {
       "hits": 9,
-      "first_hit": 2108337399
+      "first_hit": 2108382053
     },
     "837": {
       "hits": 7,
-      "first_hit": 192901758
+      "first_hit": 192928951
     },
     "867": {
       "hits": 1,
-      "first_hit": 2191313988
+      "first_hit": 2191366436
     },
     "873": {
       "hits": 3,
-      "first_hit": 2108331242
+      "first_hit": 2108375896
     },
     "956": {
       "hits": 1,

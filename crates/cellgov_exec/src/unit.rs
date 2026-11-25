@@ -41,10 +41,15 @@ pub enum UnitStatus {
     Suspended = 4,
 }
 
-/// The cycles a PPE thread's recent stalls at the shared issue point add
-/// to each instruction of another PPE thread, past the cycle that
-/// instruction is ready, and the interval its own issues leave a thread
-/// it outranks.
+/// What a PPE thread's recent work costs another PPE thread.
+///
+/// The fields hold three kinds of cost:
+///
+/// - the cycles the thread's stalls at the shared issue point add to each
+///   instruction of the other thread, past the cycle it is ready;
+/// - the interval the thread's own issues leave a thread it outranks;
+/// - the thread's share of recent cycles in LV2 calls, which slows the
+///   other thread's LV2 calls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PpeIssuePressure {
     /// Added to each instruction other than a multiply or a VSU
@@ -85,6 +90,10 @@ pub struct PpeIssuePressure {
     /// A VSU instruction of the receiving thread that no fence holds,
     /// other than an `mtvscr`, waits these cycles when it leaves the queue.
     pub fence_cycles: u32,
+    /// The share, out of 256, of the thread's recent cycles spent in LV2
+    /// calls. The larger the share, the longer an LV2 call of the
+    /// receiving thread takes.
+    pub kernel_share: u32,
     /// The thread's mean own cycles an instruction, past what a sibling
     /// added, in 1/256 cycle: a thread it outranks issues no more often.
     /// The runtime passes zero from a sibling that does not outrank the
@@ -103,6 +112,7 @@ impl PpeIssuePressure {
         drain_cycles: 0,
         queue_cycles: 0,
         fence_cycles: 0,
+        kernel_share: 0,
         issue_interval: 0,
     };
 
@@ -118,6 +128,7 @@ impl PpeIssuePressure {
             drain_cycles: self.drain_cycles.max(other.drain_cycles),
             queue_cycles: self.queue_cycles.max(other.queue_cycles),
             fence_cycles: self.fence_cycles.max(other.fence_cycles),
+            kernel_share: self.kernel_share.max(other.kernel_share),
             issue_interval: self.issue_interval.max(other.issue_interval),
         }
     }

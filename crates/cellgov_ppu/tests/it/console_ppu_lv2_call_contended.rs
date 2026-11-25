@@ -128,10 +128,11 @@ fn the_uncontended_yield_lies_within_its_loop_s_spread_of_the_table() {
 
 #[test]
 fn contended_calls_cost_the_console_more_than_the_uncontended_trips_cellgov_charges() {
-    // CellGov charges a yield its uncontended trip whatever the other
-    // threads do. It charges a woken wait the cheapest call's trip from
-    // the poster's commit. The console's contended paths cost several
-    // times that, and these ratios hold the size of the gap.
+    // These ratios hold the console's contended paths against the
+    // uncontended trips. Beside a runnable sibling CellGov adds a share of
+    // the trip (`console_ppu_lv2_call_sibling`), but it charges a yield
+    // that switches threads no more than that. It charges a woken wait
+    // the cheapest call's trip from the poster's commit.
     let w = console_words();
     let yield_trip = ppu_syscall_round_trip_cycles(sc::PPU_THREAD_YIELD) as f64;
     let sibling = console_cycles(&w, SIBLING_LOOP).0 - rest(&w);
