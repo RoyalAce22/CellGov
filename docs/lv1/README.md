@@ -124,7 +124,7 @@ its `name_source`. A number that neither header lists has `none` as its
 `tests/micro/lv1_hypercall_table`. A `past_table` number
 (0 numbers) is not below the table's entry
 count, 256. The state is `answered`
-(42 numbers) or `null_backend`: no handler answers
+(43 numbers) or `null_backend`: no handler answers
 the number.
 
 lv1's vector answers a `past_table` number before any handler runs. It

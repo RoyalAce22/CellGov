@@ -182,7 +182,7 @@ pub(crate) fn storage_read(
         return lv1_answer(NOTIFY_REQUESTS_FULL_STATUS);
     };
     let rm_size = firmware.and_then(real_mode_size);
-    let real = match buffer_real(state.regions, rm_size, request.r(8)) {
+    let real = match buffer_real(state.regions, rm_size, request.r(8), NOTIFY_BUFFER_BYTES) {
         BufferPlace::Real(real) if state.memory.holds(real, NOTIFY_BUFFER_BYTES) => real,
         BufferPlace::Real(_) | BufferPlace::Unheld => return BUFFER.refusal(request),
         BufferPlace::Lv1(status) => {

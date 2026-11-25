@@ -6,14 +6,19 @@ use std::collections::{BTreeMap, BTreeSet};
 use cellgov_mem::lanes::{self, LaneValue, ObjectLanes};
 use cellgov_mem::scheme::{HashedSurface, Stamp};
 
-use super::{read, status, write};
+use super::{command, read, status, write};
 use crate::group::state::StateChange;
 use crate::group::table::Group;
 
 /// The storage group's registration.
 pub(crate) const GROUP: Group = Group {
     name: "storage",
-    hypercalls: &[read::HYPERCALLS, write::HYPERCALLS, status::HYPERCALLS],
+    hypercalls: &[
+        read::HYPERCALLS,
+        write::HYPERCALLS,
+        command::HYPERCALLS,
+        status::HYPERCALLS,
+    ],
     lanes: &[208..=215],
     hashed_surfaces: &[
         HashedSurface {
@@ -41,6 +46,11 @@ pub(crate) const GROUP: Group = Group {
             source: Some(WAITING_READ_SOURCE),
             stamp: Stamp::Version(34),
         },
+        HashedSurface {
+            name: "the device commands that lv1 holds for the partition",
+            source: Some(DEVICE_COMMAND_SOURCE),
+            stamp: Stamp::Pending,
+        },
     ],
 };
 
@@ -63,6 +73,45 @@ pub(crate) const REPORTED_DEVICES_SOURCE: u8 = 211;
 /// The lane source of the waiting notification read: object 0 while lv1
 /// holds one.
 pub(crate) const WAITING_READ_SOURCE: u8 = 212;
+
+/// The lane source of the device commands: one object for each command,
+/// keyed by 16 times its device id plus its tag.
+pub(crate) const DEVICE_COMMAND_SOURCE: u8 = 213;
+
+/// A command that lv1 started on a storage device for the partition,
+/// and holds until the device's controller replies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeviceCommand {
+    /// The device id on the storage bus.
+    pub device: u64,
+    /// The tag that lv1 gave the request, below 16.
+    pub tag: u8,
+    /// The command id, the low word of the call's r4.
+    pub command: u32,
+    /// The real address of CellGov's storage of the data buffer.
+    pub data: u64,
+    /// The data length, the low word of the call's r8.
+    pub data_bytes: u64,
+}
+
+impl DeviceCommand {
+    /// The command's object key: 16 times its device id plus its tag.
+    pub(crate) fn key(&self) -> u64 {
+        self.device
+            .wrapping_mul(16)
+            .wrapping_add(u64::from(self.tag))
+    }
+}
+
+impl LaneValue for DeviceCommand {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, self.device);
+        lanes.lane(2, 0, u64::from(self.tag));
+        lanes.lane(3, 0, u64::from(self.command));
+        lanes.lane(4, 0, self.data);
+        lanes.lane(5, 0, self.data_bytes);
+    }
+}
 
 /// A notification read that lv1 holds waiting for a report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,7 +162,8 @@ impl LaneValue for NotifyRequest {
 ///   partition;
 /// - the number of storage devices that lv1 reported to the partition,
 ///   the index at +64 of its open record;
-/// - the notification read that lv1 holds waiting for the partition.
+/// - the notification read that lv1 holds waiting for the partition;
+/// - each device command that lv1 holds for the partition.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StorageState {
     requests: BTreeMap<u8, NotifyRequest>,
@@ -121,6 +171,7 @@ pub struct StorageState {
     registered: BTreeSet<u64>,
     reported: u64,
     waiting: Option<WaitingRead>,
+    commands: BTreeMap<(u64, u8), DeviceCommand>,
 }
 
 impl StorageState {
@@ -161,9 +212,27 @@ impl StorageState {
         })
     }
 
+    /// Each device command, in device and tag order.
+    pub fn device_commands(&self) -> impl Iterator<Item = DeviceCommand> + '_ {
+        self.commands.values().copied()
+    }
+
+    /// The tags of the commands of the storage device `device`, one bit
+    /// for each tag.
+    pub fn device_held_tags(&self, device: u64) -> u16 {
+        self.commands
+            .range((device, 0)..=(device, u8::MAX))
+            .fold(0, |tags, (&(_, tag), _)| {
+                tags | 1u16.checked_shl(u32::from(tag)).unwrap_or(0)
+            })
+    }
+
     /// Applies `change` to the state.
     pub(crate) fn apply(&mut self, change: StorageChange) {
         match change {
+            StorageChange::DeviceCommandStarted(command) => {
+                self.commands.insert((command.device, command.tag), command);
+            }
             StorageChange::NotifyEventMaskSet(mask) => {
                 self.event_mask = Some(mask);
             }
@@ -207,8 +276,15 @@ impl StorageState {
             0 => registered,
             count => registered.wrapping_add(lanes::value_term(REPORTED_DEVICES_SOURCE, 0, &count)),
         };
-        self.waiting.map_or(reported, |read| {
+        let waiting = self.waiting.map_or(reported, |read| {
             reported.wrapping_add(lanes::value_term(WAITING_READ_SOURCE, 0, &read))
+        });
+        self.device_commands().fold(waiting, |sum, command| {
+            sum.wrapping_add(lanes::value_term(
+                DEVICE_COMMAND_SOURCE,
+                command.key(),
+                &command,
+            ))
         })
     }
 }
@@ -232,6 +308,9 @@ pub enum StorageChange {
     NotifyDeviceReported,
     /// lv1 holds this notification read waiting for a report.
     NotifyReadWaiting(WaitingRead),
+    /// lv1 started this command on a storage device, and holds its
+    /// request until the device's controller replies.
+    DeviceCommandStarted(DeviceCommand),
 }
 
 impl From<StorageChange> for StateChange {
@@ -251,3 +330,7 @@ mod registered_device_hash_tests;
 #[cfg(test)]
 #[path = "tests/notify_read_hash_tests.rs"]
 mod notify_read_hash_tests;
+
+#[cfg(test)]
+#[path = "tests/device_command_hash_tests.rs"]
+mod device_command_hash_tests;

@@ -102,7 +102,8 @@ pub(super) fn lv1_answer(status: i64) -> HypercallDisposition {
     HypercallDisposition::Answered(HypercallAnswer::lv1_status(zero_extended(status), []))
 }
 
-/// Where CellGov finds the bytes of a notification buffer.
+/// Where CellGov finds the bytes of a buffer that lv1's translation
+/// takes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum BufferPlace {
     /// The real address of CellGov's storage of the bytes.
@@ -113,8 +114,8 @@ pub(super) enum BufferPlace {
     Unheld,
 }
 
-/// Where CellGov finds the [`NOTIFY_BUFFER_BYTES`] bytes at the logical
-/// partition address `address`.
+/// Where CellGov finds the `bytes` bytes at the logical partition address
+/// `address`.
 ///
 /// lv1's translation finds the partition's memory region that holds the
 /// address [OFW-4.93 lv1 a:0x2544D4-0x2544E8]. It checks that the bytes
@@ -135,8 +136,9 @@ pub(super) fn buffer_real(
     regions: &MemoryState,
     real_mode_size: Option<u64>,
     address: u64,
+    bytes: u64,
 ) -> BufferPlace {
-    let Some(end) = address.checked_add(NOTIFY_BUFFER_BYTES) else {
+    let Some(end) = address.checked_add(bytes) else {
         return BufferPlace::Unheld;
     };
     let found = (0u64..)
@@ -254,7 +256,7 @@ pub(crate) fn storage_write(
         return lv1_answer(NOTIFY_WRITE_BAD_REQUEST_STATUS);
     }
     let rm_size = firmware.and_then(real_mode_size);
-    let real = match buffer_real(state.regions, rm_size, request.r(8)) {
+    let real = match buffer_real(state.regions, rm_size, request.r(8), NOTIFY_BUFFER_BYTES) {
         BufferPlace::Real(real) => real,
         BufferPlace::Lv1(status) => return lv1_answer(status),
         BufferPlace::Unheld => return BUFFER.refusal(request),

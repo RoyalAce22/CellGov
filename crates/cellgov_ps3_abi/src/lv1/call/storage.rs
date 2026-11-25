@@ -29,6 +29,21 @@ pub const STORAGE_READ: u64 = 245;
 /// form [OFW-4.93 lv1 a:0x308A18-0x308A54]; see [`crate::lv1::storage`].
 pub const STORAGE_WRITE: u64 = 246;
 
+/// `storage_send_device_command`: six inputs and one output.
+/// - r3 is the id of a device of the storage bus, or -1 for the
+///   notification device.
+/// - r4 is the command id.
+/// - r5 is the logical partition address of the command buffer.
+/// - r6 is the command buffer's length in bytes.
+/// - r7 is the logical partition address of the data buffer.
+/// - r8 is the data buffer's length in bytes.
+/// - The output r4 is the tag of the request.
+///
+/// The lv1 handler [OFW-4.93 lv1 a:0x3094E4] reads the inputs in this
+/// form [OFW-4.93 lv1 a:0x3094F4-0x309530]; see
+/// [`crate::lv1::storage_command`].
+pub const STORAGE_SEND_DEVICE_COMMAND: u64 = 248;
+
 /// `storage_get_async_status`: one input and two outputs.
 /// - r3 is the id of a device of the storage bus, or -1 for the
 ///   notification device.
