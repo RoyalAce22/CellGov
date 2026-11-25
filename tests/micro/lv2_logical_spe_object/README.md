@@ -5,11 +5,14 @@ the reference console. It gives these values:
 - the spe id and the shadow address that lv1's `construct_logical_spe`
   (hypercall 57) gave the kernel's boot call;
 - the outlet id of each interrupt class that lv1's `get_spe_irq_outlet`
-  (hypercall 78) gave the kernel for that SPE.
+  (hypercall 78) gave the kernel for that SPE;
+- the port id that lv1's `construct_event_receive_port` (hypercall 18)
+  gave the kernel's call after those three calls.
 
 CellGov's hypervisor answers those calls with these values in
 `cellgov_lv1`'s `construct_capture_tests` and
-`irq_outlet_capture_tests`.
+`irq_outlet_capture_tests`, and in `cellgov_ps3_abi`'s
+`event_port_spe_console_tests` for the port id.
 
 No probe runs, so this directory has no manifest and no runner frame.
 The file under `peek/cech20-cex-493/` holds the words the read returned.
@@ -24,11 +27,13 @@ The file under `peek/cech20-cex-493/` holds the words the read returned.
   the XMB. It read each page twice, and the two reads agree:
   - on 2026-11-11, the object, the spe id and the shadow;
   - on 2026-11-12, the three outlets, with the spe id again, which read
-    11 as before.
+    11 as before;
+  - on 2026-11-12, in a later session, the port id, with the TOC slot
+    and the spe id again, which read as before.
 
   It wrote nothing to lv1 or lv2, used no poke and installed nothing on
   the console.
-- Only the six words below are committed.
+- Only the seven words below are committed.
 - No console-identifying value is in this directory.
 
 ## Where the object is
@@ -59,16 +64,21 @@ The shipped 4.93 `lv2_kernel.self`, decrypted offline and read with
   +40 or +48 for class 0, 1 or 2
   [OFW-4.93 lv2_kernel a:0x800000000004f1e4-0x800000000004f210]. It uses
   no other output of the call.
+- It then sends hypercall 18
+  [OFW-4.93 lv2_kernel a:0x800000000004f214-0x800000000004f218]. On
+  r3 = 0 it stores r4 at +88
+  [OFW-4.93 lv2_kernel a:0x800000000004f21c-0x800000000004f224]. It uses
+  no other output of the call.
 
 ## Files
 
 | File | Rows | Holds |
 |---|---|---|
-| `spe_object.tsv` | 6 | for each word: its address, its field, its width in bytes, the number of reads, whether they agree, and its value |
+| `spe_object.tsv` | 7 | for each word: its address, its field, its width in bytes, the number of reads, whether they agree, and its value |
 
 The fields are `object` (the TOC slot), `spe_id` (the object's +8),
-`shadow` (the object's +16) and `outlet_0` to `outlet_2` (the object's
-+32, +40 and +48).
+`shadow` (the object's +16), `outlet_0` to `outlet_2` (the object's
++32, +40 and +48) and `port` (the object's +88).
 
 ## The live object
 
@@ -92,3 +102,7 @@ The fields are `object` (the TOC slot), `spe_id` (the object's +8),
   r3 = 0. lv1 makes the three outlets in hypercall 57, one per class in
   class order, and each takes the first free id of the partition's
   object table; see `cellgov_ps3_abi::lv1::spe`.
+- The port id is 16. It is not 0, so the call returned r3 = 0. lv1
+  gives a new port the first free id of the partition's object table;
+  see `cellgov_ps3_abi::lv1::event_port`. So the port took the first id
+  after the outlets. No read names the object that took id 12.

@@ -1,6 +1,6 @@
-//! The 4.93 port id of each kernel call held to the console capture of
-//! all eight port ids the kernel keeps. The README of the capture cites
-//! each place the kernel stores an id.
+//! The 4.93 port id of each per-thread kernel call held to the console
+//! capture of the eight port ids the kernel keeps for its threads. The
+//! README of the capture cites each place the kernel stores an id.
 
 use super::*;
 use crate::lv1::boot_record_capture::captured_doubleword_in;
@@ -42,15 +42,24 @@ fn captured_id(thread: u8, sc: u64) -> u64 {
 }
 
 #[test]
-fn each_4_93_kernel_call_gets_the_port_id_the_capture_reads_for_it() {
+fn each_4_93_per_thread_call_gets_the_port_id_the_capture_reads_for_it() {
     for thread in 0..2 {
         assert_eq!(read(RECORDS + RECORD_SIZE * thread), thread, "record");
         assert_eq!(entry(TABLE_B, thread, 32), thread, "table B +32");
         assert_eq!(entry(TABLE_C, thread, 32), thread, "table C +32");
     }
-    let calls = game_os_port_calls("4.93").expect("the 4.93 port calls");
+    let all = game_os_port_calls("4.93").expect("the 4.93 port calls");
+    assert!(
+        all.windows(2).all(|pair| pair[0].id < pair[1].id),
+        "in the order of the port id"
+    );
+    let per_thread = [RECORD_SC, START_A_SC, START_B_SC, START_C_SC];
+    let calls: Vec<&GameOsPortCall> = all
+        .iter()
+        .filter(|call| per_thread.contains(&call.sc))
+        .collect();
     assert_eq!(calls.len(), 8);
-    for call in calls {
+    for call in &calls {
         assert_eq!(
             captured_id(call.thread, call.sc),
             call.id,
@@ -59,12 +68,20 @@ fn each_4_93_kernel_call_gets_the_port_id_the_capture_reads_for_it() {
             call.sc
         );
     }
-    let mut sites: Vec<(u8, u64)> = calls.iter().map(|c| (c.thread, c.sc)).collect();
+    let mut sites: Vec<(u8, u64)> = all.iter().map(|c| (c.thread, c.sc)).collect();
     sites.sort_unstable();
     sites.dedup();
-    assert_eq!(sites.len(), 8, "one call for each thread and site");
-    assert!(
-        calls.windows(2).all(|pair| pair[0].id < pair[1].id),
-        "in the order of the port id"
-    );
+    assert_eq!(sites.len(), all.len(), "one row for each thread and site");
+}
+
+#[test]
+fn the_one_4_93_row_past_the_per_thread_calls_is_thread_0s_boot_spe_call() {
+    let all = game_os_port_calls("4.93").expect("the 4.93 port calls");
+    let per_thread = [RECORD_SC, START_A_SC, START_B_SC, START_C_SC];
+    let rest: Vec<(u8, u64)> = all
+        .iter()
+        .filter(|call| !per_thread.contains(&call.sc))
+        .map(|call| (call.thread, call.sc))
+        .collect();
+    assert_eq!(rest, [(0, SPE_SC)]);
 }

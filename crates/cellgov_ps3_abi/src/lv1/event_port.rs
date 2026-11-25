@@ -127,6 +127,9 @@ const START_B_SC: u64 = 0x8000_0000_0026_5784;
 /// Call C of a hardware thread's start
 /// [OFW-4.93 lv2_kernel a:0x8000000000265840].
 const START_C_SC: u64 = 0x8000_0000_0026_5840;
+/// The call in the kernel's create function of its boot logical SPE
+/// [OFW-4.93 lv2_kernel a:0x800000000004f218].
+const SPE_SC: u64 = 0x8000_0000_0004_f218;
 
 const fn call(thread: u8, sc: u64, id: u64) -> GameOsPortCall {
     GameOsPortCall { thread, sc, id }
@@ -136,16 +139,26 @@ const fn call(thread: u8, sc: u64, id: u64) -> GameOsPortCall {
 /// kernel's boot, for each firmware that a source gives the ids for.
 ///
 /// The partition's other objects decide each id, so no image read gives
-/// it. The capture `lv2_event_port_ids` reads the id of each 4.93 call;
-/// its README cites the place where the kernel stores each id. On each
-/// hardware thread the 4.93 kernel makes these calls:
+/// it. On each hardware thread the 4.93 kernel makes these calls:
 /// - one call in the setup of the thread's record;
 /// - calls A, B and C in the thread's start.
+///
+/// The capture `lv2_event_port_ids` reads the id of each of these calls.
+/// Its README cites the place where the kernel stores each id.
 ///
 /// Thread 0 runs the kernel's subsystem init before its call A
 /// [OFW-4.93 lv2_kernel a:0x80000000002656bc]
 /// [OFW-4.93 lv2_kernel a:0x80000000002657a8-0x80000000002657ac]. In the
 /// capture, thread 1's start calls took their ids before thread 0's.
+///
+/// Only thread 0 calls the kernel's setup of its boot logical SPE, after
+/// its call C [OFW-4.93 lv2_kernel a:0x80000000002658d8]
+/// [OFW-4.93 lv2_kernel a:0x8000000000265960]. So thread 0 makes the one
+/// call in the create function of that SPE, after its calls of
+/// `get_spe_irq_outlet`. The capture
+/// [`super::spe::LOGICAL_SPE_OBJECT_CAPTURE`] reads that id at +88 of the
+/// SPE object, where the kernel stores it
+/// [OFW-4.93 lv2_kernel a:0x800000000004f21c-0x800000000004f224].
 pub const GAME_OS_PORT_CALLS: &[GameOsPortCalls] = &[GameOsPortCalls {
     firmware: "4.93",
     calls: &[
@@ -157,6 +170,7 @@ pub const GAME_OS_PORT_CALLS: &[GameOsPortCalls] = &[GameOsPortCalls {
         call(0, START_A_SC, 8),
         call(0, START_B_SC, 9),
         call(0, START_C_SC, 10),
+        call(0, SPE_SC, 16),
     ],
 }];
 
@@ -192,3 +206,7 @@ mod console_tests;
 #[cfg(test)]
 #[path = "tests/event_port_ids_console_tests.rs"]
 mod ids_console_tests;
+
+#[cfg(test)]
+#[path = "tests/event_port_spe_console_tests.rs"]
+mod spe_console_tests;

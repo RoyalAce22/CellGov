@@ -9,8 +9,8 @@
 //! [`cellgov_ps3_abi::lv1::event_port`]. So the hypervisor keeps each
 //! port, and hashes it.
 //!
-//! A console capture gives the port id of each call of the GameOS
-//! kernel's boot, by the call's hardware thread and its `sc` address. So
+//! Console captures give the port id of each call of the GameOS kernel's
+//! boot, by the call's hardware thread and its `sc` address. So
 //! the handler reads [`HypercallRequest::thread`] and
 //! [`HypercallRequest::pc`], although lv1 reads neither.
 
@@ -208,3 +208,7 @@ mod hash_tests;
 #[cfg(test)]
 #[path = "tests/event_port_boot_order_tests.rs"]
 mod boot_order_tests;
+
+#[cfg(test)]
+#[path = "tests/event_port_spe_tests.rs"]
+mod spe_tests;
