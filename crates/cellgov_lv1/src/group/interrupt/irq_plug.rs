@@ -212,3 +212,7 @@ mod clear_path_tests;
 #[cfg(test)]
 #[path = "tests/irq_plug_raised_bit_tests.rs"]
 mod raised_bit_tests;
+
+#[cfg(test)]
+#[path = "tests/irq_plug_spe_id_tests.rs"]
+mod spe_id_tests;
