@@ -98,6 +98,7 @@ fn the_emitter_refuses_an_elf_that_is_not_its_pups_committed_kernel() {
     let table = archive::parse(&archive::KERNEL, crate::lv2_tables::KERNEL_TSV)
         .expect("compiled kernel table");
     let kernel = archive::kernel_rows(&table)
+        .expect("compiled kernel rows")
         .into_iter()
         .next()
         .expect("kernel.tsv holds a kernel");

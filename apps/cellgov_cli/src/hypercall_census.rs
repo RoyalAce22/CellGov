@@ -183,11 +183,16 @@ fn load_existing(output_dir: &Path) -> Result<HypercallCensus, HypercallCensusEr
     match (site_path.is_file(), unresolved_path.is_file()) {
         (false, false) => Ok(HypercallCensus::default()),
         (true, true) => Ok(HypercallCensus {
-            sites: lv1_archive::hypercall_site_rows(&read_table(&site_path, &HYPERCALL_SITE)?),
-            unresolved: lv1_archive::hypercall_unresolved_rows(&read_table(
+            sites: read_rows(
+                &site_path,
+                &HYPERCALL_SITE,
+                lv1_archive::hypercall_site_rows,
+            )?,
+            unresolved: read_rows(
                 &unresolved_path,
                 &HYPERCALL_UNRESOLVED,
-            )?),
+                lv1_archive::hypercall_unresolved_rows,
+            )?,
         }),
         _ => Err(HypercallCensusError::ExistingPartial {
             path: output_dir.to_path_buf(),
@@ -195,18 +200,21 @@ fn load_existing(output_dir: &Path) -> Result<HypercallCensus, HypercallCensusEr
     }
 }
 
-fn read_table(
+fn read_rows<T>(
     path: &Path,
     spec: &'static archive::TableSpec,
-) -> Result<archive::Table, HypercallCensusError> {
+    rows: fn(&archive::Table) -> Result<Vec<T>, archive::ArchiveError>,
+) -> Result<Vec<T>, HypercallCensusError> {
     let text = std::fs::read_to_string(path).map_err(|source| HypercallCensusError::Read {
         path: path.to_path_buf(),
         source,
     })?;
-    archive::parse(spec, &text).map_err(|source| HypercallCensusError::Parse {
-        table: spec.name,
-        source,
-    })
+    archive::parse(spec, &text)
+        .and_then(|table| rows(&table))
+        .map_err(|source| HypercallCensusError::Parse {
+            table: spec.name,
+            source,
+        })
 }
 
 fn write(path: &Path, text: &str) -> Result<(), HypercallCensusError> {

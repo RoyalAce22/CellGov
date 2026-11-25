@@ -2,6 +2,7 @@
 
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
+use std::str::FromStr;
 
 use super::spec::{Column, ColumnKind, TableSpec};
 
@@ -295,6 +296,25 @@ fn check_cell(
     }
 }
 
+fn check_row<S: AsRef<str>>(
+    spec: &'static TableSpec,
+    line: usize,
+    cells: &[S],
+) -> Result<(), ArchiveError> {
+    if cells.len() != spec.columns.len() {
+        return Err(ArchiveError::CellCount {
+            table: spec.name,
+            line,
+            expected: spec.columns.len(),
+            found: cells.len(),
+        });
+    }
+    for (column, cell) in spec.columns.iter().zip(cells) {
+        check_cell(spec.name, line, column, cell.as_ref())?;
+    }
+    Ok(())
+}
+
 fn key_of(spec: &TableSpec, cells: &[&str]) -> Vec<KeyPart> {
     spec.key_indexes()
         .into_iter()
@@ -341,17 +361,7 @@ pub fn parse(spec: &'static TableSpec, text: &str) -> Result<Table, ArchiveError
             }
             continue;
         }
-        if cells.len() != spec.columns.len() {
-            return Err(ArchiveError::CellCount {
-                table,
-                line,
-                expected: spec.columns.len(),
-                found: cells.len(),
-            });
-        }
-        for (column, cell) in spec.columns.iter().zip(&cells) {
-            check_cell(table, line, column, cell)?;
-        }
+        check_row(spec, line, &cells)?;
         let key = key_of(spec, &cells);
         if let Some(previous) = &previous_key {
             match key.cmp(previous) {
@@ -364,6 +374,143 @@ pub fn parse(spec: &'static TableSpec, text: &str) -> Result<Table, ArchiveError
         rows.push(cells.iter().map(|c| (*c).to_string()).collect());
     }
     Ok(Table { spec, rows })
+}
+
+/// The rows of `table`, checked against `spec`.
+///
+/// The check is the one [`parse`] makes on each row: the header, the
+/// cell count and the kind of each cell. It does not check the key
+/// order.
+///
+/// # Errors
+///
+/// - [`ArchiveError::Header`] if the columns of `table` are not those of `spec`.
+/// - [`ArchiveError::CellCount`] if a row has the wrong number of cells.
+/// - A cell variant of [`ArchiveError`] if a cell does not have its column's kind.
+pub fn checked_rows<'t>(
+    spec: &'static TableSpec,
+    table: &'t Table,
+) -> Result<Vec<CheckedRow<'t>>, ArchiveError> {
+    // `Table` has public fields, so its spec and its rows are not proof
+    // that `parse` checked them against `spec`.
+    let names = |spec: &TableSpec| spec.columns.iter().map(|c| c.name).collect::<Vec<_>>();
+    if names(table.spec) != names(spec) {
+        return Err(ArchiveError::Header {
+            table: spec.name,
+            expected: names(spec).join("\t"),
+            found: names(table.spec).join("\t"),
+        });
+    }
+    table
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(index, cells)| {
+            // Line 1 is the header.
+            let line = index + 2;
+            check_row(spec, line, cells)?;
+            Ok(CheckedRow { spec, line, cells })
+        })
+        .collect()
+}
+
+/// One row that [`checked_rows`] checked against its spec.
+///
+/// Each accessor takes the index of a column of that spec. It returns:
+///
+/// - [`ArchiveError::BadCell`] if the cell does not read as the accessor's kind;
+/// - [`ArchiveError::CellCount`] if the spec has no column at the index.
+#[derive(Debug, Clone, Copy)]
+pub struct CheckedRow<'t> {
+    spec: &'static TableSpec,
+    line: usize,
+    cells: &'t [String],
+}
+
+impl<'t> CheckedRow<'t> {
+    fn cell(&self, index: usize) -> Result<(&'static Column, &'t str), ArchiveError> {
+        self.spec
+            .columns
+            .get(index)
+            .zip(self.cells.get(index))
+            .map(|(column, cell)| (column, cell.as_str()))
+            .ok_or(ArchiveError::CellCount {
+                table: self.spec.name,
+                line: self.line,
+                expected: self.spec.columns.len(),
+                found: self.cells.len(),
+            })
+    }
+
+    fn bad_cell(&self, column: &Column, cell: &str, kind: ColumnKind) -> ArchiveError {
+        ArchiveError::BadCell {
+            table: self.spec.name,
+            line: self.line,
+            column: column.name,
+            cell: cell.to_string(),
+            expected: kind.describe(),
+        }
+    }
+
+    /// The text of the cell.
+    pub fn text(&self, index: usize) -> Result<&'t str, ArchiveError> {
+        self.cell(index).map(|(_, cell)| cell)
+    }
+
+    /// The text of the cell, or `None` when the cell is [`NONE`].
+    pub fn optional(&self, index: usize) -> Result<Option<&'t str>, ArchiveError> {
+        self.text(index).map(|cell| (cell != NONE).then_some(cell))
+    }
+
+    /// The cell as a decimal integer.
+    pub fn integer<T: FromStr>(&self, index: usize) -> Result<T, ArchiveError> {
+        let (column, cell) = self.cell(index)?;
+        cell.parse()
+            .map_err(|_| self.bad_cell(column, cell, ColumnKind::Integer))
+    }
+
+    /// The cell as a comma-joined list of decimal integers. A [`NONE`]
+    /// cell is the empty list.
+    pub fn integers(&self, index: usize) -> Result<Vec<u64>, ArchiveError> {
+        let (column, cell) = self.cell(index)?;
+        if cell == NONE {
+            return Ok(Vec::new());
+        }
+        cell.split(',')
+            .map(|item| {
+                item.parse()
+                    .map_err(|_| self.bad_cell(column, cell, ColumnKind::IntegerList))
+            })
+            .collect()
+    }
+
+    /// The cell as `0x` and 16 lowercase hexadecimal digits.
+    pub fn hex64(&self, index: usize) -> Result<u64, ArchiveError> {
+        let (column, cell) = self.cell(index)?;
+        cell.strip_prefix("0x")
+            .filter(|digits| is_lower_hex(digits, 16))
+            .and_then(|digits| u64::from_str_radix(digits, 16).ok())
+            .ok_or_else(|| self.bad_cell(column, cell, ColumnKind::Hex64))
+    }
+
+    /// The cell as `0x` and 8 lowercase hexadecimal digits.
+    pub fn hex32(&self, index: usize) -> Result<u32, ArchiveError> {
+        let (column, cell) = self.cell(index)?;
+        cell.strip_prefix("0x")
+            .filter(|digits| is_lower_hex(digits, 8))
+            .and_then(|digits| u32::from_str_radix(digits, 16).ok())
+            .ok_or_else(|| self.bad_cell(column, cell, ColumnKind::Hex32))
+    }
+
+    /// The value that `read` gives the label in the cell.
+    pub fn label<T>(
+        &self,
+        index: usize,
+        read: impl FnOnce(&str) -> Option<T>,
+    ) -> Result<T, ArchiveError> {
+        let (column, cell) = self.cell(index)?;
+        read(cell).ok_or_else(|| self.bad_cell(column, cell, column.kind))
+    }
 }
 
 /// Render `rows` under `spec`'s header, then parse the result so a
@@ -450,3 +597,7 @@ pub fn check_references(tables: &[Table]) -> Result<(), ArchiveError> {
 #[cfg(test)]
 #[path = "tests/table_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/checked_rows_tests.rs"]
+mod checked_rows_tests;

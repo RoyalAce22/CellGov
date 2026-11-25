@@ -90,21 +90,17 @@ pub(super) fn print(rt: &Runtime) {
     // The caller table is the archive's largest; `print` parses it only
     // for a run whose PUP takes caller evidence.
     let callers = if takes_caller_evidence(pup) {
-        parse(&CALLER, CALLER_TSV).map(|table| caller_rows(&table))
+        parse(&CALLER, CALLER_TSV).and_then(|table| caller_rows(&table))
     } else {
         Ok(Vec::new())
     };
-    let (Ok(names), Ok(gates), Ok(callers)) = (
-        parse(&NAME, NAME_TSV),
-        parse(&CAPABILITY_GATE, GATE_TSV),
-        callers,
-    ) else {
+    let gates = parse(&CAPABILITY_GATE, GATE_TSV).and_then(|table| gate_rows(&table));
+    let (Ok(names), Ok(gates), Ok(callers)) = (parse(&NAME, NAME_TSV), gates, callers) else {
         debug_assert!(false, "committed LV2 report archives must parse");
         eprintln!("unmodelled_syscall_report_error: committed LV2 archive did not parse");
         return;
     };
     let names = name_rows(&names);
-    let gates = gate_rows(&gates);
     let unsupported = rt
         .lv2_host()
         .observability()

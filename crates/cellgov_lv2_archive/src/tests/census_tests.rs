@@ -33,7 +33,7 @@ fn kernel_stub_and_census_rows_round_trip_byte_identically() {
         )
     );
     assert_eq!(
-        kernel_rows(&parse(&KERNEL, &kernel_text).expect("parse kernel")),
+        kernel_rows(&parse(&KERNEL, &kernel_text).expect("parse kernel")).expect("read kernel"),
         [kernel]
     );
 
@@ -56,7 +56,7 @@ fn kernel_stub_and_census_rows_round_trip_byte_identically() {
         )
     );
     assert_eq!(
-        stub_rows(&parse(&STUB, &stub_text).expect("parse stub")),
+        stub_rows(&parse(&STUB, &stub_text).expect("parse stub")).expect("read stub"),
         [stub]
     );
 
@@ -86,7 +86,7 @@ fn kernel_stub_and_census_rows_round_trip_byte_identically() {
         )
     );
     assert_eq!(
-        census_rows(&parse(&CENSUS, &census_text).expect("parse census")),
+        census_rows(&parse(&CENSUS, &census_text).expect("parse census")).expect("read census"),
         census
     );
 }
@@ -138,7 +138,7 @@ fn subentry_rows_round_trip_with_decimal_packets() {
         )
     );
     assert_eq!(
-        subentry_rows(&parse(&SUBENTRY, &text).expect("parse subentry")),
+        subentry_rows(&parse(&SUBENTRY, &text).expect("parse subentry")).expect("read subentry"),
         rows
     );
 }
@@ -170,7 +170,7 @@ fn gate_rows_round_trip_all_three_states() {
     ];
     let text = gate_tsv(&rows).expect("render gates");
     assert_eq!(
-        gate_rows(&parse(&CAPABILITY_GATE, &text).expect("parse gates")),
+        gate_rows(&parse(&CAPABILITY_GATE, &text).expect("parse gates")).expect("read gates"),
         rows
     );
 }

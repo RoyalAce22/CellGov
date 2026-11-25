@@ -25,12 +25,12 @@ impl CensusClass {
         }
     }
 
-    fn from_label(label: &str) -> Self {
+    fn from_label(label: &str) -> Option<Self> {
         match label {
-            "implemented" => Self::Implemented,
-            "stub" => Self::Stub,
-            "absent" => Self::Absent,
-            _ => unreachable!("the archive parser checked the census class"),
+            "implemented" => Some(Self::Implemented),
+            "stub" => Some(Self::Stub),
+            "absent" => Some(Self::Absent),
+            _ => None,
         }
     }
 }
@@ -55,12 +55,12 @@ impl DispatchShape {
         }
     }
 
-    fn from_label(label: &str) -> Self {
+    fn from_label(label: &str) -> Option<Self> {
         match label {
-            "flat" => Self::Flat,
-            "subtable" => Self::Subtable,
-            "chain_incomplete" => Self::ChainIncomplete,
-            _ => unreachable!("the archive parser checked the dispatch shape"),
+            "flat" => Some(Self::Flat),
+            "subtable" => Some(Self::Subtable),
+            "chain_incomplete" => Some(Self::ChainIncomplete),
+            _ => None,
         }
     }
 }
@@ -276,12 +276,12 @@ impl GateState {
         }
     }
 
-    fn from_label(label: &str) -> Self {
+    fn from_label(label: &str) -> Option<Self> {
         match label {
-            "gated" => Self::Gated,
-            "ungated" => Self::Ungated,
-            "not_analysed" => Self::NotAnalysed,
-            _ => unreachable!("the archive parser checked the gate state"),
+            "gated" => Some(Self::Gated),
+            "ungated" => Some(Self::Ungated),
+            "not_analysed" => Some(Self::NotAnalysed),
+            _ => None,
         }
     }
 }
@@ -390,93 +390,116 @@ pub fn presence_rows(
         .collect())
 }
 
-/// Requires `table` to satisfy the [`KERNEL`] spec.
-pub fn kernel_rows(table: &Table) -> Vec<KernelRow> {
-    debug_assert_eq!(table.spec.name, KERNEL.name);
-    table
-        .rows
+/// The typed rows of a table parsed with [`KERNEL`].
+///
+/// # Errors
+///
+/// Returns the [`table::checked_rows`] refusal when `table` does not
+/// hold the columns and the cell kinds of [`KERNEL`].
+pub fn kernel_rows(table: &Table) -> Result<Vec<KernelRow>, ArchiveError> {
+    table::checked_rows(&KERNEL, table)?
         .iter()
-        .map(|row| KernelRow {
-            pup_sha256: row[0].clone(),
-            kernel_elf_sha256: row[1].clone(),
-            table_base: parse_hex64(&row[2]),
-            entry_width: parse_usize(&row[3]),
-            entry_format: row[4].clone(),
-            entry_count: parse_usize(&row[5]),
-            discovery_method: row[6].clone(),
-            confidence: row[7].clone(),
-            census_sha256: row[8].clone(),
-            subentry_sha256: row[9].clone(),
-            gate_sha256: row[10].clone(),
+        .map(|row| {
+            Ok(KernelRow {
+                pup_sha256: row.text(0)?.to_string(),
+                kernel_elf_sha256: row.text(1)?.to_string(),
+                table_base: row.hex64(2)?,
+                entry_width: row.integer(3)?,
+                entry_format: row.text(4)?.to_string(),
+                entry_count: row.integer(5)?,
+                discovery_method: row.text(6)?.to_string(),
+                confidence: row.text(7)?.to_string(),
+                census_sha256: row.text(8)?.to_string(),
+                subentry_sha256: row.text(9)?.to_string(),
+                gate_sha256: row.text(10)?.to_string(),
+            })
         })
         .collect()
 }
 
-/// Requires `table` to satisfy the [`STUB`] spec.
-pub fn stub_rows(table: &Table) -> Vec<StubRow> {
-    debug_assert_eq!(table.spec.name, STUB.name);
-    table
-        .rows
+/// The typed rows of a table parsed with [`STUB`].
+///
+/// # Errors
+///
+/// Returns the [`table::checked_rows`] refusal when `table` does not
+/// hold the columns and the cell kinds of [`STUB`].
+pub fn stub_rows(table: &Table) -> Result<Vec<StubRow>, ArchiveError> {
+    table::checked_rows(&STUB, table)?
         .iter()
-        .map(|row| StubRow {
-            pup_sha256: row[0].clone(),
-            descriptor: parse_hex64(&row[1]),
-            target: parse_hex64(&row[2]),
-            errno: parse_hex32(&row[3]),
-            errno_symbol: row[4].clone(),
-            references: parse_usize(&row[5]),
-            primary: row[6] == "yes",
+        .map(|row| {
+            Ok(StubRow {
+                pup_sha256: row.text(0)?.to_string(),
+                descriptor: row.hex64(1)?,
+                target: row.hex64(2)?,
+                errno: row.hex32(3)?,
+                errno_symbol: row.text(4)?.to_string(),
+                references: row.integer(5)?,
+                primary: row.text(6)? == "yes",
+            })
         })
         .collect()
 }
 
-/// Requires `table` to satisfy the [`CENSUS`] spec.
-pub fn census_rows(table: &Table) -> Vec<CensusRow> {
-    debug_assert_eq!(table.spec.name, CENSUS.name);
-    table
-        .rows
+/// The typed rows of a table parsed with [`CENSUS`].
+///
+/// # Errors
+///
+/// Returns the [`table::checked_rows`] refusal when `table` does not
+/// hold the columns and the cell kinds of [`CENSUS`].
+pub fn census_rows(table: &Table) -> Result<Vec<CensusRow>, ArchiveError> {
+    table::checked_rows(&CENSUS, table)?
         .iter()
-        .map(|row| CensusRow {
-            fw: row[0].clone(),
-            ordinal: parse_usize(&row[1]),
-            class: CensusClass::from_label(&row[2]),
-            target: (row[3] != NONE).then(|| parse_hex64(&row[3])),
-            dispatch: DispatchShape::from_label(&row[4]),
+        .map(|row| {
+            Ok(CensusRow {
+                fw: row.text(0)?.to_string(),
+                ordinal: row.integer(1)?,
+                class: row.label(2, CensusClass::from_label)?,
+                target: row.optional(3)?.map(|_| row.hex64(3)).transpose()?,
+                dispatch: row.label(4, DispatchShape::from_label)?,
+            })
         })
         .collect()
 }
 
-/// Requires `table` to satisfy the [`SUBENTRY`] spec.
-pub fn subentry_rows(table: &Table) -> Vec<SubentryRow> {
-    debug_assert_eq!(table.spec.name, SUBENTRY.name);
-    table
-        .rows
+/// The typed rows of a table parsed with [`SUBENTRY`].
+///
+/// # Errors
+///
+/// Returns the [`table::checked_rows`] refusal when `table` does not
+/// hold the columns and the cell kinds of [`SUBENTRY`].
+pub fn subentry_rows(table: &Table) -> Result<Vec<SubentryRow>, ArchiveError> {
+    table::checked_rows(&SUBENTRY, table)?
         .iter()
-        .map(|row| SubentryRow {
-            pup_sha256: row[0].clone(),
-            ordinal: parse_usize(&row[1]),
-            selector_slot: row[2].clone(),
-            packet: row[3]
-                .parse()
-                .expect("the archive parser checked the packet integer"),
-            class: CensusClass::from_label(&row[4]),
-            target: parse_hex64(&row[5]),
+        .map(|row| {
+            Ok(SubentryRow {
+                pup_sha256: row.text(0)?.to_string(),
+                ordinal: row.integer(1)?,
+                selector_slot: row.text(2)?.to_string(),
+                packet: row.integer(3)?,
+                class: row.label(4, CensusClass::from_label)?,
+                target: row.hex64(5)?,
+            })
         })
         .collect()
 }
 
-/// Requires `table` to satisfy the [`CAPABILITY_GATE`] spec.
-pub fn gate_rows(table: &Table) -> Vec<GateRow> {
-    debug_assert_eq!(table.spec.name, CAPABILITY_GATE.name);
-    table
-        .rows
+/// The typed rows of a table parsed with [`CAPABILITY_GATE`].
+///
+/// # Errors
+///
+/// Returns the [`table::checked_rows`] refusal when `table` does not
+/// hold the columns and the cell kinds of [`CAPABILITY_GATE`].
+pub fn gate_rows(table: &Table) -> Result<Vec<GateRow>, ArchiveError> {
+    table::checked_rows(&CAPABILITY_GATE, table)?
         .iter()
-        .map(|row| GateRow {
-            pup_sha256: row[0].clone(),
-            ordinal: parse_usize(&row[1]),
-            state: GateState::from_label(&row[2]),
-            reads: (row[3] != NONE).then(|| row[3].clone()),
-            fail_errno: (row[4] != NONE).then(|| parse_hex32(&row[4])),
+        .map(|row| {
+            Ok(GateRow {
+                pup_sha256: row.text(0)?.to_string(),
+                ordinal: row.integer(1)?,
+                state: row.label(2, GateState::from_label)?,
+                reads: row.optional(3)?.map(str::to_string),
+                fail_errno: row.optional(4)?.map(|_| row.hex32(4)).transpose()?,
+            })
         })
         .collect()
 }
@@ -573,14 +596,6 @@ fn parse_usize(value: &str) -> usize {
     value
         .parse()
         .expect("the archive parser checked the decimal integer")
-}
-
-fn parse_hex64(value: &str) -> u64 {
-    u64::from_str_radix(&value[2..], 16).expect("the archive parser checked the u64 hex value")
-}
-
-fn parse_hex32(value: &str) -> u32 {
-    u32::from_str_radix(&value[2..], 16).expect("the archive parser checked the u32 hex value")
 }
 
 #[cfg(test)]

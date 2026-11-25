@@ -10,9 +10,7 @@ use cellgov_ps3_abi::lv1::call::{
 };
 use cellgov_ps3_abi::lv1::table::{self as lv1_table, TableEntry};
 
-use cellgov_lv2_archive::{
-    self as archive, ArchiveError, ColumnKind, ExtractionError, PupRow, Table, TableSpec, NONE,
-};
+use cellgov_lv2_archive::{self as archive, ArchiveError, ExtractionError, PupRow, Table, NONE};
 
 use super::spec::{HYPERCALL, HYPERCALL_SITE, HYPERCALL_UNRESOLVED};
 
@@ -268,56 +266,17 @@ pub fn hypercall_rows(
 ///
 /// # Errors
 ///
-/// - [`ArchiveError::Header`] if the columns of `table` are not those of
-///   [`HYPERCALL`].
-/// - [`ArchiveError::CellCount`] if a row has the wrong number of cells.
-/// - [`ArchiveError::BadCell`] if the number of an answered row is not a
-///   decimal integer.
+/// Returns the [`archive::checked_rows`] refusal when `table` does not
+/// hold the columns and the cell kinds of [`HYPERCALL`].
 pub fn census_answered(table: &Table) -> Result<BTreeSet<u64>, ArchiveError> {
-    // `Table` has public fields, so the spec and the rows are not proof
-    // that `parse` checked them against `HYPERCALL`.
-    let names = |spec: &TableSpec| spec.columns.iter().map(|c| c.name).collect::<Vec<_>>();
-    let columns = names(&HYPERCALL);
-    let wrong_header = || ArchiveError::Header {
-        table: HYPERCALL.name,
-        expected: columns.join("\t"),
-        found: names(table.spec).join("\t"),
-    };
-    if names(table.spec) != columns {
-        return Err(wrong_header());
-    }
-    let position = |name: &str| columns.iter().position(|c| *c == name);
-    let (Some(number), Some(state)) = (position("number"), position("state")) else {
-        return Err(wrong_header());
-    };
+    // The column indexes of `number` and `state` in `HYPERCALL`.
+    const NUMBER: usize = 0;
+    const STATE: usize = 9;
     let mut answered = BTreeSet::new();
-    for (index, row) in table.rows.iter().enumerate() {
-        // Line 1 is the header.
-        let line = index + 2;
-        let cells = (row.len() == columns.len())
-            .then(|| row.get(number).zip(row.get(state)))
-            .flatten();
-        let Some((number_cell, state_cell)) = cells else {
-            return Err(ArchiveError::CellCount {
-                table: HYPERCALL.name,
-                line,
-                expected: columns.len(),
-                found: row.len(),
-            });
-        };
-        if state_cell != HypercallState::Answered.label() {
-            continue;
+    for row in archive::checked_rows(&HYPERCALL, table)? {
+        if row.text(STATE)? == HypercallState::Answered.label() {
+            answered.insert(row.integer(NUMBER)?);
         }
-        let value = number_cell
-            .parse::<u64>()
-            .map_err(|_| ArchiveError::BadCell {
-                table: HYPERCALL.name,
-                line,
-                column: "number",
-                cell: number_cell.clone(),
-                expected: ColumnKind::Integer.describe(),
-            })?;
-        answered.insert(value);
     }
     Ok(answered)
 }
@@ -366,41 +325,39 @@ pub fn hypercall_tsv(rows: &[HypercallRow]) -> Result<String, ArchiveError> {
 
 /// The typed rows of a parsed `hypercall_site.tsv`.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics unless the loader parsed `table` with [`HYPERCALL_SITE`].
-pub fn hypercall_site_rows(table: &Table) -> Vec<HypercallSiteRow> {
-    debug_assert_eq!(table.spec.name, HYPERCALL_SITE.name);
-    table
-        .rows
+/// Returns the [`archive::checked_rows`] refusal when `table` does not
+/// hold the columns and the cell kinds of [`HYPERCALL_SITE`].
+pub fn hypercall_site_rows(table: &Table) -> Result<Vec<HypercallSiteRow>, ArchiveError> {
+    archive::checked_rows(&HYPERCALL_SITE, table)?
         .iter()
-        .map(|row| HypercallSiteRow {
-            pup_sha256: row[0].clone(),
-            number: row[1]
-                .parse()
-                .expect("the archive parser checked the decimal integer"),
-            sites: parse_list(&row[2]),
+        .map(|row| {
+            Ok(HypercallSiteRow {
+                pup_sha256: row.text(0)?.to_string(),
+                number: row.integer(1)?,
+                sites: row.integers(2)?,
+            })
         })
         .collect()
 }
 
 /// The typed rows of a parsed `hypercall_unresolved.tsv`.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics unless the loader parsed `table` with [`HYPERCALL_UNRESOLVED`].
-pub fn hypercall_unresolved_rows(table: &Table) -> Vec<HypercallUnresolvedRow> {
-    debug_assert_eq!(table.spec.name, HYPERCALL_UNRESOLVED.name);
-    table
-        .rows
+/// Returns the [`archive::checked_rows`] refusal when `table` does not
+/// hold the columns and the cell kinds of [`HYPERCALL_UNRESOLVED`].
+pub fn hypercall_unresolved_rows(
+    table: &Table,
+) -> Result<Vec<HypercallUnresolvedRow>, ArchiveError> {
+    archive::checked_rows(&HYPERCALL_UNRESOLVED, table)?
         .iter()
-        .map(|row| HypercallUnresolvedRow {
-            pup_sha256: row[0].clone(),
-            sites: if row[1] == NONE {
-                Vec::new()
-            } else {
-                parse_list(&row[1])
-            },
+        .map(|row| {
+            Ok(HypercallUnresolvedRow {
+                pup_sha256: row.text(0)?.to_string(),
+                sites: row.integers(1)?,
+            })
         })
         .collect()
 }
@@ -456,16 +413,6 @@ fn list_cell(values: &[u64]) -> String {
         .map(u64::to_string)
         .collect::<Vec<_>>()
         .join(",")
-}
-
-fn parse_list(cell: &str) -> Vec<u64> {
-    cell.split(',')
-        .map(|value| {
-            value
-                .parse()
-                .expect("the archive parser checked the integer list")
-        })
-        .collect()
 }
 
 #[cfg(test)]

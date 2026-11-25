@@ -141,7 +141,7 @@ fn the_site_tables_round_trip_their_typed_rows_in_key_order() {
             p2 = pup(2)
         )
     );
-    let parsed = hypercall_site_rows(&parse(&HYPERCALL_SITE, &text).expect("parse"));
+    let parsed = hypercall_site_rows(&parse(&HYPERCALL_SITE, &text).expect("parse")).expect("read");
     assert_eq!(
         parsed,
         [site(1, 5, &[16]), site(1, 74, &[8, 12]), site(2, 7, &[4])]
@@ -165,7 +165,8 @@ fn the_site_tables_round_trip_their_typed_rows_in_key_order() {
             p2 = pup(2)
         )
     );
-    let parsed = hypercall_unresolved_rows(&parse(&HYPERCALL_UNRESOLVED, &text).expect("parse"));
+    let parsed = hypercall_unresolved_rows(&parse(&HYPERCALL_UNRESOLVED, &text).expect("parse"))
+        .expect("read");
     assert_eq!(parsed, [unresolved[1].clone(), unresolved[0].clone()]);
 }
 

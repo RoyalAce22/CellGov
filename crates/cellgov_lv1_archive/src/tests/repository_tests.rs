@@ -223,7 +223,7 @@ fn bi_pu_index_0_and_index_1_are_two_read_rows_that_round_trip() {
         read_row(1, bi(b"pu", 0), 1, true),
     ];
     let text = repository_read_tsv(&rows).unwrap();
-    let parsed = repository_read_rows(&archive::parse(&REPOSITORY_READ, &text).unwrap());
+    let parsed = repository_read_rows(&archive::parse(&REPOSITORY_READ, &text).unwrap()).unwrap();
     assert_eq!(parsed.len(), 2);
     assert_eq!(parsed[0], rows[1]);
     assert_eq!(parsed[1], rows[0]);

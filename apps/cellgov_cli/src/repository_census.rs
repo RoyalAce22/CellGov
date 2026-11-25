@@ -182,9 +182,9 @@ fn load_existing(path: &Path) -> Result<Vec<RepositoryReadRow>, RepositoryCensus
             })
         }
     };
-    let table = archive::parse(&REPOSITORY_READ, &text)
-        .map_err(|source| RepositoryCensusError::Parse { source })?;
-    Ok(lv1_archive::repository_read_rows(&table))
+    archive::parse(&REPOSITORY_READ, &text)
+        .and_then(|table| lv1_archive::repository_read_rows(&table))
+        .map_err(|source| RepositoryCensusError::Parse { source })
 }
 
 fn write(path: &Path, text: &str) -> Result<(), RepositoryCensusError> {

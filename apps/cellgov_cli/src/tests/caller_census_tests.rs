@@ -180,15 +180,15 @@ fn a_single_firmware_refresh_preserves_other_pup_rows() {
         .expect("parse table")
     };
     assert_eq!(
-        archive::caller_rows(&read(&CALLER)),
+        archive::caller_rows(&read(&CALLER)).expect("read rows"),
         [caller(&hashes[0], 200), caller(&hashes[1], 100)]
     );
     assert_eq!(
-        archive::caller_unresolved_rows(&read(&CALLER_UNRESOLVED)),
+        archive::caller_unresolved_rows(&read(&CALLER_UNRESOLVED)).expect("read rows"),
         [unresolved(&hashes[0]), unresolved(&hashes[1])]
     );
     assert_eq!(
-        archive::reach_rows(&read(&REACH)),
+        archive::reach_rows(&read(&REACH)).expect("read rows"),
         [reach(&hashes[0], 44), reach(&hashes[1], 33)]
     );
 }

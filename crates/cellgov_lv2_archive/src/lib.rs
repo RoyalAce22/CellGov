@@ -45,6 +45,10 @@ mod unmodelled;
 #[path = "tests/regenerate.rs"]
 mod regenerate;
 
+#[cfg(test)]
+#[path = "tests/reader_refusal_tests.rs"]
+mod reader_refusal_tests;
+
 pub use behavior::{
     arm_token, foldable, parse_citation, parse_witness, provenance_ref_fits, Witness, DOC_KEYS,
     WITNESS_CRATES,
@@ -93,7 +97,9 @@ pub use spec::{
     TRANSITIONS, TRANSITION_KINDS, VIEWS,
 };
 pub use sql::{build_sql, create_table_sql, import_sql, schema_sql, sql_banner, SQLITE_VERSION};
-pub use table::{check_references, parse, render, ArchiveError, Table, NONE};
+pub use table::{
+    check_references, checked_rows, parse, render, ArchiveError, CheckedRow, Table, NONE,
+};
 pub use transitions::{
     transitions, transitions_tsv, ComparisonState, TransitionKind, TransitionRow,
 };

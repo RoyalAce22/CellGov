@@ -37,7 +37,8 @@ fn repository_rows_are_well_formed() {
             &read_in(&archive_dir(), &REPOSITORY_READ.file()),
         )
         .unwrap_or_else(|e| panic!("{e}")),
-    );
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
     let pups = lv2_archive::pup_rows(
         &lv2_archive::parse(&PUP, &read_in(&lv2_archive_dir(), &PUP.file()))
             .unwrap_or_else(|e| panic!("{e}")),
@@ -46,6 +47,7 @@ fn repository_rows_are_well_formed() {
         &lv2_archive::parse(&KERNEL, &read_in(&lv2_archive_dir(), &KERNEL.file()))
             .unwrap_or_else(|e| panic!("{e}")),
     )
+    .unwrap_or_else(|e| panic!("{e}"))
     .into_iter()
     .map(|row| row.pup_sha256)
     .collect();

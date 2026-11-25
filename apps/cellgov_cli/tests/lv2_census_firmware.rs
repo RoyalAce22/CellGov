@@ -108,7 +108,7 @@ fn firmware_reextracts_byte_identical_census_rows() {
         .collect();
     let kernel_table = archive::parse(&KERNEL, &read(&committed.join(KERNEL.file())))
         .expect("parse committed kernel table");
-    let kernels = archive::kernel_rows(&kernel_table);
+    let kernels = archive::kernel_rows(&kernel_table).expect("read committed kernel rows");
     let stored = stored_kernels(&root);
     let output = scratch_labeled("lv2_census_firmware");
 
@@ -140,6 +140,7 @@ fn firmware_reextracts_byte_identical_census_rows() {
     let extracted = archive::parse(&KERNEL, &read(&output.join(KERNEL.file())))
         .expect("parse re-extracted kernel table");
     let extracted: BTreeMap<String, KernelRow> = archive::kernel_rows(&extracted)
+        .expect("read re-extracted kernel rows")
         .into_iter()
         .map(|row| (row.pup_sha256.clone(), row))
         .collect();
@@ -201,7 +202,7 @@ fn firmware_reextracts_byte_identical_hypercall_rows() {
     let stored = stored_kernels(&root);
     let output = scratch_labeled("hypercall_census_firmware");
 
-    for kernel in &archive::kernel_rows(&kernel_table) {
+    for kernel in &archive::kernel_rows(&kernel_table).expect("read committed kernel rows") {
         let fw = &firmware_by_pup[&kernel.pup_sha256];
         let source = kernel_for(kernel, fw, &stored);
         let result = Command::new(env!("CARGO_BIN_EXE_cellgov"))

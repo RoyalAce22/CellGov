@@ -46,13 +46,13 @@ fn committed_pups() -> Vec<PupRow> {
 fn committed_kernels() -> Vec<KernelRow> {
     let text = read(&lv2_archive_dir().join(KERNEL.file()));
     let table = lv2_archive::parse(&KERNEL, &text).unwrap_or_else(|error| panic!("{error}"));
-    lv2_archive::kernel_rows(&table)
+    lv2_archive::kernel_rows(&table).unwrap_or_else(|error| panic!("{error}"))
 }
 
 fn committed_hypercall_sites() -> Vec<archive::HypercallSiteRow> {
     let text = read(&archive_dir().join(HYPERCALL_SITE.file()));
     let table = lv2_archive::parse(&HYPERCALL_SITE, &text).unwrap_or_else(|e| panic!("{e}"));
-    archive::hypercall_site_rows(&table)
+    archive::hypercall_site_rows(&table).unwrap_or_else(|e| panic!("{e}"))
 }
 
 fn committed_repository_reads() -> Vec<archive::RepositoryReadRow> {
@@ -64,7 +64,7 @@ fn committed_repository_reads() -> Vec<archive::RepositoryReadRow> {
         rerendered, text,
         "repository_read.tsv is not byte-canonical"
     );
-    archive::repository_read_rows(&table)
+    archive::repository_read_rows(&table).unwrap_or_else(|e| panic!("{e}"))
 }
 
 fn fill(template: &str, subs: &[(&str, String)]) -> String {
@@ -392,7 +392,8 @@ fn hypercall_site_rows_are_well_formed() {
             &read(&dir.join(HYPERCALL_UNRESOLVED.file())),
         )
         .unwrap_or_else(|error| panic!("{error}")),
-    );
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
     let kernel_pups: BTreeSet<String> = committed_kernels()
         .into_iter()
         .map(|row| row.pup_sha256)

@@ -27,6 +27,10 @@ mod repository;
 mod spec;
 mod sql;
 
+#[cfg(test)]
+#[path = "tests/reader_refusal_tests.rs"]
+mod reader_refusal_tests;
+
 pub use hypercall::{
     census_answered, census_contradictions, hypercall_family, hypercall_rows, hypercall_site_rows,
     hypercall_site_tsv, hypercall_tsv, hypercall_unresolved_rows, hypercall_unresolved_tsv,

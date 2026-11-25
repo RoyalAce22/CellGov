@@ -74,7 +74,7 @@ fn committed_kernels() -> Vec<KernelRow> {
     let rerendered =
         archive::render(&KERNEL, &table.rows).unwrap_or_else(|error| panic!("kernel.tsv: {error}"));
     assert_eq!(rerendered, text, "kernel.tsv is not byte-canonical");
-    archive::kernel_rows(&table)
+    archive::kernel_rows(&table).unwrap_or_else(|e| panic!("{e}"))
 }
 
 fn committed_stubs() -> Vec<StubRow> {
@@ -83,7 +83,7 @@ fn committed_stubs() -> Vec<StubRow> {
     let rerendered =
         archive::render(&STUB, &table.rows).unwrap_or_else(|error| panic!("stub.tsv: {error}"));
     assert_eq!(rerendered, text, "stub.tsv is not byte-canonical");
-    archive::stub_rows(&table)
+    archive::stub_rows(&table).unwrap_or_else(|e| panic!("{e}"))
 }
 
 fn committed_subentries() -> Vec<SubentryRow> {
@@ -92,7 +92,7 @@ fn committed_subentries() -> Vec<SubentryRow> {
     let rerendered = archive::render(&SUBENTRY, &table.rows)
         .unwrap_or_else(|error| panic!("subentry.tsv: {error}"));
     assert_eq!(rerendered, text, "subentry.tsv is not byte-canonical");
-    archive::subentry_rows(&table)
+    archive::subentry_rows(&table).unwrap_or_else(|e| panic!("{e}"))
 }
 
 fn committed_gates() -> Vec<GateRow> {
@@ -101,7 +101,7 @@ fn committed_gates() -> Vec<GateRow> {
     let rerendered = archive::render(&CAPABILITY_GATE, &table.rows)
         .unwrap_or_else(|error| panic!("gate.tsv: {error}"));
     assert_eq!(rerendered, text, "gate.tsv is not byte-canonical");
-    archive::gate_rows(&table)
+    archive::gate_rows(&table).unwrap_or_else(|e| panic!("{e}"))
 }
 
 fn census_files(kernels: &[KernelRow], pups: &[PupRow]) -> Vec<String> {
@@ -162,7 +162,10 @@ fn generated_presence(census_files: &[String]) -> Vec<archive::PresenceRow> {
                 .expect("census file follows the archive path convention");
             let table = archive::parse(&CENSUS, &read(&archive_dir().join(file)))
                 .unwrap_or_else(|error| panic!("{file}: {error}"));
-            (fw.to_string(), archive::census_rows(&table))
+            (
+                fw.to_string(),
+                archive::census_rows(&table).unwrap_or_else(|e| panic!("{e}")),
+            )
         })
         .collect();
     archive::presence_rows(&by_version)
@@ -179,7 +182,10 @@ fn generated_coverage(routes: &[RouteRow], census_files: &[String]) -> Vec<archi
                 .expect("census file follows the archive path convention");
             let table = archive::parse(&CENSUS, &read(&archive_dir().join(file)))
                 .unwrap_or_else(|error| panic!("{file}: {error}"));
-            (fw.to_string(), archive::census_rows(&table))
+            (
+                fw.to_string(),
+                archive::census_rows(&table).unwrap_or_else(|e| panic!("{e}")),
+            )
         })
         .collect();
     archive::coverage_rows(routes, &by_version)
@@ -371,7 +377,10 @@ fn generated_transitions(
                 .expect("census file follows the archive path convention");
             let table = archive::parse(&CENSUS, &read(&archive_dir().join(file)))
                 .unwrap_or_else(|error| panic!("{file}: {error}"));
-            (fw.to_string(), archive::census_rows(&table))
+            (
+                fw.to_string(),
+                archive::census_rows(&table).unwrap_or_else(|e| panic!("{e}")),
+            )
         })
         .collect();
     let firmware_by_pup: BTreeMap<&str, &str> = pups
@@ -1017,7 +1026,7 @@ fn kernel_census_rows_are_well_formed() {
             kernel.pup_sha256
         );
         let table = archive::parse(&CENSUS, &text).unwrap_or_else(|error| panic!("{error}"));
-        let rows = archive::census_rows(&table);
+        let rows = archive::census_rows(&table).unwrap_or_else(|e| panic!("{e}"));
         let pup_subentries = subentries_by_pup
             .get(kernel.pup_sha256.as_str())
             .cloned()
@@ -1191,7 +1200,7 @@ fn modelled_ordinals_are_not_absent_from_every_extracted_census() {
         .map(|file| {
             let table = archive::parse(&CENSUS, &read(&archive_dir().join(file)))
                 .unwrap_or_else(|error| panic!("{file}: {error}"));
-            archive::census_rows(&table)
+            archive::census_rows(&table).unwrap_or_else(|e| panic!("{e}"))
         })
         .collect();
     let absent: Vec<u64> = archive::route_rows()
@@ -1238,7 +1247,7 @@ fn nonimplemented_modelled_ordinals_have_behavior_rows() {
         .map(|file| {
             let table = archive::parse(&CENSUS, &read(&archive_dir().join(file)))
                 .unwrap_or_else(|error| panic!("{file}: {error}"));
-            archive::census_rows(&table)
+            archive::census_rows(&table).unwrap_or_else(|e| panic!("{e}"))
         })
         .collect();
     let behavior = archive::parse(

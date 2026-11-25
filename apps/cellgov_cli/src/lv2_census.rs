@@ -325,36 +325,33 @@ fn load_existing(output_dir: &Path) -> Result<ExtractedRows, Lv2CensusError> {
         gate_path.is_file(),
     ) {
         (false, false, false, false) => Ok(ExtractedRows::default()),
-        (true, true, true, true) => {
-            let kernel = read_table(&kernel_path, &KERNEL)?;
-            let stub = read_table(&stub_path, &STUB)?;
-            let subentry = archive::subentry_rows(&read_table(&subentry_path, &SUBENTRY)?);
-            let gate = archive::gate_rows(&read_table(&gate_path, &CAPABILITY_GATE)?);
-            Ok(ExtractedRows {
-                kernels: archive::kernel_rows(&kernel),
-                stubs: archive::stub_rows(&stub),
-                subentries: subentry,
-                gates: gate,
-            })
-        }
+        (true, true, true, true) => Ok(ExtractedRows {
+            kernels: read_rows(&kernel_path, &KERNEL, archive::kernel_rows)?,
+            stubs: read_rows(&stub_path, &STUB, archive::stub_rows)?,
+            subentries: read_rows(&subentry_path, &SUBENTRY, archive::subentry_rows)?,
+            gates: read_rows(&gate_path, &CAPABILITY_GATE, archive::gate_rows)?,
+        }),
         _ => Err(Lv2CensusError::ExistingPartial {
             path: output_dir.to_path_buf(),
         }),
     }
 }
 
-fn read_table(
+fn read_rows<T>(
     path: &Path,
     spec: &'static archive::TableSpec,
-) -> Result<archive::Table, Lv2CensusError> {
+    rows: fn(&archive::Table) -> Result<Vec<T>, archive::ArchiveError>,
+) -> Result<Vec<T>, Lv2CensusError> {
     let text = std::fs::read_to_string(path).map_err(|source| Lv2CensusError::Read {
         path: path.to_path_buf(),
         source,
     })?;
-    archive::parse(spec, &text).map_err(|source| Lv2CensusError::Parse {
-        table: spec.name,
-        source,
-    })
+    archive::parse(spec, &text)
+        .and_then(|table| rows(&table))
+        .map_err(|source| Lv2CensusError::Parse {
+            table: spec.name,
+            source,
+        })
 }
 
 fn write_all(

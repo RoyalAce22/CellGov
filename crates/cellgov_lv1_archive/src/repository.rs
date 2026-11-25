@@ -304,33 +304,27 @@ pub fn repository_tsv(rows: &[RepositoryRow]) -> Result<String, ArchiveError> {
 
 /// The typed rows of a parsed `repository_read.tsv`.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics unless the loader parsed `table` with [`REPOSITORY_READ`].
-pub fn repository_read_rows(table: &Table) -> Vec<RepositoryReadRow> {
-    debug_assert_eq!(table.spec.name, REPOSITORY_READ.name);
-    let word = |cell: &str| {
-        u64::from_str_radix(&cell[2..], 16).expect("the archive parser checked the hex word")
-    };
-    table
-        .rows
+/// Returns the [`archive::checked_rows`] refusal when `table` does not
+/// hold the columns and the cell kinds of [`REPOSITORY_READ`].
+pub fn repository_read_rows(table: &Table) -> Result<Vec<RepositoryReadRow>, ArchiveError> {
+    archive::checked_rows(&REPOSITORY_READ, table)?
         .iter()
-        .map(|row| RepositoryReadRow {
-            pup_sha256: row[0].clone(),
-            key: RepositoryKey {
-                lpar: row[1]
-                    .parse()
-                    .expect("the archive parser checked the decimal integer"),
-                n1: word(&row[2]),
-                n2: word(&row[3]),
-                n3: word(&row[4]),
-                n4: word(&row[5]),
-            },
-            node: row[6].clone(),
-            first: row[7]
-                .parse()
-                .expect("the archive parser checked the decimal integer"),
-            answered: row[8] == "answered",
+        .map(|row| {
+            Ok(RepositoryReadRow {
+                pup_sha256: row.text(0)?.to_string(),
+                key: RepositoryKey {
+                    lpar: row.integer(1)?,
+                    n1: row.hex64(2)?,
+                    n2: row.hex64(3)?,
+                    n3: row.hex64(4)?,
+                    n4: row.hex64(5)?,
+                },
+                node: row.text(6)?.to_string(),
+                first: row.integer(7)?,
+                answered: row.text(8)? == "answered",
+            })
         })
         .collect()
 }

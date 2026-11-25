@@ -40,7 +40,10 @@ fn each_table_round_trips_its_typed_rows() {
         caller(&pup(1), "sys/a.sprx", 22, &[48]),
     ];
     let text = caller_tsv(&callers).unwrap();
-    assert_eq!(caller_rows(&parse(&CALLER, &text).unwrap()), callers);
+    assert_eq!(
+        caller_rows(&parse(&CALLER, &text).unwrap()).unwrap(),
+        callers
+    );
 
     let unresolved_rows = vec![
         unresolved(&pup(1), "sys/a.sprx", &[]),
@@ -49,7 +52,7 @@ fn each_table_round_trips_its_typed_rows() {
     let text = caller_unresolved_tsv(&unresolved_rows).unwrap();
     assert!(text.contains("\tnone\n"), "{text}");
     assert_eq!(
-        caller_unresolved_rows(&parse(&CALLER_UNRESOLVED, &text).unwrap()),
+        caller_unresolved_rows(&parse(&CALLER_UNRESOLVED, &text).unwrap()).unwrap(),
         unresolved_rows
     );
 
@@ -58,7 +61,10 @@ fn each_table_round_trips_its_typed_rows() {
         reach(&pup(1), "sys/a.sprx", 30, 7),
     ];
     let text = reach_tsv(&reach_rows_in).unwrap();
-    assert_eq!(reach_rows(&parse(&REACH, &text).unwrap()), reach_rows_in);
+    assert_eq!(
+        reach_rows(&parse(&REACH, &text).unwrap()).unwrap(),
+        reach_rows_in
+    );
 }
 
 /// The column is a plain integer, so a held row may carry a NID wider
@@ -66,7 +72,7 @@ fn each_table_round_trips_its_typed_rows() {
 #[test]
 fn a_held_reach_row_wider_than_a_nid_reads_back_unchanged() {
     let held = reach_tsv(&[reach(&pup(1), "sys/a.sprx", 1 << 32, 7)]).unwrap();
-    let rows = reach_rows(&parse(&REACH, &held).unwrap());
+    let rows = reach_rows(&parse(&REACH, &held).unwrap()).unwrap();
     assert_eq!(rows[0].export_nid, 4_294_967_296);
     assert_eq!(reach_tsv(&rows).unwrap(), held);
 }
@@ -80,7 +86,7 @@ fn the_renderers_order_integer_keys_numerically() {
         caller(&pup(1), "sys/a.sprx", 22, &[1]),
         caller(&pup(1), "sys/a.sprx", 7, &[1]),
     ];
-    let rows = caller_rows(&parse(&CALLER, &caller_tsv(&callers).unwrap()).unwrap());
+    let rows = caller_rows(&parse(&CALLER, &caller_tsv(&callers).unwrap()).unwrap()).unwrap();
     let keys: Vec<(String, &str, usize)> = rows
         .iter()
         .map(|row| (row.pup_sha256.clone(), row.module.as_str(), row.ordinal))
@@ -100,7 +106,7 @@ fn the_renderers_order_integer_keys_numerically() {
         reach(&pup(1), "sys/a.sprx", 7, 30),
         reach(&pup(1), "sys/a.sprx", 7, 4),
     ];
-    let rows = reach_rows(&parse(&REACH, &reach_tsv(&reaches).unwrap()).unwrap());
+    let rows = reach_rows(&parse(&REACH, &reach_tsv(&reaches).unwrap()).unwrap()).unwrap();
     let keys: Vec<(u64, usize)> = rows
         .iter()
         .map(|row| (row.export_nid, row.ordinal))
@@ -118,7 +124,8 @@ fn the_renderers_order_integer_keys_numerically() {
             &caller_unresolved_tsv(&unresolveds).unwrap(),
         )
         .unwrap(),
-    );
+    )
+    .unwrap();
     let keys: Vec<(String, &str)> = rows
         .iter()
         .map(|row| (row.pup_sha256.clone(), row.module.as_str()))

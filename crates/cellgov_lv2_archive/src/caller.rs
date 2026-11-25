@@ -97,62 +97,59 @@ impl CallerCensus {
 
 /// The typed rows of a parsed `caller.tsv`.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics unless the loader parsed `table` with [`CALLER`].
-pub fn caller_rows(table: &Table) -> Vec<CallerRow> {
-    debug_assert_eq!(table.spec.name, CALLER.name);
-    table
-        .rows
+/// Returns the [`table::checked_rows`] refusal when `table` does not
+/// hold the columns and the cell kinds of [`CALLER`].
+pub fn caller_rows(table: &Table) -> Result<Vec<CallerRow>, ArchiveError> {
+    table::checked_rows(&CALLER, table)?
         .iter()
-        .map(|row| CallerRow {
-            pup_sha256: row[0].clone(),
-            module: row[1].clone(),
-            ordinal: parse_usize(&row[2]),
-            sites: parse_list(&row[3]),
+        .map(|row| {
+            Ok(CallerRow {
+                pup_sha256: row.text(0)?.to_string(),
+                module: row.text(1)?.to_string(),
+                ordinal: row.integer(2)?,
+                sites: row.integers(3)?,
+            })
         })
         .collect()
 }
 
 /// The typed rows of a parsed `caller_unresolved.tsv`.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics unless the loader parsed `table` with [`CALLER_UNRESOLVED`].
-pub fn caller_unresolved_rows(table: &Table) -> Vec<CallerUnresolvedRow> {
-    debug_assert_eq!(table.spec.name, CALLER_UNRESOLVED.name);
-    table
-        .rows
+/// Returns the [`table::checked_rows`] refusal when `table` does not
+/// hold the columns and the cell kinds of [`CALLER_UNRESOLVED`].
+pub fn caller_unresolved_rows(table: &Table) -> Result<Vec<CallerUnresolvedRow>, ArchiveError> {
+    table::checked_rows(&CALLER_UNRESOLVED, table)?
         .iter()
-        .map(|row| CallerUnresolvedRow {
-            pup_sha256: row[0].clone(),
-            module: row[1].clone(),
-            sites: if row[2] == NONE {
-                Vec::new()
-            } else {
-                parse_list(&row[2])
-            },
+        .map(|row| {
+            Ok(CallerUnresolvedRow {
+                pup_sha256: row.text(0)?.to_string(),
+                module: row.text(1)?.to_string(),
+                sites: row.integers(2)?,
+            })
         })
         .collect()
 }
 
 /// The typed rows of a parsed `reach.tsv`.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics unless the loader parsed `table` with [`REACH`].
-pub fn reach_rows(table: &Table) -> Vec<ReachRow> {
-    debug_assert_eq!(table.spec.name, REACH.name);
-    table
-        .rows
+/// Returns the [`table::checked_rows`] refusal when `table` does not
+/// hold the columns and the cell kinds of [`REACH`].
+pub fn reach_rows(table: &Table) -> Result<Vec<ReachRow>, ArchiveError> {
+    table::checked_rows(&REACH, table)?
         .iter()
-        .map(|row| ReachRow {
-            pup_sha256: row[0].clone(),
-            module: row[1].clone(),
-            export_nid: row[2]
-                .parse()
-                .expect("the archive parser checked the NID integer"),
-            ordinal: parse_usize(&row[3]),
+        .map(|row| {
+            Ok(ReachRow {
+                pup_sha256: row.text(0)?.to_string(),
+                module: row.text(1)?.to_string(),
+                export_nid: row.integer(2)?,
+                ordinal: row.integer(3)?,
+            })
         })
         .collect()
 }
@@ -241,22 +238,6 @@ fn list_cell(values: &[u64]) -> String {
         .map(u64::to_string)
         .collect::<Vec<_>>()
         .join(",")
-}
-
-fn parse_list(cell: &str) -> Vec<u64> {
-    cell.split(',')
-        .map(|value| {
-            value
-                .parse()
-                .expect("the archive parser checked the integer list")
-        })
-        .collect()
-}
-
-fn parse_usize(value: &str) -> usize {
-    value
-        .parse()
-        .expect("the archive parser checked the decimal integer")
 }
 
 #[cfg(test)]

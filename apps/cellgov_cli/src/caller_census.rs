@@ -336,22 +336,33 @@ fn merge_existing(output_dir: &Path, tables: &mut CensusTables) -> Result<(), Ca
     }
     let pups = crate::lv2_tables::committed_pup_rows()?;
     let valid: BTreeSet<&str> = pups.iter().map(|row| row.pup_sha256.as_str()).collect();
-    let read = |spec: &'static archive::TableSpec| {
-        let path = output_dir.join(spec.file());
-        let text = std::fs::read_to_string(&path)
-            .map_err(|source| CallerCensusError::ExistingRead { path, source })?;
-        archive::parse(spec, &text).map_err(|source| CallerCensusError::ExistingParse {
-            table: spec.name,
-            source,
-        })
-    };
     let existing = CallerCensus {
-        caller: archive::caller_rows(&read(&CALLER)?),
-        unresolved: archive::caller_unresolved_rows(&read(&CALLER_UNRESOLVED)?),
-        reach: archive::reach_rows(&read(&REACH)?),
+        caller: read_existing(output_dir, &CALLER, archive::caller_rows)?,
+        unresolved: read_existing(
+            output_dir,
+            &CALLER_UNRESOLVED,
+            archive::caller_unresolved_rows,
+        )?,
+        reach: read_existing(output_dir, &REACH, archive::reach_rows)?,
     };
     tables.census.merge_existing(existing, &valid);
     Ok(())
+}
+
+fn read_existing<T>(
+    output_dir: &Path,
+    spec: &'static archive::TableSpec,
+    rows: fn(&archive::Table) -> Result<Vec<T>, archive::ArchiveError>,
+) -> Result<Vec<T>, CallerCensusError> {
+    let path = output_dir.join(spec.file());
+    let text = std::fs::read_to_string(&path)
+        .map_err(|source| CallerCensusError::ExistingRead { path, source })?;
+    archive::parse(spec, &text)
+        .and_then(|table| rows(&table))
+        .map_err(|source| CallerCensusError::ExistingParse {
+            table: spec.name,
+            source,
+        })
 }
 
 fn write_tables(output_dir: &Path, tables: &CensusTables) -> Result<(), CallerCensusError> {

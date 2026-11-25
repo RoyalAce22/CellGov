@@ -63,9 +63,9 @@ pub(crate) fn check_committed_kernel(
     pup_sha256: &str,
     elf: &[u8],
 ) -> Result<(), CommittedKernelError> {
-    let table = archive::parse(&archive::KERNEL, KERNEL_TSV)
-        .map_err(|source| CommittedKernelError::KernelTable { source })?;
-    let expected = archive::kernel_rows(&table)
+    let expected = archive::parse(&archive::KERNEL, KERNEL_TSV)
+        .and_then(|table| archive::kernel_rows(&table))
+        .map_err(|source| CommittedKernelError::KernelTable { source })?
         .into_iter()
         .find(|row| row.pup_sha256 == pup_sha256)
         .ok_or_else(|| CommittedKernelError::NoKernelRow {
