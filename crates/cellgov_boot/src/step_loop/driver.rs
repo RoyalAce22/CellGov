@@ -9,8 +9,8 @@ use cellgov_core::{Runtime, RuntimeStep, StepError};
 
 use crate::diag::{
     append_orphan_exit_info, fetch_raw_at, format_commit_fault, format_deadlock, format_fault,
-    format_max_steps, format_process_exit, report_trace_line, unit_memory, ProcessExitInfo,
-    TtyCapture,
+    format_max_steps, format_process_exit, is_hypercall, report_trace_line, unit_memory,
+    ProcessExitInfo, TtyCapture,
 };
 use crate::step_loop::ctx::StepLoopCtx;
 use crate::step_loop::timing::compute_untracked;
@@ -213,7 +213,14 @@ fn on_step(
     record_insn_coverage(rt, step.unit, step.result.local_diagnostics.pc, ctx);
     let t_cov_end = Instant::now();
 
-    if let Some(args) = &step.result.syscall_args {
+    // The HLE, exit, TTY and ring checks read LV2 syscall numbers,
+    // which a hypercall does not carry.
+    let lv2_args = step
+        .result
+        .syscall_args
+        .as_ref()
+        .filter(|_| !is_hypercall(&step.result));
+    if let Some(args) = lv2_args {
         let pc = step.result.local_diagnostics.pc.unwrap_or(0);
         // The buffer is read through the caller's own space:
         // a child process passes child-space addresses.
@@ -371,3 +378,7 @@ fn handle_tty_capture(
 #[cfg(test)]
 #[path = "tests/ends_at_tests.rs"]
 mod ends_at_tests;
+
+#[cfg(test)]
+#[path = "tests/hypercall_args_tests.rs"]
+mod hypercall_args_tests;

@@ -2,11 +2,13 @@
 
 use cellgov_core::Runtime;
 
-use super::{ascii_safe_preview, fetch_raw_at, format_hle_idx, longest_readable_prefix};
+use super::{
+    ascii_safe_preview, fetch_raw_at, format_hle_idx, is_hypercall, longest_readable_prefix,
+};
 use crate::BootSink;
 
 /// Report the step `unit` just retired: its PC, the raw word there, and
-/// the syscall it dispatched.
+/// the syscall or hypercall it dispatched.
 pub(crate) fn report_trace_line(
     rt: &Runtime,
     unit: cellgov_event::UnitId,
@@ -29,7 +31,9 @@ pub(crate) fn report_trace_line(
     let Some(args) = &result.syscall_args else {
         return;
     };
-    if args[0] >= 0x10000 {
+    if is_hypercall(result) {
+        sink.note(&format!("       -> hypercall {}", args[0]));
+    } else if args[0] >= 0x10000 {
         let idx = (args[0] - 0x10000) as u32;
         sink.note(&format!("       -> HLE #{idx}: {}", format_hle_idx(idx)));
     } else if args[0] == cellgov_ps3_abi::lv2::syscall::TTY_WRITE {

@@ -13,7 +13,8 @@ mod trace;
 
 pub(crate) use fault::{format_commit_fault, format_deadlock, format_fault, unit_memory};
 pub(crate) use helpers::{
-    ascii_safe_preview, fetch_raw_at, format_hle_idx, longest_readable_prefix, region_label_at,
+    ascii_safe_preview, fetch_raw_at, format_hle_idx, is_hypercall, longest_readable_prefix,
+    region_label_at,
 };
 pub(crate) use rings::{append_orphan_exit_info, append_pc_ring_with_decode, append_syscall_ring};
 pub(crate) use trace::report_trace_line;
