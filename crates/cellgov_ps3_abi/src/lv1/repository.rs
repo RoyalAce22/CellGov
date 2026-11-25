@@ -232,8 +232,8 @@ const GAME_OS_341_DUMP: NodeSource = NodeSource::PsdevwikiDump {
 /// The dump is of firmware 3.41, which no logged boot is. No source gives
 /// the values for 1.50, 1.94 or 3.70. At 4.93 the console captures
 /// [`BOOT_RECORD_CAPTURE`], [`DEBUG_SUPPORT_CAPTURE`],
-/// [`FLASH_EXT_CAPTURE`], [`HW_CONFIG_CAPTURE`] and [`BUS_CAPTURE`] give
-/// each value that the 4.93 boot reads.
+/// [`FLASH_EXT_CAPTURE`], [`HW_CONFIG_CAPTURE`], [`LIST_CAPTURE`] and
+/// [`BUS_CAPTURE`] give each value that the 4.93 boot reads.
 const DUMP_FIRMWARE_BEFORE_4_93: &[&str] = &["1.50", "1.94", "3.70"];
 
 /// The console capture of the 4.93 kernel's boot repository record, on
@@ -249,7 +249,8 @@ pub const BOOT_RECORD_CAPTURE: &str = "tests/micro/lv2_repository_boot_nodes/ps3
 pub const BOOT_RECORD_4_93: u64 = 0x8000_0000_0037_a5a0;
 
 /// The firmware of [`BOOT_RECORD_CAPTURE`], [`DEBUG_SUPPORT_CAPTURE`],
-/// [`FLASH_EXT_CAPTURE`], [`HW_CONFIG_CAPTURE`] and [`BUS_CAPTURE`].
+/// [`FLASH_EXT_CAPTURE`], [`HW_CONFIG_CAPTURE`], [`LIST_CAPTURE`] and
+/// [`BUS_CAPTURE`].
 const CAPTURE_FIRMWARE: &[&str] = &["4.93"];
 
 /// The value at offset `offset` of the 4.93 boot record, as
@@ -309,6 +310,15 @@ pub const HW_CONFIG_CAPTURE: &str = "tests/micro/lv1_repository_hw_config/peek/c
 /// The lv1 address of the first value of the node that
 /// [`HW_CONFIG_CAPTURE`] read.
 const HW_CONFIG_V1_ADDRESS: u64 = 0x0068_9678;
+
+/// The console capture of the whole list of lpar 1's repository in lv1,
+/// on the reference console at firmware 4.93. Its README gives the
+/// method.
+pub const LIST_CAPTURE: &str = "tests/micro/lv1_repository_list/peek/cech20-cex-493";
+
+/// The lv1 address of the first value of `ss.param.update.status`, as
+/// [`LIST_CAPTURE`] read it.
+const UPDATE_STATUS_V1_ADDRESS: u64 = 0x0076_3e58;
 
 /// The console capture of lpar 1's bus nodes in lv1's repository, on the
 /// reference console at firmware 4.93. Its README gives the method.
@@ -599,6 +609,28 @@ pub const NODES: &[RepositoryNode] = &[
             address: DEBUG_SUPPORT_V1_ADDRESS,
         },
     ),
+    // `ss.param.update.status`. Its reader stores only the low byte of v1
+    // and does not store v2
+    // [OFW-4.93 lv2_kernel a:0x8000000000050b24-0x8000000000050b50]. Each
+    // of the reader's six callers compares that byte with 0xFF, for
+    // example the constructor that the 4.93 boot runs
+    // [OFW-4.93 lv2_kernel a:0x80000000000a1f84-0x80000000000a1fa0].
+    node(
+        LPAR_ID_PME,
+        [
+            first_field(b"ss", 0),
+            field(b"param", 0),
+            field(b"update", 0),
+            field(b"status", 0),
+        ],
+        0xff,
+        SecondValue::Given(0),
+        CAPTURE_FIRMWARE,
+        NodeSource::Lv1NodeCapture {
+            capture: LIST_CAPTURE,
+            address: UPDATE_STATUS_V1_ADDRESS,
+        },
+    ),
     // `sys.flash.ext`. The kernel keeps only r4, the first value. Its reader returns 1 for
     // a status 0 answer only when bit 1 of r4 is clear
     // [OFW-4.93 lv2_kernel a:0x8000000000050e18-0x8000000000050e48]. Only
@@ -866,6 +898,10 @@ mod flash_ext_tests;
 #[cfg(test)]
 #[path = "tests/repository_hw_config_tests.rs"]
 mod hw_config_tests;
+
+#[cfg(test)]
+#[path = "tests/repository_update_status_tests.rs"]
+mod update_status_tests;
 
 #[cfg(test)]
 #[path = "tests/repository_bus_tests.rs"]

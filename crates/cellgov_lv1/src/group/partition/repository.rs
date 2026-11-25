@@ -149,6 +149,10 @@ mod console_flash_ext_tests;
 mod console_hw_config_tests;
 
 #[cfg(test)]
+#[path = "tests/console_repository_update_status_tests.rs"]
+mod console_update_status_tests;
+
+#[cfg(test)]
 #[path = "tests/console_repository_bus_tests.rs"]
 mod console_bus_tests;
 
