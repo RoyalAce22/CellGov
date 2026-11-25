@@ -12,6 +12,7 @@ use cellgov_ps3_abi::lv1::call::WRITE_HTAB_ENTRY;
 use cellgov_ps3_abi::lv1::device_bus::{
     GAME_OS_MMIO_MAPPINGS, MMIO_REAL_BASE, WRITE_HTAB_MMIO_PAGE_SIZE_R3,
 };
+use cellgov_ps3_abi::lv1::memory::region_address;
 use cellgov_time::GuestTicks;
 
 /// The vas id that the console capture `tests/micro/lv2_vas_boot_record`
@@ -97,7 +98,16 @@ fn refusal_what(d: &HypercallDisposition) -> Option<&'static str> {
 /// and stores I and G for that address in place of the caller's WIMG.
 #[test]
 fn the_kernels_entry_in_its_mmio_mapping_maps_the_devices_real_address() {
-    assert_eq!(GAME_OS_MMIO_MAPPINGS[0].lpar_address, MAPPING.lpar_address);
+    let row = GAME_OS_MMIO_MAPPINGS[0];
+    let from_row = MmioMapping {
+        bus: row.bus,
+        device: row.device,
+        bus_address: row.bus_address,
+        size: row.size,
+        lpar_address: row.lpar_address,
+        page_shift: row.page_shift,
+    };
+    assert_eq!(from_row, MAPPING);
     let mut bytes = KERNEL_D0.to_be_bytes().to_vec();
     let stored = (MMIO_REAL_BASE + 0x301_0000) | PTE_I | PTE_G | PTE_N;
     assert_eq!(stored, 0x0000_0240_0301_002C);
@@ -115,8 +125,6 @@ fn the_kernels_entry_in_its_mmio_mapping_maps_the_devices_real_address() {
     );
 }
 
-/// The page at offset 0x1000 of the region lies at offset 0x1000 of the
-/// device's MMIO.
 #[test]
 fn a_page_past_the_first_maps_the_same_offset_of_the_devices_mmio() {
     let d = write(KERNEL_D0, KERNEL_D1 + 0x1000, &mapped(MAPPING));
@@ -141,8 +149,6 @@ fn a_64_kb_page_in_the_4_kb_page_mapping_gets_lv1s_page_size_r3() {
     );
 }
 
-/// A 64 KB allocation at region counter value 7 takes the mapping's
-/// address.
 #[test]
 fn a_page_in_an_mmio_mapping_and_an_allocated_region_is_refused() {
     assert_eq!(region_address(0x1_0000, 7), Some(MAPPING.lpar_address));
@@ -172,9 +178,39 @@ fn a_page_in_an_mmio_mapping_and_an_allocated_region_is_refused() {
 }
 
 #[test]
+fn a_page_in_an_mmio_mapping_and_the_page_tables_mapping_is_refused() {
+    let mut table_mapped = spaces();
+    table_mapped.apply(AddressSpaceChange::Mapped {
+        vas_id: VAS_ID,
+        lpar_address: MAPPING.lpar_address,
+        counter: 7,
+    });
+    let storage = GuestMemory::from_regions(vec![page_table_storage()]).expect("storage");
+    let d = write_entry(
+        &request(KERNEL_D0, KERNEL_D1),
+        Some("4.93"),
+        &table_mapped,
+        &LogicalSpeState::default(),
+        &MemoryState::default(),
+        &mapped(MAPPING),
+        &storage,
+    );
+    assert_eq!(
+        refusal_what(&d),
+        Some("a valid entry whose page lies in an MMIO mapping and in another region")
+    );
+}
+
+#[test]
 fn the_page_with_no_mmio_mapping_is_refused_outside_the_real_mode_region() {
+    let outside = Some("a valid entry whose page lies outside the partition's real mode region");
     assert_eq!(
         refusal_what(&write(KERNEL_D0, KERNEL_D1, &DeviceBusState::default())),
-        Some("a valid entry whose page lies outside the partition's real mode region")
+        outside
+    );
+    let past_end = KERNEL_D1 + MAPPING.size;
+    assert_eq!(
+        refusal_what(&write(KERNEL_D0, past_end, &mapped(MAPPING))),
+        outside
     );
 }

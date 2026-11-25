@@ -175,8 +175,8 @@ fn held_regions_other_than_the_first_captured_rows_are_a_refusal() {
     }
 }
 
-/// lv1 searches six slots [OFW-4.93 lv1 a:0x23D54C-0x23D578] and returns
-/// -2 when all are taken only after the pool gave a region
+/// lv1 searches six slots [OFW-4.93 lv1 a:0x23D54C-0x23D578]. It returns
+/// -2 when no slot is free, and only after the pool gave a region
 /// [OFW-4.93 lv1 a:0x23D544-0x23D590].
 #[test]
 fn a_device_1_or_2_call_after_six_held_regions_is_a_refusal() {

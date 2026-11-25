@@ -3,14 +3,39 @@
 //!
 //! lv1 keeps one region counter for each partition. A new region takes
 //! the counter's value, and lv1 then increments the counter. The region's
-//! address holds its size exponent `e` and that counter value:
+//! address holds its size exponent `e` and the low `42 - e` bits of that
+//! counter value:
 //!
 //! ```text
-//! address = (e << 42) | (counter << e)
+//! address = (e << 42) | ((counter mod 2^(42 - e)) << e)
 //! ```
 //!
 //! [PS3DEVWIKI-HV-RE s:Encoding_LPAR_Memory_Region_Start_Addresses_and_Sizes]
 //! gives this encoding and the per-partition counter.
+//!
+//! lv1's region function [OFW-4.93 lv1 a:0x2CEC78] makes the address in
+//! these steps:
+//! 1. It refuses a size above [`REGION_SIZE_MAX`]
+//!    [OFW-4.93 lv1 a:0x2CECC8-0x2CECD4].
+//! 2. It takes the size exponent; see [`region_function_exp`].
+//! 3. It computes the count of counter values that the address holds,
+//!    2^(42 - e), and the mask below it
+//!    [OFW-4.93 lv1 a:0x2CED50-0x2CED58] [OFW-4.93 lv1 a:0x2CED74].
+//! 4. It takes the counter's value and increments the counter
+//!    [OFW-4.93 lv1 a:0x2CED84-0x2CED94].
+//! 5. It ANDs the value with the mask, shifts it left by `e` and ORs in
+//!    `e << 42` [OFW-4.93 lv1 a:0x2CED98-0x2CEDA8].
+//! 6. It inserts the address in the partition's set of region addresses
+//!    [OFW-4.93 lv1 a:0x2CEDCC]. The insert gives the status 4 when the
+//!    set holds an equal address [OFW-4.93 lv1 a:0x2CEA0C-0x2CEA20]
+//!    [OFW-4.93 lv1 a:0x2CEA7C].
+//! 7. On the status 4, it repeats the steps from step 4 with the next
+//!    counter value [OFW-4.93 lv1 a:0x2CEDE4-0x2CEDEC].
+//!
+//! The function counts its attempts [OFW-4.93 lv1 a:0x2CEDC8]. After
+//! 2^(42 - e) attempts that all find a taken address, it fails with no
+//! address [OFW-4.93 lv1 a:0x2CEDE8] [OFW-4.93 lv1 a:0x2CED80]
+//! [OFW-4.93 lv1 a:0x2CEE08-0x2CEE24]. So its loop always ends.
 
 /// The bit position of a region's size exponent in its logical partition
 /// address.
@@ -34,20 +59,50 @@ pub const fn region_size_exp(size: u64) -> Option<u32> {
     }
 }
 
-/// The logical partition address of a region of `size` bytes that takes
-/// the counter value `counter`.
+/// The largest region size that lv1's region function accepts: 2^42
+/// bytes [OFW-4.93 lv1 a:0x2CECC8-0x2CECD4].
+pub const REGION_SIZE_MAX: u64 = 1 << REGION_SIZE_EXP_SHIFT;
+
+/// The size exponent that lv1's region function gives a region of `size`
+/// bytes, or `None` above [`REGION_SIZE_MAX`].
 ///
-/// It is `None` in these cases:
-/// - `size` is 0;
-/// - `counter << e` does not fit below bit [`REGION_SIZE_EXP_SHIFT`].
-pub const fn region_address(size: u64, counter: u64) -> Option<u64> {
-    let Some(exp) = region_size_exp(size) else {
-        return None;
-    };
-    if exp >= REGION_SIZE_EXP_SHIFT || counter >> (REGION_SIZE_EXP_SHIFT - exp) != 0 {
+/// The function gives 12 to a size of 0xFFF bytes or less
+/// [OFW-4.93 lv1 a:0x2CED34-0x2CED3C] [OFW-4.93 lv1 a:0x2CEE2C-0x2CEE38].
+/// For a larger size it gives [`region_size_exp`]
+/// [OFW-4.93 lv1 a:0x2CED40-0x2CED48].
+pub const fn region_function_exp(size: u64) -> Option<u32> {
+    if size > REGION_SIZE_MAX {
         return None;
     }
-    Some(((exp as u64) << REGION_SIZE_EXP_SHIFT) | (counter << exp))
+    if size <= 0xFFF {
+        return Some(12);
+    }
+    region_size_exp(size)
+}
+
+/// The count of counter values that the address of a region of `size`
+/// bytes holds: 2^(42 - e). It is `None` above [`REGION_SIZE_MAX`].
+///
+/// Counter values that differ by a multiple of this count give one
+/// address.
+pub const fn region_counter_values(size: u64) -> Option<u64> {
+    match region_function_exp(size) {
+        Some(exp) => Some(1 << (REGION_SIZE_EXP_SHIFT - exp)),
+        None => None,
+    }
+}
+
+/// The logical partition address of a region of `size` bytes that takes
+/// the counter value `counter`, or `None` above [`REGION_SIZE_MAX`].
+///
+/// The address holds the counter value modulo
+/// [`region_counter_values`], so a counter past the address field wraps
+/// to a low address.
+pub const fn region_address(size: u64, counter: u64) -> Option<u64> {
+    let (Some(exp), Some(values)) = (region_function_exp(size), region_counter_values(size)) else {
+        return None;
+    };
+    Some(((exp as u64) << REGION_SIZE_EXP_SHIFT) | ((counter & (values - 1)) << exp))
 }
 
 /// The region counter of the GameOS partition when the kernel makes its
@@ -215,3 +270,7 @@ mod check_tests;
 #[cfg(test)]
 #[path = "tests/memory_allocated_page_console_tests.rs"]
 mod allocated_page_console_tests;
+
+#[cfg(test)]
+#[path = "tests/memory_region_wrap_tests.rs"]
+mod region_wrap_tests;

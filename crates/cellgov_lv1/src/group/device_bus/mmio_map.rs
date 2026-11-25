@@ -15,12 +15,13 @@ use cellgov_ps3_abi::lv1::device_bus::{
     MMIO_MAP_PAGE_SHIFTS, MMIO_MAP_PAGE_SHIFT_R3, MMIO_MAP_SIZE_R3, OPEN_DEVICE_BUS_MAX,
     OPEN_DEVICE_READ_BUS,
 };
-use cellgov_ps3_abi::lv1::memory::{game_os_region_counter_at_boot, region_address};
+use cellgov_ps3_abi::lv1::memory::game_os_region_counter_at_boot;
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
 use super::{DeviceBusChange, DeviceBusState, OpenDevice};
 use crate::answer::{HypercallAnswer, HypercallDisposition, UnmodelledError};
 use crate::group::hypercall::Hypercall;
+use crate::group::memory::allocator::{place, HeldRegions};
 use crate::group::memory::region::MemoryState;
 use crate::group::memory::MemoryChange;
 use crate::request::HypercallRequest;
@@ -36,6 +37,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
             input.firmware,
             input.groups.device_bus(),
             input.groups.memory().regions(),
+            &HeldRegions::of(input.groups),
         )
     },
 }];
@@ -104,11 +106,6 @@ const NO_COUNTER: UnmodelledError = UnmodelledError::new(
     "a map_device_mmio_region at a firmware whose region counter no source gives",
 );
 
-/// The call when the region encoding cannot hold the address.
-const NO_ENCODING: UnmodelledError = UnmodelledError::new(
-    "a map_device_mmio_region whose logical partition address the region encoding cannot hold",
-);
-
 /// lv1's own r3 with r4 to r10 cleared.
 fn lv1_answer(r3: u64) -> HypercallDisposition {
     HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, []))
@@ -123,16 +120,14 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// in r4 and r5 to r10 cleared. The answer carries the mapping and the
 /// counter value that it took.
 ///
-/// The address is the region of the call's size for the next value of
-/// the partition's region counter in `memory`. Before the first region,
-/// that value is the firmware's boot value.
+/// lv1 gives the address of the region of the call's size at the next
+/// value of the partition's region counter in `memory`. Before the first
+/// region, that value is the firmware's boot value. The address skips
+/// each address in `held`; see [`place`].
 ///
 /// The model makes these assumptions:
 /// - The address function's checks of the partition pass, as both
 ///   captured mappings show.
-/// - The allocator's first address for the counter value is free, so no
-///   retry takes a further value. Both captured mappings took the next
-///   value.
 /// - lv1's allocations of its 176-byte region object and its 96-byte
 ///   mapping object succeed.
 /// - A close that frees a mapping's address leaves the counter as it is.
@@ -143,12 +138,13 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// - r4 names a device of bus 1 above device 2;
 /// - the device is open, and no capture reads its regions;
 /// - no source gives the region counter for `firmware`;
-/// - the region encoding cannot hold the address.
+/// - [`place`] gives no address.
 pub(crate) fn map_mmio(
     request: &HypercallRequest,
     firmware: Option<&str>,
     state: &DeviceBusState,
     memory: &MemoryState,
+    held: &HeldRegions,
 ) -> HypercallDisposition {
     let Some(firmware) = firmware.filter(|fw| mmio_map_handler(fw).is_some()) else {
         return UNREAD_FIRMWARE.refusal(request);
@@ -193,14 +189,13 @@ pub(crate) fn map_mmio(
     if size & ((1 << page_shift) - 1) != 0 {
         return lv1_answer(MMIO_MAP_SIZE_R3);
     }
-    let Some(counter) = memory
-        .next_counter()
-        .or_else(|| game_os_region_counter_at_boot(firmware))
-    else {
+    let Some(boot) = game_os_region_counter_at_boot(firmware) else {
         return NO_COUNTER.refusal(request);
     };
-    let Some(lpar_address) = region_address(size, counter) else {
-        return NO_ENCODING.refusal(request);
+    let first = memory.next_counter().unwrap_or(boot);
+    let (lpar_address, counter) = match place(size, first, boot, held) {
+        Ok(placement) => (placement.address, placement.counter),
+        Err(missing) => return UnmodelledError::new(missing.what()).refusal(request),
     };
     let mapping = MmioMapping {
         bus,
@@ -235,3 +230,7 @@ mod device_2_tests;
 #[cfg(test)]
 #[path = "tests/mmio_map_device_2_order_tests.rs"]
 mod device_2_order_tests;
+
+#[cfg(test)]
+#[path = "tests/mmio_map_wrap_tests.rs"]
+mod wrap_tests;

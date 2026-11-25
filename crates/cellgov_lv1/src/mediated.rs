@@ -56,7 +56,7 @@ pub struct MediatedTake {
 ///
 /// The handler reloads the LPCR before its shadow test, which clears
 /// LPCR\[MER\] [OFW-4.93 lv1 a:0x1A5C]. Both outcomes then leave through
-/// one tail. It reloads HSRR0, HSRR1, SRR0 and SRR1 from the values that
+/// one tail. The tail reloads HSRR0, HSRR1, SRR0 and SRR1 from the values that
 /// the handler saved at entry, unless the vector entry changed them
 /// [OFW-4.93 lv1 a:0x1AF8-0x1B10] [OFW-4.93 lv1 a:0x1B2C-0x1B40]. Then
 /// its `hrfid` returns to the thread [OFW-4.93 lv1 a:0x1B84].

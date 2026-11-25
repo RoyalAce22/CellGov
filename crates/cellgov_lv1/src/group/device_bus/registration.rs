@@ -104,7 +104,7 @@ pub(crate) const STORAGE_DEVICE_OPEN_SOURCE: u8 = 181;
 pub(crate) const STORAGE_DEVICE_PORT_SOURCE: u8 = 182;
 
 /// The lane source of the MMIO mappings: one object for each mapping,
-/// keyed by its index in bus, device and bus address order.
+/// keyed by its index in the order of [`DeviceBusState::mmio_mappings`].
 pub(crate) const MMIO_MAPPING_SOURCE: u8 = 183;
 
 /// The lane source of the page shifts of the MMIO mappings: one object
@@ -156,14 +156,17 @@ pub struct DeviceBusState {
 }
 
 impl DeviceBusState {
-    /// Each MMIO mapping, in bus, device and bus address order.
+    /// Each MMIO mapping, in bus, device, bus address, length and logical
+    /// partition address order.
     pub fn mmio_mappings(&self) -> impl Iterator<Item = MmioMapping> + '_ {
         self.mmio_mappings.iter().copied()
     }
 
     /// The partition's first MMIO mapping of the region at `bus_address`
-    /// of device `device` of bus `bus`, in length and logical partition
-    /// address order, if any. A region can hold more than one mapping.
+    /// of device `device` of bus `bus`, if any.
+    ///
+    /// A region can hold more than one mapping. The first mapping has the
+    /// least length, then the least logical partition address.
     pub fn mmio_mapping(&self, bus: u64, device: u64, bus_address: u64) -> Option<MmioMapping> {
         self.mmio_mappings().find(|mapping| {
             mapping.bus == bus && mapping.device == device && mapping.bus_address == bus_address

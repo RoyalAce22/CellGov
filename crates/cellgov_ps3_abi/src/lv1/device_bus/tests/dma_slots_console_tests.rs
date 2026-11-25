@@ -1,5 +1,5 @@
-//! The DMA region of device 1 of bus 1, held to the console capture of
-//! the device's slot object and region list in lv1.
+//! The DMA slot object of device 1 of bus 1 and its first region, held
+//! to the console capture of the slot object and region list in lv1.
 
 use std::collections::BTreeMap;
 
@@ -117,8 +117,8 @@ fn the_slot_objects_device_is_the_open_device_that_the_access_check_finds() {
     assert_eq!(slots("device_open.tsv")[&(device() + 108)], 1);
     assert_eq!(fields[&(device() + 112)], LPAR_ID_GAME_OS);
     assert_ne!(fields[&(device() + 120)], u64::MAX);
-    // The pool index is the word at +128 and the backend the doubleword
-    // at +136 [OFW-4.93 lv1 a:0x22D9B4-0x22D9BC].
+    // The pool index is the word at +128, and the backend is the
+    // doubleword at +136 [OFW-4.93 lv1 a:0x22D9B4-0x22D9BC].
     assert_eq!(fields[&(device() + 128)] >> 32, 3);
     assert_eq!(network[&(network_device + 128)] >> 32, 0);
     assert_eq!(fields[&(device() + 136)], bus_object);

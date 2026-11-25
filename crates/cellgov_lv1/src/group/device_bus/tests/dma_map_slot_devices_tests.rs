@@ -153,8 +153,10 @@ fn lv1s_own_region_of_device_0_is_no_region_of_devices_1_and_2() {
 #[test]
 fn a_page_of_a_closed_device_1_or_2_gets_lv1s_wrong_state() {
     let page = slot_device_pages()[0];
-    let state = DeviceBusState::default();
     for id in [1, 2] {
+        let mut state = DeviceBusState::default();
+        state.apply(DeviceBusChange::Opened(device(0)));
+        state.apply(DeviceBusChange::Opened(device(3 - id)));
         let call = DmaMapping { device: id, ..page };
         assert_eq!(
             map(&state, call),

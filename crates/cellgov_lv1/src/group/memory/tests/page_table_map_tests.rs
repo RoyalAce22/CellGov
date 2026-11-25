@@ -10,6 +10,7 @@ use cellgov_ps3_abi::lv1::call::{
     ALLOCATE_MEMORY, CONSTRUCT_VIRTUAL_ADDRESS_SPACE, MAP_HTAB, SELECT_VIRTUAL_ADDRESS_SPACE,
     WRITE_HTAB_ENTRY,
 };
+use cellgov_ps3_abi::lv1::memory::region_address;
 use cellgov_ps3_abi::lv1::page_table::PTE_M;
 use cellgov_time::GuestTicks;
 
@@ -81,6 +82,7 @@ fn a_mapping_takes_the_next_region_counter_value() {
             Some("4.93"),
             &spaces(true),
             &fresh,
+            &HeldRegions::default(),
         );
         assert_eq!(d, mapped(boot_counter()), "vas id {vas_id}");
     }
@@ -97,6 +99,7 @@ fn a_mapping_takes_the_next_region_counter_value() {
         Some("4.93"),
         &spaces(true),
         &allocated,
+        &HeldRegions::default(),
     );
     assert_eq!(d, mapped(boot_counter() + 1));
 }
@@ -128,6 +131,7 @@ fn a_mapping_refuses_twice_and_where_no_address_space_is_named() {
             firmware,
             &spaces,
             &MemoryState::default(),
+            &HeldRegions::default(),
         );
         assert_eq!(
             refusal_what(&d),

@@ -159,7 +159,8 @@ that the partition holds at a range of bus addresses in a device's DMA
 region. `map_device_mmio_region` maps a device's MMIO region at a
 logical partition address. The hypervisor keeps each mapping as a
 record in its device bus state: the bus, the device, the bus address,
-the logical partition address and the length.
+the logical partition address and the length, and for an MMIO mapping
+the page shift.
 
 ## Region access modes
 

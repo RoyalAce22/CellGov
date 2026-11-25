@@ -96,7 +96,6 @@ fn a_4_kb_page_in_a_mapping_of_page_shift_16_maps_the_devices_mmio() {
     }
 }
 
-/// The second mapping starts at the first byte past the first one.
 #[test]
 fn the_pages_on_each_side_of_the_first_mappings_end_take_their_own_mappings() {
     let first = mapping(0, GAME_OS_MMIO_MAPPINGS[0].page_shift);

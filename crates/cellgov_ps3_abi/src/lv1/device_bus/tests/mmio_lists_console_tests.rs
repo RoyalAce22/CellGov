@@ -51,7 +51,7 @@ fn words(capture: &str, file: &str) -> BTreeMap<u64, u64> {
     words
 }
 
-/// The words of both files of the lists capture.
+/// The doublewords of both files of the lists capture.
 fn lists() -> BTreeMap<u64, u64> {
     let mut lists = words(MMIO_LISTS_CAPTURE, "region_lists.tsv");
     let next = words(MMIO_LISTS_CAPTURE, "region_3_next.tsv");
@@ -95,7 +95,10 @@ fn the_third_regions_game_os_mapping_is_the_record_of_the_kernels_second_call() 
     assert_eq!(lists[&(next + 8)], 0);
     assert_eq!(lists[&(next + 24)], head);
     assert_eq!(lists[&(next + 32)], 0);
-    assert_eq!(lists[&(next + 48)], MMIO_REAL_BASE + row.bus_address);
+    assert_eq!(
+        Some(lists[&(next + 48)]),
+        mmio_real_address(row.firmware, row.bus, row.device, row.bus_address)
+    );
     assert_eq!(lists[&(next + 64)] >> 56, 0);
     assert_eq!(lists[&(next + 72)], object);
 }
@@ -109,7 +112,10 @@ fn the_first_region_holds_only_lv1s_own_mapping() {
     assert_eq!(lists[&head], MAPPING_CLASS);
     assert_eq!(lists[&(head + 8)], 0);
     assert_eq!(lists[&(head + 32)], 0);
-    assert_eq!(lists[&(head + 48)], MMIO_REAL_BASE + region.address);
+    assert_eq!(
+        Some(lists[&(head + 48)]),
+        mmio_real_address(region.firmware, region.bus, region.device, region.address)
+    );
     assert_eq!(lists[&(head + 72)], object);
     assert!(GAME_OS_MMIO_MAPPINGS
         .iter()

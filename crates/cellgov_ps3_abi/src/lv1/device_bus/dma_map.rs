@@ -26,7 +26,8 @@
 //!    than 0 [OFW-4.93 lv1 a:0x236D88] [OFW-4.93 lv1 a:0x236E1C-0x236E38].
 //! 2. The device lookup with the bus id and the device id
 //!    [OFW-4.93 lv1 a:0x236D80-0x236D90]. The section on devices 1 and 2
-//!    below gives the device that it finds for bus 1. The function takes no path of its own for devices 1 and 2 of bus 1
+//!    below gives the device that it finds for bus 1. The function takes
+//!    no path of its own for devices 1 and 2 of bus 1
 //!    [OFW-4.93 lv1 a:0x236D1C-0x236DB8].
 //! 3. The device's map function [OFW-4.93 lv1 a:0x227218], with the
 //!    device, the partition, the bus address, the logical partition
@@ -114,8 +115,8 @@
 //!   -17 for the word; see [`DMA_MAP_NO_IO_WORD`].
 //!
 //! For a bus address in [`DMA_MAP_IO_BUS_ADDRESSES`], the entry at +120
-//! gives the I/O address as the low 31 bits of the bus address plus the
-//! device's doublewords at +168 and +176
+//! gives an I/O address. That address is the low 31 bits of the bus
+//! address plus the device's doublewords at +168 and +176
 //! [OFW-4.93 lv1 a:0x22D75C-0x22D778]. The capture
 //! [`DMA_MAPPINGS_CAPTURE`] reads 0x400000000 and 0 for device 1, and
 //! 0x500000000 and 0 for device 2. The IOPTE writes for these I/O
@@ -405,10 +406,11 @@ pub struct GameOsDmaMapping {
 /// The mapping function keeps each region's list sorted by the offset at
 /// +16, highest first [OFW-4.93 lv1 a:0x225EB8-0x225F10]
 /// [OFW-4.93 lv1 a:0x225FBC-0x225FE0]. It writes that offset and the
-/// mapping's class [OFW-4.93 lv1 a:0x225E80-0x225EA4], whose entry at +16
-/// [OFW-4.93 lv1 a:0x35C548-0x35C54C] [OFW-4.93 lv1 a:0x32D108-0x32D10C]
-/// is the compare [OFW-4.93 lv1 a:0x225C88-0x225CA8]. So the order of a
-/// list gives no order of the calls.
+/// mapping's class [OFW-4.93 lv1 a:0x225E80-0x225EA4]. The entry at +16
+/// of that class [OFW-4.93 lv1 a:0x35C548-0x35C54C]
+/// [OFW-4.93 lv1 a:0x32D108-0x32D10C] is the compare function
+/// [OFW-4.93 lv1 a:0x225C88-0x225CA8]. So the order of a list gives no
+/// order of the calls.
 pub const GAME_OS_DMA_MAPPINGS: &[GameOsDmaMapping] = &[
     GameOsDmaMapping {
         firmware: "4.93",
@@ -465,7 +467,7 @@ pub const GAME_OS_DMA_MAP_FLAGS: u64 = 0xE000_0000_0000_0000;
 /// [`GAME_OS_DMA_MAPPINGS`] sent with [`GAME_OS_DMA_MAP_FLAGS`].
 ///
 /// A console capture holds the mapping that lv1 made for each row. The
-/// IOPTE writes of any other call read lv1's IOMMU state, which no lv1
+/// IOPTE writes of any other call read lv1's IOMMU state, which no image
 /// read or console capture gives.
 pub fn is_game_os_dma_mapping(
     firmware: &str,

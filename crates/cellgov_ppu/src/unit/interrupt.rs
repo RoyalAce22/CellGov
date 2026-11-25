@@ -38,8 +38,8 @@ use crate::instruction::PpuInstruction;
 /// CellGov declares LPCR\[LPES\] = 0b11 for the interrupts the kernel
 /// takes at its own vectors. So such an interrupt does not change
 /// MSR\[HV\]. ME does not change either. A mediated external interrupt
-/// differs: on the console it enters lv1 (LPES bit 0 = 0), and lv1
-/// passes it to the kernel's external vector. CellGov models only that
+/// differs: on the console it enters lv1 (LPES bit 0 = 0), and lv1 can
+/// pass it to the kernel's external vector. CellGov models only that
 /// second step, with the SRR1 bits that lv1 passes to the kernel.
 ///
 /// [CBE-Handbook p:292 s:9.12] Table 9-40: an interrupt clears BE, EE, FE0, FE1, FP, PR, SE, DR, IR and RI, sets SF, keeps ME, and keeps HV when LPCR\[LPES\] bits 0 and 1 are 1.
@@ -292,6 +292,8 @@ impl PpuExecutionUnit {
         self.close_block(effects);
         let mut record = interrupt.record(pc);
         let Some(msr) = self.state.supervisor().map(|s| s.msr) else {
+            // `boundary_interrupt` finds no interrupt for a thread with no
+            // supervisor registers.
             debug_assert!(
                 false,
                 "a mediated take on a thread with no supervisor registers"
@@ -308,8 +310,9 @@ impl PpuExecutionUnit {
     /// `false`, and changes nothing, when the thread has no supervisor
     /// registers.
     ///
-    /// The thread's pc is the interrupted instruction, and its MSR is the
-    /// MSR at the take.
+    /// The method reads the interrupted instruction from the thread's pc,
+    /// and the MSR at the take from the thread's MSR. So the caller calls
+    /// it once, after the take and before the thread runs again.
     #[must_use]
     pub fn enter_mediated_external_vector(&mut self) -> bool {
         if self.state.supervisor().is_none() {
@@ -329,7 +332,7 @@ impl PpuExecutionUnit {
     /// [OFW-4.93 lv1 a:0x1AF8-0x1B10], and reloads SRR0 and SRR1 from the
     /// values that they held before the take [OFW-4.93 lv1 a:0x1B2C-0x1B40].
     /// So the thread keeps its pc, SRR0 and SRR1, and takes the MSR that
-    /// [`hrfid_msr`] gives for the take's SRR1.
+    /// `hrfid` gives for the take's SRR1.
     #[must_use]
     pub fn resume_from_mediated_take(&mut self) -> bool {
         self.state

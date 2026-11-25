@@ -11,7 +11,7 @@ use crate::lv1::partition::LPAR_ID_GAME_OS;
 /// r2 - 27872 [OFW-4.93 lv1 a:0x353358-0x35335C].
 const SYSTEM_BUS_GLOBAL: u64 = 0x36_82C0;
 
-/// Entry 1 of the table of slot objects at 0x3682F8, device 2's
+/// Entry 1 of the table of slot objects at 0x3682F8: the entry of device 2
 /// [OFW-4.93 lv1 a:0x23710C-0x237120] [OFW-4.93 lv1 a:0x353C88-0x353C8C].
 const DEVICE_2_SLOT_ENTRY: u64 = 0x36_8300;
 

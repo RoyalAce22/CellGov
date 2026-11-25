@@ -16,7 +16,7 @@ const DEVICE_1: OpenDevice = OpenDevice { bus: 1, device: 1 };
 const DEVICE_2: OpenDevice = OpenDevice { bus: 1, device: 2 };
 
 /// Flags 1, the flags of the kernel's device 1 call. The slot path of
-/// devices 1 and 2 takes the flags 0 to 3 to the same answer
+/// devices 1 and 2 gives one answer for each of the flags 0 to 3
 /// [OFW-4.93 lv1 a:0x237108-0x23713C].
 const FLAGS: u64 = 1;
 

@@ -131,15 +131,21 @@
 //!    [OFW-4.93 lv1 a:0x23D524-0x23D540]. A nonzero r3 is the answer, and
 //!    no slot changes [OFW-4.93 lv1 a:0x23D544-0x23D548].
 //! 2. It searches the six slots at +104, in order, for a free one
-//!    [OFW-4.93 lv1 a:0x23D54C-0x23D578]. When all six are taken, it gives
-//!    the region back and returns -2 [OFW-4.93 lv1 a:0x23D57C-0x23D590].
+//!    [OFW-4.93 lv1 a:0x23D54C-0x23D578]. When no slot is free, it frees
+//!    the region and returns -2 [OFW-4.93 lv1 a:0x23D57C-0x23D590].
 //! 3. It marks the slot and stores the partition and the low word of the
 //!    address in it [OFW-4.93 lv1 a:0x23D5D0-0x23D5FC].
-//! 4. It writes the flags, the size and the low word of the address to
-//!    the slot object's register block
+//! 4. It calls a function that writes the flags, the size and the low
+//!    word of the address to the slot object's register block
 //!    [OFW-4.93 lv1 a:0x23D600] [OFW-4.93 lv1 a:0x23D3A8-0x23D4C0]. That
 //!    function returns 0, so the slot function returns 0
 //!    [OFW-4.93 lv1 a:0x23D604-0x23D608].
+//!
+//! The slot function searches the slots only after the pool gave a region
+//! [OFW-4.93 lv1 a:0x23D544-0x23D548], so the pool's own failure comes
+//! first. When none of the [`DMA_SLOT_COUNT`] slots is free, it frees the
+//! region and returns `LV1_RESOURCE_SHORTAGE` (-2)
+//! [OFW-4.93 lv1 a:0x23D57C-0x23D590].
 //!
 //! The device at +24 of device 1's slot object is the device that the
 //! access check finds. The lookup gives device 1 the code 3
@@ -190,25 +196,17 @@
 //! and a captured address holds only for a call that comes in the
 //! captured order. The capture [`DMA_SLOTS_CAPTURE`] gives that order:
 //! - The device's list holds the five regions with region 1 at its head,
-//!   and each region links to the region before it. The link step adds
-//!   each new region at the tail [OFW-4.93 lv1 a:0x226CA4-0x226CDC]
-//!   [OFW-4.93 lv1 a:0x226D6C-0x226D78], because the method of the region
-//!   class 0x35C560 that it calls for each region returns 0
+//!   and each region links to the region before it. The link step calls
+//!   the method of the region class 0x35C560 for each region, and that
+//!   method returns 0
 //!   [OFW-4.93 lv1 a:0x35C570-0x35C574] [OFW-4.93 lv1 a:0x32CFA0-0x32CFA4]
-//!   [OFW-4.93 lv1 a:0x2258F8-0x2258FC].
-//!   So the list is in the order of the calls.
+//!   [OFW-4.93 lv1 a:0x2258F8-0x2258FC]. So the step adds each new region
+//!   at the tail [OFW-4.93 lv1 a:0x226CA4-0x226CDC]
+//!   [OFW-4.93 lv1 a:0x226D6C-0x226D78], and the list is in the order of
+//!   the calls.
 //! - Slots 0 to 4 hold the regions in the order of the list, and slot 5
 //!   is free. The slot function takes the first free slot, so the slots
 //!   are in the order of the calls.
-//!
-//! A model that matched a call to a row by its size and page shift alone
-//! would give a row's address to a call that comes out of that order.
-//!
-//! When all [`DMA_SLOT_COUNT`] slots are taken, the slot function gives
-//! the region back and returns `LV1_RESOURCE_SHORTAGE` (-2)
-//! [OFW-4.93 lv1 a:0x23D57C-0x23D590]. It searches the slots only after
-//! the pool gave a region [OFW-4.93 lv1 a:0x23D544-0x23D548], so the pool's
-//! own failure comes first.
 //!
 //! # The 4.93 kernel's call of `allocate_device_dma_region`
 //!

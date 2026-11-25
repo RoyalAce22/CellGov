@@ -444,23 +444,21 @@ pub trait ExecutionUnit {
         false
     }
 
-    /// Moves the thread to its external interrupt vector after its take
-    /// of a mediated external interrupt, as the hypervisor's vector entry
-    /// does, and returns whether the thread holds supervisor registers.
+    /// Moves the thread to its external interrupt vector after a mediated
+    /// take, and returns whether the thread holds supervisor registers.
     ///
-    /// The take's interrupt boundary leaves the thread at the interrupted
-    /// instruction, and the hypervisor decides where it goes. A unit with
-    /// no supervisor registers changes nothing.
+    /// The take leaves the thread at the interrupted instruction, and the
+    /// hypervisor decides where it goes. A unit with no supervisor
+    /// registers changes nothing.
     fn enter_mediated_external_vector(&mut self) -> bool {
         false
     }
 
-    /// Returns the thread to the interrupted instruction after its take of
-    /// a mediated external interrupt, as the hypervisor's `hrfid` does
-    /// when it enters no vector. Returns whether the thread holds
-    /// supervisor registers.
+    /// Returns the thread to the interrupted instruction after a mediated
+    /// take, and returns whether the thread holds supervisor registers.
     ///
-    /// A unit with no supervisor registers changes nothing.
+    /// The hypervisor's `hrfid` does this when it enters no vector. A unit
+    /// with no supervisor registers changes nothing.
     fn resume_from_mediated_take(&mut self) -> bool {
         false
     }

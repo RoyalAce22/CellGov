@@ -3,7 +3,9 @@ use crate::answer::HypercallRefusal;
 use crate::Hypervisor;
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::call::OPEN_DEVICE;
-use cellgov_ps3_abi::lv1::device_bus::DMA_REGION_SIZE_R3;
+use cellgov_ps3_abi::lv1::device_bus::{
+    DMA_REGION_FLAGS_R3, DMA_REGION_PAGE_SHIFT_R3, DMA_REGION_SIZE_R3, DMA_REGION_TOO_LARGE_R3,
+};
 use cellgov_time::GuestTicks;
 
 /// The `sc` of the 4.93 kernel's wrapper
@@ -121,6 +123,25 @@ fn devices_1_and_2_take_flags_from_1_to_3_to_the_size_checks() {
 }
 
 #[test]
+fn the_network_device_gets_the_flags_status_for_flags_1_to_3_and_the_size_status_for_flags_0() {
+    let state = opened(&[NETWORK_DEVICE]);
+    let cases = [
+        (0, DMA_REGION_SIZE_R3),
+        (1, DMA_REGION_FLAGS_R3),
+        (2, DMA_REGION_FLAGS_R3),
+        (3, DMA_REGION_FLAGS_R3),
+    ];
+    assert_eq!(cases.len(), 4);
+    for (flag, r3) in cases {
+        assert_eq!(
+            allocate(&state, &request(1, 0, 0, 13, flag)),
+            answered(r3),
+            "flags {flag}"
+        );
+    }
+}
+
+#[test]
 fn a_device_1_or_2_call_before_its_open_gets_the_not_open_status() {
     let state = opened(&[NETWORK_DEVICE]);
     for device in [1, 2] {
@@ -132,6 +153,38 @@ fn a_device_1_or_2_call_before_its_open_gets_the_not_open_status() {
             answered(DMA_REGION_NOT_OPEN_R3),
             "device {device}"
         );
+    }
+}
+
+#[test]
+fn a_device_1_or_2_call_before_its_open_gets_the_not_open_status_before_the_shape_checks() {
+    let closed = opened(&[NETWORK_DEVICE]);
+    let open = opened(&[NETWORK_DEVICE, DEVICE_1, DEVICE_2]);
+    let shapes = [
+        (0, KERNEL_PAGE_SHIFT, DMA_REGION_SIZE_R3),
+        (KERNEL_SIZE, 13, DMA_REGION_PAGE_SHIFT_R3),
+        (0x4_1000, KERNEL_PAGE_SHIFT, DMA_REGION_SIZE_R3),
+        (1 << 33, 24, DMA_REGION_TOO_LARGE_R3),
+    ];
+    assert_eq!(shapes.len(), 4);
+    for device in [1, 2] {
+        for (size, page_shift, shape_r3) in shapes {
+            for flags in 0..=DMA_REGION_FLAGS_MAX {
+                let call = request(1, device, size, page_shift, flags);
+                assert_eq!(
+                    allocate(&open, &call),
+                    answered(shape_r3),
+                    "open {:X?}",
+                    call.inputs
+                );
+                assert_eq!(
+                    allocate(&closed, &call),
+                    answered(DMA_REGION_NOT_OPEN_R3),
+                    "closed {:X?}",
+                    call.inputs
+                );
+            }
+        }
     }
 }
 

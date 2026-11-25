@@ -121,8 +121,8 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// their order. A call that passes them gets 0 in r3, the bus address in
 /// r4 and r5 to r10 cleared, and the answer carries the region.
 ///
-/// Only device 0 checks that the flags are 0. Devices 1 and 2 accept
-/// flags 0 to 3.
+/// lv1 checks that the flags are 0 for device 0 alone. For devices 1 and
+/// 2, lv1 accepts flags 0 to 3.
 ///
 /// lv1 picks the address from a pool whose state CellGov does not model.
 /// The pool's state depends on the regions that lv1 gave before, so the
@@ -222,9 +222,13 @@ pub(crate) fn allocate_region(
 ///
 /// `captured` holds the device's captured regions in the order of the
 /// calls. `held` holds the partition's regions of the device in address
-/// order. The result is an error in these cases:
-/// - `held` is not the set of the first captured regions;
-/// - no captured region follows them.
+/// order.
+///
+/// # Errors
+///
+/// - `OTHER_HELD` if `held` is not the set of the first captured regions.
+/// - `OTHER_SHAPE` if `captured` and `held` are empty.
+/// - `NEXT_REGION` if no captured region follows a nonempty `held`.
 fn next_captured_region(
     captured: &[DmaRegion],
     held: &[DmaRegion],

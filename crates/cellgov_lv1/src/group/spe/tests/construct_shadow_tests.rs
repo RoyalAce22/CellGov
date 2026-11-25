@@ -60,9 +60,13 @@ fn held(count: u64) -> LogicalSpeState {
 }
 
 fn constructed_shadow_real(spes: &LogicalSpeState) -> Option<u64> {
-    let HypercallDisposition::Answered(answer) =
-        construct(&boot_call(), Some("4.93"), &memory(), spes)
-    else {
+    let HypercallDisposition::Answered(answer) = construct(
+        &boot_call(),
+        Some("4.93"),
+        &memory(),
+        spes,
+        &HeldRegions::default(),
+    ) else {
         return None;
     };
     answer.changes.iter().find_map(|change| match change {
@@ -91,7 +95,13 @@ fn each_new_spe_gets_the_storage_page_after_the_held_spes() {
 fn a_construct_past_the_shadow_page_storage_is_refused() {
     let r = boot_call();
     assert_eq!(
-        construct(&r, Some("4.93"), &memory(), &held(SHADOW_STORAGE_PAGES)),
+        construct(
+            &r,
+            Some("4.93"),
+            &memory(),
+            &held(SHADOW_STORAGE_PAGES),
+            &HeldRegions::default()
+        ),
         HypercallDisposition::Refused(HypercallRefusal::UnmodelledInput {
             number: CONSTRUCT_LOGICAL_SPE,
             unit: r.unit,

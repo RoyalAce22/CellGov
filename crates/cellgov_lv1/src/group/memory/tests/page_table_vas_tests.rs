@@ -56,6 +56,7 @@ fn vas_id_0_before_a_selection_answers_lv1_no_entry() {
             firmware,
             &spaces,
             &MemoryState::default(),
+            &HeldRegions::default(),
         ),
     ];
     assert_eq!(answers.len(), 3);

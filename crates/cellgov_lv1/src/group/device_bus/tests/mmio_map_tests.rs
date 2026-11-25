@@ -79,7 +79,13 @@ fn opened(devices: &[OpenDevice]) -> DeviceBusState {
 }
 
 fn map(state: &DeviceBusState, request: &HypercallRequest) -> HypercallDisposition {
-    map_mmio(request, Some("4.93"), state, &memory())
+    map_mmio(
+        request,
+        Some("4.93"),
+        state,
+        &memory(),
+        &HeldRegions::default(),
+    )
 }
 
 fn answered(r3: u64) -> HypercallDisposition {
@@ -95,17 +101,21 @@ fn refused(request: &HypercallRequest, what: &'static str) -> HypercallDispositi
     })
 }
 
-#[test]
-fn the_kernel_call_gets_the_captured_lpar_address_in_r4_and_carries_the_mapping() {
+/// The answer to the kernel's call with the next region counter value
+/// [`KERNEL_COUNTER`]: the captured address in r4, the mapping and the
+/// counter value.
+fn kernel_answer() -> HypercallDisposition {
     let mapping = kernel_mapping();
     let mut expected = HypercallAnswer::lv1_status(0, [mapping.lpar_address, 0, 0, 0, 0, 0, 0]);
     expected.push_change(DeviceBusChange::MmioRegionMapped(mapping));
     expected.push_change(MemoryChange::CounterTaken(KERNEL_COUNTER));
-    assert_eq!(
-        map(&opened(&[DEVICE_1]), &kernel_call()),
-        HypercallDisposition::Answered(expected)
-    );
-    assert_eq!(mapping.lpar_address, 0x4000_0007_0000);
+    HypercallDisposition::Answered(expected)
+}
+
+#[test]
+fn the_kernel_call_gets_the_captured_lpar_address_in_r4_and_carries_the_mapping() {
+    assert_eq!(map(&opened(&[DEVICE_1]), &kernel_call()), kernel_answer());
+    assert_eq!(kernel_mapping().lpar_address, 0x4000_0007_0000);
 }
 
 #[test]
@@ -181,7 +191,7 @@ fn another_bus_another_device_and_an_unread_firmware_are_refusals_that_name_them
     let call = kernel_call();
     for firmware in [None, Some("4.92"), Some("3.70")] {
         assert_eq!(
-            map_mmio(&call, firmware, &open, &memory()),
+            map_mmio(&call, firmware, &open, &memory(), &HeldRegions::default()),
             refused(&call, UNREAD_FIRMWARE.what),
             "{firmware:?}"
         );
@@ -195,10 +205,9 @@ fn the_size_and_page_shift_checks_answer_with_a_mapping_held_and_a_close_clears_
     let call = kernel_call();
     assert_eq!(state.mmio_mappings().count(), 1);
 
-    // The size and page shift checks answer with the region mapped, and
-    // the mapping of one region leaves the others unmapped.
     for (mapped_call, r3) in [
         (request(1, 1, 0x301_0000, 0, 12), MMIO_MAP_SIZE_R3),
+        (request(1, 1, 0x301_0000, 0x1800, 12), MMIO_MAP_SIZE_R3),
         (
             request(1, 1, 0x301_0000, 0x1_0000, 13),
             MMIO_MAP_PAGE_SHIFT_R3,
@@ -215,8 +224,5 @@ fn the_size_and_page_shift_checks_answer_with_a_mapping_held_and_a_close_clears_
     state.apply(DeviceBusChange::Closed(DEVICE_1));
     assert_eq!(state.mmio_mappings().count(), 0);
     state.apply(DeviceBusChange::Opened(DEVICE_1));
-    assert!(matches!(
-        map(&state, &call),
-        HypercallDisposition::Answered(answer) if answer.r3 == 0
-    ));
+    assert_eq!(map(&state, &call), kernel_answer());
 }

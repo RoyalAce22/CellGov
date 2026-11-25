@@ -8,6 +8,8 @@
 //! - `map_htab`, `construct_logical_spe` and `map_device_mmio_region`
 //!   read the counter, and the regions they create take only a counter
 //!   value here;
+//! - each of these four calls reads the address of each region that it
+//!   must not take; see [`super::allocator`];
 //! - `write_htab_entry` reads the regions and their storage.
 
 use std::collections::BTreeMap;
@@ -15,15 +17,16 @@ use std::collections::BTreeMap;
 use cellgov_mem::lanes::{self, LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::call::ALLOCATE_MEMORY;
 use cellgov_ps3_abi::lv1::memory::{
-    allocate_memory_checks_read, game_os_region_counter_at_boot, region_address,
-    ALLOCATE_MEMORY_FLAGS_MASK, ALLOCATE_MEMORY_FLAGS_R3, ALLOCATE_MEMORY_MAX_SIZE,
-    ALLOCATE_MEMORY_PAGE_SIZE_EXP_MAX, ALLOCATE_MEMORY_PAGE_SIZE_EXP_MIN,
-    ALLOCATE_MEMORY_PAGE_SIZE_EXP_R3, ALLOCATE_MEMORY_R5_MAX, ALLOCATE_MEMORY_R5_R3,
-    ALLOCATE_MEMORY_SIZE_ALIGNMENT_R3, ALLOCATE_MEMORY_SIZE_TOO_LARGE_R3, ALLOCATE_MEMORY_UNIT_ID,
+    allocate_memory_checks_read, game_os_region_counter_at_boot, ALLOCATE_MEMORY_FLAGS_MASK,
+    ALLOCATE_MEMORY_FLAGS_R3, ALLOCATE_MEMORY_MAX_SIZE, ALLOCATE_MEMORY_PAGE_SIZE_EXP_MAX,
+    ALLOCATE_MEMORY_PAGE_SIZE_EXP_MIN, ALLOCATE_MEMORY_PAGE_SIZE_EXP_R3, ALLOCATE_MEMORY_R5_MAX,
+    ALLOCATE_MEMORY_R5_R3, ALLOCATE_MEMORY_SIZE_ALIGNMENT_R3, ALLOCATE_MEMORY_SIZE_TOO_LARGE_R3,
+    ALLOCATE_MEMORY_UNIT_ID,
 };
 use cellgov_ps3_abi::lv1::partition::LPAR_ID_GAME_OS;
 use cellgov_ps3_abi::lv1::repository::{field, first_field, lookup, RepositoryKey};
 
+use super::allocator::{place, HeldRegions};
 use super::storage::{self, ALLOCATED_STORAGE_BASE};
 use super::{REGION_COUNTER_SOURCE, REGION_SOURCE, REGION_STORAGE_SOURCE};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
@@ -35,7 +38,14 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
     number: ALLOCATE_MEMORY,
     name: "allocate_memory",
     cost: None,
-    handler: |request, input| allocate(request, input.firmware, input.groups.memory().regions()),
+    handler: |request, input| {
+        allocate(
+            request,
+            input.firmware,
+            input.groups.memory().regions(),
+            &HeldRegions::of(input.groups),
+        )
+    },
 }];
 
 /// The page size exponents that the 4.93 kernel's boot allocations pass,
@@ -86,8 +96,8 @@ impl MemoryState {
         &self.regions
     }
 
-    /// The counter value of the next region, or `None` before the first
-    /// region.
+    /// The counter value of the next region's first attempt, or `None`
+    /// before the first region.
     pub fn next_counter(&self) -> Option<u64> {
         self.next_counter
     }
@@ -119,9 +129,10 @@ impl MemoryState {
     }
 
     /// Moves the counter past `counter`, the value that a region or a
-    /// page table mapping took.
+    /// page table mapping took. lv1's 64-bit add wraps
+    /// [OFW-4.93 lv1 a:0x2CED8C].
     pub(crate) fn take_counter(&mut self, counter: u64) {
-        self.next_counter = Some(counter.saturating_add(1));
+        self.next_counter = Some(counter.wrapping_add(1));
     }
 
     /// The sync-state terms of the regions, their storage and the counter.
@@ -227,8 +238,9 @@ fn lv1_argument_check(size: u64, exp: u64, r5: u64, flags: u64) -> Option<u64> {
 /// slot on that path.
 ///
 /// The address takes the partition's region counter, which starts at the
-/// firmware's boot value. The answer carries the region, and the
-/// hypervisor keeps it. The call is a refusal in these cases:
+/// firmware's boot value, and skips each address in `held`; see
+/// [`place`]. The answer carries the region, and the hypervisor keeps
+/// it. The call is a refusal in these cases:
 /// - no lv1 image read shows the argument checks for `firmware`;
 /// - r5 is 1, or r6 sets one of its low 4 bits, which lv1's checks pass;
 /// - r4 is a page size exponent that the kernel's boot allocations do
@@ -237,11 +249,12 @@ fn lv1_argument_check(size: u64, exp: u64, r5: u64, flags: u64) -> Option<u64> {
 /// - no source gives the boot counter or the partition's memory for
 ///   `firmware`;
 /// - the regions would hold more than the partition's memory;
-/// - the address encoding cannot hold the region.
+/// - [`place`] gives no address.
 pub(crate) fn allocate(
     request: &HypercallRequest,
     firmware: Option<&str>,
     memory: &MemoryState,
+    held: &HeldRegions,
 ) -> HypercallDisposition {
     let (size, exp) = (request.r(3), request.r(4));
     let Some(firmware) = firmware else {
@@ -286,12 +299,10 @@ pub(crate) fn allocate(
     if memory.allocated().saturating_add(size) > pool {
         return refuse(request, "an allocation past the partition's memory");
     }
-    let counter = memory.next_counter().unwrap_or(boot_counter);
-    let Some(lpar_address) = region_address(size, counter) else {
-        return refuse(
-            request,
-            "an allocation whose region address the encoding cannot hold",
-        );
+    let first = memory.next_counter().unwrap_or(boot_counter);
+    let (lpar_address, counter) = match place(size, first, boot_counter, held) {
+        Ok(placement) => (placement.address, placement.counter),
+        Err(missing) => return refuse(request, missing.what()),
     };
     let mut answer = HypercallAnswer::success([lpar_address, ALLOCATE_MEMORY_UNIT_ID]);
     answer.push_change(MemoryRegion {

@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 
 use cellgov_mem::lanes::{self, LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::call::CONSTRUCT_LOGICAL_SPE;
-use cellgov_ps3_abi::lv1::memory::{game_os_region_counter_at_boot, region_address};
+use cellgov_ps3_abi::lv1::memory::game_os_region_counter_at_boot;
 use cellgov_ps3_abi::lv1::spe::{
     construct_logical_spe_handler, game_os_spe_call, LOGICAL_SPE_AREA_SIZE,
     LOGICAL_SPE_PRIV2_OFFSET, LOGICAL_SPE_PROBLEM_OFFSET,
@@ -31,6 +31,7 @@ use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::group::interrupt::event_port::EventReceivePort;
 use crate::group::interrupt::InterruptChange;
+use crate::group::memory::allocator::{place, HeldRegions};
 use crate::group::memory::{MemoryChange, MemoryGroupState};
 use crate::request::HypercallRequest;
 
@@ -45,6 +46,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
             input.firmware,
             input.groups.memory(),
             input.groups.spe().spes(),
+            &HeldRegions::of(input.groups),
         )
     },
 }];
@@ -154,10 +156,12 @@ fn kernel_inputs(request: &HypercallRequest, spe_type: u64) -> bool {
 /// - r9: the spe id;
 /// - r10: 0.
 ///
-/// The area takes the partition's next region counter value, and the
-/// shadow page takes the value after it. The shadow page gets the next
-/// page of CellGov's shadow page storage. The answer carries these
-/// changes, and the hypervisor keeps each:
+/// The area takes the partition's next free region address, and the
+/// shadow page takes the next free one after it. Each address skips the
+/// addresses in `held`; see [`place`]. The area's size exponent is 19
+/// and the shadow page's is 12, so their addresses never match. The
+/// shadow page gets the next page of CellGov's shadow page storage. The
+/// answer carries these changes, and the hypervisor keeps each:
 /// - the SPE;
 /// - the shadow page's counter value;
 /// - the SPE's irq outlets of classes 0 to 2, unconnected, with the ids
@@ -171,12 +175,13 @@ fn kernel_inputs(request: &HypercallRequest, spe_type: u64) -> bool {
 /// - the hypervisor already holds an SPE with that id;
 /// - the shadow page storage holds no page for one more SPE;
 /// - no source gives the region counter for `firmware`;
-/// - the address encoding cannot hold the area or the shadow page.
+/// - [`place`] gives no address for the area or the shadow page.
 pub(crate) fn construct(
     request: &HypercallRequest,
     firmware: Option<&str>,
     memory: &MemoryGroupState,
     spes: &LogicalSpeState,
+    held: &HeldRegions,
 ) -> HypercallDisposition {
     let Some(firmware) = firmware.filter(|fw| construct_logical_spe_handler(fw).is_some()) else {
         return refuse(
@@ -215,26 +220,23 @@ pub(crate) fn construct(
             "a logical SPE construct past CellGov's shadow page storage",
         );
     };
-    let Some(counter) = memory
-        .regions()
-        .next_counter()
-        .or_else(|| game_os_region_counter_at_boot(firmware))
-    else {
+    let Some(boot) = game_os_region_counter_at_boot(firmware) else {
         return refuse(
             request,
             "a logical SPE construct at a firmware whose region counter no source gives",
         );
     };
-    let shadow_counter = counter.saturating_add(1);
-    let (Some(area), Some(shadow)) = (
-        region_address(LOGICAL_SPE_AREA_SIZE, counter),
-        region_address(1 << SHADOW_PAGE_SHIFT, shadow_counter),
-    ) else {
-        return refuse(
-            request,
-            "a logical SPE construct whose region addresses the encoding cannot hold",
-        );
+    let first = memory.regions().next_counter().unwrap_or(boot);
+    let area = match place(LOGICAL_SPE_AREA_SIZE, first, boot, held) {
+        Ok(area) => area,
+        Err(missing) => return refuse(request, missing.what()),
     };
+    let next = area.counter.wrapping_add(1);
+    let (shadow, shadow_counter) = match place(1 << SHADOW_PAGE_SHIFT, next, boot, held) {
+        Ok(placement) => (placement.address, placement.counter),
+        Err(missing) => return refuse(request, missing.what()),
+    };
+    let area = area.address;
     let outputs = [
         area + LOGICAL_SPE_PRIV2_OFFSET,
         area + LOGICAL_SPE_PROBLEM_OFFSET,
@@ -280,3 +282,7 @@ mod shadow_tests;
 #[cfg(test)]
 #[path = "tests/construct_outlet_tests.rs"]
 mod outlet_tests;
+
+#[cfg(test)]
+#[path = "tests/construct_wrap_tests.rs"]
+mod wrap_tests;

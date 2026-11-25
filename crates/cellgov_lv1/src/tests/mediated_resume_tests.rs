@@ -20,7 +20,7 @@ fn a_take_after_the_mask_lost_its_bit_resumes_the_thread() {
 /// vector entry [OFW-4.93 lv1 a:0x188C-0x18A8], which the no-bit path never calls
 /// [OFW-4.93 lv1 a:0x1AD4].
 #[test]
-fn a_take_with_no_shared_bit_resumes_at_the_trampoline_slot_and_with_a_cleared_msr_bit() {
+fn a_take_with_no_shared_bit_resumes_at_the_trampoline_slot_and_with_msr_bit_56() {
     for (srr0, msr) in [(0x28B8, TAKE_MSR), (TAKE_PC, TAKE_MSR | 0x80)] {
         let mut hv = requested();
         assert_eq!(

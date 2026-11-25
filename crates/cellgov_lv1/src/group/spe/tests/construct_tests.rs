@@ -1,7 +1,9 @@
 use super::*;
+use crate::group::memory::allocator::NoPlacement;
 use crate::{AddressSpace, AddressSpaceChange, Hypervisor, SHADOW_STORAGE_BASE};
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::call::CONSTRUCT_VIRTUAL_ADDRESS_SPACE;
+use cellgov_ps3_abi::lv1::memory::region_address;
 use cellgov_time::GuestTicks;
 
 /// The vas id of the 4.93 kernel's boot address space, which the console
@@ -19,7 +21,7 @@ fn boot_spe_id() -> u64 {
 
 /// The 4.93 kernel's boot call, with r3 to r10 as it sets them
 /// [OFW-4.93 lv2_kernel a:0x800000000004f158-0x800000000004f184].
-fn request() -> HypercallRequest {
+pub(super) fn request() -> HypercallRequest {
     HypercallRequest {
         unit: UnitId::new(1),
         number: CONSTRUCT_LOGICAL_SPE,
@@ -34,7 +36,7 @@ fn request() -> HypercallRequest {
 
 /// A memory state that holds the boot address space and whose next
 /// region counter value is `next_counter`, or the boot value for `None`.
-fn memory(next_counter: Option<u64>) -> MemoryGroupState {
+pub(super) fn memory(next_counter: Option<u64>) -> MemoryGroupState {
     let mut memory = MemoryGroupState::default();
     memory.apply(MemoryChange::AddressSpace(AddressSpaceChange::Constructed(
         AddressSpace {
@@ -108,7 +110,8 @@ fn the_kernels_boot_call_gets_the_area_the_shadow_page_and_the_captured_id() {
             &request(),
             Some("4.93"),
             &memory(Some(5)),
-            &LogicalSpeState::default()
+            &LogicalSpeState::default(),
+            &HeldRegions::default()
         ),
         expected
     );
@@ -144,7 +147,8 @@ fn with_no_region_yet_the_area_and_the_shadow_page_take_the_boot_counter_values(
             &request(),
             Some("4.93"),
             &memory(None),
-            &LogicalSpeState::default()
+            &LogicalSpeState::default(),
+            &HeldRegions::default()
         ),
         expected
     );
@@ -155,12 +159,27 @@ fn the_answer_does_not_read_r10() {
     let mut r = request();
     r.inputs[7] = 0xA5A5_A5A5_A5A5_A5A5;
     let spes = LogicalSpeState::default();
-    let base = construct(&request(), Some("4.93"), &memory(Some(5)), &spes);
+    let base = construct(
+        &request(),
+        Some("4.93"),
+        &memory(Some(5)),
+        &spes,
+        &HeldRegions::default(),
+    );
     assert!(
         matches!(base, HypercallDisposition::Answered(_)),
         "{base:?}"
     );
-    assert_eq!(construct(&r, Some("4.93"), &memory(Some(5)), &spes), base);
+    assert_eq!(
+        construct(
+            &r,
+            Some("4.93"),
+            &memory(Some(5)),
+            &spes,
+            &HeldRegions::default()
+        ),
+        base
+    );
 }
 
 #[test]
@@ -168,7 +187,13 @@ fn a_call_at_a_firmware_whose_handler_is_not_read_is_refused() {
     let r = request();
     for firmware in [None, Some("3.70"), Some("4.92")] {
         assert_eq!(
-            construct(&r, firmware, &memory(Some(5)), &LogicalSpeState::default()),
+            construct(
+                &r,
+                firmware,
+                &memory(Some(5)),
+                &LogicalSpeState::default(),
+                &HeldRegions::default()
+            ),
             refused(
                 &r,
                 "a logical SPE construct at a firmware whose lv1 handler is not read"
@@ -191,7 +216,8 @@ fn the_kernels_calls_whose_spe_id_no_capture_gives_are_refused() {
                 &r,
                 Some("4.93"),
                 &memory(Some(5)),
-                &LogicalSpeState::default()
+                &LogicalSpeState::default(),
+                &HeldRegions::default()
             ),
             refused(
                 &r,
@@ -222,7 +248,8 @@ fn a_page_shift_or_a_type_that_the_kernels_call_does_not_pass_is_refused() {
                 &r,
                 Some("4.93"),
                 &memory(Some(5)),
-                &LogicalSpeState::default()
+                &LogicalSpeState::default(),
+                &HeldRegions::default()
             ),
             refused(
                 &r,
@@ -241,12 +268,24 @@ fn a_vas_id_that_the_hypervisor_did_not_construct_is_refused() {
     other.inputs[5] = VAS_ID + 1;
     let spes = LogicalSpeState::default();
     assert_eq!(
-        construct(&other, Some("4.93"), &memory(Some(5)), &spes),
+        construct(
+            &other,
+            Some("4.93"),
+            &memory(Some(5)),
+            &spes,
+            &HeldRegions::default()
+        ),
         refused(&other, what)
     );
     let r = request();
     assert_eq!(
-        construct(&r, Some("4.93"), &MemoryGroupState::default(), &spes),
+        construct(
+            &r,
+            Some("4.93"),
+            &MemoryGroupState::default(),
+            &spes,
+            &HeldRegions::default()
+        ),
         refused(&r, what)
     );
 }
@@ -264,7 +303,13 @@ fn a_second_boot_call_is_refused() {
         shadow_real: 0,
     });
     assert_eq!(
-        construct(&r, Some("4.93"), &memory(Some(5)), &spes),
+        construct(
+            &r,
+            Some("4.93"),
+            &memory(Some(5)),
+            &spes,
+            &HeldRegions::default()
+        ),
         refused(
             &r,
             "a logical SPE construct whose spe id the hypervisor already holds"
@@ -272,22 +317,20 @@ fn a_second_boot_call_is_refused() {
     );
 }
 
-/// A 512 KB region's counter value has 42 - 19 = 23 bits in the
-/// encoding of `cellgov_ps3_abi::lv1::memory`.
+/// A 512 KB region's address holds 2^(42 - 19) counter values, so the
+/// counter value 2^23 wraps to the value 0, below the boot value.
 #[test]
-fn a_counter_value_that_the_area_encoding_cannot_hold_is_refused() {
+fn an_area_counter_value_that_wraps_below_the_boot_value_is_refused() {
     let r = request();
     assert_eq!(
         construct(
             &r,
             Some("4.93"),
             &memory(Some(1 << 23)),
-            &LogicalSpeState::default()
+            &LogicalSpeState::default(),
+            &HeldRegions::default()
         ),
-        refused(
-            &r,
-            "a logical SPE construct whose region addresses the encoding cannot hold"
-        )
+        refused(&r, NoPlacement::BootRegion.what())
     );
 }
 

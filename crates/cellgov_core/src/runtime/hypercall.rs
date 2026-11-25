@@ -284,17 +284,15 @@ impl Runtime {
     ///
     /// The take of a mediated interrupt sets [`SRR1_MEDIATED_EXTERNAL`] in
     /// SRR1, and leaves the thread at the interrupted instruction. The
-    /// hypervisor's answer moves the thread:
+    /// hypervisor reads the decrementer at the unit's clock, the end of
+    /// the step that took the interrupt. Where the run's time base is
+    /// later, it reads the decrementer at that time base, as the thread's
+    /// next read does. The hypervisor's answer moves the thread:
     /// - [`MediatedEntry::Vector`] moves it to the external vector.
     /// - [`MediatedEntry::Resume`] keeps it at the interrupted instruction,
     ///   with the MSR of lv1's `hrfid`.
     /// - A refusal also moves it to the vector, and the next step stops the
     ///   run.
-    ///
-    /// The hypervisor reads the decrementer at the unit's clock, the end of
-    /// the step that took the interrupt. Where the run's time base is
-    /// later, it reads the decrementer at that time base, as the thread's
-    /// next read does.
     pub(in crate::runtime) fn end_external_interrupt(
         &mut self,
         result: &ExecutionStepResult,
@@ -340,6 +338,7 @@ impl Runtime {
             Ok(MediatedEntry::Vector) | Err(_) => registered.enter_mediated_external_vector(),
         };
         if !moved {
+            // A unit that took the interrupt holds supervisor registers.
             debug_assert!(
                 false,
                 "{source:?} took a mediated interrupt it cannot leave"

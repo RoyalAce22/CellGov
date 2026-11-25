@@ -54,6 +54,21 @@ fn a_resumed_take_keeps_the_pc_msr_srr0_and_srr1_of_the_interrupted_thread() {
     assert_eq!((sup(&unit).srr0, sup(&unit).srr1), (OLD_SRR0, OLD_SRR1));
 }
 
+/// An `mtmsrd` that sets PR also sets EE, IR and DR, so the test writes
+/// the MSR at the take directly.
+#[test]
+fn a_resumed_take_in_problem_state_with_ir_and_dr_0_sets_ir_and_dr() {
+    let mut unit = taken();
+    let at_take = MSR_SF | MSR_PR | MSR_EE | MSR_ME;
+    unit.state_mut()
+        .update_supervisor(|s| s.msr = at_take)
+        .expect("supervisor registers");
+    assert!(unit.resume_from_mediated_take());
+    assert_eq!(sup(&unit).msr, at_take | MSR_IR | MSR_DR);
+    assert_eq!(unit.state().pc, CODE + 4);
+    assert_eq!((sup(&unit).srr0, sup(&unit).srr1), (OLD_SRR0, OLD_SRR1));
+}
+
 #[test]
 fn a_resumed_thread_runs_the_interrupted_instruction_next() {
     let mut unit = taken();

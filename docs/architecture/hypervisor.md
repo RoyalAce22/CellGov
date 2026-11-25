@@ -967,9 +967,11 @@ Both regions take their address from the region function
 exponent of the region [OFW-4.93 lv1 a:0x2CED34-0x2CED48]. It
 increments the context's counter [OFW-4.93 lv1 a:0x2CED84-0x2CED94],
 and encodes the old value in the address
-[OFW-4.93 lv1 a:0x2CED98-0x2CEDA8]; see `lv1::memory`. So the area
-takes a value of the partition's region counter, and the shadow page
-takes the next value.
+[OFW-4.93 lv1 a:0x2CED98-0x2CEDA8]. It repeats with the next value
+while the partition holds a region at that address
+[OFW-4.93 lv1 a:0x2CEDE4-0x2CEDEC]; see `lv1::memory`. So the area
+takes a free value of the partition's region counter, and the shadow
+page takes the next free value.
 
 ### The shadow page
 

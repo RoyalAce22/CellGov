@@ -178,6 +178,12 @@ fn the_region_lists_of_devices_1_and_2_hold_no_region_of_lv1() {
     let words = doublewords();
     let mut regions = 0;
     for (device, object) in devices(&words) {
+        assert!(
+            LV1_DMA_REGIONS
+                .iter()
+                .all(|row| (row.firmware, row.bus, row.device) != ("4.93", 1, device)),
+            "an lv1 region of device {device}"
+        );
         for region in list(&words, object + REGION_LIST, REGION_BOUND) {
             regions += 1;
             assert_eq!(words[&(region + 8)], LPAR_ID_GAME_OS, "region 0x{region:X}");

@@ -19,7 +19,7 @@ use cellgov_ps3_abi::hw::ppu_mmu::{
 };
 use cellgov_ps3_abi::lv1::address_space::{htab_size, HTAB_SIZE_EXP_MAX};
 use cellgov_ps3_abi::lv1::call::{MAP_HTAB, READ_HTAB_ENTRIES, WRITE_HTAB_ENTRY};
-use cellgov_ps3_abi::lv1::memory::{game_os_region_counter_at_boot, region_address};
+use cellgov_ps3_abi::lv1::memory::game_os_region_counter_at_boot;
 use cellgov_ps3_abi::lv1::page_table::{
     duplicates, large, large_page_bits, large_page_index, other_group, page_table_entries,
     page_table_handlers, read_htab_low_halfwords, select_hid6_lb, select_sdr1, stored_doubleword1,
@@ -31,6 +31,7 @@ use cellgov_ps3_abi::lv1::page_table::{
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
 use super::address_space::{AddressSpace, AddressSpaceChange, AddressSpaceState};
+use super::allocator::{place, HeldRegions};
 use super::mmio_page::{self, MmioPage};
 use super::region as memory;
 use super::region::MemoryState;
@@ -80,7 +81,13 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[
         cost: None,
         handler: |request, input| {
             let memory = input.groups.memory();
-            map_table(request, input.firmware, memory.spaces(), memory.regions())
+            map_table(
+                request,
+                input.firmware,
+                memory.spaces(),
+                memory.regions(),
+                &HeldRegions::of(input.groups),
+            )
         },
     },
 ];
@@ -382,8 +389,8 @@ struct Regions<'a> {
 ///   logical partition address.
 ///
 /// The page of an MMIO mapping lies in a device's MMIO, which no CellGov
-/// storage holds. Each other page must lie in CellGov's storage. A page
-/// in an MMIO mapping and in another region is a refusal.
+/// storage holds. Each other page must lie in CellGov's storage. CellGov
+/// refuses a page that lies in an MMIO mapping and in another region.
 fn real_page(
     firmware: &str,
     regions: Regions<'_>,
@@ -402,11 +409,12 @@ fn real_page(
     let spe = region_page(regions.spes, page.address, page.shift, doubleword1);
     let allocated = storage::region_page(regions.allocated, page.address, page.shift);
     let mmio = mmio_page::mapping_page(firmware, regions.device_bus, page.address, page.shift);
-    // Each region of the partition takes its own value of the region
-    // counter, so no two lv1 regions share a page. The MMIO map handler
-    // takes a counter value for each mapping as lv1's allocator does
-    // [OFW-4.93 lv1 a:0x2CED84-0x2CED94], so a page in two regions is a
-    // break of the model's own state.
+    // lv1's region function never gives an address that a region of the
+    // partition holds [OFW-4.93 lv1 a:0x2CEDE4-0x2CEDEC], and the region
+    // of each address lies in the 2^e-byte block at that address. So no
+    // two lv1 regions share a page. The MMIO map handler places each
+    // mapping as lv1's allocator does [OFW-4.93 lv1 a:0x2CED84-0x2CED94],
+    // so a page in two regions is a break of the model's own state.
     if mmio.is_some() && (in_mapping.is_some() || spe.is_some() || allocated.is_some()) {
         return Err(NoRealPage::Refused(
             "a valid entry whose page lies in an MMIO mapping and in another region",
@@ -585,22 +593,24 @@ pub(crate) fn write_entry(
 ///
 /// The answer gives the mapping's logical partition address in r4. The
 /// mapping takes the next value of the partition's region counter in
-/// `memory`, as an allocation does. Its address encodes the page table's
-/// size exponent. The answer carries the mapping, and the hypervisor
-/// keeps it. r5 to r10 get 0: lv1 leaves data from its own stack there,
-/// and CellGov does not model that data.
+/// `memory`, and skips each address in `held`, as an allocation does; see
+/// [`place`]. Its address encodes the page table's size exponent. The
+/// answer carries the mapping, and the hypervisor keeps it. r5 to r10
+/// get 0: lv1 leaves data from its own stack there, and CellGov does not
+/// model that data.
 ///
 /// The call is a refusal in these cases:
 /// - [`named_space`] refuses it;
 /// - the page table is already mapped, and no kernel call is shown to map
 ///   it twice;
 /// - no source gives the region counter for `firmware`;
-/// - the address encoding cannot hold the mapping.
+/// - [`place`] gives no address.
 pub(crate) fn map_table(
     request: &HypercallRequest,
     firmware: Option<&str>,
     spaces: &AddressSpaceState,
     memory: &MemoryState,
+    held: &HeldRegions,
 ) -> HypercallDisposition {
     let space = match named_space(request, firmware, spaces) {
         Ok(space) => space,
@@ -611,20 +621,16 @@ pub(crate) fn map_table(
     }
     // named_space refuses a call with no firmware version.
     let firmware = firmware.unwrap_or_default();
-    let counter = memory
-        .next_counter()
-        .or_else(|| game_os_region_counter_at_boot(firmware));
-    let Some(counter) = counter else {
+    let Some(boot) = game_os_region_counter_at_boot(firmware) else {
         return refuse(
             request,
             "a page table mapping at a firmware whose region counter no source gives",
         );
     };
-    let Some(lpar_address) = region_address(htab_size(space.htab_size_exp), counter) else {
-        return refuse(
-            request,
-            "a page table mapping whose address the encoding cannot hold",
-        );
+    let first = memory.next_counter().unwrap_or(boot);
+    let (lpar_address, counter) = match place(htab_size(space.htab_size_exp), first, boot, held) {
+        Ok(placement) => (placement.address, placement.counter),
+        Err(missing) => return refuse(request, missing.what()),
     };
     let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), [lpar_address]);
     answer.push_change(AddressSpaceChange::Mapped {

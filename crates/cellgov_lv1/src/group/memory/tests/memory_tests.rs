@@ -1,4 +1,5 @@
 use super::*;
+use crate::group::memory::allocator::NoPlacement;
 use crate::state::Hypervisor;
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::memory::{game_os_region_counter_at_boot, region_address};
@@ -209,14 +210,21 @@ fn an_allocation_with_no_firmware_or_a_floor_firmware_is_refused() {
     }
 }
 
+/// A 1 MB region's address holds 2^22 counter values, so the counter
+/// value 2^22 wraps to the value 0, below the boot value.
 #[test]
-fn an_allocation_whose_counter_reaches_the_exponent_bits_is_refused() {
+fn an_allocation_whose_counter_wraps_below_the_boot_value_is_refused() {
     let memory = MemoryState {
         next_counter: Some(1 << 22),
         ..MemoryState::default()
     };
     assert_eq!(
-        allocate(&request([0x10_0000, 20, 0, 0]), Some("4.93"), &memory),
-        refused("an allocation whose region address the encoding cannot hold")
+        allocate(
+            &request([0x10_0000, 20, 0, 0]),
+            Some("4.93"),
+            &memory,
+            &HeldRegions::default()
+        ),
+        refused(NoPlacement::BootRegion.what())
     );
 }

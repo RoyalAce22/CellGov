@@ -2,6 +2,9 @@
 
 use super::*;
 
+/// Each address is [`MMIO_REAL_BASE`] plus the bus address. The console
+/// tests hold each address to lv1's own mapping of its region in the
+/// captures.
 #[test]
 fn each_4_93_mmio_region_lies_at_the_real_base_plus_its_bus_address() {
     let reals: Vec<_> = MMIO_REGIONS

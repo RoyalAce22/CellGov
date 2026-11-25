@@ -41,18 +41,6 @@ fn the_size_exponent_rounds_up_between_powers_of_two() {
 }
 
 #[test]
-fn a_region_with_no_size_an_exponent_of_42_or_a_counter_that_reaches_bit_42_has_no_address() {
-    assert_eq!(region_address(0, 2), None);
-    // 2^20-byte regions: counter values below 2^22 fit below bit 42.
-    assert_eq!(
-        region_address(0x10_0000, (1 << 22) - 1),
-        Some((20 << 42) | (((1 << 22) - 1) << 20))
-    );
-    assert_eq!(region_address(0x10_0000, 1 << 22), None);
-    assert_eq!(region_address(1 << 42, 0), None);
-}
-
-#[test]
 fn only_4_93_has_a_boot_region_counter() {
     assert_eq!(GAME_OS_REGION_COUNTER_AT_BOOT.len(), 1);
     assert!(game_os_region_counter_at_boot("4.93").is_some());

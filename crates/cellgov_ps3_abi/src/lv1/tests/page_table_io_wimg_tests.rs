@@ -6,8 +6,7 @@ use crate::hw::ppu_mmu::PTE_N;
 
 /// Each real address and the WIMG for a caller with G clear, then with G
 /// set, as the writer's branches give them. The addresses are literals
-/// from the writer's compares [OFW-4.93 lv1 a:0x2D3178-0x2D31C4], so a
-/// wrong limit constant turns a case red.
+/// from the writer's compares [OFW-4.93 lv1 a:0x2D3178-0x2D31C4].
 const CASES: [(u64, u64, u64); 7] = [
     (0x240_0301_0000, PTE_I | PTE_G, PTE_I | PTE_G),
     (0x280_8000_1000, PTE_I, PTE_I | PTE_G),

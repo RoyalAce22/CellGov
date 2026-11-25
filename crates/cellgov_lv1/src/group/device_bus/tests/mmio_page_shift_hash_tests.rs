@@ -20,22 +20,35 @@ fn mapped(mappings: &[MmioMapping]) -> DeviceBusState {
     state
 }
 
-/// The page shifts add their terms on their own source, keyed by the
-/// mapping's index, beside the terms of the mappings with no page shift.
+/// The list holds every nonzero lane of a state with two mappings, given
+/// out of bus address order: the mapping lanes on source 183 and the page
+/// shift lanes on source 184, both keyed by the mapping's index.
 #[test]
 fn mmio_page_shift_sync_term_lane_vector_golden() {
-    let lane = |object, field, value| contribution(LaneIndex::new(184, object, field, 0), value);
+    let lane = |source, object, field, value| {
+        contribution(LaneIndex::new(source, object, field, 0), value)
+    };
+    let sum = [
+        lane(183, 0, 0, 1),
+        lane(183, 0, 1, 1),
+        lane(183, 0, 2, 1),
+        lane(183, 0, 3, 0x301_0000),
+        lane(183, 0, 4, 0x1_0000),
+        lane(183, 0, 5, 0x4000_0007_0000),
+        lane(183, 1, 0, 1),
+        lane(183, 1, 1, 1),
+        lane(183, 1, 2, 1),
+        lane(183, 1, 3, 0x381_0000),
+        lane(183, 1, 4, 0x1_0000),
+        lane(183, 1, 5, 0x4000_0007_0000),
+        lane(184, 0, 0, 1),
+        lane(184, 0, 1, 12),
+        lane(184, 1, 0, 1),
+        lane(184, 1, 1, 16),
+    ]
+    .into_iter()
+    .fold(0u128, u128::wrapping_add);
     let state = mapped(&[mapping(0x381_0000, 16), mapping(0x301_0000, 12)]);
-    let without = mapped(&[mapping(0x381_0000, 0), mapping(0x301_0000, 0)]);
-    let zero_shifts = [lane(0, 0, 1), lane(1, 0, 1)]
-        .into_iter()
-        .fold(0u128, u128::wrapping_add);
-    let sum = [lane(0, 0, 1), lane(0, 1, 12), lane(1, 0, 1), lane(1, 1, 16)]
-        .into_iter()
-        .fold(
-            without.sync_term().wrapping_sub(zero_shifts),
-            u128::wrapping_add,
-        );
     assert_eq!(state.sync_term(), sum);
 }
 

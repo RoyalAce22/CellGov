@@ -1,5 +1,5 @@
 //! The 4.93 MMIO regions of device 1 of bus 1 and the mapping of the
-//! kernel's call, held to the console capture of the device in lv1.
+//! kernel's first call, held to the console capture of the device in lv1.
 
 use super::*;
 use crate::lv1::partition::LPAR_ID_GAME_OS;
@@ -10,7 +10,7 @@ const DEVICE_1: u64 = 0x61_E050;
 
 /// The method table of the bus 1 devices
 /// [OFW-4.93 lv1 a:0x353480-0x353484].
-const DEVICE_TABLE: u64 = 0x35_C878;
+pub(super) const DEVICE_TABLE: u64 = 0x35_C878;
 
 /// The class of a region, from the TOC slot r2 - 28312
 /// [OFW-4.93 lv1 a:0x3531A0-0x3531A4].
@@ -139,6 +139,10 @@ fn the_kernel_call_mapping_is_the_one_game_os_mapping_of_its_region() {
     assert_eq!(at(&rows, "mapping_2_partition", second + 8), 0);
     assert_eq!(at(&rows, "mapping_2_previous", second + 24), first);
     assert_eq!(at(&rows, "mapping_2_next", second + 32), 0);
+    assert_eq!(
+        Some(at(&rows, "mapping_2_lpar", second + 48)),
+        mmio_real_address(row.firmware, row.bus, row.device, row.bus_address)
+    );
     assert_eq!(at(&rows, "mapping_2_region", second + 72), object);
     assert_eq!(at(&rows, "mapping_2_64", second + 64) >> 56, 0);
 }

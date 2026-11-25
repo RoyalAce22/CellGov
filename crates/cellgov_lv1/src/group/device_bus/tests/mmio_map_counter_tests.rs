@@ -1,11 +1,13 @@
-//! The logical partition address of `map_device_mmio_region`: the region
-//! of the call's size for the next value of the partition's region
-//! counter.
+//! The logical partition address of `map_device_mmio_region`: the address
+//! of the region of the call's size at the next value of the partition's
+//! region counter.
 
 use super::*;
+use crate::group::memory::allocator::NoPlacement;
 use crate::{GroupStates, StateChange};
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::device_bus::GAME_OS_MMIO_MAPPINGS;
+use cellgov_ps3_abi::lv1::memory::region_address;
 use cellgov_time::GuestTicks;
 
 /// Device 1 of bus 1.
@@ -43,6 +45,7 @@ fn map(groups: &GroupStates, request: &HypercallRequest) -> HypercallDisposition
         Some("4.93"),
         groups.device_bus(),
         groups.memory().regions(),
+        &HeldRegions::of(groups),
     )
 }
 
@@ -130,14 +133,17 @@ fn a_second_map_of_a_mapped_region_takes_the_next_counter_value() {
     }
     assert_eq!(lpars, [0x4000_0007_0000, 0x4000_0008_0000]);
     assert_eq!(groups.device_bus().mmio_mappings().count(), 2);
+    assert_eq!(groups.memory().regions().next_counter(), Some(9));
 }
 
+/// A 64 KB region's address holds 2^26 counter values, so the counter
+/// value 2^26 wraps to the value 0, below the boot value.
 #[test]
-fn a_counter_value_the_region_encoding_cannot_hold_is_a_refusal() {
+fn a_counter_value_that_wraps_below_the_boot_value_is_a_refusal() {
     let call = request(0x301_0000, 0x1_0000, 12);
     assert_eq!(
         map(&groups(Some(1 << 26)), &call),
-        NO_ENCODING.refusal(&call)
+        UnmodelledError::new(NoPlacement::BootRegion.what()).refusal(&call)
     );
     let (r3, _, _) = answer_parts(map(&groups(Some((1 << 26) - 1)), &call));
     assert_eq!(r3, 0);

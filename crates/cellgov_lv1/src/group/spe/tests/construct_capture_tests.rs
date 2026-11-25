@@ -5,6 +5,7 @@
 use super::*;
 use crate::{AddressSpace, AddressSpaceChange, MemoryRegion};
 use cellgov_event::UnitId;
+use cellgov_ps3_abi::lv1::memory::region_address;
 use cellgov_ps3_abi::lv1::spe::LOGICAL_SPE_OBJECT_CAPTURE;
 use cellgov_time::GuestTicks;
 
@@ -93,6 +94,7 @@ fn the_kernels_boot_call_gets_the_captured_spe_id_and_shadow_page() {
         Some("4.93"),
         &boot_memory(),
         &LogicalSpeState::default(),
+        &HeldRegions::default(),
     );
     let HypercallDisposition::Answered(answer) = d else {
         panic!("{d:?}");

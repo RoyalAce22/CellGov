@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 
+use super::mmio_map_console_tests::DEVICE_TABLE;
 use super::*;
 use crate::lv1::memory::region_address;
 use crate::lv1::partition::LPAR_ID_GAME_OS;
@@ -88,9 +89,32 @@ fn mmio_words() -> BTreeMap<u64, u64> {
     all
 }
 
-/// The address of device 2, from +64 of the system bus object.
+/// The address of device 2, from +64 of the system bus object, after the
+/// check that the object there has the method table of the bus 1 devices.
 fn device_2(words: &BTreeMap<u64, u64>) -> u64 {
-    words[&(words[&SYSTEM_BUS_GLOBAL] + DEVICE_2_SLOT)]
+    let device = words[&(words[&SYSTEM_BUS_GLOBAL] + DEVICE_2_SLOT)];
+    assert_eq!(words[&device], DEVICE_TABLE, "the table of {device:#x}");
+    device
+}
+
+/// The address at +48 of lv1's own mapping in the list of the region
+/// object `object`: the one mapping of the list with the partition 0.
+fn lv1_mapping_address(words: &BTreeMap<u64, u64>, object: u64) -> u64 {
+    let mut found = Vec::new();
+    let mut mapping = words[&(object + 72)];
+    for _ in 0..=2 {
+        if mapping == 0 {
+            break;
+        }
+        assert_eq!(words[&mapping], MAPPING_CLASS, "{mapping:#x}");
+        if words[&(mapping + 8)] == 0 {
+            found.push(words[&(mapping + 48)]);
+        }
+        mapping = words[&(mapping + 32)];
+    }
+    assert_eq!(mapping, 0, "the end of the list of {object:#x}");
+    assert_eq!(found.len(), 1, "the list of {object:#x}: {found:x?}");
+    found[0]
 }
 
 /// The rows of `GAME_OS_MMIO_MAPPINGS` for device 2, in table order.
@@ -105,7 +129,7 @@ fn device_2_mappings() -> Vec<GameOsMmioMapping> {
 }
 
 #[test]
-fn device_2_has_index_4_so_each_region_lies_at_the_real_base_plus_its_bus_address() {
+fn device_2_has_index_4_and_each_regions_real_address_is_that_of_lv1s_own_mapping() {
     let words = mmio_words();
     let device = device_2(&words);
     // The constructor stores the index as a word at +128
@@ -114,9 +138,10 @@ fn device_2_has_index_4_so_each_region_lies_at_the_real_base_plus_its_bus_addres
     let regions: Vec<_> = MMIO_REGIONS.iter().filter(|r| r.device == 2).collect();
     assert_eq!(regions.len(), 3);
     for region in regions {
+        let object = words[&(device + 24 + 8 * region.slot)];
         assert_eq!(
             mmio_real_address(region.firmware, region.bus, region.device, region.address),
-            Some(MMIO_REAL_BASE + region.address),
+            Some(lv1_mapping_address(&words, object)),
             "slot {}",
             region.slot
         );

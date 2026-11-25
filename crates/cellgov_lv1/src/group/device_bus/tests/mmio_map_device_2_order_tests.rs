@@ -17,8 +17,8 @@ fn both_open() -> GroupStates {
     groups
 }
 
-/// The 4.93 answer to the call for device `device` of bus 1. The
-/// answer's changes are applied to `groups`.
+/// The 4.93 answer to the call for device `device` of bus 1. The helper
+/// applies the answer's changes to `groups`.
 fn map_device(
     groups: &mut GroupStates,
     device: u64,
@@ -41,6 +41,7 @@ fn map_device(
         Some("4.93"),
         groups.device_bus(),
         groups.memory().regions(),
+        &HeldRegions::of(groups),
     );
     if let HypercallDisposition::Answered(answer) = &disposition {
         for change in answer.changes.clone() {

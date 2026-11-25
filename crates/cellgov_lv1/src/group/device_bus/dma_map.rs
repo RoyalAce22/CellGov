@@ -102,7 +102,7 @@ const OUTSIDE_MEMORY: UnmodelledError = UnmodelledError::new(
      whose lv1 IOPTE path is not read",
 );
 
-/// A call of device 1 or 2 that passes lv1's checks and that no console
+/// A call for device 1 or 2 that passes lv1's checks and that no console
 /// capture shows lv1 completed.
 const UNCAPTURED_MAP: UnmodelledError = UnmodelledError::new(
     "a map_device_dma_region for device 1 or 2 of bus 1 that no console capture shows, whose \
