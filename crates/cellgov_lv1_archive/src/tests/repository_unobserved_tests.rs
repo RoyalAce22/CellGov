@@ -58,7 +58,7 @@ fn an_unobserved_second_value_renders_as_the_unobserved_label_and_never_as_0() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].v2, None);
     let text = repository_tsv(&rows).unwrap();
-    let parsed = table::parse(&REPOSITORY, &text).unwrap();
+    let parsed = archive::parse(&REPOSITORY, &text).unwrap();
     assert_eq!(parsed.rows.len(), 1);
     let v2 = REPOSITORY
         .columns
@@ -75,7 +75,7 @@ fn the_v2_column_refuses_a_label_other_than_unobserved() {
     let text = repository_tsv(&rows).unwrap();
     let other = text.replace(REPOSITORY_UNOBSERVED, "unknown");
     assert!(matches!(
-        table::parse(&REPOSITORY, &other),
+        archive::parse(&REPOSITORY, &other),
         Err(ArchiveError::BadCell { column: "v2", .. })
     ));
 }

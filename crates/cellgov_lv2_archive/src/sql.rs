@@ -7,10 +7,18 @@ use super::table::NONE;
 pub const SQLITE_VERSION: &str = "3.53.0";
 
 fn banner() -> String {
+    sql_banner("cellgov_lv2_archive", REGENERATE, GATE)
+}
+
+/// The comment that opens a rendered SQL file of an archive.
+///
+/// It names the crate that renders the file, the command that rewrites
+/// it and the gate that fails on drift.
+pub fn sql_banner(crate_name: &str, regenerate: &str, gate: &str) -> String {
     format!(
-        "-- Rendered from cellgov_lv2_archive by\n\
-         --   {REGENERATE}\n\
-         -- Do not edit by hand: {GATE} fails on drift.\n"
+        "-- Rendered from {crate_name} by\n\
+         --   {regenerate}\n\
+         -- Do not edit by hand: {gate} fails on drift.\n"
     )
 }
 
@@ -24,7 +32,9 @@ fn quoted_list(columns: &[&str]) -> String {
     quoted.join(", ")
 }
 
-fn create_table(table: &TableSpec) -> String {
+/// The `CREATE TABLE` statement of `table`: STRICT, with its checks, key
+/// and references.
+pub fn create_table_sql(table: &TableSpec) -> String {
     let mut lines = Vec::new();
     for column in table.columns {
         let name = quoted(column.name);
@@ -67,10 +77,10 @@ pub fn schema_sql() -> String {
     out.push_str(&format!("\nPRAGMA user_version = {SCHEMA_VERSION};\n"));
     for table in TABLES {
         out.push('\n');
-        out.push_str(&create_table(table));
+        out.push_str(&create_table_sql(table));
     }
     out.push('\n');
-    out.push_str(&create_table(&CENSUS));
+    out.push_str(&create_table_sql(&CENSUS));
     for view in VIEWS {
         out.push_str(&format!(
             "\nCREATE VIEW {} AS\n{};\n",
@@ -93,19 +103,23 @@ pub fn build_sql(census_files: &[String]) -> String {
          .read sql/schema.sql\n",
     );
     for table in TABLES {
-        append_import(&mut out, table, &table.file());
+        out.push_str(&import_sql(table, &table.file()));
     }
     // Sorting preserves byte-deterministic output when the caller discovers
     // the per-version files in filesystem order.
     let mut census_files = census_files.to_vec();
     census_files.sort();
     for file in &census_files {
-        append_import(&mut out, &CENSUS, file);
+        out.push_str(&import_sql(&CENSUS, file));
     }
     out
 }
 
-fn append_import(out: &mut String, table: &TableSpec, file: &str) {
+/// The `build.sql` lines that import `file` into `table` through a
+/// staging table.
+///
+/// `file` is the path relative to the directory the build runs in.
+pub fn import_sql(table: &TableSpec, file: &str) -> String {
     let staging = format!("staging_{}", table.name);
     let names: Vec<&str> = table.columns.iter().map(|c| c.name).collect();
     let typed: Vec<String> = names
@@ -126,7 +140,7 @@ fn append_import(out: &mut String, table: &TableSpec, file: &str) {
             expr
         })
         .collect();
-    out.push_str(&format!(
+    format!(
         "\n\
              CREATE TEMP TABLE {staging} ({});\n\
              .import --ascii --colsep \"\\t\" --rowsep \"\\n\" --skip 1 {} {staging}\n\
@@ -139,7 +153,7 @@ fn append_import(out: &mut String, table: &TableSpec, file: &str) {
         table.name,
         quoted_list(&names),
         selected.join(", "),
-    ));
+    )
 }
 
 #[cfg(test)]

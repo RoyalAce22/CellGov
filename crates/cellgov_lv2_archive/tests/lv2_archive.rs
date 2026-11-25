@@ -23,13 +23,9 @@ use cellgov_lv2_archive::{
     self as archive, CensusClass, ConflictRow, DispatchShape, FirmwareRole, FirmwareRow, GateRow,
     GateState, HandlingCounts, KernelRow, NameRow, NameSource, OwnerClass, PupRow, Route, RouteRow,
     StubRow, SubentryRow, CALLER, CALLER_GATE, CALLER_UNRESOLVED, CAPABILITY_GATE, CENSUS,
-    CENSUS_GATE, FIRMWARE, FIRMWARE_GATE, GATE, HYPERCALL, HYPERCALL_GATE, HYPERCALL_REGENERATE,
-    HYPERCALL_SITE, HYPERCALL_UNRESOLVED, KERNEL, NAME, NAME_GATE, NAME_REGENERATE, PRIORITY, PUP,
-    PUP_GATE, REACH, REGENERATE, REPOSITORY, REPOSITORY_GATE, REPOSITORY_LOGGED_FIRMWARE,
-    REPOSITORY_READ, REPOSITORY_REGENERATE, REPOSITORY_UNOBSERVED, SCHEMA_VERSION, STUB, SUBENTRY,
-    SUBENTRY_ATTRIBUTION, TABLES,
+    CENSUS_GATE, FIRMWARE, FIRMWARE_GATE, GATE, KERNEL, NAME, NAME_GATE, NAME_REGENERATE, PRIORITY,
+    PUP, PUP_GATE, REACH, REGENERATE, SCHEMA_VERSION, STUB, SUBENTRY, SUBENTRY_ATTRIBUTION, TABLES,
 };
-use cellgov_ps3_abi::lv1::repository::NODES;
 use cellgov_ps3_abi::lv2::census::{lookup, PupCensusClass};
 use cellgov_ps3_abi::lv2::syscall::SYSCALL_TABLE_SLOTS;
 use sha2::Digest as _;
@@ -79,24 +75,6 @@ fn committed_kernels() -> Vec<KernelRow> {
         archive::render(&KERNEL, &table.rows).unwrap_or_else(|error| panic!("kernel.tsv: {error}"));
     assert_eq!(rerendered, text, "kernel.tsv is not byte-canonical");
     archive::kernel_rows(&table)
-}
-
-fn committed_hypercall_sites() -> Vec<archive::HypercallSiteRow> {
-    let text = read(&archive_dir().join(HYPERCALL_SITE.file()));
-    let table = archive::parse(&HYPERCALL_SITE, &text).unwrap_or_else(|e| panic!("{e}"));
-    archive::hypercall_site_rows(&table)
-}
-
-fn committed_repository_reads() -> Vec<archive::RepositoryReadRow> {
-    let text = read(&archive_dir().join(REPOSITORY_READ.file()));
-    let table = archive::parse(&REPOSITORY_READ, &text).unwrap_or_else(|e| panic!("{e}"));
-    let rerendered = archive::render(&REPOSITORY_READ, &table.rows)
-        .unwrap_or_else(|e| panic!("repository_read.tsv: {e}"));
-    assert_eq!(
-        rerendered, text,
-        "repository_read.tsv is not byte-canonical"
-    );
-    archive::repository_read_rows(&table)
 }
 
 fn committed_stubs() -> Vec<StubRow> {
@@ -507,9 +485,6 @@ struct ReadmeData<'a> {
     transition_rows: usize,
     coverage_rows: usize,
     census_files: &'a [String],
-    hypercalls: &'a [archive::HypercallRow],
-    repository: &'a [archive::RepositoryRow],
-    repository_reads: &'a [archive::RepositoryReadRow],
 }
 
 fn readme(data: ReadmeData<'_>) -> String {
@@ -638,44 +613,6 @@ fn readme(data: ReadmeData<'_>) -> String {
                 uncorroborated_rows.len().to_string(),
             ),
             ("uncorroborated_rows", uncorroborated_rows.join("\n")),
-            ("hypercall_numbers", data.hypercalls.len().to_string()),
-            (
-                "hypercall_answered",
-                data.hypercalls
-                    .iter()
-                    .filter(|row| row.state == archive::HypercallState::Answered)
-                    .count()
-                    .to_string(),
-            ),
-            (
-                "hypercall_invalid",
-                data.hypercalls
-                    .iter()
-                    .filter(|row| row.lv1_493 == archive::Lv1Entry::Invalid)
-                    .count()
-                    .to_string(),
-            ),
-            ("hypercall_gate", HYPERCALL_GATE.to_string()),
-            ("hypercall_regenerate", HYPERCALL_REGENERATE.to_string()),
-            ("repository_nodes", data.repository.len().to_string()),
-            (
-                "repository_logged_firmware",
-                REPOSITORY_LOGGED_FIRMWARE.join(", "),
-            ),
-            (
-                "repository_refused",
-                data.repository_reads
-                    .iter()
-                    .filter(|row| !row.answered)
-                    .map(|row| format!("`{}`", row.node))
-                    .collect::<BTreeSet<_>>()
-                    .into_iter()
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            ),
-            ("repository_gate", REPOSITORY_GATE.to_string()),
-            ("repository_regenerate", REPOSITORY_REGENERATE.to_string()),
-            ("repository_unobserved", REPOSITORY_UNOBSERVED.to_string()),
         ],
     )
 }
@@ -698,11 +635,6 @@ fn rendered() -> BTreeMap<String, String> {
     let names = committed_names();
     let conflicts = archive::conflict_rows(&names);
     let priority = generated_priority();
-    let hypercalls = archive::hypercall_rows(&committed_hypercall_sites(), &pups)
-        .expect("every committed hypercall site row names a committed PUP");
-    let repository_reads = committed_repository_reads();
-    let repository = archive::repository_rows(NODES, &repository_reads, &pups)
-        .unwrap_or_else(|e| panic!("{e}; regenerate with:\n  {REPOSITORY_REGENERATE}"));
     let mut files = BTreeMap::new();
     files.insert(
         "README.md".to_string(),
@@ -720,18 +652,7 @@ fn rendered() -> BTreeMap<String, String> {
             transition_rows: transition_rows.len(),
             coverage_rows: coverage.len(),
             census_files: &census_files,
-            hypercalls: &hypercalls,
-            repository: &repository,
-            repository_reads: &repository_reads,
         }),
-    );
-    files.insert(
-        HYPERCALL.file(),
-        archive::hypercall_tsv(&hypercalls).unwrap_or_else(|e| panic!("hypercall.tsv: {e}")),
-    );
-    files.insert(
-        REPOSITORY.file(),
-        archive::repository_tsv(&repository).unwrap_or_else(|e| panic!("repository.tsv: {e}")),
     );
     files.insert("sql/schema.sql".to_string(), archive::schema_sql());
     files.insert(
@@ -1406,107 +1327,6 @@ fn caller_rows_are_well_formed() {
         assert!(
             resolved.contains(&(row[0].as_str(), row[1].as_str(), row[3].as_str())),
             "reach row names no resolved caller ordinal: {row:?}"
-        );
-    }
-}
-
-/// Each number that CellGov's hypervisor answers and whose kernel sites
-/// the census scanner misses. The scanner walks the words linearly and
-/// stops at a `blr`, so it drops the `li r11` of an `sc` block that sits
-/// after the function's `blr`. Each entry is the number, a firmware
-/// whose kernel holds the site, and the site's real address, which
-/// `hypercall_unresolved.tsv` must list for that kernel:
-/// - 12, `connect_irq_plug_ext`
-///   [OFW-4.93 lv2_kernel a:0x80000000000087a0-0x80000000000087f8].
-const ANSWERED_WITH_MISSED_SITES: &[(u64, &str, u64)] = &[(12, "4.93", 0x87F8)];
-
-#[test]
-fn hypercall_site_rows_are_well_formed() {
-    assert_eq!(HYPERCALL_SITE.gate, HYPERCALL_GATE);
-    assert_eq!(HYPERCALL_UNRESOLVED.gate, HYPERCALL_GATE);
-    let dir = archive_dir();
-    let sites = committed_hypercall_sites();
-    let unresolved = archive::hypercall_unresolved_rows(
-        &archive::parse(
-            &HYPERCALL_UNRESOLVED,
-            &read(&dir.join(HYPERCALL_UNRESOLVED.file())),
-        )
-        .unwrap_or_else(|error| panic!("{error}")),
-    );
-    let kernel_pups: BTreeSet<String> = committed_kernels()
-        .into_iter()
-        .map(|row| row.pup_sha256)
-        .collect();
-    let scanned: BTreeSet<String> = unresolved
-        .iter()
-        .map(|row| row.pup_sha256.clone())
-        .collect();
-    assert_eq!(
-        scanned, kernel_pups,
-        "hypercall_unresolved.tsv must name every kernel.tsv kernel"
-    );
-    assert!(!scanned.is_empty(), "kernel.tsv names no kernel");
-    for row in &sites {
-        assert!(
-            scanned.contains(&row.pup_sha256),
-            "hypercall site row names an unscanned kernel: {row:?}"
-        );
-    }
-    let ascending = |list: &[u64]| list.windows(2).all(|pair| pair[0] < pair[1]);
-    for row in &sites {
-        assert!(
-            !row.sites.is_empty() && ascending(&row.sites),
-            "hypercall site row sites are empty or not ascending: {row:?}"
-        );
-    }
-    for row in &unresolved {
-        assert!(
-            ascending(&row.sites),
-            "hypercall unresolved row sites are not ascending: {row:?}"
-        );
-    }
-    // A missed site stays listed as unresolved, so the census cannot
-    // give it to another number, and its number stays answered.
-    let pups = committed_pups();
-    for &(number, fw, site) in ANSWERED_WITH_MISSED_SITES {
-        assert!(
-            cellgov_lv1::ANSWERED.contains(&number),
-            "hypercall {number} is no longer answered; \
-             remove it from ANSWERED_WITH_MISSED_SITES"
-        );
-        let listed = pups.iter().filter(|pup| pup.fw == fw).any(|pup| {
-            unresolved
-                .iter()
-                .any(|row| row.pup_sha256 == pup.pup_sha256 && row.sites.contains(&site))
-        });
-        assert!(
-            listed,
-            "the {fw} kernel's unresolved sites do not list {site:#x}, \
-             the missed site of hypercall {number}"
-        );
-    }
-    // Every number CellGov's hypervisor answers is one each kernel calls.
-    for &number in cellgov_lv1::ANSWERED {
-        let callers: BTreeSet<&str> = sites
-            .iter()
-            .filter(|row| row.number == number)
-            .map(|row| row.pup_sha256.as_str())
-            .collect();
-        if ANSWERED_WITH_MISSED_SITES
-            .iter()
-            .any(|&(missed, _, _)| missed == number)
-        {
-            assert!(
-                callers.is_empty(),
-                "the census now finds a site of answered hypercall {number}; \
-                 remove it from ANSWERED_WITH_MISSED_SITES"
-            );
-            continue;
-        }
-        assert_eq!(
-            callers.len(),
-            scanned.len(),
-            "answered hypercall {number} has no site in some scanned kernel"
         );
     }
 }

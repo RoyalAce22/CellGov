@@ -199,12 +199,12 @@ fn the_emitter_replaces_its_pups_rows_and_keeps_another_pups() {
     };
     write(
         &output.join(HYPERCALL_SITE.file()),
-        &archive::hypercall_site_tsv(&held.sites).expect("render"),
+        &lv1_archive::hypercall_site_tsv(&held.sites).expect("render"),
     )
     .expect("write");
     write(
         &output.join(HYPERCALL_UNRESOLVED.file()),
-        &archive::hypercall_unresolved_tsv(&held.unresolved).expect("render"),
+        &lv1_archive::hypercall_unresolved_tsv(&held.unresolved).expect("render"),
     )
     .expect("write");
     let args = HypercallCensusArgs {
@@ -267,7 +267,7 @@ fn an_existing_archive_with_one_hypercall_table_is_refused_as_partial() {
     let output = scratch_labeled("hypercall_census_partial");
     write(
         &output.join(HYPERCALL_SITE.file()),
-        &archive::hypercall_site_tsv(&[]).expect("render"),
+        &lv1_archive::hypercall_site_tsv(&[]).expect("render"),
     )
     .expect("write");
     assert!(matches!(

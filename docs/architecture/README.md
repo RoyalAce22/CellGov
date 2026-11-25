@@ -56,6 +56,8 @@ Related documents outside this directory:
   firmware by firmware.
 - The generated [LV2 archive](../lv2/README.md): the drift-gated
   per-slot routing and per-arm fidelity tables.
+- The generated [LV1 archive](../lv1/README.md): the drift-gated
+  hypercall and repository tables of the LV2 kernels.
 
 For per-crate detail and module layout, run
 `cargo doc --no-deps --open` and read the crate-level doc comments.

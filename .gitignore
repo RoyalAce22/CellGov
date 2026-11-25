@@ -81,3 +81,8 @@ docs/lv2/*.db
 docs/lv2/*.db-journal
 docs/lv2/*.db-wal
 docs/lv2/*.db-shm
+# The same for the LV1 archive's docs/lv1/sql/build.sql.
+docs/lv1/*.db
+docs/lv1/*.db-journal
+docs/lv1/*.db-wal
+docs/lv1/*.db-shm

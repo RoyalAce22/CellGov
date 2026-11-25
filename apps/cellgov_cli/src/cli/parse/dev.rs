@@ -111,7 +111,7 @@ pub(crate) struct HypercallCensusArgs {
     #[arg(long, value_name = "SHA256")]
     pub pup_sha256: String,
     /// Write the two hypercall site tables to this directory.
-    #[arg(long, value_name = "DIR", default_value = "docs/lv2")]
+    #[arg(long, value_name = "DIR", default_value = "docs/lv1")]
     pub output_dir: PathBuf,
 }
 
@@ -128,7 +128,7 @@ pub(crate) struct RepositoryCensusArgs {
     #[arg(long, value_name = "SHA256")]
     pub pup_sha256: String,
     /// Write the repository read table to this directory.
-    #[arg(long, value_name = "DIR", default_value = "docs/lv2")]
+    #[arg(long, value_name = "DIR", default_value = "docs/lv1")]
     pub output_dir: PathBuf,
     /// Stop the boot after this many runtime steps.
     #[arg(long, value_name = "N", default_value_t = 1_000_000)]

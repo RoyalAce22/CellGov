@@ -6,9 +6,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use cellgov_lv1::RepositoryRead;
 use cellgov_ps3_abi::lv1::repository::{RepositoryKey, RepositoryNode, SecondValue};
 
-use super::pup::PupRow;
+use cellgov_lv2_archive::{self as archive, ArchiveError, PupRow, Table, NONE};
+
 use super::spec::{REPOSITORY, REPOSITORY_READ, REPOSITORY_UNOBSERVED};
-use super::table::{self, ArchiveError, Table, NONE};
 
 /// One logged kernel boot's reads of one key.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -273,7 +273,7 @@ pub fn repository_read_tsv(rows: &[RepositoryReadRow]) -> Result<String, Archive
             cells
         })
         .collect();
-    table::render(&REPOSITORY_READ, &cells)
+    archive::render(&REPOSITORY_READ, &cells)
 }
 
 /// Renders `repository.tsv`.
@@ -299,7 +299,7 @@ pub fn repository_tsv(rows: &[RepositoryRow]) -> Result<String, ArchiveError> {
             cells
         })
         .collect();
-    table::render(&REPOSITORY, &cells)
+    archive::render(&REPOSITORY, &cells)
 }
 
 /// The typed rows of a parsed `repository_read.tsv`.

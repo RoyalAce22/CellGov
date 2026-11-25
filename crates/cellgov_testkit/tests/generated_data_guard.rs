@@ -9,9 +9,9 @@
 //! - a console capture under `tests/micro/*/ps3/`, an RPCS3 baseline
 //!   under `tests/scenario_observations/*/`, or a `.tsv` / `.csv` table
 //!   carries neither the attribute nor a named exemption;
-//! - a table in `docs/lv2/` disagrees with the owner class the archive's
-//!   README gives it: a curated or attributed table carries the
-//!   attribute, or an extracted or generated one carries no decision;
+//! - a file in `docs/lv2/` or `docs/lv1/` disagrees with the owner class
+//!   its archive's README gives it: a curated or attributed table carries
+//!   the attribute, or an extracted or generated one carries no decision;
 //! - a tracked text file over [`LARGE_FILE_LINES`] lines carries no
 //!   decision either way.
 //!
@@ -34,8 +34,9 @@ const BINARY_PROBE_BYTES: usize = 8192;
 /// The attribute the guard reads.
 const ATTRIBUTE: &str = "linguist-generated";
 
-/// The archive README whose file table classes every `docs/lv2/` file.
-const LV2_README: &str = "docs/lv2/README.md";
+/// Each archive directory, whose `README.md` file table classes every
+/// file in it, with the fewest rows that table can have.
+const ARCHIVES: &[(&str, usize)] = &[("docs/lv2", 101), ("docs/lv1", 8)];
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -126,8 +127,8 @@ fn is_table(path: &str) -> bool {
 }
 
 /// The file rows of the archive README's table, `| \`<file>\` | <class> |`,
-/// as repository path -> owner class.
-fn lv2_owner_classes(readme: &str) -> BTreeMap<String, String> {
+/// as repository path under `dir` -> owner class.
+fn owner_classes(dir: &str, readme: &str) -> BTreeMap<String, String> {
     readme
         .lines()
         .filter_map(|line| {
@@ -135,7 +136,7 @@ fn lv2_owner_classes(readme: &str) -> BTreeMap<String, String> {
             let file = cells.next()?.strip_prefix('`')?.strip_suffix('`')?;
             let class = cells.next()?;
             matches!(class, "extracted" | "generated" | "curated" | "attributed")
-                .then(|| (format!("docs/lv2/{file}"), class.to_string()))
+                .then(|| (format!("{dir}/{file}"), class.to_string()))
         })
         .collect()
 }
@@ -171,7 +172,7 @@ fn the_capture_matcher_takes_the_recorded_runs_and_nothing_beside_them() {
 }
 
 #[test]
-fn the_readme_reader_takes_the_file_rows_and_their_classes() {
+fn the_readme_reader_takes_the_file_rows_and_their_classes_under_the_named_archive() {
     let readme = "\
 | File | Owner class | Regenerate | Gate |
 | --- | --- | --- | --- |
@@ -180,10 +181,18 @@ fn the_readme_reader_takes_the_file_rows_and_their_classes() {
 | Class | Meaning |
 | generated | Rendered from code. |
 ";
-    let classes = lv2_owner_classes(readme);
+    let classes = owner_classes("docs/lv2", readme);
     assert_eq!(classes.len(), 2);
     assert_eq!(classes["docs/lv2/tables/behavior.tsv"], "curated");
     assert_eq!(classes["docs/lv2/census/fw-4.93.tsv"], "extracted");
+    let lv1 = owner_classes("docs/lv1", readme);
+    assert_eq!(
+        lv1.keys().collect::<Vec<_>>(),
+        [
+            "docs/lv1/census/fw-4.93.tsv",
+            "docs/lv1/tables/behavior.tsv"
+        ]
+    );
 }
 
 #[test]
@@ -212,34 +221,34 @@ fn every_capture_and_table_is_collapsed_or_exempted_by_name() {
 }
 
 #[test]
-fn every_lv2_archive_file_follows_its_owner_class() {
+fn every_archive_file_follows_its_owner_class() {
     let root = workspace_root();
-    let readme =
-        fs::read_to_string(root.join(LV2_README)).unwrap_or_else(|e| panic!("{LV2_README}: {e}"));
-    let classes = lv2_owner_classes(&readme);
-    assert!(
-        classes.len() > 100,
-        "only {} archive rows read from {LV2_README}: the table reader broke",
-        classes.len()
-    );
     let attrs = tracked_attributes(&root);
-    let wrong: Vec<String> = classes
-        .iter()
-        .filter_map(|(path, class)| {
-            let value = attrs.get(path).map_or("untracked", String::as_str);
+    let mut wrong = Vec::new();
+    for &(dir, fewest) in ARCHIVES {
+        let path = format!("{dir}/README.md");
+        let readme = fs::read_to_string(root.join(&path)).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let classes = owner_classes(dir, &readme);
+        assert!(
+            classes.len() >= fewest,
+            "only {} archive rows read from {path}: the table reader broke",
+            classes.len()
+        );
+        wrong.extend(classes.iter().filter_map(|(file, class)| {
+            let value = attrs.get(file).map_or("untracked", String::as_str);
             let fits = match class.as_str() {
                 // A table written by hand stays expanded.
                 "curated" | "attributed" => matches!(value, "unset" | "false"),
                 // Output a command writes carries an explicit decision.
                 _ => matches!(value, "true" | "false"),
             };
-            (!fits).then(|| format!("{path} ({class}): {value}"))
-        })
-        .collect();
+            (!fits).then(|| format!("{file} ({class}): {value}"))
+        }));
+    }
     assert!(
         wrong.is_empty(),
         "archive files whose .gitattributes decision disagrees with their owner \
-         class in {LV2_README}:\n{}",
+         class in their archive's README.md:\n{}",
         wrong.join("\n")
     );
 }

@@ -1,7 +1,9 @@
 //! The LV1 repository tables: `repository_read.tsv` and
 //! `repository.tsv`.
 
-use super::schema::{Column, ColumnKind, OwnerClass, TableSpec, GATE, REGENERATE};
+use cellgov_lv2_archive::{Column, ColumnKind, OwnerClass, TableSpec};
+
+use super::schema::{GATE, REGENERATE};
 
 /// Rewrites `repository_read.tsv`: `cellgov dev repository-census` over
 /// each logged firmware's stored kernel.

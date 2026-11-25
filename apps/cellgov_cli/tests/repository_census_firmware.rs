@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use cellgov_install::store::{ArtifactKind, InstallRecord, StoreLayout, DEFAULT_VFS_ROOT};
-use cellgov_lv2_archive::{self as archive, REPOSITORY_LOGGED_FIRMWARE, REPOSITORY_READ};
+use cellgov_lv1_archive::{self as archive, REPOSITORY_LOGGED_FIRMWARE, REPOSITORY_READ};
+use cellgov_lv2_archive as lv2_archive;
 use cellgov_testkit::scratch::scratch_labeled;
 
 #[path = "common/installed_firmware.rs"]
@@ -55,7 +56,7 @@ fn stored_kernels(root: &Path) -> BTreeMap<String, (String, PathBuf)> {
 #[test]
 fn firmware_boots_reextract_byte_identical_repository_reads() {
     let root = installed_firmware::workspace_root();
-    let committed = root.join("docs/lv2").join(REPOSITORY_READ.file());
+    let committed = root.join("docs/lv1").join(REPOSITORY_READ.file());
     let stored = stored_kernels(&root);
     let output = scratch_labeled("repository_census_firmware");
 
@@ -82,7 +83,7 @@ fn firmware_boots_reextract_byte_identical_repository_reads() {
     }
 
     let extracted = read(&output.join(REPOSITORY_READ.file()));
-    archive::parse(&REPOSITORY_READ, &extracted).expect("the re-extracted table parses");
+    lv2_archive::parse(&REPOSITORY_READ, &extracted).expect("the re-extracted table parses");
     if std::env::var_os("CELLGOV_REGENERATE").is_some_and(|v| v == "1") {
         std::fs::write(&committed, &extracted)
             .unwrap_or_else(|e| panic!("write {}: {e}", committed.display()));

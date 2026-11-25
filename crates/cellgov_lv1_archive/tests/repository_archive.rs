@@ -7,18 +7,24 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use cellgov_lv2_archive::{
-    self as archive, KERNEL, PUP, REPOSITORY_GATE, REPOSITORY_LOGGED_FIRMWARE, REPOSITORY_READ,
+use cellgov_lv1_archive::{
+    self as archive, REPOSITORY_GATE, REPOSITORY_LOGGED_FIRMWARE, REPOSITORY_READ,
     REPOSITORY_SOURCES,
 };
+use cellgov_lv2_archive::{self as lv2_archive, KERNEL, PUP};
 use cellgov_ps3_abi::lv1::repository::{NodeSource, NODES};
 
 fn archive_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/lv1")
+}
+
+/// The LV2 archive, which holds the PUP and kernel tables.
+fn lv2_archive_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/lv2")
 }
 
-fn read(file: &str) -> String {
-    let path = archive_dir().join(file);
+fn read_in(dir: &Path, file: &str) -> String {
+    let path = dir.join(file);
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
 }
 
@@ -26,14 +32,19 @@ fn read(file: &str) -> String {
 fn repository_rows_are_well_formed() {
     assert_eq!(REPOSITORY_READ.gate, REPOSITORY_GATE);
     let reads = archive::repository_read_rows(
-        &archive::parse(&REPOSITORY_READ, &read(&REPOSITORY_READ.file()))
+        &lv2_archive::parse(
+            &REPOSITORY_READ,
+            &read_in(&archive_dir(), &REPOSITORY_READ.file()),
+        )
+        .unwrap_or_else(|e| panic!("{e}")),
+    );
+    let pups = lv2_archive::pup_rows(
+        &lv2_archive::parse(&PUP, &read_in(&lv2_archive_dir(), &PUP.file()))
             .unwrap_or_else(|e| panic!("{e}")),
     );
-    let pups = archive::pup_rows(
-        &archive::parse(&PUP, &read(&PUP.file())).unwrap_or_else(|e| panic!("{e}")),
-    );
-    let kernel_pups: BTreeSet<String> = archive::kernel_rows(
-        &archive::parse(&KERNEL, &read(&KERNEL.file())).unwrap_or_else(|e| panic!("{e}")),
+    let kernel_pups: BTreeSet<String> = lv2_archive::kernel_rows(
+        &lv2_archive::parse(&KERNEL, &read_in(&lv2_archive_dir(), &KERNEL.file()))
+            .unwrap_or_else(|e| panic!("{e}")),
     )
     .into_iter()
     .map(|row| row.pup_sha256)

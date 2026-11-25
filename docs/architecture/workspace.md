@@ -28,6 +28,9 @@ graph BT
   subgraph Offline analysis
     lv2_archive
   end
+  subgraph LV1 offline analysis
+    lv1_archive
+  end
   subgraph Host tooling
     terminal; testkit; observation; compare; explore; fuzz; install; runner_ps3; boot
   end
@@ -56,8 +59,9 @@ graph BT
   lv1 --> core
   lv2 --> core
   trace --> core
-  lv1 --> lv2_archive
   lv2 --> lv2_archive
+  lv1 --> lv1_archive
+  lv2_archive --> lv1_archive
   core --> testkit
   ppu --> testkit
   trace --> observation
@@ -75,7 +79,7 @@ graph BT
   boot --> cli
   explore --> cli
   fuzz --> cli
-  lv2_archive --> cli
+  lv1_archive --> cli
   runner_ps3 --> cli
   ps3_abi --> mkelf
   compare --> rpcs3_to_observation
@@ -153,6 +157,14 @@ The archive defines its own row types and the rules that merge and
 check them. The mapping from `cellgov_ppu`'s kernel and caller
 classifications into those rows sits above both crates, in the
 commands that extract them.
+
+The lv1 hypercall and repository censuses are a second archive crate,
+`cellgov_lv1_archive`, over `docs/lv1/`. It depends on
+`cellgov_lv2_archive` for the table loader and the firmware, PUP and
+kernel tables, and `cellgov_lv2_archive` never depends on it: the
+generator's layers place it above the LV2 archive. It reads
+`cellgov_lv1`'s answered numbers, and nothing in `cellgov_lv1` depends
+on it.
 
 ### The install library
 
@@ -256,6 +268,7 @@ dependencies are intentionally absent. The workspace compiles under
 | `cellgov_install`      | aes, cbc, ctr, flate2, hmac, serde, sha1, sha2, thiserror, toml            |
 | `cellgov_terminal`     | ctrlc, terminal_size                                                       |
 | `cellgov_lv2_archive`  | strum, thiserror                                                           |
+| `cellgov_lv1_archive`  | thiserror                                                                  |
 | `cellgov_fuzz`         | serde, serde_json, thiserror                                               |
 | `cellgov_cli`          | clap, clap_complete, filebuffer, serde, serde_json, strum, thiserror, toml |
 | `runner_ps3`           | serde, serde_json, strum, thiserror, toml                                  |
@@ -281,6 +294,7 @@ dependencies are intentionally absent. The workspace compiles under
 | `cellgov_lv1`                  | CellGov's hypervisor: the answers to the LV1 hypercalls that a thread in supervisor state makes, from the `cellgov_ps3_abi::lv1` facts. It answers in lv1's place and does not run or emulate lv1. It keeps the partition's memory regions, virtual address spaces, interrupt state bitmaps and event receive ports, and a witness of each number with no handler. The runtime in `cellgov_core` sends each hypercall to it. |
 | `cellgov_lv2`                  | LV2 model: image / content registry, loaded-PRX registry, thread-group table, PPU thread table, in-memory filesystem store, LV2 sync primitives (mutex, cond, semaphore, lwmutex, event-flag, event-queue), syscall classification (`Lv2Request`) and dispatch (`Lv2Dispatch`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `cellgov_lv2_archive`          | The LV2 syscall archive under `docs/lv2/`: the table specs and their loader, the census, caller and name rows with the rules that merge and check them, the route and arm tables rendered from `cellgov_lv2`'s classification, the `pup.tsv` rows, the SQL forms and the operator-local oracle-gap overlay's text form. Text in, text out; no I/O. The runtime never calls it. `pup.rs` holds the `pup.tsv` rows only; the PUP container layout stays in `cellgov_ps3_abi::format::pup`. |
+| `cellgov_lv1_archive`          | The LV1 archive under `docs/lv1/`: the hypercall census (each kernel's hypercall sites and the per-number join with `cellgov_ps3_abi::lv1::call`, lv1's 4.93 table and CellGov's hypervisor), the repository census (each logged kernel boot's repository reads and the node table CellGov's hypervisor serves), their table specs and their SQL forms. It reads its tables with `cellgov_lv2_archive`'s loader and takes the firmware, PUP and kernel tables from that archive; `cellgov_lv2_archive` never depends on it. Text in, text out; no I/O. The runtime never calls it. |
 | `cellgov_core`                 | The runtime: deterministic step loop, commit pipeline, syscall response table, SPU factory hook.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `cellgov_ppu`                  | PPU interpreter, ELF64 / SPRX / PRX loaders, and the PRX loader's dependency-ordered multi-module import resolution; the NID lookup database lives in `cellgov_ps3_abi`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `cellgov_spu`                  | SPU interpreter and SPU ELF loader; MFC / SPU channel-number constants live in `cellgov_ps3_abi::hw::spu`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |

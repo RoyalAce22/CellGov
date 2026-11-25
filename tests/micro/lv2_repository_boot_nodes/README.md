@@ -62,7 +62,7 @@ boot reader reads r5 back:
 
 No other `bl` in the kernel's text calls the wrapper. A CellGov boot of
 the shipped 4.93 kernel makes each read from the site in its row
-(`docs/lv2/tables/repository_read.tsv`): a read from another site would
+(`docs/lv1/tables/repository_read.tsv`): a read from another site would
 stop the boot at a refusal. CellGov's
 hypervisor puts 0 in r5 for a node from this capture only when the read
 comes from the `sc` and return address of that node's row. It refuses a

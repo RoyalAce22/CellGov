@@ -7,7 +7,7 @@ pub const REGENERATE: &str = "CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_arc
 pub const GATE: &str = "committed_archive_matches_generator";
 
 /// Pins SQLite's `user_version` to the archive's frozen schema.
-pub const SCHEMA_VERSION: u32 = 10;
+pub const SCHEMA_VERSION: u32 = 11;
 
 /// Who writes a table, and under what discipline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,7 +163,7 @@ pub struct TableSpec {
 }
 
 impl TableSpec {
-    /// The file name under `docs/lv2/`.
+    /// The file name under the archive directory: `docs/lv2/` or `docs/lv1/`.
     pub fn file(&self) -> String {
         format!("tables/{}.tsv", self.name)
     }

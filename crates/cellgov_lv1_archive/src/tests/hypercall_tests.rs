@@ -2,7 +2,7 @@
 //! renderers and the per-PUP replacement.
 
 use super::*;
-use crate::parse;
+use cellgov_lv2_archive::parse;
 
 fn pup(n: u8) -> String {
     format!("{n:02x}").repeat(32)

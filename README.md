@@ -76,6 +76,9 @@ the claim that rests on that check is narrow.
   the retail firmware line, every syscall slot's routing, every arm's
   fidelity, what each modelled behaviour rests on, and every name a
   committed source gives an ordinal, queryable through SQLite.
+- [docs/lv1/](docs/lv1/README.md) -- the LV1 archive: the lv1
+  hypercalls each kernel makes and the repository nodes it reads, with
+  CellGov's hypervisor's answer to each, queryable through SQLite.
 - [title_manifests/](title_manifests/manifest_template.README.md) --
   the title registry: one manifest per title.
 

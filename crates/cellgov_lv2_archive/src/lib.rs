@@ -8,6 +8,10 @@
 //! The runtime never calls this crate. It reads the kernel model's
 //! request classification and fidelity map from `cellgov_lv2`, and
 //! nothing in `cellgov_lv2` depends on it.
+//!
+//! The lv1 hypercall and repository censuses are in `cellgov_lv1_archive`.
+//! That crate uses this crate's table machinery and firmware tables, and
+//! this crate never depends on it.
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 #![cfg_attr(
@@ -28,11 +32,9 @@ mod coverage;
 mod extraction;
 mod firmware;
 mod handling;
-mod hypercall;
 mod name;
 mod oracle_gap;
 mod pup;
-mod repository;
 mod spec;
 mod sql;
 mod table;
@@ -70,11 +72,6 @@ pub use firmware::{
 pub use handling::{
     arm_rows, arm_tsv, route_rows, route_tsv, ArmRow, HandlingCounts, Route, RouteRow,
 };
-pub use hypercall::{
-    hypercall_family, hypercall_rows, hypercall_site_rows, hypercall_site_tsv, hypercall_tsv,
-    hypercall_unresolved_rows, hypercall_unresolved_tsv, HypercallCensus, HypercallRow,
-    HypercallSiteRow, HypercallState, HypercallUnresolvedRow, Lv1Entry,
-};
 pub use name::{
     conflict_rows, conflicts_tsv, macro_name_rows, name_rows, name_tsv, uncorroborated,
     with_cellgov_rows, ConflictRow, Disagreement, NameRow, NameSource, CELLGOV_CONSTANT_PATH,
@@ -84,27 +81,18 @@ pub use oracle_gap::{
     OVERLAY_REVISION_KEY,
 };
 pub use pup::{check_pup_rows, checked_pup_rows, pup_rows, PupRow, PupTableError, PupTsvError};
-pub use repository::{
-    replace_repository_reads, repository_read_rows, repository_read_rows_of, repository_read_tsv,
-    repository_rows, repository_tsv, MixedRepositoryRead, RepositoryReadRow, RepositoryRow,
-    RepositoryTableError,
-};
 pub use spec::{
     files, manifest, Column, ColumnKind, ManifestRow, OwnerClass, TableSpec, View, ARM, BEHAVIOR,
     BEHAVIOR_GATE, CALLER, CALLER_GATE, CALLER_REGENERATE, CALLER_UNRESOLVED, CAPABILITY_GATE,
     CENSUS, CENSUS_CLASSES, CENSUS_GATE, CENSUS_REGENERATE, COMPARISON_STATES, CONFLICTS, COVERAGE,
     COVERAGE_SCOPES, DISAGREEMENTS, DISCOVERY_CONFIDENCE, DISCOVERY_METHODS, DISPATCH_SHAPES,
     ENTRY_FORMATS, EXCEPTIONS, FIDELITY_LABELS, FIRMWARE, FIRMWARE_GATE, FIRMWARE_ROLES, GATE,
-    GATE_STATES, HYPERCALL, HYPERCALL_FAMILIES, HYPERCALL_GATE, HYPERCALL_LEAVES,
-    HYPERCALL_LV1_ENTRIES, HYPERCALL_REGENERATE, HYPERCALL_SITE, HYPERCALL_STATES,
-    HYPERCALL_UNRESOLVED, KERNEL, NAME, NAME_GATE, NAME_REGENERATE, NAME_SOURCES, PRESENCE,
-    PRIMARY_LABELS, PRIORITY, PROVENANCE_KINDS, PUP, PUP_GATE, REACH, REGENERATE, REPOSITORY,
-    REPOSITORY_GATE, REPOSITORY_LOGGED_FIRMWARE, REPOSITORY_READ, REPOSITORY_READ_STATES,
-    REPOSITORY_REGENERATE, REPOSITORY_SOURCES, REPOSITORY_UNOBSERVED, ROUTE, ROUTE_LABELS,
+    GATE_STATES, KERNEL, NAME, NAME_GATE, NAME_REGENERATE, NAME_SOURCES, PRESENCE, PRIMARY_LABELS,
+    PRIORITY, PROVENANCE_KINDS, PUP, PUP_GATE, REACH, REGENERATE, ROUTE, ROUTE_LABELS,
     SCHEMA_VERSION, SELECTOR_SLOTS, STUB, SUBENTRY, SUBENTRY_ATTRIBUTION, SUBENTRY_SOURCES, TABLES,
     TRANSITIONS, TRANSITION_KINDS, VIEWS,
 };
-pub use sql::{build_sql, schema_sql, SQLITE_VERSION};
+pub use sql::{build_sql, create_table_sql, import_sql, schema_sql, sql_banner, SQLITE_VERSION};
 pub use table::{check_references, parse, render, ArchiveError, Table, NONE};
 pub use transitions::{
     transitions, transitions_tsv, ComparisonState, TransitionKind, TransitionRow,

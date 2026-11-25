@@ -1,7 +1,7 @@
 //! Emits one LV2 kernel's LV1 hypercall sites into the archive's two
 //! hypercall site tables.
 //!
-//! `cellgov_ppu` finds the sites; `cellgov_lv2_archive` holds the rows
+//! `cellgov_ppu` finds the sites; `cellgov_lv1_archive` holds the rows
 //! and renders the tables. The command replaces the rows of the named
 //! PUP and keeps every other PUP's rows. It scans only the kernel ELF
 //! that `kernel.tsv` names for that PUP.
@@ -9,10 +9,11 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use cellgov_lv2_archive::{
-    self as archive, ExtractionError, HypercallCensus, HypercallSiteRow, HypercallUnresolvedRow,
-    HYPERCALL_SITE, HYPERCALL_UNRESOLVED,
+use cellgov_lv1_archive::{
+    self as lv1_archive, HypercallCensus, HypercallSiteRow, HypercallUnresolvedRow, HYPERCALL_SITE,
+    HYPERCALL_UNRESOLVED,
 };
+use cellgov_lv2_archive::{self as archive, ExtractionError};
 use cellgov_ppu::caller_census::{scan_hypercalls, CallerScanError, CallerSite};
 use cellgov_ps3_abi::hw::ppu_mmu::REAL_MODE_IGNORED_EA;
 
@@ -115,10 +116,13 @@ fn write_census(
     };
     let mut census = load_existing(&args.output_dir)?;
     census.replace_pup(&args.pup_sha256, scan);
-    let site_text = render(&HYPERCALL_SITE, archive::hypercall_site_tsv(&census.sites))?;
+    let site_text = render(
+        &HYPERCALL_SITE,
+        lv1_archive::hypercall_site_tsv(&census.sites),
+    )?;
     let unresolved_text = render(
         &HYPERCALL_UNRESOLVED,
-        archive::hypercall_unresolved_tsv(&census.unresolved),
+        lv1_archive::hypercall_unresolved_tsv(&census.unresolved),
     )?;
     write(&args.output_dir.join(HYPERCALL_SITE.file()), &site_text)?;
     write(
@@ -179,8 +183,8 @@ fn load_existing(output_dir: &Path) -> Result<HypercallCensus, HypercallCensusEr
     match (site_path.is_file(), unresolved_path.is_file()) {
         (false, false) => Ok(HypercallCensus::default()),
         (true, true) => Ok(HypercallCensus {
-            sites: archive::hypercall_site_rows(&read_table(&site_path, &HYPERCALL_SITE)?),
-            unresolved: archive::hypercall_unresolved_rows(&read_table(
+            sites: lv1_archive::hypercall_site_rows(&read_table(&site_path, &HYPERCALL_SITE)?),
+            unresolved: lv1_archive::hypercall_unresolved_rows(&read_table(
                 &unresolved_path,
                 &HYPERCALL_UNRESOLVED,
             )?),

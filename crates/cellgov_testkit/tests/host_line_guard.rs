@@ -36,6 +36,7 @@ const RUNTIME: &[&str] = &[
     "crates/cellgov_lv1",
     "crates/cellgov_lv2",
     "crates/cellgov_lv2_archive",
+    "crates/cellgov_lv1_archive",
     "crates/cellgov_spu",
     "crates/cellgov_ppu",
 ];

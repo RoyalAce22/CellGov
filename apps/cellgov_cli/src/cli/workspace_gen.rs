@@ -167,6 +167,8 @@ const LAYERS: &[(&str, &[&str])] = &[
     ("Models and interpreters", &["lv1", "lv2", "ppu", "spu"]),
     ("Runtime", &["core"]),
     ("Offline analysis", &["lv2_archive"]),
+    // Above the LV2 archive, so the generator refuses an edge from it.
+    ("LV1 offline analysis", &["lv1_archive"]),
     (
         "Host tooling",
         &[

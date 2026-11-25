@@ -10,10 +10,9 @@ use cellgov_ps3_abi::lv1::call::{
 };
 use cellgov_ps3_abi::lv1::table::{self as lv1_table, TableEntry};
 
-use super::extraction::ExtractionError;
-use super::pup::PupRow;
+use cellgov_lv2_archive::{self as archive, ArchiveError, ExtractionError, PupRow, Table, NONE};
+
 use super::spec::{HYPERCALL, HYPERCALL_SITE, HYPERCALL_UNRESOLVED};
-use super::table::{self, ArchiveError, Table, NONE};
 
 /// One kernel's sites of one hypercall number.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -289,7 +288,7 @@ pub fn hypercall_tsv(rows: &[HypercallRow]) -> Result<String, ArchiveError> {
             ]
         })
         .collect();
-    table::render(&HYPERCALL, &cells)
+    archive::render(&HYPERCALL, &cells)
 }
 
 /// The typed rows of a parsed `hypercall_site.tsv`.
@@ -351,7 +350,7 @@ pub fn hypercall_site_tsv(rows: &[HypercallSiteRow]) -> Result<String, ArchiveEr
             ]
         })
         .collect();
-    table::render(&HYPERCALL_SITE, &cells)
+    archive::render(&HYPERCALL_SITE, &cells)
 }
 
 /// Renders `hypercall_unresolved.tsv`, sorted by PUP.
@@ -375,7 +374,7 @@ pub fn hypercall_unresolved_tsv(rows: &[HypercallUnresolvedRow]) -> Result<Strin
             ]
         })
         .collect();
-    table::render(&HYPERCALL_UNRESOLVED, &cells)
+    archive::render(&HYPERCALL_UNRESOLVED, &cells)
 }
 
 fn list_cell(values: &[u64]) -> String {

@@ -1,11 +1,12 @@
 //! Reproduces the committed LV2 census and the committed hypercall site
-//! tables from the operator-owned installed firmware.
+//! tables of the LV1 archive from the operator-owned installed firmware.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use cellgov_install::store::{ArtifactKind, InstallRecord, StoreLayout, DEFAULT_VFS_ROOT};
+use cellgov_lv1_archive::{HYPERCALL_REGENERATE, HYPERCALL_SITE, HYPERCALL_UNRESOLVED};
 use cellgov_lv2_archive::{self as archive, KernelRow, KERNEL, PUP};
 use cellgov_testkit::scratch::scratch_labeled;
 
@@ -187,14 +188,15 @@ fn firmware_reextracts_byte_identical_census_rows() {
 #[test]
 fn firmware_reextracts_byte_identical_hypercall_rows() {
     let root = workspace_root();
-    let committed = root.join("docs/lv2");
-    let pup_table = archive::parse(&PUP, &read(&committed.join(PUP.file())))
-        .expect("parse committed PUP table");
+    let lv2 = root.join("docs/lv2");
+    let committed = root.join("docs/lv1");
+    let pup_table =
+        archive::parse(&PUP, &read(&lv2.join(PUP.file()))).expect("parse committed PUP table");
     let firmware_by_pup: BTreeMap<String, String> = archive::pup_rows(&pup_table)
         .into_iter()
         .map(|row| (row.pup_sha256, row.fw))
         .collect();
-    let kernel_table = archive::parse(&KERNEL, &read(&committed.join(KERNEL.file())))
+    let kernel_table = archive::parse(&KERNEL, &read(&lv2.join(KERNEL.file())))
         .expect("parse committed kernel table");
     let stored = stored_kernels(&root);
     let output = scratch_labeled("hypercall_census_firmware");
@@ -221,10 +223,7 @@ fn firmware_reextracts_byte_identical_hypercall_rows() {
     }
 
     let regenerate = std::env::var_os("CELLGOV_REGENERATE").is_some_and(|v| v == "1");
-    for file in [
-        archive::HYPERCALL_SITE.file(),
-        archive::HYPERCALL_UNRESOLVED.file(),
-    ] {
+    for file in [HYPERCALL_SITE.file(), HYPERCALL_UNRESOLVED.file()] {
         let extracted = read(&output.join(&file));
         if regenerate {
             std::fs::write(committed.join(&file), &extracted)
@@ -235,8 +234,7 @@ fn firmware_reextracts_byte_identical_hypercall_rows() {
             extracted,
             read(&committed.join(&file)),
             "{file} changed during firmware re-extraction; regenerate with:\n  \
-             CELLGOV_REGENERATE=1 cargo test -p cellgov_cli --features installed-firmware-tests \
-             --test lv2_census_firmware firmware_reextracts_byte_identical_hypercall_rows"
+             {HYPERCALL_REGENERATE}"
         );
     }
 }

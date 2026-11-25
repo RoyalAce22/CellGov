@@ -7,9 +7,7 @@ use super::census::{
 };
 use super::firmware::{FIRMWARE, PUP};
 use super::handling::{ARM, BEHAVIOR, ROUTE};
-use super::hypercall::{HYPERCALL, HYPERCALL_SITE, HYPERCALL_UNRESOLVED};
 use super::naming::{CONFLICTS, NAME, PRIORITY};
-use super::repository::{REPOSITORY, REPOSITORY_READ};
 use super::schema::{OwnerClass, TableSpec, View, GATE, REGENERATE};
 
 /// Every table, a referenced table before the table that references it.
@@ -29,11 +27,6 @@ pub const TABLES: &[TableSpec] = &[
     CALLER,
     CALLER_UNRESOLVED,
     REACH,
-    HYPERCALL_SITE,
-    HYPERCALL_UNRESOLVED,
-    HYPERCALL,
-    REPOSITORY_READ,
-    REPOSITORY,
     BEHAVIOR,
     NAME,
     CONFLICTS,
@@ -47,7 +40,7 @@ const FIXED_FILES: &[&str] = &["README.md", "sql/schema.sql", "sql/build.sql"];
 /// One row of the archive document's manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManifestRow {
-    /// The file name under `docs/lv2/`.
+    /// The file name under the archive directory.
     pub file: String,
     /// Who writes it.
     pub owner: OwnerClass,

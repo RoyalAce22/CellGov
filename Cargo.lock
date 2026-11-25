@@ -181,6 +181,7 @@ dependencies = [
  "cellgov_fuzz",
  "cellgov_install",
  "cellgov_lv1",
+ "cellgov_lv1_archive",
  "cellgov_lv2_archive",
  "cellgov_mem",
  "cellgov_ppu",
@@ -370,6 +371,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cellgov_lv1_archive"
+version = "0.0.0"
+dependencies = [
+ "cellgov_event",
+ "cellgov_lv1",
+ "cellgov_lv2_archive",
+ "cellgov_ps3_abi",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "cellgov_lv2"
 version = "0.0.0"
 dependencies = [
@@ -390,12 +403,10 @@ name = "cellgov_lv2_archive"
 version = "0.0.0"
 dependencies = [
  "cellgov_event",
- "cellgov_lv1",
  "cellgov_lv2",
  "cellgov_mem",
  "cellgov_ps3_abi",
  "cellgov_time",
- "serde_json",
  "sha2",
  "strum",
  "thiserror",

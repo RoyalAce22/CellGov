@@ -1,7 +1,9 @@
 //! The LV1 hypercall tables: `hypercall_site.tsv`,
 //! `hypercall_unresolved.tsv` and `hypercall.tsv`.
 
-use super::schema::{Column, ColumnKind, OwnerClass, TableSpec, GATE, REGENERATE};
+use cellgov_lv2_archive::{Column, ColumnKind, OwnerClass, TableSpec};
+
+use super::schema::{GATE, REGENERATE};
 
 /// Rewrites the two hypercall site tables: `cellgov dev hypercall-census`
 /// over every `kernel.tsv` kernel in the installed firmware.

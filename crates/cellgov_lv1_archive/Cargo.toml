@@ -1,0 +1,24 @@
+[package]
+name = "cellgov_lv1_archive"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+cellgov_lv1 = { path = "../cellgov_lv1" }
+# The table machinery and the shared firmware tables. One way only:
+# cellgov_lv2_archive never depends on this crate.
+cellgov_lv2_archive = { path = "../cellgov_lv2_archive" }
+cellgov_ps3_abi = { path = "../cellgov_ps3_abi" }
+thiserror = "2"
+
+[dev-dependencies]
+cellgov_event = { path = "../cellgov_event" }
+serde_json = "1"

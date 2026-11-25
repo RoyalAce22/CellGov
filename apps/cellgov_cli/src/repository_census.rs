@@ -2,7 +2,7 @@
 //! emits the repository reads it makes into the archive's
 //! `repository_read.tsv`.
 //!
-//! `cellgov_boot` runs the kernel; `cellgov_lv2_archive` holds the rows
+//! `cellgov_boot` runs the kernel; `cellgov_lv1_archive` holds the rows
 //! and renders the table. The command replaces the rows of the named PUP
 //! and keeps every other PUP's rows. It boots only the kernel ELF that
 //! `kernel.tsv` names for that PUP.
@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 
 use cellgov_boot::kernel::{run_kernel_from_entry, KernelRun, KernelRunError, KernelRunStop};
 use cellgov_lv1::HypercallRefusal;
-use cellgov_lv2_archive::{self as archive, ExtractionError, RepositoryReadRow, REPOSITORY_READ};
+use cellgov_lv1_archive::{self as lv1_archive, RepositoryReadRow, REPOSITORY_READ};
+use cellgov_lv2_archive::{self as archive, ExtractionError};
 
 use crate::cli::exit::CommandError;
 use crate::cli::parse::RepositoryCensusArgs;
@@ -39,7 +40,7 @@ enum RepositoryCensusError {
         reads: usize,
     },
     #[error(transparent)]
-    MixedRead(#[from] archive::MixedRepositoryRead),
+    MixedRead(#[from] lv1_archive::MixedRepositoryRead),
     #[error("read existing {}: {source}", path.display())]
     Read {
         path: PathBuf,
@@ -137,8 +138,8 @@ fn emit(args: &RepositoryCensusArgs, elf: &[u8]) -> Result<KernelRun, Repository
     let fresh = census_rows(&args.pup_sha256, args.max_steps, &boot)?;
     let path = args.output_dir.join(REPOSITORY_READ.file());
     let mut rows = load_existing(&path)?;
-    archive::replace_repository_reads(&mut rows, &args.pup_sha256, fresh);
-    let text = archive::repository_read_tsv(&rows)
+    lv1_archive::replace_repository_reads(&mut rows, &args.pup_sha256, fresh);
+    let text = lv1_archive::repository_read_tsv(&rows)
         .map_err(|source| RepositoryCensusError::Render { source })?;
     write(&path, &text)?;
     Ok(boot)
@@ -151,7 +152,7 @@ fn emit(args: &RepositoryCensusArgs, elf: &[u8]) -> Result<KernelRun, Repository
 /// logged boot.
 // The step cap is a deadlock bound that callers abort on (cellgov_core
 // `StepError::MaxStepsExceeded`). The archive logs each boot's reads up to
-// where CellGov's hypervisor stops it (docs/lv2/README.md, "Hypervisor
+// where CellGov's hypervisor stops it (docs/lv1/README.md, "Hypervisor
 // repository"); a capped run stops where the cap fell instead.
 fn census_rows(
     pup_sha256: &str,
@@ -165,7 +166,7 @@ fn census_rows(
             reads: boot.repository_reads.len(),
         });
     }
-    archive::repository_read_rows_of(pup_sha256, &boot.repository_reads)
+    lv1_archive::repository_read_rows_of(pup_sha256, &boot.repository_reads)
         .map_err(RepositoryCensusError::from)
 }
 
@@ -183,7 +184,7 @@ fn load_existing(path: &Path) -> Result<Vec<RepositoryReadRow>, RepositoryCensus
     };
     let table = archive::parse(&REPOSITORY_READ, &text)
         .map_err(|source| RepositoryCensusError::Parse { source })?;
-    Ok(archive::repository_read_rows(&table))
+    Ok(lv1_archive::repository_read_rows(&table))
 }
 
 fn write(path: &Path, text: &str) -> Result<(), RepositoryCensusError> {
