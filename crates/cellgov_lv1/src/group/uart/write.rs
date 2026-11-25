@@ -31,10 +31,12 @@ use super::buffer::{self, BufferCheck, BufferRegion};
 use super::receive::ReceivedBytes;
 use super::reply;
 use super::request::PendingRequest;
-use super::status;
+use super::shadow::{self, StatusInput};
 use super::{UartChange, UartState};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
+use crate::group::interrupt::raise::RaiseState;
+use crate::group::interrupt::InterruptGroupState;
 use crate::group::memory::region::MemoryState;
 use crate::request::HypercallRequest;
 
@@ -50,6 +52,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
                 firmware: input.firmware,
                 memory: input.groups.memory().regions(),
                 uart: input.groups.uart(),
+                interrupt: input.groups.interrupt(),
                 storage: input.storage,
             },
         )
@@ -64,8 +67,25 @@ pub(crate) struct WriteInput<'a> {
     pub(crate) memory: &'a MemoryState,
     /// The virtual UART group's state.
     pub(crate) uart: &'a UartState,
+    /// The interrupt group's state, which a status step reads.
+    pub(crate) interrupt: &'a InterruptGroupState,
     /// The caller's real address space, which holds the bytes to send.
     pub(crate) storage: &'a GuestMemory,
+}
+
+impl WriteInput<'_> {
+    /// The state that a status step after the write reads.
+    fn status(&self) -> StatusInput<'_> {
+        StatusInput {
+            uart: self.uart,
+            raise: RaiseState {
+                bitmaps: self.interrupt.bitmaps(),
+                ports: self.interrupt.ports(),
+                paused: self.interrupt.paused(),
+                storage: self.storage,
+            },
+        }
+    }
 }
 
 fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDisposition {
@@ -207,9 +227,9 @@ struct Buffer {
 ///   request that is not complete, and lv1 writes all the bytes when that
 ///   count and `buffer.size` fit in the buffer.
 /// - CellGov's storage does not hold the bytes.
-/// - The port's interrupt mask can raise the port's interrupt when lv1
-///   computes the status after the write; see [`status::mask_refusal`].
-///   CellGov delivers no such interrupt.
+/// - The status step after the write refuses; see
+///   [`shadow::status_step`]. The write leaves the port's receive buffer
+///   as it is, so the step changes no bit.
 ///
 /// A write whose bytes complete a request gets the answer that
 /// [`completing_write`] gives.
@@ -238,17 +258,25 @@ fn dispatcher_write(
             "a virtual UART write buffer whose bytes CellGov's storage does not hold",
         );
     };
-    let params = input.uart.port_params(row.port);
-    let received = input.uart.received(row.port);
-    if let Some(what) = status::mask_refusal(firmware, &params, received.len() as u64) {
-        return refuse(request, what);
-    }
     let next = pending.with(&bytes);
     if next.is_complete() {
         return completing_write(request, input, firmware, row, &pending, &bytes);
     }
+    let params = input.uart.port_params(row.port);
+    let received = input.uart.received(row.port).len() as u64;
     let mut answer = written_answer(buffer.size);
     answer.push_change(UartChange::RequestBytesSent(next));
+    let step = shadow::status_step(
+        request,
+        firmware,
+        &input.status(),
+        &params,
+        received,
+        &mut answer,
+    );
+    if let Err(error) = step {
+        return error.refusal(request);
+    }
     HypercallDisposition::Answered(answer)
 }
 
@@ -260,14 +288,19 @@ fn dispatcher_write(
 /// the port's receive buffer at this write. The answer is r3 = 0 with the
 /// bytes written in r4. It carries these changes:
 /// - the port holds no request that is not complete;
-/// - the port's receive buffer holds the reply after its earlier bytes.
+/// - the port's receive buffer holds the reply after its earlier bytes;
+/// - the status step for the filled buffer; see [`shadow::status_step`].
+///
+/// lv1's endpoint write function calls the port's listeners after it
+/// copies bytes to the port's receive buffer
+/// [OFW-4.93 lv1 a:0x2F0324-0x2F03AC]. A raise of the port's shadow bit
+/// can give the irq outlet an event, which raises the plug's bit of the
+/// outlet's thread.
 ///
 /// The call is a refusal in these cases, in this order:
 /// - [`reply::dispatcher_reply`] gives no reply;
 /// - the reply is more than the free bytes of the port's receive buffer;
-/// - the port's mask can raise the port's interrupt when lv1 computes the
-///   status after the reply; see [`status::reply_refusal`]. CellGov
-///   delivers no such interrupt.
+/// - the status step refuses.
 fn completing_write(
     request: &HypercallRequest,
     input: &WriteInput<'_>,
@@ -289,9 +322,7 @@ fn completing_write(
         );
     }
     let params = input.uart.port_params(row.port);
-    if let Some(what) = status::reply_refusal(firmware, &params, queued.len() as u64) {
-        return refuse(request, what);
-    }
+    let count = queued.len() as u64;
     let mut answer = written_answer(bytes.len() as u64);
     answer.push_change(UartChange::RequestBytesSent(PendingRequest::empty(
         row.port,
@@ -300,6 +331,17 @@ fn completing_write(
         port: row.port,
         bytes: queued,
     }));
+    let step = shadow::status_step(
+        request,
+        firmware,
+        &input.status(),
+        &params,
+        count,
+        &mut answer,
+    );
+    if let Err(error) = step {
+        return error.refusal(request);
+    }
     HypercallDisposition::Answered(answer)
 }
 

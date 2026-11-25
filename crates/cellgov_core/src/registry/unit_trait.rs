@@ -102,6 +102,14 @@ pub trait RegisteredUnit: 'static {
     /// [`ExecutionUnit::load_page_table`].
     fn load_page_table(&mut self, sdr1: u64, lb: u8) -> bool;
 
+    /// Raises the thread's external exception. See
+    /// [`ExecutionUnit::raise_external_exception`].
+    fn raise_external_exception(&mut self) -> bool;
+
+    /// Clears the thread's external exception. See
+    /// [`ExecutionUnit::clear_external_exception`].
+    fn clear_external_exception(&mut self) -> bool;
+
     /// The PPE thread's issue pressure. See
     /// [`ExecutionUnit::ppe_issue_pressure`].
     fn ppe_issue_pressure(&self) -> cellgov_exec::PpeIssuePressure;
@@ -347,6 +355,16 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn load_page_table(&mut self, sdr1: u64, lb: u8) -> bool {
         ExecutionUnit::load_page_table(self, sdr1, lb)
+    }
+
+    #[inline]
+    fn raise_external_exception(&mut self) -> bool {
+        ExecutionUnit::raise_external_exception(self)
+    }
+
+    #[inline]
+    fn clear_external_exception(&mut self) -> bool {
+        ExecutionUnit::clear_external_exception(self)
     }
 
     #[inline]

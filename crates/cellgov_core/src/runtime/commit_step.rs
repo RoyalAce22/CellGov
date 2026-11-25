@@ -89,6 +89,11 @@ impl Runtime {
         effects: &[Effect],
     ) -> Result<CommitOutcome, CommitError> {
         self.step_woke_others = false;
+        // Both commit paths end a taken external interrupt, so the clear
+        // comes before the fast path.
+        if result.yield_reason == YieldReason::InterruptBoundary {
+            self.end_external_interrupt(result, source);
+        }
         if self.trivial_commit_eligible(source, result, effects) {
             self.epoch.advance();
             // This path fires no completion, so the list this commit

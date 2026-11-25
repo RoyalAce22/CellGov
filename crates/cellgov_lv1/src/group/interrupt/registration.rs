@@ -59,13 +59,13 @@ pub(crate) const GROUP: Group = Group {
             stamp: Stamp::Version(29),
         },
         HashedSurface {
-            name: "the status shadows of the logical PPE threads",
-            source: Some(IRQ_STATUS_SHADOW_SOURCE),
-            stamp: Stamp::Version(29),
+            name: "the irq outlets with a pending event",
+            source: Some(PENDING_EVENT_SOURCE),
+            stamp: Stamp::Version(30),
         },
         HashedSurface {
-            name: "the paused PPE hardware threads that lv1 woke",
-            source: Some(WOKEN_THREAD_SOURCE),
+            name: "the status shadows of the logical PPE threads",
+            source: Some(IRQ_STATUS_SHADOW_SOURCE),
             stamp: Stamp::Version(29),
         },
     ],
@@ -87,24 +87,20 @@ pub(crate) const IRQ_OUTLET_SOURCE: u8 = 144;
 /// object per thread in thread order.
 pub(crate) const PAUSED_THREAD_SOURCE: u8 = 145;
 
-/// The lane source of the event receive ports with a pending event, one
-/// object per port in id order.
+/// The lane source of the event receive ports and irq outlets with a
+/// pending event, one object per id in id order.
 pub(crate) const PENDING_EVENT_SOURCE: u8 = 146;
 
 /// The lane source of the status shadows with a set bit, one object per
 /// logical PPE thread in key order.
 pub(crate) const IRQ_STATUS_SHADOW_SOURCE: u8 = 147;
 
-/// The lane source of the paused threads that lv1 woke, one object per
-/// thread in thread order.
-pub(crate) const WOKEN_THREAD_SOURCE: u8 = 148;
-
 /// The interrupt group's state.
 ///
 /// The state holds:
 /// - the interrupt state bitmaps and the status shadows;
 /// - the event receive ports, the irq outlets and the pending events;
-/// - the paused threads and their wakes.
+/// - the paused threads.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InterruptGroupState {
     bitmaps: IrqStateBitmapState,
@@ -124,8 +120,7 @@ impl InterruptGroupState {
         &self.ports
     }
 
-    /// The PPE hardware threads that lv1 paused, and the paused threads
-    /// that lv1 woke.
+    /// The PPE hardware threads that lv1 paused.
     pub fn paused(&self) -> &PausedThreadState {
         &self.paused
     }
@@ -173,11 +168,13 @@ pub enum InterruptChange {
     OutletPlugConnect(EventReceivePort),
     /// The call paused this thread.
     ThreadPaused(PausedThread),
-    /// The call set the pending byte of the port with this id.
+    /// The call set the pending byte of the port or irq outlet with this
+    /// id.
     EventPending(u64),
     /// The call left this doubleword in a thread's status shadow.
     StatusShadow(StatusShadowWrite),
-    /// lv1 cleared the pause flag of this paused hardware thread.
+    /// lv1 cleared the pause flag of this paused hardware thread, which
+    /// ends its pause. The thread then returns from `pause`.
     ThreadWoken(u8),
 }
 

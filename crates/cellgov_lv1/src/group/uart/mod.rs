@@ -18,6 +18,7 @@ mod registration;
 mod reply;
 mod request;
 mod set_param;
+mod shadow;
 mod status;
 mod write;
 
@@ -27,3 +28,4 @@ pub(crate) use registration::GROUP;
 pub use registration::{UartChange, UartState};
 pub use request::PendingRequest;
 pub use set_param::VirtualUartPortParams;
+pub use shadow::{VirtualUartShadowWrite, UART_SHADOW_DOUBLEWORDS};

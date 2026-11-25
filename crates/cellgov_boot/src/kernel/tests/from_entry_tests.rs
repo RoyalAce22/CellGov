@@ -31,6 +31,9 @@ mod start_msr;
 #[path = "from_entry_partition_tests.rs"]
 mod partition;
 
+#[path = "from_entry_external_tests.rs"]
+mod external;
+
 /// A firmware for which CellGov serves the repository values of the
 /// psdevwiki dump.
 const FW: &str = "1.50";

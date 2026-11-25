@@ -39,6 +39,8 @@ fn answered(r3: u64, path: ReturnPath) -> HypercallDisposition {
         page_table: None,
         changes: Vec::new(),
         pauses_caller: false,
+        external: None,
+        resumed: Vec::new(),
     })
 }
 

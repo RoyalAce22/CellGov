@@ -1,4 +1,5 @@
 use super::*;
+use crate::group::interrupt::InterruptGroupState;
 use crate::group::memory::region::MemoryRegion;
 use cellgov_event::UnitId;
 use cellgov_mem::{PageSize, Region};
@@ -80,6 +81,7 @@ fn write_at(
             firmware,
             memory,
             uart: &UartState::default(),
+            interrupt: &InterruptGroupState::default(),
             storage: &storage(),
         },
     )

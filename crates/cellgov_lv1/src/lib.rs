@@ -41,6 +41,7 @@
 
 mod answer;
 mod cost;
+mod external;
 mod group;
 mod handlers;
 mod request;
@@ -50,7 +51,7 @@ mod vector;
 
 pub use answer::{
     ConsoleWrite, HypercallAnswer, HypercallDisposition, HypercallRefusal, OutputRegisters,
-    PageTableLoad, ReturnPath,
+    PageTableLoad, ReturnPath, ThreadResume,
 };
 pub use cost::cost;
 pub use group::device_bus::{DeviceBusChange, DeviceBusState};
@@ -83,8 +84,9 @@ pub use group::state::{GroupStates, StateChange};
 pub use group::storage::{StorageChange, StorageState};
 pub use group::uart::{
     PendingRequest, ReceivedBytes, UartChange, UartState, VirtualUartIrq, VirtualUartPortParams,
+    VirtualUartShadowWrite, UART_SHADOW_DOUBLEWORDS,
 };
 pub use handlers::{answer, answered_numbers, answers};
 pub use request::HypercallRequest;
-pub use return_path::{Compare, ReturnPair, ReturnRegisters};
+pub use return_path::{Compare, ExternalDelivery, ReturnPair, ReturnRegisters, SavedMsrs};
 pub use state::{HypercallWitness, Hypervisor};

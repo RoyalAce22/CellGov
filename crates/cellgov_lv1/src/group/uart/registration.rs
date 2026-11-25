@@ -12,6 +12,7 @@ use super::read;
 use super::receive::ReceivedBytes;
 use super::request::PendingRequest;
 use super::set_param::{self, VirtualUartPortParams};
+use super::shadow::{VirtualUartShadow, VirtualUartShadowWrite, UART_SHADOW_DOUBLEWORDS};
 use super::write;
 use crate::group::state::StateChange;
 use crate::group::table::Group;
@@ -48,7 +49,12 @@ pub(crate) const GROUP: Group = Group {
         HashedSurface {
             name: "the bytes in the receive buffer of each service port of the virtual UART",
             source: Some(VIRTUAL_UART_RECEIVED_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(30),
+        },
+        HashedSurface {
+            name: "the interrupt shadow of the virtual UART's ports",
+            source: Some(VIRTUAL_UART_SHADOW_SOURCE),
+            stamp: Stamp::Version(30),
         },
     ],
 };
@@ -70,20 +76,33 @@ pub(crate) const VIRTUAL_UART_REQUEST_SOURCE: u8 = 242;
 /// each port with such a buffer, keyed by its index in port order.
 pub(crate) const VIRTUAL_UART_RECEIVED_SOURCE: u8 = 243;
 
+/// The lane source of the virtual UART's interrupt shadow: one object,
+/// with key 0, while a bit is set.
+pub(crate) const VIRTUAL_UART_SHADOW_SOURCE: u8 = 244;
+
 /// The virtual UART group's state:
 /// - the interrupt configuration of the partition's virtual UART;
 /// - the triggers and the interrupt mask of each port;
 /// - the bytes of the request that is not complete on each port;
-/// - the bytes in the receive buffer of each port.
+/// - the bytes in the receive buffer of each port;
+/// - the interrupt shadow of the ports.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UartState {
     irq: Option<VirtualUartIrq>,
     ports: BTreeMap<u64, VirtualUartPortParams>,
     requests: BTreeMap<u64, PendingRequest>,
     received: BTreeMap<u64, ReceivedBytes>,
+    /// lv1's init function clears the shadow [OFW-4.93 lv1 a:0x2F130C-0x2F1318].
+    shadow: [u64; UART_SHADOW_DOUBLEWORDS],
 }
 
 impl UartState {
+    /// The virtual UART's interrupt shadow, one bit for each port; see
+    /// [`cellgov_ps3_abi::lv1::uart::virtual_uart_shadow_bit`].
+    pub fn shadow(&self) -> [u64; UART_SHADOW_DOUBLEWORDS] {
+        self.shadow
+    }
+
     /// The virtual UART's interrupt configuration, or `None` before
     /// `configure_virtual_uart_irq` succeeds.
     pub fn irq(&self) -> Option<&VirtualUartIrq> {
@@ -150,16 +169,30 @@ impl UartState {
                     self.received.insert(received.port, received);
                 }
             }
+            UartChange::ShadowSet(write) => {
+                if let Some(doubleword) = self.shadow.get_mut(usize::from(write.index)) {
+                    *doubleword = write.value;
+                }
+            }
         }
     }
 
     /// The sync-state terms of the interrupt configuration, the ports'
-    /// values, the requests that are not complete and the receive buffers.
-    /// An empty state adds no term.
+    /// values, the requests that are not complete, the receive buffers and
+    /// the shadow. An empty state adds no term.
     pub fn sync_term(&self) -> u128 {
-        let irq = self
-            .irq
-            .map_or(0, |irq| lanes::value_term(VIRTUAL_UART_IRQ_SOURCE, 0, &irq));
+        let shadow = if self.shadow == [0; UART_SHADOW_DOUBLEWORDS] {
+            0
+        } else {
+            lanes::value_term(
+                VIRTUAL_UART_SHADOW_SOURCE,
+                0,
+                &VirtualUartShadow(self.shadow),
+            )
+        };
+        let irq = self.irq.map_or(shadow, |irq| {
+            shadow.wrapping_add(lanes::value_term(VIRTUAL_UART_IRQ_SOURCE, 0, &irq))
+        });
         let ports = (0u64..)
             .zip(self.ports.values())
             .fold(irq, |sum, (index, params)| {
@@ -201,6 +234,8 @@ pub enum UartChange {
     RequestBytesSent(PendingRequest),
     /// The call left these bytes in a port's receive buffer.
     ReceiveBufferSet(ReceivedBytes),
+    /// The call left this doubleword in the virtual UART's shadow.
+    ShadowSet(VirtualUartShadowWrite),
 }
 
 impl From<UartChange> for StateChange {

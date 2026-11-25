@@ -3,10 +3,9 @@
 //! partition's virtual UART.
 //!
 //! lv1 keeps the three values in the port's endpoint. After each call it
-//! computes the port's interrupt status, and raises the port's interrupt
-//! when the status and the mask share a bit; see
-//! [`cellgov_ps3_abi::lv1::uart`]. CellGov answers a call that raises no
-//! interrupt, and keeps and hashes the values of each port.
+//! computes the port's interrupt status, and sets or clears the port's
+//! shadow bit; see [`cellgov_ps3_abi::lv1::uart`] and [`super::shadow`].
+//! The hypervisor keeps and hashes the values of each port.
 
 use cellgov_mem::lanes::{LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::call::SET_VIRTUAL_UART_PARAM;
@@ -18,10 +17,11 @@ use cellgov_ps3_abi::lv1::uart::{
     VIRTUAL_UART_PARAM_RX_TRIGGER, VIRTUAL_UART_PARAM_TX_TRIGGER, VIRTUAL_UART_PORT_MAX,
 };
 
-use super::status;
-use super::{UartChange, UartState};
+use super::shadow::{self, StatusInput};
+use super::UartChange;
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
+use crate::group::interrupt::raise::RaiseState;
 use crate::request::HypercallRequest;
 
 /// The hypercalls this module answers.
@@ -29,7 +29,22 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
     number: SET_VIRTUAL_UART_PARAM,
     name: "set_virtual_uart_param",
     cost: None,
-    handler: |request, input| set_param(request, input.firmware, input.groups.uart()),
+    handler: |request, input| {
+        let interrupt = input.groups.interrupt();
+        set_param(
+            request,
+            input.firmware,
+            &StatusInput {
+                uart: input.groups.uart(),
+                raise: RaiseState {
+                    bitmaps: interrupt.bitmaps(),
+                    ports: interrupt.ports(),
+                    paused: interrupt.paused(),
+                    storage: input.storage,
+                },
+            },
+        )
+    },
 }];
 
 /// The values that `set_virtual_uart_param` gave one port of the virtual
@@ -104,14 +119,15 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
 /// - no source gives the port r3 at `firmware`;
-/// - the call leaves a mask other than 0 with which lv1 can raise the
-///   port's interrupt, for the bytes in the port's receive buffer. The
-///   refusal names the mask bit; see [`status::mask_refusal`].
+/// - the status step after the call refuses; see [`shadow::status_step`].
+///
+/// Otherwise the answer also carries that step.
 pub(crate) fn set_param(
     request: &HypercallRequest,
     firmware: Option<&str>,
-    uart: &UartState,
+    input: &StatusInput<'_>,
 ) -> HypercallDisposition {
+    let uart = input.uart;
     let Some(firmware) = firmware.filter(|fw| virtual_uart_set_param_handler(fw).is_some()) else {
         return refuse(
             request,
@@ -139,11 +155,13 @@ pub(crate) fn set_param(
         _ => return lv1_answer(SET_VIRTUAL_UART_PARAM_NO_PARAM_R3),
     }
     let received = uart.received(port).len() as u64;
-    if let Some(what) = status::mask_refusal(firmware, &params, received) {
-        return refuse(request, what);
-    }
     let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []);
     answer.push_change(UartChange::PortParamsSet(params));
+    if let Err(error) =
+        shadow::status_step(request, firmware, input, &params, received, &mut answer)
+    {
+        return error.refusal(request);
+    }
     HypercallDisposition::Answered(answer)
 }
 

@@ -6,27 +6,27 @@
 //! [`cellgov_ps3_abi::lv1::pause`]. So the handler reads
 //! [`HypercallRequest::thread`].
 //!
-//! CellGov delivers no wake to a paused thread:
-//! - `send_event_locally` can raise an unmasked plug's bit on a paused
-//!   thread. lv1 then clears the thread's pause flag, and the hypervisor
-//!   keeps that wake; see [`PausedThreadState::is_woken`].
-//! - CellGov does not model the decrementer wake of mode 0.
-//!
-//! A paused thread therefore stays parked, and the run that holds it says
-//! so where it stops. A thread that resumes from a pause returns through
-//! lv1's vector, which checks the thread's status shadow against its mask;
-//! see [`cellgov_ps3_abi::lv1::interrupt_mask`].
+//! A raise on an unmasked plug of a paused thread wakes it; see
+//! [`super::raise::raise`]. The wake ends the pause, and the thread
+//! returns from the call through lv1's vector, which checks the thread's
+//! status shadow against its mask; see
+//! [`cellgov_ps3_abi::lv1::interrupt_mask`]. CellGov does not model the
+//! decrementer wake of mode 0.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use cellgov_mem::lanes::{self, LaneValue, ObjectLanes};
+use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::lv1::call::PAUSE;
 use cellgov_ps3_abi::lv1::pause::{
     pause_handler, PAUSE_MODE_DECREMENTER_IGNORED, PAUSE_MODE_DECREMENTER_WAKES, PAUSE_MODE_R3,
 };
+use cellgov_ps3_abi::lv1::ppe::game_os_logical_ppe_id;
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
-use super::{InterruptChange, PAUSED_THREAD_SOURCE, WOKEN_THREAD_SOURCE};
+use super::bitmap::{IrqStateBitmapKey, IrqStateBitmapState};
+use super::raise::unmasked;
+use super::{InterruptChange, PAUSED_THREAD_SOURCE};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::request::HypercallRequest;
@@ -36,7 +36,14 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
     number: PAUSE,
     name: "pause",
     cost: None,
-    handler: |request, input| pause(request, input.firmware),
+    handler: |request, input| {
+        pause(
+            request,
+            input.firmware,
+            input.groups.interrupt().bitmaps(),
+            input.storage,
+        )
+    },
 }];
 
 /// One thread that lv1 paused.
@@ -57,21 +64,10 @@ impl LaneValue for PausedThread {
     }
 }
 
-/// A paused thread that lv1 woke. Field 1 is the thread.
-struct WokenThread(u8);
-
-impl LaneValue for WokenThread {
-    fn lanes(&self, lanes: &mut ObjectLanes) {
-        lanes.lane(1, 0, u64::from(self.0));
-    }
-}
-
-/// The threads that lv1 paused, each with its wake flag, and the paused
-/// threads that lv1 woke.
+/// The threads that lv1 paused, each with its wake flag.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PausedThreadState {
     paused: BTreeMap<u8, bool>,
-    woken: BTreeSet<u8>,
 }
 
 impl PausedThreadState {
@@ -101,40 +97,22 @@ impl PausedThreadState {
         self.paused.insert(paused.thread, paused.decrementer_wakes);
     }
 
-    /// Whether lv1 cleared the pause flag of the paused thread `thread`.
-    ///
-    /// lv1 clears the flag for an interrupt on an unmasked plug. CellGov
-    /// delivers no wake, so the thread stays parked.
-    pub fn is_woken(&self, thread: u8) -> bool {
-        self.woken.contains(&thread)
-    }
-
-    /// Keeps the wake of the paused thread `thread`.
+    /// Ends the pause of the thread `thread`, as lv1's wake clears the
+    /// thread's pause flag.
     pub(crate) fn wake(&mut self, thread: u8) {
-        self.woken.insert(thread);
+        self.paused.remove(&thread);
     }
 
-    /// The sync-state terms of the paused threads and their wakes.
+    /// The sync-state terms of the paused threads.
     ///
     /// Each paused thread is one object of the lane source
-    /// `PAUSED_THREAD_SOURCE`, and each woken thread is one object of the
-    /// lane source `WOKEN_THREAD_SOURCE`. Each object's key is its index
-    /// in thread order. A state with no paused thread and no wake adds no
-    /// term.
+    /// `PAUSED_THREAD_SOURCE`, keyed by its index in thread order. A
+    /// state with no paused thread adds no term.
     pub fn sync_term(&self) -> u128 {
-        let paused = (0u64..)
+        (0u64..)
             .zip(self.threads())
             .fold(0u128, |sum, (index, paused)| {
                 sum.wrapping_add(lanes::value_term(PAUSED_THREAD_SOURCE, index, &paused))
-            });
-        (0u64..)
-            .zip(&self.woken)
-            .fold(paused, |sum, (index, &thread)| {
-                sum.wrapping_add(lanes::value_term(
-                    WOKEN_THREAD_SOURCE,
-                    index,
-                    &WokenThread(thread),
-                ))
             })
     }
 }
@@ -150,28 +128,36 @@ fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDispositio
 
 /// Hypercall 9: pauses the calling thread in the mode r3.
 ///
-/// For mode 0 or 1, the answer is r3 = 0 with r4 to r10 cleared, and
-/// the caller pauses. The answer carries the paused thread and its wake
-/// flag, and the hypervisor keeps them. lv1 ends the call with no pause
-/// in two cases, and CellGov's hypervisor answers neither:
-/// - an unmasked status shadow bit. The hypervisor raises a bit only on
-///   a paused thread, so the caller's shadow is 0;
-/// - in mode 0, a pending decrementer interrupt that lv1 keeps in the
-///   byte at +1830. CellGov's hypervisor keeps no such byte.
+/// For mode 0 or 1, the answer is r3 = 0 with r4 to r10 cleared. lv1's
+/// pause step ends the call with no pause when the caller's status shadow
+/// holds a bit that its mask holds [OFW-4.93 lv1 a:0x2C6930-0x2C695C].
+/// Otherwise the caller pauses: the answer carries the paused thread and
+/// its wake flag, and the hypervisor keeps them.
+///
+/// lv1 also ends a mode 0 call with no pause while a decrementer
+/// interrupt is pending in the byte at +1830. CellGov's hypervisor keeps
+/// no such byte.
 ///
 /// Any other mode gets [`PAUSE_MODE_R3`] with r4 to r10 cleared, and the
 /// caller does not pause.
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
-/// - the request names no hardware thread.
-pub(crate) fn pause(request: &HypercallRequest, firmware: Option<&str>) -> HypercallDisposition {
-    if firmware.and_then(pause_handler).is_none() {
+/// - the request names no hardware thread;
+/// - the test of the shadow against the mask is a refusal of
+///   [`unmasked`].
+pub(crate) fn pause(
+    request: &HypercallRequest,
+    firmware: Option<&str>,
+    bitmaps: &IrqStateBitmapState,
+    storage: &GuestMemory,
+) -> HypercallDisposition {
+    let Some(firmware) = firmware.filter(|fw| pause_handler(fw).is_some()) else {
         return refuse(
             request,
             "a pause at a firmware whose lv1 handler is not read",
         );
-    }
+    };
     let decrementer_wakes = match request.r(3) {
         PAUSE_MODE_DECREMENTER_WAKES => true,
         PAUSE_MODE_DECREMENTER_IGNORED => false,
@@ -181,6 +167,15 @@ pub(crate) fn pause(request: &HypercallRequest, firmware: Option<&str>) -> Hyper
         return refuse(request, "a pause from a unit that names no hardware thread");
     };
     let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []);
+    let pending = match game_os_logical_ppe_id(firmware) {
+        Some(ppe_id) => unmasked(bitmaps, IrqStateBitmapKey { ppe_id, thread }, storage),
+        None => Ok(false),
+    };
+    match pending {
+        Ok(true) => return HypercallDisposition::Answered(answer),
+        Ok(false) => {}
+        Err(error) => return error.refusal(request),
+    }
     answer.push_change(InterruptChange::ThreadPaused(PausedThread {
         thread,
         decrementer_wakes,

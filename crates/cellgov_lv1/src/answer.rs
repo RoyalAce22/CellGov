@@ -9,7 +9,7 @@ use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
 use crate::group::state::StateChange;
 use crate::request::HypercallRequest;
-use crate::return_path::{self, ReturnRegisters};
+use crate::return_path::{self, ExternalDelivery, ReturnRegisters};
 
 /// The values for r4 to r10, in register order.
 pub type OutputRegisters = [u64; MAX_OUTPUTS as usize];
@@ -57,6 +57,23 @@ pub struct HypercallAnswer {
     /// When it is set, the runtime parks the caller. The caller gets the
     /// return only when a wake makes it runnable again.
     pub pauses_caller: bool,
+    /// The external interrupt that lv1's return raises for the caller,
+    /// or `None` when it raises none. The hypervisor sets it as it
+    /// dispatches the call.
+    pub external: Option<ExternalDelivery>,
+    /// Each paused thread that the call woke, which returns from its
+    /// `pause`. The hypervisor sets it as it dispatches the call.
+    pub resumed: Vec<ThreadResume>,
+}
+
+/// A paused thread that a call woke, and the external interrupt that its
+/// return from `pause` raises.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThreadResume {
+    /// The PPE hardware thread.
+    pub thread: u8,
+    /// The external interrupt of its return, or `None`.
+    pub external: Option<ExternalDelivery>,
 }
 
 /// How lv1's vector returns to the caller.
@@ -130,14 +147,20 @@ impl HypercallAnswer {
 
     /// What lv1's return leaves in r0, r11, r12 and CR for `request`,
     /// from a hypervisor for the firmware version `firmware`.
+    ///
+    /// A return that raises the external interrupt leaves the registers
+    /// of [`return_path::delivering_table`].
     pub fn return_registers(
         &self,
         request: &HypercallRequest,
         firmware: Option<&str>,
     ) -> ReturnRegisters {
-        match self.path {
-            ReturnPath::Table(_) => return_path::table(request.problem_state, firmware),
-            ReturnPath::PastTheTable(registers) => registers,
+        match (self.path, self.external) {
+            (ReturnPath::Table(_), None) => return_path::table(request.problem_state, firmware),
+            (ReturnPath::Table(_), Some(delivery)) => {
+                return_path::delivering_table(request.problem_state, firmware, delivery)
+            }
+            (ReturnPath::PastTheTable(registers), _) => registers,
         }
     }
 
@@ -150,6 +173,8 @@ impl HypercallAnswer {
             page_table: None,
             changes: Vec::new(),
             pauses_caller: false,
+            external: None,
+            resumed: Vec::new(),
         }
     }
 
@@ -247,6 +272,33 @@ impl HypercallRefusal {
                 cellgov_ps3_abi::lv1::call::READ_REPOSITORY_NODE
             }
         }
+    }
+}
+
+/// Inputs that a step of a handler finds and that CellGov does not model.
+/// The handler refuses the call with
+/// [`HypercallRefusal::UnmodelledInput`], which names `what`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the model does not cover {what}")]
+pub(crate) struct UnmodelledError {
+    /// The inputs, as the refusal names them.
+    pub(crate) what: &'static str,
+}
+
+impl UnmodelledError {
+    /// The error for the inputs `what`.
+    pub(crate) const fn new(what: &'static str) -> Self {
+        Self { what }
+    }
+
+    /// The refusal of `request` for these inputs.
+    pub(crate) fn refusal(self, request: &HypercallRequest) -> HypercallDisposition {
+        HypercallDisposition::Refused(HypercallRefusal::UnmodelledInput {
+            number: request.number,
+            unit: request.unit,
+            pc: request.pc,
+            what: self.what,
+        })
     }
 }
 

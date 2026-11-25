@@ -1,5 +1,6 @@
 use super::*;
 use crate::allocated_storage;
+use crate::group::interrupt::InterruptGroupState;
 use crate::group::memory::region::MemoryRegion;
 use crate::group::uart::VirtualUartPortParams;
 use cellgov_event::UnitId;
@@ -167,6 +168,7 @@ fn write_with(
             firmware: Some("4.93"),
             memory,
             uart,
+            interrupt: &InterruptGroupState::default(),
             storage,
         },
     )

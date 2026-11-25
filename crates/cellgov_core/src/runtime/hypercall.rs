@@ -14,7 +14,13 @@
 //!   - the r0, r11, r12 and CR fields that lv1's return leaves.
 //!
 //! An answer that pauses the caller also parks it. The caller takes its
-//! committed inputs at its first step after a wake makes it runnable.
+//! committed inputs at its first step after a wake makes it runnable. An
+//! answer that wakes a paused thread makes that thread's unit runnable.
+//!
+//! The hypervisor tests each return for an external interrupt, as lv1's
+//! return does. The runtime raises the external exception of a thread
+//! whose return delivers one, and clears it when the thread takes the
+//! interrupt or a later return that gives outputs delivers none.
 //!
 //! A refusal answers nothing. The hypervisor keeps it, and the next
 //! [`Runtime::step`] stops the run with it.
@@ -24,11 +30,13 @@ use cellgov_event::UnitId;
 use cellgov_exec::{CompareFields, CompareResult, ExecutionStepResult};
 use cellgov_lv1::{
     cost, Compare, HypercallAnswer, HypercallDisposition, HypercallRefusal, HypercallRequest,
-    PageTableLoad, ReturnPair,
+    PageTableLoad, ReturnPair, SavedMsrs, ThreadResume,
 };
+use cellgov_ps3_abi::hw::ppu_interrupt::VECTOR_EXTERNAL;
 use cellgov_ps3_abi::lv1::call::{LOGICAL_CONSOLE_SEND_MAX, MAX_OUTPUTS};
 use cellgov_trace::{HostWriter, TraceRecord, TracedHypercallDisposition, CONSOLE_RECORD_BYTES};
 
+use crate::registry::UnitRegistry;
 use crate::runtime::types::RuntimeMode;
 use crate::runtime::Runtime;
 
@@ -69,7 +77,8 @@ impl Runtime {
         let space = self.spaces.space_of(source);
         let storage =
             crate::runtime::spaces::resolve_space_memory(&self.memory, &self.spaces, space);
-        let disposition = self.hypervisor.dispatch_with(&request, storage);
+        let msrs = saved_msrs(&self.registry);
+        let disposition = self.hypervisor.dispatch_returning(&request, storage, &msrs);
         if self.mode != RuntimeMode::FaultDriven {
             self.trace.record(&TraceRecord::HypercallEntered {
                 unit: source,
@@ -129,6 +138,96 @@ impl Runtime {
         if answer.pauses_caller {
             self.registry
                 .set_status_override(unit, cellgov_exec::UnitStatus::Blocked);
+        } else if answer.outputs().is_some() {
+            self.set_external_exception(unit, answer.external.is_some());
+        }
+        for resume in &answer.resumed {
+            self.resume_paused_thread(resume);
+        }
+    }
+
+    /// Makes the paused thread of `resume` runnable, as lv1's wake ends
+    /// its pause, and gives its return from `pause` the external interrupt
+    /// that lv1's return raises.
+    ///
+    /// The thread took the rest of its return when it paused. A raise
+    /// replaces r11 and r12 with the vector and the new MSR, as lv1 loads
+    /// them after the raise. The runtime gives a unit's register writes in
+    /// order, so these writes win.
+    fn resume_paused_thread(&mut self, resume: &ThreadResume) {
+        let unit = self
+            .registry
+            .iter()
+            .find(|(_, u)| u.ppe_thread() == Some(resume.thread))
+            .map(|(id, _)| id);
+        let Some(unit) = unit else {
+            self.lv2_host.log_invariant_break(
+                "dispatch.hypervisor_woken_thread_missing",
+                format_args!("no unit runs the woken PPE thread {}", resume.thread),
+            );
+            return;
+        };
+        self.registry.clear_status_override(unit);
+        // The wake makes another unit runnable, which the scheduler's
+        // notice of this step reports.
+        self.step_woke_others = true;
+        if let Some(delivery) = resume.external {
+            self.registry.push_register_write(unit, 11, delivery.vector);
+            self.registry.push_register_write(unit, 12, delivery.msr);
+        }
+        self.set_external_exception(unit, resume.external.is_some());
+    }
+
+    /// Raises the external exception of `unit` when `raised` is set, and
+    /// clears it otherwise, as lv1's return to the thread raises the
+    /// external interrupt or reloads the LPCR [OFW-4.93 lv1 a:0x1008].
+    ///
+    /// The exception exists until the thread takes the interrupt; see
+    /// [`Runtime::end_external_interrupt`]. A unit that takes no
+    /// exception logs an invariant break, and the interrupt is lost.
+    ///
+    /// # Panics
+    ///
+    /// Panics in a debug build where the unit takes no raised exception.
+    fn set_external_exception(&mut self, unit: UnitId, raised: bool) {
+        let Some(registered) = self.registry.get_mut(unit) else {
+            return;
+        };
+        if !raised {
+            // A unit with no supervisor registers holds no exception.
+            let _ = registered.clear_external_exception();
+            return;
+        }
+        if !registered.raise_external_exception() {
+            debug_assert!(false, "{unit:?} took no external exception");
+            self.lv2_host.log_invariant_break(
+                "dispatch.hypervisor_external_exception_refused",
+                format_args!("{unit:?} took no external exception, so its interrupt is lost"),
+            );
+        }
+    }
+
+    /// Clears the external exception of `source` when its step `result`
+    /// took the external interrupt.
+    ///
+    /// lv1 raises the interrupt once for each return that finds a shared
+    /// bit, and keeps no record of it. The next return tests the shadow
+    /// again; see [`cellgov_ps3_abi::lv1::interrupt_mask`].
+    pub(in crate::runtime) fn end_external_interrupt(
+        &mut self,
+        result: &ExecutionStepResult,
+        source: UnitId,
+    ) {
+        let took = result
+            .local_diagnostics
+            .interrupt
+            .is_some_and(|interrupt| interrupt.vector == VECTOR_EXTERNAL);
+        if !took {
+            return;
+        }
+        if let Some(registered) = self.registry.get_mut(source) {
+            // A unit with no supervisor registers takes no interrupt.
+            let _ = registered.clear_external_exception();
         }
     }
 
@@ -261,6 +360,23 @@ impl Runtime {
     }
 }
 
+/// The SRR1 that the `sc` of each PPE hardware thread sets, as lv1 saves
+/// it at the thread's hypercall, from each unit with supervisor
+/// registers.
+fn saved_msrs(registry: &UnitRegistry) -> SavedMsrs {
+    let mut msrs = SavedMsrs::default();
+    for (_, unit) in registry.iter() {
+        let (Some(thread), Some(save)) = (unit.ppe_thread(), unit.system_call_save_restore())
+        else {
+            continue;
+        };
+        if let Some(slot) = msrs.0.get_mut(usize::from(thread)) {
+            *slot = Some(save.srr1);
+        }
+    }
+    msrs
+}
+
 /// The CR fields of `cr`, as the caller's next step takes them.
 fn compare_fields(cr: &[Option<Compare>; 8]) -> CompareFields {
     CompareFields(cr.map(|field| {
@@ -298,3 +414,7 @@ mod hypercall_vector_tests;
 #[cfg(test)]
 #[path = "tests/hypercall_return_path_tests.rs"]
 mod hypercall_return_path_tests;
+
+#[cfg(test)]
+#[path = "tests/hypercall_external_tests.rs"]
+mod hypercall_external_tests;

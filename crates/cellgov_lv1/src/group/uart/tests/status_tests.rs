@@ -1,6 +1,9 @@
 use super::*;
-use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
-use crate::group::uart::set_param::set_param;
+use crate::answer::UnmodelledError;
+use crate::answer::{HypercallAnswer, HypercallDisposition};
+use crate::group::interrupt::raise::RaiseState;
+use crate::group::interrupt::InterruptGroupState;
+use crate::group::uart::shadow::{StatusInput, VirtualUartShadowWrite};
 use crate::group::uart::{UartChange, UartState};
 use crate::request::HypercallRequest;
 use crate::Hypervisor;
@@ -20,10 +23,6 @@ const SERVICE_PORTS: [(u64, u64); 2] = [(2, 0x800), (10, 0x1000)];
 const TX_RAISE: &str = "the transmit bit 1 of a virtual UART interrupt mask on a port whose peer \
                         holds no more bytes than the transmit trigger, with which lv1 raises the \
                         port's interrupt";
-
-const RX_RAISE: &str = "the receive bit 2 of a virtual UART interrupt mask on a port whose \
-                        receive buffer has no more free bytes than the receive trigger, with \
-                        which lv1 raises the port's interrupt";
 
 const RX_UNKNOWN: &str = "the receive bit 2 of a virtual UART interrupt mask on a port whose \
                           peer and traffic no source gives";
@@ -62,13 +61,24 @@ fn set(params: VirtualUartPortParams) -> HypercallDisposition {
     HypercallDisposition::Answered(answer)
 }
 
-fn refused(r: &HypercallRequest, what: &'static str) -> HypercallDisposition {
-    HypercallDisposition::Refused(HypercallRefusal::UnmodelledInput {
-        number: SET_VIRTUAL_UART_PARAM,
-        unit: r.unit,
-        pc: r.pc,
-        what,
-    })
+/// `set_param` on `uart`, with no interrupt state and no storage.
+fn set_param(
+    r: &HypercallRequest,
+    firmware: Option<&str>,
+    uart: &UartState,
+) -> HypercallDisposition {
+    let interrupt = InterruptGroupState::default();
+    let storage = GuestMemory::new(0);
+    let input = StatusInput {
+        uart,
+        raise: RaiseState {
+            bitmaps: interrupt.bitmaps(),
+            ports: interrupt.ports(),
+            paused: interrupt.paused(),
+            storage: &storage,
+        },
+    };
+    crate::group::uart::set_param::set_param(r, firmware, &input)
 }
 
 /// The kernel's open sets each trigger to the buffer size less 1, then
@@ -98,19 +108,20 @@ fn the_kernel_s_mask_2_on_each_service_port_after_its_open_raises_nothing_and_is
 }
 
 #[test]
-fn mask_2_on_an_empty_service_port_raises_only_once_the_receive_trigger_reaches_the_size() {
+fn mask_2_on_an_empty_service_port_raises_the_shadow_bit_only_once_the_receive_trigger_reaches_the_size(
+) {
     for (port, size) in SERVICE_PORTS {
         for rx in [0, 1, size - 1] {
             assert_eq!(
-                mask_refusal("4.93", &params(port, 0, rx, 2), 0),
-                None,
+                shadow_step("4.93", &params(port, 0, rx, 2), 0, false),
+                Ok(ShadowStep::Keep),
                 "port {port} rx {rx:#x}"
             );
         }
         for rx in [size, size + 1, u64::MAX] {
             assert_eq!(
-                mask_refusal("4.93", &params(port, 0, rx, 2), 0),
-                Some(RX_RAISE),
+                shadow_step("4.93", &params(port, 0, rx, 2), 0, false),
+                Ok(ShadowStep::Raise),
                 "port {port} rx {rx:#x}"
             );
         }
@@ -125,8 +136,8 @@ fn the_transmit_bit_on_a_service_port_raises_for_each_transmit_trigger() {
         for mask in [1, 3, 5, 7] {
             for tx in [0, size - 1, u64::MAX] {
                 assert_eq!(
-                    mask_refusal("4.93", &params(port, tx, size - 1, mask), 0),
-                    Some(TX_RAISE),
+                    shadow_step("4.93", &params(port, tx, size - 1, mask), 0, false),
+                    Err(UnmodelledError::new(TX_RAISE)),
                     "port {port} mask {mask} tx {tx:#x}"
                 );
             }
@@ -141,8 +152,8 @@ fn the_disconnect_bit_on_a_service_port_raises_nothing() {
     for (port, size) in SERVICE_PORTS {
         for mask in [4, 6] {
             assert_eq!(
-                mask_refusal("4.93", &params(port, 0, size - 1, mask), 0),
-                None,
+                shadow_step("4.93", &params(port, 0, size - 1, mask), 0, false),
+                Ok(ShadowStep::Keep),
                 "port {port} mask {mask}"
             );
         }
@@ -154,8 +165,8 @@ fn a_mask_of_0_raises_nothing_on_any_port_for_any_trigger() {
     for port in [0, 2, 10] {
         for trigger in [0, u64::MAX] {
             assert_eq!(
-                mask_refusal("4.93", &params(port, trigger, trigger, 0), 0),
-                None,
+                shadow_step("4.93", &params(port, trigger, trigger, 0), 0, false),
+                Ok(ShadowStep::Keep),
                 "port {port} trigger {trigger:#x}"
             );
         }
@@ -166,8 +177,8 @@ fn a_mask_of_0_raises_nothing_on_any_port_for_any_trigger() {
 #[test]
 fn mask_2_on_a_service_port_at_a_firmware_with_no_port_rows_is_a_traffic_refusal() {
     assert_eq!(
-        mask_refusal("4.92", &params(10, 0, 0xfff, 2), 0),
-        Some(RX_UNKNOWN)
+        shadow_step("4.92", &params(10, 0, 0xfff, 2), 0, false),
+        Err(UnmodelledError::new(RX_UNKNOWN))
     );
 }
 
@@ -178,7 +189,17 @@ fn a_receive_trigger_call_on_a_service_port_with_mask_2_raises_only_at_the_size(
     let mut uart = UartState::default();
     uart.apply(UartChange::PortParamsSet(params(10, 0xfff, 0xfff, 2)));
     let r = request(10, 1, 0x1000);
-    assert_eq!(set_param(&r, Some("4.93"), &uart), refused(&r, RX_RAISE));
+    let HypercallDisposition::Answered(mut raised) = set(params(10, 0xfff, 0x1000, 2)) else {
+        panic!("an answer");
+    };
+    raised.push_change(UartChange::ShadowSet(VirtualUartShadowWrite {
+        index: 0,
+        value: 1 << 53,
+    }));
+    assert_eq!(
+        set_param(&r, Some("4.93"), &uart),
+        HypercallDisposition::Answered(raised)
+    );
     assert_eq!(
         set_param(&request(10, 1, 0xffe), Some("4.93"), &uart),
         set(params(10, 0xfff, 0xffe, 2))

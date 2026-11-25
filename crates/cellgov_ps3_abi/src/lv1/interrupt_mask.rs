@@ -44,15 +44,38 @@
 //!
 //! On each hypercall's return, lv1's vector ANDs the caller's status
 //! shadow at +1696 of its lv1 context with the mask doublewords that
-//! +1736 names [OFW-4.93 lv1 a:0x0FC4-0x1010]. For a nonzero result, the
-//! function [OFW-4.93 lv1 a:0x18E0] raises the external interrupt
+//! +1736 names [OFW-4.93 lv1 a:0x0FC4-0x1010]. Before the test, it loads
+//! the LPCR from +504 of the context [OFW-4.93 lv1 a:0x0FE8]
+//! [OFW-4.93 lv1 a:0x1008]. For a nonzero result, the function
+//! [OFW-4.93 lv1 a:0x18E0] raises the external interrupt
 //! [OFW-4.93 lv1 a:0x101C]:
-//! - With `MSR[EE]` set in the caller's saved MSR, it returns to the
-//!   caller's external interrupt vector [OFW-4.93 lv1 a:0x18E0-0x1918].
-//! - Otherwise, it sets bit 0x800 of the LPCR [OFW-4.93 lv1 a:0x191C-0x1928].
+//! - With `MSR[EE]` set in the caller's saved MSR at +1288
+//!   [OFW-4.93 lv1 a:0x18E0-0x18EC], it gives SRR0 the saved pc at +1280
+//!   and SRR1 the saved MSR [OFW-4.93 lv1 a:0x18F0-0x18F8]. It then stores
+//!   [`EXTERNAL_INTERRUPT_VECTOR`] as the saved pc, and
+//!   [`external_interrupt_msr`] as the saved MSR
+//!   [OFW-4.93 lv1 a:0x18FC-0x1914].
+//! - Otherwise, it sets [`LPCR_MER`] in the LPCR [OFW-4.93 lv1 a:0x191C-0x1928].
 //!
-//! So a mask change raises the external interrupt only for a bit that is
-//! set in the status shadow.
+//! The return then loads r11 and r12 from the saved pc and MSR
+//! [OFW-4.93 lv1 a:0x1038-0x103C], and gives the same values to HSRR0 and
+//! HSRR1 [OFW-4.93 lv1 a:0x1070-0x1074]. So after a raise, the `hrfid`
+//! enters the vector, with the vector in r11 and the new MSR in r12.
+//!
+//! lv1 keeps no record of the raise. The next return to the thread tests
+//! the shadow and the mask again. So a mask change raises the external
+//! interrupt only for a bit that is set in the status shadow.
+//!
+//! lv1 has a second copy of the test for a return from an interrupt that
+//! the thread took while it ran [OFW-4.93 lv1 a:0x1A84-0x1AD4]. Its
+//! function [OFW-4.93 lv1 a:0x1870] enters no vector in these cases. It
+//! sets [`LPCR_MER`] in the LPCR, as it does for a saved `MSR[EE]` of 0
+//! [OFW-4.93 lv1 a:0x187C] [OFW-4.93 lv1 a:0x18D0-0x18DC]. No image read
+//! gives the meaning of these cases:
+//! - the bytes at +1832 and +1833 of the context are both set
+//!   [OFW-4.93 lv1 a:0x1880-0x1888] [OFW-4.93 lv1 a:0x18C4-0x18CC];
+//! - the saved pc is the trampoline slot 0x28B8
+//!   [OFW-4.93 lv1 a:0x188C-0x18A8].
 //!
 //! # The kernel's calls
 //!
@@ -98,6 +121,63 @@ pub fn interrupt_mask_handler(firmware: &str) -> Option<&'static InterruptMaskHa
         .find(|handler| handler.firmware == firmware)
 }
 
+/// The vector at which lv1's return gives a thread its external
+/// interrupt: the value at +496 of the thread's lv1 context.
+///
+/// Each logical PPE gets new lv1 contexts [OFW-4.93 lv1 a:0x2E1048]
+/// [OFW-4.93 lv1 a:0x2C5758]. The context constructor stores this value
+/// at +496 of each one [OFW-4.93 lv1 a:0x2C3DB8] [OFW-4.93 lv1 a:0x2C3DC8].
+///
+/// The threads of the GameOS partition keep this vector while the kernel
+/// runs. One other function stores at +496 of a context
+/// [OFW-4.93 lv1 a:0x2E82EC]. It stores 0x28B4, a trampoline slot of lv1
+/// [OFW-4.93 lv1 a:0x2E8584-0x2E85A8] [OFW-4.93 lv1 a:0x3584E8]. That
+/// store does not reach a GameOS thread:
+/// - The store's function has one caller [OFW-4.93 lv1 a:0x2E8858], in a
+///   wrapper [OFW-4.93 lv1 a:0x2E8848]. The wrapper has one caller
+///   [OFW-4.93 lv1 a:0x3B01EC], in the start function
+///   [OFW-4.93 lv1 a:0x3B0114].
+/// - No word of the image holds the OPD entry of the store's function or
+///   of the wrapper [OFW-4.93 lv1 a:0x348BB8] [OFW-4.93 lv1 a:0x348BD0].
+/// - lv1's start list holds the OPD entry of the start function with the
+///   thread limit 1 [OFW-4.93 lv1 a:0x3C22F0-0x3C22FC]
+///   [OFW-4.93 lv1 a:0x34C2A8]. Each hardware thread walks the list once
+///   at lv1's start [OFW-4.93 lv1 a:0x3AF148] [OFW-4.93 lv1 a:0x2C70A0].
+///   The walk calls an entry only on a thread whose PIR is below its
+///   limit [OFW-4.93 lv1 a:0x3AE8C0-0x3AE8E0].
+/// - The start function makes the partition with the fixed id 1
+///   [OFW-4.93 lv1 a:0x3B0158-0x3B0160] [OFW-4.93 lv1 a:0x2CCFD8]. That
+///   is the id that `get_logical_partition_id` returns
+///   [OFW-4.93 lv1 a:0x2EBDC0], and the policy module's partition
+///   [`LPAR_ID_PME`](super::partition::LPAR_ID_PME). The start function
+///   gives that partition alone to the wrapper
+///   [OFW-4.93 lv1 a:0x3B01E8-0x3B01EC].
+/// - The store's function stores 0x28B4 only in the contexts of the
+///   logical PPE that it makes for that partition
+///   [OFW-4.93 lv1 a:0x2E854C] [OFW-4.93 lv1 a:0x2E8564].
+///
+/// No code restores 0x500 in those contexts.
+pub const EXTERNAL_INTERRUPT_VECTOR: u64 = 0x500;
+
+/// The bits of the LPCR that lv1 sets for an external interrupt of a
+/// thread whose saved `MSR[EE]` is 0: bit 52, MER.
+///
+/// [CBE-Handbook p:306 s:10.4.3] LPCR bit 52 is MER, the mediated external exception request, which each thread holds.
+/// [CBE-Handbook p:275 s:9.7] For a direct external interrupt and a partition with MSR\[EE\] = 0, the hypervisor returns to the partition and sets LPCR\[MER\] to 1.
+pub const LPCR_MER: u64 = 0x800;
+
+/// The MSR bits 48 to 63, which lv1's raise clears in the saved MSR
+/// [OFW-4.93 lv1 a:0x1904].
+pub const EXTERNAL_INTERRUPT_MSR_CLEARED: u64 = 0xFFFF;
+
+/// The MSR that lv1's raise gives a thread whose saved MSR is `msr`.
+///
+/// The raise clears bits 48 to 63 and sets bit 0, SF
+/// [OFW-4.93 lv1 a:0x18FC-0x1910].
+pub const fn external_interrupt_msr(msr: u64) -> u64 {
+    (msr & !EXTERNAL_INTERRUPT_MSR_CLEARED) | crate::hw::ppu_supervisor::MSR_SF
+}
+
 /// The r3 of `did_update_interrupt_mask` for an r3 that names no live
 /// logical PPE of the partition: `LV1_NO_ENTRY` (-6), with r3 marked in
 /// the high word [OFW-4.93 lv1 a:0x2E9508-0x2E9514].
@@ -120,3 +200,7 @@ pub const INTERRUPT_MASK_THREAD_R3: u64 = 0x0000_0002_FFFF_FFFA;
 #[cfg(test)]
 #[path = "tests/interrupt_mask_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/interrupt_mask_external_tests.rs"]
+mod external_tests;

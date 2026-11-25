@@ -3,13 +3,14 @@
 //! `write_virtual_uart` that moves a byte, and each reply of a service,
 //! and the mask bit that raises the port's interrupt.
 //!
-//! lv1 raises the port's interrupt when the status and the mask share a
-//! bit; see [`cellgov_ps3_abi::lv1::uart`]. CellGov delivers no such
-//! interrupt. So the hypervisor answers a call that leaves a mask other
-//! than 0 only when these conditions are true:
-//! - CellGov holds each field that the status reads, which is true only
-//!   for a service port;
-//! - the status and the mask share no bit.
+//! lv1 sets the port's bit in the virtual UART's shadow while the status
+//! and the mask share a bit, and clears it otherwise; see
+//! [`cellgov_ps3_abi::lv1::uart`] and [`super::shadow`]. CellGov decides
+//! the step only when it holds each field that the status reads:
+//! - for a service port, the receive bit follows the port's own receive
+//!   buffer, which the hypervisor holds;
+//! - the transmit bit follows the bytes in the peer's buffer, which the
+//!   service reads at a time that no image read gives.
 
 use cellgov_ps3_abi::lv1::uart::{
     game_os_service_port, game_os_virtual_uart_port, virtual_uart_status, VirtualUartTraffic,
@@ -17,53 +18,51 @@ use cellgov_ps3_abi::lv1::uart::{
 };
 
 use super::VirtualUartPortParams;
+use crate::answer::UnmodelledError;
 
-/// The refusal of a service's reply that raises the receive interrupt.
-pub(super) const REPLY_RAISE_REFUSAL: &str =
-    "the delivery of the receive interrupt that lv1 raises on a virtual UART port when a \
-     service's reply fills the port's receive buffer under the receive bit 2 of the port's mask, \
-     to the thread that the port's irq plug names";
-
-/// The refusal for the port's values `params` when lv1 can raise the
-/// port's interrupt, with `received` bytes in the port's receive buffer.
-///
-/// The value is `None` in these cases:
-/// - the mask is 0;
-/// - the port is a service port, and its status and mask share no bit.
-///
-/// The refusal names one mask bit:
-/// - for a service port, the lowest mask bit that raises the interrupt;
-/// - for a port whose traffic CellGov does not hold, the lowest mask bit.
-pub(super) fn mask_refusal(
-    firmware: &str,
-    params: &VirtualUartPortParams,
-    received: u64,
-) -> Option<&'static str> {
-    match raised(firmware, params, received)? {
-        Raised::ServicePort(bits) => Some(raise(lowest_bit(bits))),
-        Raised::UnknownTraffic(mask) => Some(unknown_traffic(lowest_bit(mask))),
-    }
+/// What lv1's status function does to a port's bit in the virtual UART's
+/// shadow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ShadowStep {
+    /// The bit stays as it is.
+    Keep,
+    /// The function sets the bit [OFW-4.93 lv1 a:0x2F225C-0x2F2278].
+    Raise,
+    /// The function clears the bit [OFW-4.93 lv1 a:0x2F2308-0x2F2334].
+    Clear,
 }
 
-/// The refusal for the port's values `params` when a service's reply
-/// leaves `received` bytes in the port's receive buffer, and lv1 can
-/// raise the port's interrupt.
+/// lv1's step for the port's values `params`, with `received` bytes in
+/// the port's receive buffer, when the port's shadow bit is `raised`.
 ///
-/// lv1's endpoint write function calls the port's listeners after it
-/// copies bytes to the port's receive buffer
-/// [OFW-4.93 lv1 a:0x2F0324-0x2F03AC]. The refusal for the receive bit is
-/// [`REPLY_RAISE_REFUSAL`]. The refusal for another bit is the refusal of
-/// [`mask_refusal`].
-pub(super) fn reply_refusal(
+/// The status function changes nothing for a bit already in the state
+/// that the status gives [OFW-4.93 lv1 a:0x2F2250-0x2F2258]
+/// [OFW-4.93 lv1 a:0x2F2308-0x2F2310].
+///
+/// # Errors
+///
+/// Returns the refusal text, which names one mask bit, in these cases:
+/// - for a service port, the status and the mask share the transmit bit
+///   and not the receive bit, so the step depends on the peer's bytes;
+/// - for a port whose traffic CellGov does not hold, the mask is not 0.
+pub(super) fn shadow_step(
     firmware: &str,
     params: &VirtualUartPortParams,
     received: u64,
-) -> Option<&'static str> {
-    match raised(firmware, params, received)? {
-        Raised::ServicePort(bits) if bits & VIRTUAL_UART_STATUS_RX != 0 => {
-            Some(REPLY_RAISE_REFUSAL)
+    raised_bit: bool,
+) -> Result<ShadowStep, UnmodelledError> {
+    let step = |shared: bool| match (shared, raised_bit) {
+        (true, false) => ShadowStep::Raise,
+        (false, true) => ShadowStep::Clear,
+        _ => ShadowStep::Keep,
+    };
+    match raised(firmware, params, received) {
+        None => Ok(step(false)),
+        Some(Raised::ServicePort(bits)) if bits & VIRTUAL_UART_STATUS_RX != 0 => Ok(step(true)),
+        Some(Raised::ServicePort(bits)) => Err(UnmodelledError::new(raise(lowest_bit(bits)))),
+        Some(Raised::UnknownTraffic(mask)) => {
+            Err(UnmodelledError::new(unknown_traffic(lowest_bit(mask))))
         }
-        _ => mask_refusal(firmware, params, received),
     }
 }
 

@@ -2,6 +2,7 @@
 //! its own lane source.
 
 use super::*;
+use crate::group::uart::UartState;
 use cellgov_mem::lanes::{contribution, LaneIndex};
 
 fn with_ports(ports: &[VirtualUartPortParams]) -> UartState {

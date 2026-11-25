@@ -25,6 +25,7 @@ use cellgov_ps3_abi::lv1::uart::{
     VIRTUAL_UART_IRQ_BITMAP_BYTES,
 };
 
+use super::shadow::UART_SHADOW_DOUBLEWORDS;
 use super::{UartChange, UartState};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
@@ -96,12 +97,12 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 
 /// Hypercall 166: gives the virtual UART an irq outlet, with its id in r4, and the bitmap at r3.
 ///
-/// The answer clears r5 to r10 and writes 0 to the 32 bytes of the
-/// bitmap. lv1 copies its shadow there, and the shadow is 0 because no
-/// call that CellGov answers raises a port's interrupt. For the same
-/// reason lv1 raises no event on the outlet. The answer carries the
-/// outlet with no connection, and the interrupt configuration. The
-/// hypervisor keeps both.
+/// The answer clears r5 to r10 and writes the virtual UART's shadow to
+/// the 32 bytes of the bitmap, as lv1 copies it there. The answer carries
+/// the outlet with no connection, and the interrupt configuration. The
+/// hypervisor keeps both. For a shadow with a set bit, lv1 gives the
+/// outlet to the event function, and the answer carries the outlet's
+/// pending event; the new outlet has no plug to raise.
 ///
 /// A call that fails one of lv1's checks gets lv1's own r3, with r4 to
 /// r10 cleared. See [`CONFIGURE_VIRTUAL_UART_IRQ_NO_REGION_R3`] for the
@@ -183,16 +184,22 @@ pub(crate) fn configure_irq(
             "a virtual UART bitmap that CellGov holds no storage for",
         );
     };
+    let shadow = state.uart.shadow();
     let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), [outlet]);
     answer.effects.push(Effect::SharedWriteIntent {
         range,
-        bytes: WritePayload::new(vec![0; VIRTUAL_UART_IRQ_BITMAP_BYTES as usize]),
+        bytes: WritePayload::new(shadow.iter().flat_map(|d| d.to_be_bytes()).collect()),
         source: request.unit,
         source_time: request.tick,
     });
     answer.push_change(InterruptChange::OutletConstructed(EventReceivePort::new(
         outlet,
     )));
+    // lv1 gives the outlet to the event function while the count of set
+    // shadow bits is above 0 [OFW-4.93 lv1 a:0x2F16F4-0x2F1708].
+    if shadow != [0; UART_SHADOW_DOUBLEWORDS] {
+        answer.push_change(InterruptChange::EventPending(outlet));
+    }
     answer.push_change(UartChange::IrqConfigured(VirtualUartIrq {
         outlet,
         bitmap: address,
@@ -207,3 +214,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/irq_hash_tests.rs"]
 mod hash_tests;
+
+#[cfg(test)]
+#[path = "tests/irq_shadow_tests.rs"]
+mod shadow_tests;

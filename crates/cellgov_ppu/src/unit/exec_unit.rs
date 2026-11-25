@@ -160,6 +160,14 @@ impl ExecutionUnit for PpuExecutionUnit {
             .unwrap_or(false)
     }
 
+    fn raise_external_exception(&mut self) -> bool {
+        PpuExecutionUnit::raise_external_exception(self)
+    }
+
+    fn clear_external_exception(&mut self) -> bool {
+        PpuExecutionUnit::clear_external_exception(self)
+    }
+
     fn time_base_read(&self) -> Option<u64> {
         self.state.clock_read.then_some(self.state.tb)
     }

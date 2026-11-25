@@ -1,8 +1,30 @@
 use super::*;
+use crate::group::interrupt::InterruptGroupState;
+use crate::group::uart::UartState;
 use crate::Hypervisor;
 use cellgov_event::UnitId;
 use cellgov_mem::GuestMemory;
 use cellgov_time::GuestTicks;
+
+/// `set_param` on `uart`, with no interrupt state and no storage.
+fn set_param(
+    r: &HypercallRequest,
+    firmware: Option<&str>,
+    uart: &UartState,
+) -> HypercallDisposition {
+    let interrupt = InterruptGroupState::default();
+    let storage = GuestMemory::new(0);
+    let input = StatusInput {
+        uart,
+        raise: RaiseState {
+            bitmaps: interrupt.bitmaps(),
+            ports: interrupt.ports(),
+            paused: interrupt.paused(),
+            storage: &storage,
+        },
+    };
+    super::set_param(r, firmware, &input)
+}
 
 /// The `sc` of the 4.93 kernel's call for the transmit trigger
 /// [OFW-4.93 lv2_kernel a:0x8000000000017678].

@@ -1,4 +1,5 @@
 use super::*;
+use crate::group::interrupt::InterruptGroupState;
 use crate::group::uart::VirtualUartPortParams;
 use crate::Hypervisor;
 use cellgov_effects::Effect;
@@ -136,6 +137,7 @@ fn complete(uart: &UartState) -> HypercallDisposition {
             firmware: Some("4.93"),
             memory: &MemoryState::default(),
             uart,
+            interrupt: &InterruptGroupState::default(),
             storage: &storage,
         },
     )
@@ -171,20 +173,35 @@ fn the_kernel_s_completing_write_writes_0x38_bytes_and_queues_the_reply_under_ma
 /// open sets the receive trigger to the buffer size less 1. The console
 /// capture `lv2_vuart_port_mask` shows the mask 2 on port 10.
 #[test]
-fn the_kernel_s_mask_2_makes_the_completing_write_a_refusal_that_names_the_receive_interrupt() {
+fn the_kernel_s_mask_2_makes_the_completing_write_raise_the_port_s_shadow_bit() {
     let uart = after_header(params(rx_buffer_size() - 1, 2), &[]);
-    assert_eq!(complete(&uart), refused(status::REPLY_RAISE_REFUSAL));
+    assert_eq!(complete(&uart), raised(queued(0x38, kernel_reply())));
 }
 
 /// The status has the receive bit only when the free bytes are not above
 /// the receive trigger [OFW-4.93 lv1 a:0x2F2208-0x2F2210].
 #[test]
-fn mask_2_lets_the_reply_in_while_the_free_bytes_stay_above_the_receive_trigger() {
+fn mask_2_raises_the_shadow_bit_only_once_the_free_bytes_reach_the_receive_trigger() {
     let free = rx_buffer_size() - kernel_reply().len() as u64;
     let below = after_header(params(free - 1, 2), &[]);
     assert_eq!(complete(&below), queued(0x38, kernel_reply()));
     let at = after_header(params(free, 2), &[]);
-    assert_eq!(complete(&at), refused(status::REPLY_RAISE_REFUSAL));
+    assert_eq!(complete(&at), raised(queued(0x38, kernel_reply())));
+}
+
+/// `queued` with the raise of port 10's bit, which is bit 63 - 10 of
+/// shadow doubleword 0 [OFW-4.93 lv1 a:0x2F2214-0x2F2248]. With no irq
+/// configuration, lv1 stores the bit in its own doublewords and gives no
+/// event.
+fn raised(queued: HypercallDisposition) -> HypercallDisposition {
+    let HypercallDisposition::Answered(mut answer) = queued else {
+        return queued;
+    };
+    answer.push_change(UartChange::ShadowSet(crate::VirtualUartShadowWrite {
+        index: 0,
+        value: 1 << 53,
+    }));
+    HypercallDisposition::Answered(answer)
 }
 
 #[test]
@@ -219,6 +236,7 @@ fn write_after(uart: &UartState, bytes: &[u8]) -> HypercallDisposition {
             firmware: Some("4.93"),
             memory: &MemoryState::default(),
             uart,
+            interrupt: &InterruptGroupState::default(),
             storage: &storage,
         },
     )

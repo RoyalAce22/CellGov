@@ -24,10 +24,12 @@ use cellgov_ps3_abi::lv1::uart::{
 
 use super::buffer::{self, BufferCheck, BufferRegion};
 use super::receive::ReceivedBytes;
-use super::status;
+use super::shadow::{self, StatusInput};
 use super::{UartChange, UartState};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
+use crate::group::interrupt::raise::RaiseState;
+use crate::group::interrupt::InterruptGroupState;
 use crate::group::memory::region::{MemoryRegion, MemoryState};
 use crate::request::HypercallRequest;
 
@@ -43,6 +45,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
                 firmware: input.firmware,
                 memory: input.groups.memory().regions(),
                 uart: input.groups.uart(),
+                interrupt: input.groups.interrupt(),
                 storage: input.storage,
             },
         )
@@ -57,8 +60,25 @@ pub(crate) struct ReadInput<'a> {
     pub(crate) memory: &'a MemoryState,
     /// The virtual UART group's state.
     pub(crate) uart: &'a UartState,
+    /// The interrupt group's state, which a status step reads.
+    pub(crate) interrupt: &'a InterruptGroupState,
     /// The caller's real address space, which holds the caller's buffer.
     pub(crate) storage: &'a GuestMemory,
+}
+
+impl ReadInput<'_> {
+    /// The state that a status step after the read reads.
+    fn status(&self) -> StatusInput<'_> {
+        StatusInput {
+            uart: self.uart,
+            raise: RaiseState {
+                bitmaps: self.interrupt.bitmaps(),
+                ports: self.interrupt.ports(),
+                paused: self.interrupt.paused(),
+                storage: self.storage,
+            },
+        }
+    }
 }
 
 fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDisposition {
@@ -238,13 +258,13 @@ fn empty_read(request: &HypercallRequest, checked: &Checked<'_>) -> HypercallDis
 /// buffer, and carries the bytes that the receive buffer still holds. The
 /// call is a refusal in these cases:
 /// - CellGov's storage does not hold the caller's buffer;
-/// - the port's mask can raise the port's interrupt when lv1 computes the
-///   status after the copy of a page [OFW-4.93 lv1 a:0x2F0830-0x2F0940];
-///   see [`status::mask_refusal`]. CellGov delivers no such interrupt.
-///   The check uses the bytes left after the read. Before the read, the
-///   status and the mask share no bit, because each change to the mask,
-///   the triggers or the buffer checks them. Each copy only adds free
-///   bytes, so the status after each page shares no bit either.
+/// - the status step after the read refuses; see [`shadow::status_step`].
+///
+/// lv1 computes the status after the copy of each page
+/// [OFW-4.93 lv1 a:0x2F0830-0x2F0940]. Each copy only adds free bytes,
+/// so the receive bit can only go from set to clear. The answer carries
+/// the step for the bytes left after the read, which can clear the port's
+/// shadow bit.
 fn received_read(
     request: &HypercallRequest,
     input: &ReadInput<'_>,
@@ -269,9 +289,6 @@ fn received_read(
     };
     let rest = &held[count..];
     let params = input.uart.port_params(checked.port);
-    if let Some(what) = status::mask_refusal(checked.firmware, &params, rest.len() as u64) {
-        return refuse(request, what);
-    }
     let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), [count as u64]);
     answer.effects.push(Effect::SharedWriteIntent {
         range,
@@ -283,6 +300,17 @@ fn received_read(
         port: checked.port,
         bytes: rest.to_vec(),
     }));
+    let step = shadow::status_step(
+        request,
+        checked.firmware,
+        &input.status(),
+        &params,
+        rest.len() as u64,
+        &mut answer,
+    );
+    if let Err(error) = step {
+        return error.refusal(request);
+    }
     HypercallDisposition::Answered(answer)
 }
 

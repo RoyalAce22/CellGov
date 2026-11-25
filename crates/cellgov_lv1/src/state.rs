@@ -9,8 +9,10 @@ use cellgov_ps3_abi::lv1::call::READ_REPOSITORY_NODE;
 use cellgov_time::GuestTicks;
 
 use super::answer::{HypercallDisposition, HypercallRefusal};
+use super::external::returns;
 use super::handlers::{answer, answers};
 use super::request::HypercallRequest;
+use super::return_path::SavedMsrs;
 use super::vector;
 use crate::group::interrupt::bitmap::IrqStateBitmapState;
 use crate::group::interrupt::event_port::EventReceivePortState;
@@ -71,6 +73,17 @@ impl Hypervisor {
     }
 
     /// The disposition of `request` from a caller whose real address
+    /// space is `storage`, as [`Self::dispatch_returning`] gives it for
+    /// threads that give no saved MSR.
+    pub fn dispatch_with(
+        &mut self,
+        request: &HypercallRequest,
+        storage: &GuestMemory,
+    ) -> HypercallDisposition {
+        self.dispatch_returning(request, storage, &SavedMsrs::default())
+    }
+
+    /// The disposition of `request` from a caller whose real address
     /// space is `storage`, after the state and the records note it:
     /// - each change the answer carries applies to its group's state, in
     ///   order;
@@ -80,12 +93,24 @@ impl Hypervisor {
     /// - a number with no handler counts toward its witness, whether
     ///   lv1's answer or a refusal disposes of it;
     /// - the first refusal is kept.
-    pub fn dispatch_with(
+    ///
+    /// An answer also carries the external interrupt of each return that
+    /// the call causes, from the saved MSR of each thread in `msrs`. When
+    /// CellGov does not model one of those returns, the call is a refusal.
+    pub fn dispatch_returning(
         &mut self,
         request: &HypercallRequest,
         storage: &GuestMemory,
+        msrs: &SavedMsrs,
     ) -> HypercallDisposition {
         let disposition = answer(request, self.firmware.as_deref(), &self.groups, storage);
+        let disposition = match disposition {
+            HypercallDisposition::Answered(answer) => {
+                let firmware = self.firmware.as_deref();
+                returns(request, firmware, &self.groups, storage, msrs, answer)
+            }
+            refused => refused,
+        };
         // A read that lv1's vector answers or refuses never reaches the
         // node table, so it is no repository read.
         if request.number == READ_REPOSITORY_NODE

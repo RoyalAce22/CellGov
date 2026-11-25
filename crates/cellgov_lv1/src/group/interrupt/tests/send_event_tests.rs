@@ -1,15 +1,44 @@
 use super::*;
-use crate::{answered_numbers, AddressSpace, AddressSpaceChange, Hypervisor};
+use crate::{
+    answered_numbers, AddressSpace, AddressSpaceChange, ExternalDelivery, Hypervisor, SavedMsrs,
+    ThreadResume,
+};
+use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
 use cellgov_mem::lanes::{contribution, LaneIndex};
+use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_ps3_abi::lv1::call::{
     CONFIGURE_IRQ_STATE_BITMAP, CONNECT_IRQ_PLUG_EXT, CONSTRUCT_EVENT_RECEIVE_PORT, PAUSE,
 };
+use cellgov_ps3_abi::lv1::interrupt::IRQ_MASK_OFFSET;
 use cellgov_time::GuestTicks;
 
-use crate::group::interrupt::pause::PausedThread;
+use crate::group::interrupt::bitmap::{IrqStateBitmapKey, IrqStateBitmapState, StatusShadowWrite};
+use crate::group::interrupt::event_port::EventReceivePortState;
+use crate::group::interrupt::pause::{PausedThread, PausedThreadState};
+use crate::group::interrupt::raise::RaiseState;
+use crate::group::interrupt::InterruptChange;
 use crate::group::spe::LogicalSpe;
 use crate::group::state::StateChange;
+
+/// The 4.93 kernel's MSR at its sends: SF, EE, IR, DR and RI.
+const KERNEL_MSR: u64 = 0x8000_0000_0000_8032;
+
+/// The external interrupt that the return of a woken thread with
+/// [`KERNEL_MSR`] raises [OFW-4.93 lv1 a:0x18FC-0x1914].
+const DELIVERY: ExternalDelivery = ExternalDelivery {
+    vector: 0x500,
+    msr: 0x8000_0000_0000_0000,
+};
+
+/// The disposition of `r` from threads that both saved [`KERNEL_MSR`].
+fn dispatch(
+    hv: &mut Hypervisor,
+    r: &HypercallRequest,
+    storage: &GuestMemory,
+) -> HypercallDisposition {
+    hv.dispatch_returning(r, storage, &SavedMsrs([Some(KERNEL_MSR); 2]))
+}
 
 /// The `sc` of the kernel's port call in the setup of a thread's record
 /// [OFW-4.93 lv2_kernel a:0x8000000000007d8c]. The console gave thread 1's
@@ -148,6 +177,10 @@ fn raise_answer(id: u64, index: u8, value: u64, woken: bool) -> HypercallDisposi
     }));
     if woken {
         answer.push_change(InterruptChange::ThreadWoken(1));
+        answer.resumed = vec![ThreadResume {
+            thread: 1,
+            external: Some(DELIVERY),
+        }];
     }
     HypercallDisposition::Answered(answer)
 }
@@ -165,7 +198,7 @@ fn an_unconnected_port_gets_r3_0_and_keeps_the_pending_event() {
     let mut expected = success();
     expected.push_change(InterruptChange::EventPending(PORT));
     assert_eq!(
-        hv.dispatch_with(&send(PORT, 0), &storage),
+        dispatch(&mut hv, &send(PORT, 0), &storage),
         HypercallDisposition::Answered(expected)
     );
     assert!(hv.event_receive_ports().is_pending(PORT));
@@ -176,30 +209,25 @@ fn an_unconnected_port_gets_r3_0_and_keeps_the_pending_event() {
 fn a_send_on_a_pending_port_gets_r3_0_and_changes_nothing() {
     let storage = storage(PLUG_BIT);
     let mut hv = booted(true, true, &storage);
-    hv.dispatch_with(&send(PORT, 0), &storage);
+    dispatch(&mut hv, &send(PORT, 0), &storage);
     let once = hv.clone();
     assert_eq!(
-        hv.dispatch_with(&send(PORT, 0), &storage),
+        dispatch(&mut hv, &send(PORT, 0), &storage),
         HypercallDisposition::Answered(success())
     );
     assert_eq!(hv, once);
 }
 
+/// The wake clears the pause flag [OFW-4.93 lv1 a:0x2C669C], so the
+/// thread is no longer paused.
 #[test]
-fn an_unmasked_raise_on_a_paused_thread_writes_its_status_and_wakes_it() {
+fn an_unmasked_raise_on_a_paused_thread_writes_its_status_and_ends_its_pause() {
     let storage = storage(PLUG_BIT);
     let mut hv = booted(true, true, &storage);
-    assert_eq!(hv.dispatch_with(&send(PORT, 0), &storage), raised(true));
+    assert_eq!(dispatch(&mut hv, &send(PORT, 0), &storage), raised(true));
     let interrupt = hv.groups().interrupt();
     assert_eq!(interrupt.bitmaps().shadow(thread_1()), [PLUG_BIT, 0, 0, 0]);
-    assert!(interrupt.paused().is_woken(1));
-    assert_eq!(
-        interrupt.paused().thread(1),
-        Some(PausedThread {
-            thread: 1,
-            decrementer_wakes: true,
-        })
-    );
+    assert_eq!(interrupt.paused().thread(1), None);
 }
 
 #[test]
@@ -208,11 +236,18 @@ fn a_masked_raise_on_a_paused_thread_writes_its_status_and_leaves_it_paused() {
         let storage = storage(mask);
         let mut hv = booted(true, true, &storage);
         assert_eq!(
-            hv.dispatch_with(&send(PORT, 0), &storage),
+            dispatch(&mut hv, &send(PORT, 0), &storage),
             raised(false),
             "{mask:#x}"
         );
-        assert!(!hv.groups().interrupt().paused().is_woken(1), "{mask:#x}");
+        assert_eq!(
+            hv.groups().interrupt().paused().thread(1),
+            Some(PausedThread {
+                thread: 1,
+                decrementer_wakes: true,
+            }),
+            "{mask:#x}"
+        );
     }
 }
 
@@ -230,10 +265,12 @@ fn a_raise_on_a_set_shadow_bit_keeps_only_the_pending_event() {
     let state = SendState {
         spaces: &AddressSpaceState::default(),
         spes: &LogicalSpeState::default(),
-        bitmaps: &bitmaps,
-        ports: interrupt.ports(),
-        paused: interrupt.paused(),
-        storage: &storage,
+        raise: RaiseState {
+            bitmaps: &bitmaps,
+            ports: interrupt.ports(),
+            paused: interrupt.paused(),
+            storage: &storage,
+        },
     };
     let mut expected = success();
     expected.push_change(InterruptChange::EventPending(PORT));
@@ -243,25 +280,38 @@ fn a_raise_on_a_set_shadow_bit_keeps_only_the_pending_event() {
     );
 }
 
+/// lv1 signals a running thread on another CPU with an interprocessor
+/// interrupt [OFW-4.93 lv1 a:0x2C663C-0x2C6650].
 #[test]
-fn a_raise_on_a_running_thread_is_a_refusal_and_changes_nothing() {
+fn a_raise_on_a_running_thread_other_than_the_caller_is_a_refusal_and_changes_nothing() {
     let storage = storage(PLUG_BIT);
-    for (caller, what) in [
-        (
-            1,
-            "an event on a plug of the calling thread, whose return lv1 checks for an external interrupt",
-        ),
-        (
-            0,
-            "an event on a plug of a running thread, which lv1 signals with an interprocessor interrupt",
-        ),
-    ] {
-        let mut hv = booted(true, false, &storage);
-        let before = hv.clone();
-        let r = send(PORT, caller);
-        assert_eq!(hv.dispatch_with(&r, &storage), refused(&r, what), "{caller}");
-        assert_eq!(hv.groups(), before.groups(), "{caller}");
-    }
+    let mut hv = booted(true, false, &storage);
+    let before = hv.clone();
+    let r = send(PORT, 0);
+    assert_eq!(
+        dispatch(&mut hv, &r, &storage),
+        refused(
+            &r,
+            "an event on a plug of a running thread, which lv1 signals with an interprocessor interrupt"
+        )
+    );
+    assert_eq!(hv.groups(), before.groups());
+}
+
+/// The raise on the calling thread sets its bit, and the return of the
+/// call delivers the unmasked bit [OFW-4.93 lv1 a:0x0FC4-0x101C].
+#[test]
+fn a_raise_on_the_calling_thread_writes_its_status_and_delivers_on_the_return() {
+    let storage = storage(PLUG_BIT);
+    let mut hv = booted(true, false, &storage);
+    let HypercallDisposition::Answered(mut expected) = raised(false) else {
+        panic!("an answer");
+    };
+    expected.external = Some(DELIVERY);
+    assert_eq!(
+        dispatch(&mut hv, &send(PORT, 1), &storage),
+        HypercallDisposition::Answered(expected)
+    );
 }
 
 #[test]
@@ -321,7 +371,7 @@ fn a_raise_on_a_plug_past_doubleword_0_writes_and_masks_its_own_doubleword() {
         let storage = storage_at(mask_index, PLUG_200_BIT);
         let (mut hv, ids) = paused_on(&[200], true, &storage);
         assert_eq!(
-            hv.dispatch_with(&send(ids[0], 0), &storage),
+            dispatch(&mut hv, &send(ids[0], 0), &storage),
             raise_answer(ids[0], 3, PLUG_200_BIT, woken),
             "{mask_index}"
         );
@@ -333,22 +383,26 @@ fn a_raise_on_a_plug_past_doubleword_0_writes_and_masks_its_own_doubleword() {
     }
 }
 
-/// lv1 reads the mask only while the pause flag is set, and its first
-/// wake clears that flag.
+/// The first wake clears the pause flag, and the thread runs again. lv1
+/// signals a raise on it with an interprocessor interrupt
+/// [OFW-4.93 lv1 a:0x2C663C-0x2C6650].
 #[test]
-fn a_second_unmasked_raise_on_a_woken_thread_carries_no_second_wake() {
+fn a_second_raise_after_a_wake_is_the_running_thread_refusal() {
     const PLUG_10_BIT: u64 = 1 << 53;
     let storage = storage(PLUG_BIT | PLUG_10_BIT);
     let (mut hv, ids) = paused_on(&[PLUG, 10], true, &storage);
     assert_eq!(
-        hv.dispatch_with(&send(ids[0], 0), &storage),
+        dispatch(&mut hv, &send(ids[0], 0), &storage),
         raise_answer(ids[0], 0, PLUG_BIT, true)
     );
+    let r = send(ids[1], 0);
     assert_eq!(
-        hv.dispatch_with(&send(ids[1], 0), &storage),
-        raise_answer(ids[1], 0, PLUG_BIT | PLUG_10_BIT, false)
+        dispatch(&mut hv, &r, &storage),
+        refused(
+            &r,
+            "an event on a plug of a running thread, which lv1 signals with an interprocessor interrupt"
+        )
     );
-    assert!(hv.groups().interrupt().paused().is_woken(1));
 }
 
 /// lv1 wakes the thread only for a set mask bit of the raised plug
@@ -361,15 +415,15 @@ fn a_masked_raise_carries_no_wake_for_an_unmasked_bit_already_in_the_shadow() {
     let masked = storage(0);
     let (mut hv, ids) = paused_on(&[PLUG, 10], true, &masked);
     assert_eq!(
-        hv.dispatch_with(&send(ids[0], 0), &masked),
+        dispatch(&mut hv, &send(ids[0], 0), &masked),
         raise_answer(ids[0], 0, PLUG_BIT, false)
     );
     let plug_9_unmasked = storage(PLUG_BIT);
     assert_eq!(
-        hv.dispatch_with(&send(ids[1], 0), &plug_9_unmasked),
+        dispatch(&mut hv, &send(ids[1], 0), &plug_9_unmasked),
         raise_answer(ids[1], 0, PLUG_BIT | PLUG_10_BIT, false)
     );
-    assert!(!hv.groups().interrupt().paused().is_woken(1));
+    assert!(hv.groups().interrupt().paused().thread(1).is_some());
 }
 
 #[test]
@@ -394,7 +448,7 @@ fn the_logical_ppe_id_gets_no_entry_and_an_unknown_id_is_a_refusal() {
     let mut hv = booted(false, false, &storage);
     let ppe_id = game_os_logical_ppe_id("4.93").expect("the 4.93 logical PPE id");
     assert_eq!(
-        hv.dispatch_with(&send(ppe_id, 0), &storage),
+        dispatch(&mut hv, &send(ppe_id, 0), &storage),
         HypercallDisposition::Answered(HypercallAnswer::lv1_status(SEND_EVENT_NO_ENTRY_R3, [0; 7]))
     );
     let r = send(0x55, 0);
@@ -427,10 +481,12 @@ fn a_logical_spe_id_gets_no_entry_and_no_change() {
     let state = SendState {
         spaces: &AddressSpaceState::default(),
         spes: &spes,
-        bitmaps: interrupt.bitmaps(),
-        ports: interrupt.ports(),
-        paused: interrupt.paused(),
-        storage: &storage,
+        raise: RaiseState {
+            bitmaps: interrupt.bitmaps(),
+            ports: interrupt.ports(),
+            paused: interrupt.paused(),
+            storage: &storage,
+        },
     };
     assert_eq!(
         send_event(&send(BOOT_SPE_ID, 0), Some("4.93"), &state),
@@ -461,10 +517,12 @@ fn an_irq_outlet_id_and_an_address_space_id_get_no_entry() {
     let state = SendState {
         spaces: &spaces,
         spes: &LogicalSpeState::default(),
-        bitmaps: interrupt.bitmaps(),
-        ports: &ports,
-        paused: interrupt.paused(),
-        storage: &storage,
+        raise: RaiseState {
+            bitmaps: interrupt.bitmaps(),
+            ports: &ports,
+            paused: interrupt.paused(),
+            storage: &storage,
+        },
     };
     for id in [OUTLET_ID, VAS_ID] {
         assert_eq!(
@@ -486,10 +544,12 @@ fn a_send_at_a_firmware_whose_handler_is_not_read_is_a_refusal() {
     let state = SendState {
         spaces: &AddressSpaceState::default(),
         spes: &LogicalSpeState::default(),
-        bitmaps: interrupt.bitmaps(),
-        ports: interrupt.ports(),
-        paused: interrupt.paused(),
-        storage: &storage,
+        raise: RaiseState {
+            bitmaps: interrupt.bitmaps(),
+            ports: interrupt.ports(),
+            paused: interrupt.paused(),
+            storage: &storage,
+        },
     };
     let r = send(PORT, 0);
     for firmware in [None, Some("4.92"), Some("3.70")] {
@@ -508,7 +568,7 @@ fn a_send_at_a_firmware_whose_handler_is_not_read_is_a_refusal() {
 fn a_bitmap_registration_writes_the_raised_shadow() {
     let storage = storage(PLUG_BIT);
     let mut hv = booted(true, true, &storage);
-    hv.dispatch_with(&send(PORT, 0), &storage);
+    dispatch(&mut hv, &send(PORT, 0), &storage);
     let again = call(CONFIGURE_IRQ_STATE_BITMAP, &[1, 1, THREAD_1_BITMAP], 0);
     let answer = answered(hv.dispatch_with(&again, &storage));
     let mut shadow = vec![0u8; 32];
@@ -523,7 +583,7 @@ fn a_bitmap_registration_writes_the_raised_shadow() {
 fn a_connect_of_a_pending_port_is_a_refusal() {
     let storage = storage(0);
     let mut hv = booted(false, false, &storage);
-    hv.dispatch_with(&send(PORT, 0), &storage);
+    dispatch(&mut hv, &send(PORT, 0), &storage);
     let plug = call(CONNECT_IRQ_PLUG_EXT, &[1, 1, PLUG, PORT, 0], 0);
     assert_eq!(
         hv.dispatch_with(&plug, &storage),
@@ -540,7 +600,7 @@ fn a_connect_of_a_pending_port_is_a_refusal() {
 fn a_connect_on_another_plug_keeps_the_raised_bit_and_carries_no_shadow_change() {
     let storage = storage(0);
     let mut hv = booted(true, true, &storage);
-    hv.dispatch_with(&send(PORT, 0), &storage);
+    dispatch(&mut hv, &send(PORT, 0), &storage);
     // A second port on plug 10 of thread 1: plug 9 still holds its bit.
     let port = HypercallRequest {
         pc: SECOND_PORT_SC,
@@ -614,10 +674,9 @@ fn status_shadow_sync_term_lane_vector_golden() {
 }
 
 /// The list holds every nonzero lane of a pending event on port 3, at the
-/// fixed lane source 146, and of a wake of thread 1, at the fixed lane
-/// source 148.
+/// fixed lane source 146.
 #[test]
-fn pending_event_and_wake_sync_term_lane_vector_golden() {
+fn pending_event_sync_term_lane_vector_golden() {
     let mut ports = EventReceivePortState::default();
     ports.set_pending(3);
     let lane = |source, field, value| contribution(LaneIndex::new(source, 0, field, 0), value);
@@ -625,10 +684,18 @@ fn pending_event_and_wake_sync_term_lane_vector_golden() {
         ports.sync_term(),
         lane(146, 0, 1).wrapping_add(lane(146, 1, 3))
     );
+}
+
+/// A wake ends the pause, so the paused threads add no term again.
+#[test]
+fn a_wake_removes_the_paused_thread_term() {
     let mut paused = PausedThreadState::default();
+    paused.pause(PausedThread {
+        thread: 1,
+        decrementer_wakes: true,
+    });
+    assert_ne!(paused.sync_term(), 0);
     paused.wake(1);
-    assert_eq!(
-        paused.sync_term(),
-        lane(148, 0, 1).wrapping_add(lane(148, 1, 1))
-    );
+    assert_eq!(paused.sync_term(), 0);
+    assert_eq!(paused, PausedThreadState::default());
 }

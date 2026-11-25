@@ -1,4 +1,5 @@
 use super::*;
+use crate::group::interrupt::InterruptGroupState;
 use crate::group::uart::VirtualUartPortParams;
 use cellgov_event::UnitId;
 use cellgov_mem::{PageSize, Region};
@@ -14,11 +15,6 @@ const PORT: u64 = 10;
 
 /// The caller's buffer, in the real mode region.
 const BUFFER: u64 = 0x0010_0000;
-
-/// The refusal for the receive bit of a mask on a service port.
-const RX_RAISE: &str = "the receive bit 2 of a virtual UART interrupt mask on a port whose \
-                        receive buffer has no more free bytes than the receive trigger, with \
-                        which lv1 raises the port's interrupt";
 
 /// The size of the receive buffer of [`PORT`] at the kernel's open.
 fn rx_buffer_size() -> u64 {
@@ -78,6 +74,7 @@ fn read_with(
             firmware: Some("4.93"),
             memory: &MemoryState::default(),
             uart,
+            interrupt: &InterruptGroupState::default(),
             storage,
         },
     )
@@ -150,18 +147,33 @@ fn a_read_whose_buffer_the_storage_does_not_hold_is_a_refusal() {
 
 /// lv1 computes the port's status after it copies a byte
 /// [OFW-4.93 lv1 a:0x2F0830-0x2F0940]. With the receive trigger at the
-/// size less 1, the status has the receive bit while a byte stays.
+/// size less 1, the status has the receive bit while a byte stays. The
+/// reply that filled the buffer raised port 10's shadow bit, bit 63 - 10
+/// of doubleword 0 [OFW-4.93 lv1 a:0x2F2214-0x2F2248]. The read that takes
+/// the last byte clears it [OFW-4.93 lv1 a:0x2F2308-0x2F2334].
 #[test]
-fn under_mask_2_a_read_that_leaves_bytes_is_a_refusal_and_a_read_of_each_byte_is_answered() {
+fn under_mask_2_a_read_that_leaves_bytes_keeps_the_shadow_bit_and_a_read_of_each_byte_clears_it() {
+    let mut uart = holding(&HELD, 2);
+    uart.apply(UartChange::ShadowSet(crate::VirtualUartShadowWrite {
+        index: 0,
+        value: 1 << 53,
+    }));
     let part = request(BUFFER, 4);
     assert_eq!(
-        read_with(&part, &holding(&HELD, 2), &storage(0x80_0000)),
-        refused(&part, RX_RAISE)
+        read_with(&part, &uart, &storage(0x80_0000)),
+        taken(&part, &HELD[..4], &HELD[4..])
     );
     let whole = request(BUFFER, 6);
+    let HypercallDisposition::Answered(mut cleared) = taken(&whole, &HELD, &[]) else {
+        panic!("an answer");
+    };
+    cleared.push_change(UartChange::ShadowSet(crate::VirtualUartShadowWrite {
+        index: 0,
+        value: 0,
+    }));
     assert_eq!(
-        read_with(&whole, &holding(&HELD, 2), &storage(0x80_0000)),
-        taken(&whole, &HELD, &[])
+        read_with(&whole, &uart, &storage(0x80_0000)),
+        HypercallDisposition::Answered(cleared)
     );
 }
 

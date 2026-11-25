@@ -73,13 +73,15 @@ pub enum KernelRunStop {
         /// The address of the faulting instruction, when the unit named it.
         pc: Option<u64>,
     },
-    /// lv1 paused every hardware thread, and CellGov delivers no wake.
+    /// lv1 paused every hardware thread, and no wake came.
     ///
     /// On the console, one of these wakes a paused thread:
-    /// - an interrupt on an unmasked plug;
-    /// - in mode 0, the thread's decrementer.
+    /// - an interrupt on an unmasked plug, which the runtime delivers: the
+    ///   thread runs again and returns from `pause`;
+    /// - in mode 0, the thread's decrementer, which CellGov does not model.
     ///
-    /// CellGov models neither wake, so the run cannot continue.
+    /// With both threads paused, no thread runs to raise a plug, so the run
+    /// cannot continue.
     NoWake {
         /// The paused threads, in thread order.
         paused: Vec<PausedThread>,

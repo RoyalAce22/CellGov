@@ -657,6 +657,18 @@ pub const fn virtual_uart_irq_bitmap_in_small_page(address: u64) -> bool {
     address & page == address.wrapping_add(VIRTUAL_UART_IRQ_BITMAP_BYTES) & page
 }
 
+/// The doubleword of the virtual UART's shadow, and the bit in it, that
+/// hold the interrupt of port `port`.
+///
+/// lv1's status function reads the port at +168 of the endpoint. It
+/// takes doubleword port / 64 and bit 63 - port % 64, with bit 0 the
+/// least significant [OFW-4.93 lv1 a:0x2F2214-0x2F2248]. So port 0 is the
+/// most significant bit of the first doubleword.
+pub const fn virtual_uart_shadow_bit(port: u8) -> (u64, u64) {
+    let port = port as u64;
+    (port / 64, 1 << (63 - port % 64))
+}
+
 /// The r3 of `configure_virtual_uart_irq` for an r3 that no memory region
 /// of the partition holds: `LV1_NO_ENTRY` (-6), with r3 marked in the high
 /// word [OFW-4.93 lv1 a:0x2F2AB8-0x2F2AC4].
@@ -1450,3 +1462,7 @@ mod reply_tests;
 #[cfg(test)]
 #[path = "tests/uart_reply_console_tests.rs"]
 mod reply_console_tests;
+
+#[cfg(test)]
+#[path = "tests/uart_shadow_tests.rs"]
+mod shadow_tests;
