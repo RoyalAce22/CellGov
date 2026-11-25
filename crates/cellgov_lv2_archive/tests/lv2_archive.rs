@@ -1410,6 +1410,16 @@ fn caller_rows_are_well_formed() {
     }
 }
 
+/// Each number that CellGov's hypervisor answers and whose kernel sites
+/// the census scanner misses. The scanner walks the words linearly and
+/// stops at a `blr`, so it drops the `li r11` of an `sc` block that sits
+/// after the function's `blr`. Each entry is the number, a firmware
+/// whose kernel holds the site, and the site's real address, which
+/// `hypercall_unresolved.tsv` must list for that kernel:
+/// - 12, `connect_irq_plug_ext`
+///   [OFW-4.93 lv2_kernel a:0x80000000000087a0-0x80000000000087f8].
+const ANSWERED_WITH_MISSED_SITES: &[(u64, &str, u64)] = &[(12, "4.93", 0x87F8)];
+
 #[test]
 fn hypercall_site_rows_are_well_formed() {
     assert_eq!(HYPERCALL_SITE.gate, HYPERCALL_GATE);
@@ -1455,6 +1465,26 @@ fn hypercall_site_rows_are_well_formed() {
             "hypercall unresolved row sites are not ascending: {row:?}"
         );
     }
+    // A missed site stays listed as unresolved, so the census cannot
+    // give it to another number, and its number stays answered.
+    let pups = committed_pups();
+    for &(number, fw, site) in ANSWERED_WITH_MISSED_SITES {
+        assert!(
+            cellgov_lv1::ANSWERED.contains(&number),
+            "hypercall {number} is no longer answered; \
+             remove it from ANSWERED_WITH_MISSED_SITES"
+        );
+        let listed = pups.iter().filter(|pup| pup.fw == fw).any(|pup| {
+            unresolved
+                .iter()
+                .any(|row| row.pup_sha256 == pup.pup_sha256 && row.sites.contains(&site))
+        });
+        assert!(
+            listed,
+            "the {fw} kernel's unresolved sites do not list {site:#x}, \
+             the missed site of hypercall {number}"
+        );
+    }
     // Every number CellGov's hypervisor answers is one each kernel calls.
     for &number in cellgov_lv1::ANSWERED {
         let callers: BTreeSet<&str> = sites
@@ -1462,6 +1492,17 @@ fn hypercall_site_rows_are_well_formed() {
             .filter(|row| row.number == number)
             .map(|row| row.pup_sha256.as_str())
             .collect();
+        if ANSWERED_WITH_MISSED_SITES
+            .iter()
+            .any(|&(missed, _, _)| missed == number)
+        {
+            assert!(
+                callers.is_empty(),
+                "the census now finds a site of answered hypercall {number}; \
+                 remove it from ANSWERED_WITH_MISSED_SITES"
+            );
+            continue;
+        }
         assert_eq!(
             callers.len(),
             scanned.len(),

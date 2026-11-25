@@ -2,10 +2,11 @@
 
 use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::lv1::call::{
-    ALLOCATE_MEMORY, CONFIGURE_IRQ_STATE_BITMAP, CONSTRUCT_EVENT_RECEIVE_PORT,
-    CONSTRUCT_VIRTUAL_ADDRESS_SPACE, GET_LOGICAL_PARTITION_ID, GET_LOGICAL_PPE_ID,
-    LOGICAL_CONSOLE_CONSTRUCT, LOGICAL_CONSOLE_FLUSH, LOGICAL_CONSOLE_SEND, MAP_HTAB,
-    READ_HTAB_ENTRIES, READ_REPOSITORY_NODE, SELECT_VIRTUAL_ADDRESS_SPACE, WRITE_HTAB_ENTRY,
+    ALLOCATE_MEMORY, CONFIGURE_IRQ_STATE_BITMAP, CONNECT_IRQ_PLUG_EXT,
+    CONSTRUCT_EVENT_RECEIVE_PORT, CONSTRUCT_VIRTUAL_ADDRESS_SPACE, GET_LOGICAL_PARTITION_ID,
+    GET_LOGICAL_PPE_ID, LOGICAL_CONSOLE_CONSTRUCT, LOGICAL_CONSOLE_FLUSH, LOGICAL_CONSOLE_SEND,
+    MAP_HTAB, READ_HTAB_ENTRIES, READ_REPOSITORY_NODE, SELECT_VIRTUAL_ADDRESS_SPACE,
+    WRITE_HTAB_ENTRY,
 };
 use cellgov_ps3_abi::lv1::partition::LPAR_ID_GAME_OS;
 
@@ -13,10 +14,12 @@ use super::address_space::AddressSpaceState;
 use super::answer::{HypercallAnswer, HypercallDisposition};
 use super::event_port::EventReceivePortState;
 use super::interrupt::IrqStateBitmapState;
+use super::irq_plug::PlugState;
 use super::memory::MemoryState;
 use super::request::HypercallRequest;
 use super::{
-    address_space, console, event_port, interrupt, memory, page_table, ppe, repository, vector,
+    address_space, console, event_port, interrupt, irq_plug, memory, page_table, ppe, repository,
+    vector,
 };
 
 /// The numbers a handler answers, ascending. Every other number takes
@@ -27,6 +30,7 @@ pub const ANSWERED: &[u64] = &[
     CONSTRUCT_VIRTUAL_ADDRESS_SPACE,
     SELECT_VIRTUAL_ADDRESS_SPACE,
     CONFIGURE_IRQ_STATE_BITMAP,
+    CONNECT_IRQ_PLUG_EXT,
     CONSTRUCT_EVENT_RECEIVE_PORT,
     GET_LOGICAL_PPE_ID,
     GET_LOGICAL_PARTITION_ID,
@@ -51,7 +55,8 @@ pub fn answers(number: u64) -> bool {
 /// - the event receive ports `ports`.
 ///
 /// `storage` is the caller's real address space. The page table calls
-/// read the page table there.
+/// read the page table there, and the bitmap and plug calls write the
+/// bitmaps there.
 ///
 /// lv1's vector answers first: a number past the table, and a
 /// problem-state call. A handler answers the call next. The null backend
@@ -76,6 +81,16 @@ pub fn answer(
         CONFIGURE_IRQ_STATE_BITMAP => {
             interrupt::configure_bitmap(request, firmware, bitmaps, storage)
         }
+        CONNECT_IRQ_PLUG_EXT => irq_plug::connect_plug(
+            request,
+            firmware,
+            &PlugState {
+                spaces,
+                bitmaps,
+                ports,
+                storage,
+            },
+        ),
         CONSTRUCT_EVENT_RECEIVE_PORT => event_port::construct_port(request, firmware, ports),
         GET_LOGICAL_PPE_ID => ppe::logical_ppe_id(request, firmware),
         GET_LOGICAL_PARTITION_ID => {

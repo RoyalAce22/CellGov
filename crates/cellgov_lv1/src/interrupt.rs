@@ -32,7 +32,7 @@ use super::event_port::EventReceivePort;
 use super::request::HypercallRequest;
 use super::{memory, vector};
 
-/// The logical PPE thread that one bitmap belongs to.
+/// A logical PPE thread: the key of its bitmap and of its plugs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct IrqStateBitmapKey {
     /// The logical PPE id, from r3.
@@ -57,6 +57,9 @@ pub enum InterruptChange {
     BitmapRegistered(IrqStateBitmapRegistration),
     /// The call constructed this event receive port.
     PortConstructed(EventReceivePort),
+    /// The call's connect step left the port with this id in this state:
+    /// a new plug, and a connection when the plug was free.
+    PlugConnect(EventReceivePort),
 }
 
 /// Fields 1 to 3: the logical PPE id, the thread and the address.
@@ -152,8 +155,8 @@ fn real_mode_region_check(address: u64, rm_size: u64) -> Option<u64> {
 /// cleared.
 ///
 /// The answer writes 0 to the bitmap's status doublewords. lv1 copies
-/// the thread's status shadow there, and the shadow is 0 because
-/// CellGov's hypervisor connects no plug. The answer carries the
+/// the thread's status shadow there, and the shadow is 0 because no call
+/// that CellGov answers raises a plug's bit. The answer carries the
 /// registration, and the hypervisor keeps it. A second registration for
 /// one thread replaces the first.
 ///
@@ -242,12 +245,12 @@ pub(super) fn configure_bitmap(
         source: request.unit,
         source_time: request.tick,
     });
-    answer.interrupt = Some(InterruptChange::BitmapRegistered(
+    answer.interrupt = Some(Box::new(InterruptChange::BitmapRegistered(
         IrqStateBitmapRegistration {
             key: IrqStateBitmapKey { ppe_id, thread },
             lpar_address: address,
         },
-    ));
+    )));
     HypercallDisposition::Answered(answer)
 }
 

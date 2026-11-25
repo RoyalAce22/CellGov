@@ -52,7 +52,10 @@ pub struct HypercallAnswer {
     /// loads, which the runtime gives the thread.
     pub page_table: Option<PageTableLoad>,
     /// The change to the interrupt state, which the hypervisor applies.
-    pub interrupt: Option<InterruptChange>,
+    ///
+    /// The box keeps [`HypercallDisposition::Answered`] within clippy's
+    /// size limit for an enum variant.
+    pub interrupt: Option<Box<InterruptChange>>,
 }
 
 /// The translation registers that lv1 loads on the calling thread when

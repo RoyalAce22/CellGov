@@ -4,7 +4,7 @@ use cellgov_mem::lanes::{contribution, LaneIndex};
 fn ports(ids: &[u64]) -> EventReceivePortState {
     let mut state = EventReceivePortState::default();
     for &id in ids {
-        state.construct(EventReceivePort { id });
+        state.construct(EventReceivePort::new(id));
     }
     state
 }

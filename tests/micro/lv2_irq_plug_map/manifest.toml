@@ -1,0 +1,20 @@
+[test]
+name = "lv2_irq_plug_map"
+
+# A hardware probe: the IRQ plugs the running kernel connected with lv1 at boot,
+# read back from the kernel's two per-thread records through the CFW's lv2 peek,
+# with each thread's interrupt state bitmap in the same pass. The console capture
+# is the answer; no emulator runs it.
+
+[observe]
+# per read, the address and the doubleword there: 30 reads, 480 bytes. The reads are
+# the TOC word, the two TOC slots, the record count, then for each of the two records
+# the thread word at +0x10, the four doublewords of the used-plug map at +0xE0, and the
+# eight doublewords of the bitmap at +0x1C0: four status doublewords, then four mask
+# doublewords at +0x1E0.
+memory_regions = [
+  { name = "result", addr = 0, size = 480 },
+]
+
+[expect]
+outcome = "completed"

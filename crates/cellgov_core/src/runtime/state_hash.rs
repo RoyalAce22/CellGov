@@ -138,3 +138,7 @@ mod hypervisor_irq_state_bitmap_hash_tests;
 #[cfg(test)]
 #[path = "tests/hypervisor_event_receive_port_hash_tests.rs"]
 mod hypervisor_event_receive_port_hash_tests;
+
+#[cfg(test)]
+#[path = "tests/hypervisor_irq_plug_hash_tests.rs"]
+mod hypervisor_irq_plug_hash_tests;

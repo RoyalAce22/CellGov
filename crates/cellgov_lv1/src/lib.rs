@@ -22,7 +22,8 @@
 //! - a new memory region;
 //! - a change to the address spaces;
 //! - a registered bitmap;
-//! - a new event receive port.
+//! - a new event receive port;
+//! - a port's plug and its connection to a plug.
 //!
 //! Before a handler runs, the hypervisor gives the answers of lv1's own
 //! `sc` vector: a number past the hypercall table, and a problem-state
@@ -50,6 +51,7 @@ mod cost;
 mod event_port;
 mod handlers;
 mod interrupt;
+mod irq_plug;
 mod memory;
 mod page_table;
 mod ppe;

@@ -10,6 +10,7 @@
 //! - the logical PPE id and the call that returns it
 //! - the checks and effects of the interrupt state bitmap call
 //! - the event receive port and the call that constructs it
+//! - the checks and effects of the call that connects a port to a plug
 //! - the statuses of a refused storage write
 //!
 //! A hypercall is `sc` with LEV = 1 from supervisor state. r11 holds
@@ -21,6 +22,7 @@ pub mod call;
 pub mod dispatch;
 pub mod event_port;
 pub mod interrupt;
+pub mod irq_plug;
 pub mod memory;
 pub mod page_table;
 pub mod partition;

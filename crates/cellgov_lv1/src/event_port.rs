@@ -1,9 +1,10 @@
 //! Hypercall 18, `construct_event_receive_port`, and the event receive
 //! ports that the hypervisor keeps for the partition.
 //!
-//! lv1 reads no input register, and keeps no thread in the port. So the
-//! handler does not read [`HypercallRequest::thread`], and the hypervisor
-//! keys each port by its id alone.
+//! lv1 reads no input register, and keeps no thread in the port it
+//! constructs. So the handler does not read
+//! [`HypercallRequest::thread`], and the hypervisor keys each port by its
+//! id alone.
 //!
 //! lv1 takes the port id from the partition's object table, and later
 //! interrupt calls look the port up by that id; see
@@ -17,22 +18,57 @@ use cellgov_ps3_abi::lv1::event_port::{event_receive_port_handler, game_os_first
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
 use super::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
-use super::interrupt::InterruptChange;
+use super::interrupt::{InterruptChange, IrqStateBitmapKey};
 use super::request::HypercallRequest;
 use super::vector;
 
 /// One event receive port that the hypervisor constructed.
+///
+/// `connect_irq_plug_ext` sets the connection and the plug; see
+/// [`cellgov_ps3_abi::lv1::irq_plug`]. A connected port holds the plug
+/// slot of its thread. No other call that CellGov answers fills a plug
+/// slot, so the ports give each thread's plug table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EventReceivePort {
     /// The port id in the partition's object table, which the answer put
     /// in r4.
     pub id: u64,
+    /// The thread whose plug table the port's +128 names, or `None` for
+    /// no connection.
+    pub connection: Option<IrqStateBitmapKey>,
+    /// The plug at +144 of the port.
+    ///
+    /// A connect step sets it even when it fails because the plug holds
+    /// another port. lv1 reads it only for a connected port.
+    pub plug: u8,
 }
 
-/// Field 1: the port id.
+impl EventReceivePort {
+    /// The port with the id `id` as lv1's constructor leaves it: no
+    /// connection, and plug 0.
+    pub const fn new(id: u64) -> Self {
+        Self {
+            id,
+            connection: None,
+            plug: 0,
+        }
+    }
+}
+
+/// These fields:
+/// - field 1: the port id;
+/// - field 2: 1 for a connection;
+/// - fields 3 and 4: the logical PPE id and the thread of the connection;
+/// - field 5: the plug.
 impl LaneValue for EventReceivePort {
     fn lanes(&self, lanes: &mut ObjectLanes) {
         lanes.lane(1, 0, self.id);
+        if let Some(key) = self.connection {
+            lanes.lane(2, 0, 1);
+            lanes.lane(3, 0, key.ppe_id);
+            lanes.lane(4, 0, u64::from(key.thread));
+        }
+        lanes.lane(5, 0, u64::from(self.plug));
     }
 }
 
@@ -54,8 +90,22 @@ impl EventReceivePortState {
         self.ports.get(&id)
     }
 
+    /// The port that the plug `plug` of the thread `thread` holds, or
+    /// `None` when the plug is free.
+    pub fn port_on_plug(&self, thread: IrqStateBitmapKey, plug: u8) -> Option<&EventReceivePort> {
+        self.ports
+            .values()
+            .find(|port| port.connection == Some(thread) && port.plug == plug)
+    }
+
     /// Keeps `port`.
     pub(super) fn construct(&mut self, port: EventReceivePort) {
+        self.ports.insert(port.id, port);
+    }
+
+    /// Keeps `port` in place of the port with its id, which a connect
+    /// step changed.
+    pub(super) fn connect(&mut self, port: EventReceivePort) {
         self.ports.insert(port.id, port);
     }
 
@@ -127,7 +177,9 @@ pub(super) fn construct_port(
     let mut outputs = vector::cleared_outputs();
     outputs[0] = id;
     let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), outputs);
-    answer.interrupt = Some(InterruptChange::PortConstructed(EventReceivePort { id }));
+    answer.interrupt = Some(Box::new(InterruptChange::PortConstructed(
+        EventReceivePort::new(id),
+    )));
     HypercallDisposition::Answered(answer)
 }
 

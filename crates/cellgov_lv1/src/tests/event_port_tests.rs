@@ -25,7 +25,9 @@ fn request() -> HypercallRequest {
 
 fn constructed(id: u64) -> HypercallDisposition {
     let mut answer = HypercallAnswer::lv1_status(0, vec![id, 0, 0, 0, 0, 0, 0]);
-    answer.interrupt = Some(InterruptChange::PortConstructed(EventReceivePort { id }));
+    answer.interrupt = Some(Box::new(InterruptChange::PortConstructed(
+        EventReceivePort::new(id),
+    )));
     HypercallDisposition::Answered(answer)
 }
 
@@ -40,7 +42,7 @@ fn refused(r: &HypercallRequest, what: &'static str) -> HypercallDisposition {
 
 fn holding(id: u64) -> EventReceivePortState {
     let mut ports = EventReceivePortState::default();
-    ports.construct(EventReceivePort { id });
+    ports.construct(EventReceivePort::new(id));
     ports
 }
 
@@ -102,7 +104,7 @@ fn the_hypervisor_keeps_the_port_and_hashes_it() {
     assert_eq!(hv.event_receive_ports().ports().len(), 1);
     assert_eq!(
         hv.event_receive_ports().port(FIRST_PORT_ID),
-        Some(&EventReceivePort { id: FIRST_PORT_ID })
+        Some(&EventReceivePort::new(FIRST_PORT_ID))
     );
     assert_ne!(hv.sync_term(), empty);
     assert!(hv.witnesses().is_empty());

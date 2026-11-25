@@ -54,7 +54,8 @@
 //! - `connect_irq_plug_ext` (hypercall 12) looks up its r6 in the object
 //!   table and checks the object's class word at +48. A failed lookup
 //!   returns `LV1_NO_ENTRY` (-6) with r6 marked
-//!   [OFW-4.93 lv1 a:0x2EA16C-0x2EA1A8].
+//!   [OFW-4.93 lv1 a:0x2EA16C-0x2EA1A8]. Its connect step sets +128 and
+//!   +144; see [`super::irq_plug`].
 //! - `send_event_locally` (hypercall 24) gives its r3 to the function
 //!   [OFW-4.93 lv1 a:0x2E269C] [OFW-4.93 lv1 a:0x2EF5B4]. That function
 //!   looks up r3 the same way, and also checks the word at +136

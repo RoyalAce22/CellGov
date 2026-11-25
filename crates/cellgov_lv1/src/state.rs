@@ -83,6 +83,7 @@ impl Hypervisor {
     ///   mapping moves the region counter past the value it took;
     /// - a registered interrupt state bitmap joins the bitmaps;
     /// - a constructed event receive port joins the ports;
+    /// - a connect step changes its port;
     /// - a console write appends its bytes to the TTY sink;
     /// - a repository read that reaches its handler appends its record,
     ///   answered or refused;
@@ -131,12 +132,15 @@ impl Hypervisor {
                     }
                     self.address_spaces.apply(change);
                 }
-                match answer.interrupt {
+                match answer.interrupt.as_deref().copied() {
                     Some(InterruptChange::BitmapRegistered(registration)) => {
                         self.irq_state_bitmaps.register(registration);
                     }
                     Some(InterruptChange::PortConstructed(port)) => {
                         self.event_receive_ports.construct(port);
+                    }
+                    Some(InterruptChange::PlugConnect(port)) => {
+                        self.event_receive_ports.connect(port);
                     }
                     None => {}
                 }

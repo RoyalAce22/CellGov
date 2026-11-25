@@ -127,6 +127,18 @@ pub const SELECT_VIRTUAL_ADDRESS_SPACE: u64 = 7;
 /// [`super::interrupt`].
 pub const CONFIGURE_IRQ_STATE_BITMAP: u64 = 11;
 
+/// `connect_irq_plug_ext`: five inputs and no output.
+/// - r3 is the logical PPE id.
+/// - r4 is the hardware thread.
+/// - r5 is the plug.
+/// - r6 is the event receive port id.
+/// - r7 is 0.
+///
+/// Linux `arch/powerpc/platforms/ps3/interrupt.c`, `ps3_irq_plug_setup`,
+/// makes the call in this form. The lv1 handler [OFW-4.93 lv1 a:0x2E9DA8]
+/// reads the inputs in this form; see [`super::irq_plug`].
+pub const CONNECT_IRQ_PLUG_EXT: u64 = 12;
+
 /// `construct_event_receive_port`: no input, and the new port's id in
 /// r4. Linux `arch/powerpc/platforms/ps3/interrupt.c`,
 /// `ps3_event_receive_port_setup`, makes the call in this form and names
