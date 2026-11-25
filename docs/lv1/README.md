@@ -105,7 +105,7 @@ as text, the position of the boot's first read of it, and whether the
 hypervisor answered or refused it. In the text, a named word's index
 follows a `+` and a numeric word reads in hex, so `bi.pu+1` and
 `bi.pu.0x1` are two keys. A refused read stops the boot, so it is the
-boot's last; the refused nodes are `bi.rgntotal`.
+boot's last; the refused nodes are `bi.rgntotal`, `sys.flash.ext`.
 
 `cellgov dev repository-census` writes one kernel's rows.
 `CELLGOV_REGENERATE=1 cargo test -p cellgov_cli --features installed-firmware-tests --test repository_census_firmware` boots every logged firmware's stored kernel
