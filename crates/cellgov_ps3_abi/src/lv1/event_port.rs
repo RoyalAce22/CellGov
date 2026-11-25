@@ -136,6 +136,9 @@ const RECORD_START_SC: u64 = 0x8000_0000_0002_7d20;
 /// The call in the kernel's function that makes the network device's
 /// interrupt port [OFW-4.93 lv2_kernel a:0x80000000000a28e0].
 const NETWORK_SC: u64 = 0x8000_0000_000a_28e0;
+/// The call in the kernel's port setup of an interrupt object of type 2
+/// [OFW-4.93 lv2_kernel a:0x8000000000096494].
+const STORAGE_SC: u64 = 0x8000_0000_0009_6494;
 
 /// The console capture of the port id that the kernel keeps at +0x38 of
 /// each thread's record.
@@ -150,6 +153,13 @@ pub const RECORD_PORT_CAPTURE: &str = "tests/micro/lv2_record_port_ids";
 /// The path is relative to the workspace root. Its README gives the
 /// method and the analysis.
 pub const NETWORK_PORT_CAPTURE: &str = "tests/micro/lv1_network_port_id";
+
+/// The console capture of the port that lv1 connects to the storage
+/// bus's interrupt for the game OS partition, and of the port's id.
+///
+/// The path is relative to the workspace root. Its README gives the
+/// method and the analysis.
+pub const STORAGE_PORT_CAPTURE: &str = "tests/micro/lv1_storage_port_id";
 
 const fn call(thread: u8, sc: u64, id: u64) -> GameOsPortCall {
     GameOsPortCall { thread, sc, id }
@@ -195,6 +205,28 @@ const fn call(thread: u8, sc: u64, id: u64) -> GameOsPortCall {
 /// [OFW-4.93 lv2_kernel a:0x80000000000a291c-0x80000000000a2930]. lv1
 /// keeps the port that it connects to the network device's interrupt. The
 /// capture [`NETWORK_PORT_CAPTURE`] reads that port's id in lv1.
+///
+/// After the storage bus open, the storage bus function registers an
+/// interrupt object of type 2 for the storage bus
+/// [OFW-4.93 lv2_kernel a:0x80000000000ae140-0x80000000000ae170]. The
+/// kernel's port setup sends hypercall 18 for that object, then gives the
+/// port id to hypercall 197
+/// [OFW-4.93 lv2_kernel a:0x8000000000096490-0x80000000000964cc]. The
+/// capture [`STORAGE_PORT_CAPTURE`] reads the port that lv1 connects to
+/// the storage bus, and its id. The id is the lowest free id
+/// [OFW-4.93 lv1 a:0x2CA258], the id after the network device's port.
+///
+/// The port setup serves each interrupt object of type 2. So the row
+/// gives the id of the first call at that address on thread 0. A later
+/// call there finds the id held, and the hypervisor refuses it.
+///
+/// Two other kernel functions register an interrupt object through the
+/// same port setup: one sets up type 2 for a device it opens
+/// [OFW-4.93 lv2_kernel a:0x80000000000ac158-0x80000000000ac164]
+/// [OFW-4.93 lv2_kernel a:0x80000000000ac1ec], and one passes its
+/// caller's type [OFW-4.93 lv2_kernel a:0x8000000000094580-0x80000000000945bc].
+/// The row keys only the thread and the address, so it is true only while
+/// the storage bus function makes the first call there on thread 0.
 pub const GAME_OS_PORT_CALLS: &[GameOsPortCalls] = &[GameOsPortCalls {
     firmware: "4.93",
     calls: &[
@@ -210,6 +242,7 @@ pub const GAME_OS_PORT_CALLS: &[GameOsPortCalls] = &[GameOsPortCalls {
         call(0, SPE_SC, 16),
         call(0, RECORD_START_SC, 17),
         call(0, NETWORK_SC, 19),
+        call(0, STORAGE_SC, 20),
     ],
 }];
 
@@ -257,3 +290,7 @@ mod record_console_tests;
 #[cfg(test)]
 #[path = "tests/event_port_network_console_tests.rs"]
 mod network_console_tests;
+
+#[cfg(test)]
+#[path = "tests/event_port_storage_console_tests.rs"]
+mod storage_console_tests;

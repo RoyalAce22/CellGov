@@ -302,3 +302,7 @@ mod outlet_hash_tests;
 #[cfg(test)]
 #[path = "tests/event_port_record_start_tests.rs"]
 mod record_start_tests;
+
+#[cfg(test)]
+#[path = "tests/event_port_storage_tests.rs"]
+mod storage_tests;

@@ -75,7 +75,7 @@ fn each_4_93_per_thread_call_gets_the_port_id_the_capture_reads_for_it() {
 }
 
 #[test]
-fn the_4_93_rows_past_the_per_thread_calls_are_the_spe_record_and_network_calls() {
+fn the_4_93_rows_past_the_per_thread_calls_are_the_spe_record_network_and_storage_calls() {
     let all = game_os_port_calls("4.93").expect("the 4.93 port calls");
     let per_thread = [RECORD_SC, START_A_SC, START_B_SC, START_C_SC];
     let rest: Vec<(u8, u64)> = all
@@ -89,7 +89,8 @@ fn the_4_93_rows_past_the_per_thread_calls_are_the_spe_record_and_network_calls(
             (1, RECORD_START_SC),
             (0, SPE_SC),
             (0, RECORD_START_SC),
-            (0, NETWORK_SC)
+            (0, NETWORK_SC),
+            (0, STORAGE_SC)
         ]
     );
 }
