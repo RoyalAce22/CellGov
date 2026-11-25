@@ -68,6 +68,7 @@ fn constructed_shadow_real(spes: &LogicalSpeState) -> Option<u64> {
     answer.changes.iter().find_map(|change| match change {
         StateChange::Spe(change) => match **change {
             SpeChange::Constructed(spe) => Some(spe.shadow_real),
+            _ => None,
         },
         _ => None,
     })

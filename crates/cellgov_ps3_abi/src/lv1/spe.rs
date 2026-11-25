@@ -5,6 +5,8 @@
 //! - the contents of the shadow page, and how `write_htab_entry` maps it;
 //! - the irq outlets of a type 1 SPE, and the handler of
 //!   `get_spe_irq_outlet` (hypercall 78);
+//! - the handler of `set_spe_transition_notifier` (hypercall 64) and its
+//!   checks;
 //! - the spe id and the outlet ids of each call of the GameOS kernel's
 //!   boot.
 //!
@@ -162,6 +164,79 @@
 //!    new SPE passes.
 //! 4. The method stores the id at +72 of the class's outlet in the slot,
 //!    and returns 0 [OFW-4.93 lv1 a:0x2FA588-0x2FA5A0].
+//!
+//! The handler of `set_spe_transition_notifier` [OFW-4.93 lv1 a:0x2FCF68]
+//! gives r3, r4 and r5 to the worker [OFW-4.93 lv1 a:0x2FCFF8-0x2FD004].
+//! It returns the worker's r3 [OFW-4.93 lv1 a:0x2FD070], and writes no
+//! return slot. The vector's entry zeroes the slots
+//! [OFW-4.93 lv1 a:0x0C08]. So r4 to r10 return 0 on each path.
+//!
+//! The worker [OFW-4.93 lv1 a:0x2FCA94] does these steps in this order:
+//! 1. It looks up r3 in the partition's object table, and checks that
+//!    the object's class word at +48 is the SPE class in the TOC slot at
+//!    r2 - 4704 [OFW-4.93 lv1 a:0x2FCAC0-0x2FCBE0]. A failed check
+//!    returns `LV1_NO_ENTRY` (-6), marked with bit 0 for r3
+//!    [OFW-4.93 lv1 a:0x2FCBE4-0x2FCBF0].
+//! 2. When r5 is 0, it calls the method with no port and a mask of 0
+//!    [OFW-4.93 lv1 a:0x2FCC58-0x2FCC5C] [OFW-4.93 lv1 a:0x2FCF38-0x2FCF64].
+//!    It does not read r4 on this path.
+//! 3. It looks up r5 in the object table, and checks these fields of the
+//!    object [OFW-4.93 lv1 a:0x2FCC60-0x2FCE98]:
+//!    - the class word at +48 is the port class in the TOC slot at
+//!      r2 - 4688;
+//!    - the word at +136 is the word in the TOC slot at r2 - 4680;
+//!    - the byte at +148 is not 0.
+//!
+//!    A failed check returns `LV1_NO_ENTRY`, marked with bit 2 for r5
+//!    [OFW-4.93 lv1 a:0x2FCD78-0x2FCD88].
+//! 4. It calls the method with the port and with r4 as the mask
+//!    [OFW-4.93 lv1 a:0x2FCE9C-0x2FCEC4], and returns the method's r3.
+//!
+//! Both calls go through the call function of `get_spe_irq_outlet`, with
+//! the method in the TOC slot at r2 - 4672. That slot holds the function
+//! descriptor [OFW-4.93 lv1 a:0x34AAD8] of the method
+//! [OFW-4.93 lv1 a:0x2FA4E8]. A new SPE passes the check of the call
+//! function on its doubleword at +184.
+//!
+//! A port that `construct_event_receive_port` constructs passes each
+//! check of step 3; see [`super::event_port`]:
+//! - The port constructor gives the object constructor the class in the
+//!   TOC slot at r2 - 8032 [OFW-4.93 lv1 a:0x2DF61C]
+//!   [OFW-4.93 lv1 a:0x2CC6A8]. That slot and the slot at r2 - 4688
+//!   hold the same class [OFW-4.93 lv1 a:0x3580D8]
+//!   [OFW-4.93 lv1 a:0x358DE8].
+//! - The port constructor stores its r6 at +136
+//!   [OFW-4.93 lv1 a:0x2DF664]. The function of hypercall 18 gives it the
+//!   word in the TOC slot at r2 - 7896 [OFW-4.93 lv1 a:0x2E2538]. That
+//!   slot and the slot at r2 - 4680 hold the same word
+//!   [OFW-4.93 lv1 a:0x358160] [OFW-4.93 lv1 a:0x358DF0].
+//! - The byte at +148 is 1 after a successful construct.
+//!
+//! An irq outlet fails step 3. Its constructor gives the port
+//! constructor the word in the TOC slot at r2 - 4472
+//! [OFW-4.93 lv1 a:0x2FF94C], which holds another word
+//! [OFW-4.93 lv1 a:0x358EC0].
+//!
+//! The method [OFW-4.93 lv1 a:0x2FA4E8] does these steps in this order:
+//! 1. A mask bit that is not set in the doubleword at +160 of the SPE
+//!    returns `LV1_ILLEGAL_PARAMETER_VALUE` (-17), marked with bit 1 for
+//!    r4 [OFW-4.93 lv1 a:0x2FA4FC-0x2FA52C].
+//! 2. It adds a reference to the new port when the port is not 0, and
+//!    stores the port at +144 of the SPE. It then removes a reference
+//!    from the port that +144 held when that port is not 0
+//!    [OFW-4.93 lv1 a:0x2FA530-0x2FA548] [OFW-4.93 lv1 a:0x2FA570-0x2FA584].
+//!    The reference count is the word at +8 of the port
+//!    [OFW-4.93 lv1 a:0x2BED58-0x2BED6C] [OFW-4.93 lv1 a:0x2BEE78-0x2BEE8C].
+//! 3. It stores the mask at +152 of the SPE, and returns 0
+//!    [OFW-4.93 lv1 a:0x2FA54C-0x2FA550].
+//!
+//! The SPE constructor sets +144, +152 and +160 to 0
+//! [OFW-4.93 lv1 a:0x2FA680-0x2FA688]. The type 1 worker then sets +160
+//! to [`LOGICAL_SPE_TYPE_1_TRANSITION_MASK`]. A call with r5 = 0 passes
+//! step 1 of the method with the mask 0. It then stores 0 at +144 and
+//! +152, the values that the constructor set, and removes a reference
+//! from the port of an earlier call [OFW-4.93 lv1 a:0x2FA530-0x2FA550].
+//! So it clears the notifier of an earlier call.
 
 use crate::lv1::status::{zero_extended, LV1_ACCESS_VIOLATION};
 
@@ -264,6 +339,45 @@ pub fn spe_irq_outlet_handler(firmware: &str) -> Option<&'static SpeIrqOutletHan
 /// [OFW-4.93 lv1 a:0x315AE0-0x315AE8].
 pub const SPE_IRQ_CLASSES: usize = 3;
 
+/// The handler of hypercall 64 in one firmware's lv1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpeTransitionNotifierHandler {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The address of the `set_spe_transition_notifier` handler.
+    pub handler: u32,
+}
+
+/// Each firmware whose lv1 image shows the handler, ascending.
+///
+/// The address is the entry of hypercall 64 in the live 4.93 hypercall
+/// table ([`super::table::LIVE_TABLE_HANDLERS`]).
+pub const SPE_TRANSITION_NOTIFIER_HANDLERS: &[SpeTransitionNotifierHandler] =
+    &[SpeTransitionNotifierHandler {
+        firmware: "4.93",
+        handler: 0x2FCF68,
+    }];
+
+/// The handler of the firmware version `firmware`, or `None` when no lv1
+/// image read shows it.
+pub fn spe_transition_notifier_handler(
+    firmware: &str,
+) -> Option<&'static SpeTransitionNotifierHandler> {
+    SPE_TRANSITION_NOTIFIER_HANDLERS
+        .iter()
+        .find(|handler| handler.firmware == firmware)
+}
+
+/// The mask bits that `set_spe_transition_notifier` accepts for a type 1
+/// SPE: the type 1 worker sets the doubleword at +160 of the SPE to 7
+/// [OFW-4.93 lv1 a:0x3159C4-0x3159CC].
+pub const LOGICAL_SPE_TYPE_1_TRANSITION_MASK: u64 = 0b111;
+
+/// The r3 of `set_spe_transition_notifier` for a mask with a bit that the
+/// SPE does not accept: `LV1_ILLEGAL_PARAMETER_VALUE` (-17), with r4
+/// marked [OFW-4.93 lv1 a:0x2FA4FC-0x2FA52C].
+pub const SET_SPE_TRANSITION_NOTIFIER_MASK_R3: u64 = 0x0000_0002_FFFF_FFEF;
+
 /// One `construct_logical_spe` call of the GameOS kernel, and the spe id
 /// that lv1 gave it on the console.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -342,3 +456,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/spe_irq_outlet_tests.rs"]
 mod irq_outlet_tests;
+
+#[cfg(test)]
+#[path = "tests/spe_transition_notifier_tests.rs"]
+mod transition_notifier_tests;

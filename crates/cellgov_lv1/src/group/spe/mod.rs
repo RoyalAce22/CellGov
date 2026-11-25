@@ -5,8 +5,10 @@ pub(crate) mod construct;
 mod irq_outlet;
 mod registration;
 pub(crate) mod shadow;
+mod transition_notifier;
 
 pub use construct::{LogicalSpe, LogicalSpeState};
 pub use registration::{SpeChange, SpeState};
-pub(crate) use registration::{GROUP, LOGICAL_SPE_SOURCE};
+pub(crate) use registration::{GROUP, LOGICAL_SPE_NOTIFIER_SOURCE, LOGICAL_SPE_SOURCE};
 pub use shadow::{shadow_storage, SHADOW_STORAGE_BASE, SHADOW_STORAGE_PAGES};
+pub use transition_notifier::{TransitionNotifier, TransitionNotifierState};

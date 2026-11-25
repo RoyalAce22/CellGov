@@ -32,3 +32,15 @@ pub const CONSTRUCT_LOGICAL_SPE: u64 = 57;
 /// [OFW-4.93 lv1 a:0x2FC968] reads the inputs and writes the output in
 /// this form; see [`crate::lv1::spe`].
 pub const GET_SPE_IRQ_OUTLET: u64 = 78;
+
+/// `set_spe_transition_notifier`: three inputs and no output.
+///
+/// The inputs:
+/// - r3 is the spe id.
+/// - r4 is the mask.
+/// - r5 is the id of the event receive port, or 0 for no port.
+///
+/// Linux `arch/powerpc/include/asm/lv1call.h` gives the call three inputs
+/// and no output. The lv1 handler [OFW-4.93 lv1 a:0x2FCF68] reads the
+/// inputs in this form; see [`crate::lv1::spe`].
+pub const SET_SPE_TRANSITION_NOTIFIER: u64 = 64;
