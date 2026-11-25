@@ -85,8 +85,8 @@ static STAND_IN: [u8; 2 << SMALL_PAGE_LOG2] = [0; 2 << SMALL_PAGE_LOG2];
 /// The page table entry group at real address `addr` and its range, or
 /// `None` where no storage holds all of it.
 ///
-/// The group holds the bytes of `writes` that fall in it, so a search
-/// sees the R and C writes the block made.
+/// The group holds the bytes of `writes` that fall in it. A later byte
+/// of `writes` replaces an earlier byte at the same address.
 fn read_pteg(
     mem: &GuestMemory,
     addr: u64,
@@ -372,6 +372,93 @@ impl PpuExecutionUnit {
         verdict
     }
 
+    /// Whether `insn` takes the alignment interrupt of a store when it runs
+    /// again after its batch ends. The unit keeps nothing of the run or of
+    /// the table searches it makes.
+    ///
+    /// The run is the first instruction of the next batch, which starts
+    /// with no cached translation. So the run meets each page of its
+    /// operand through a search:
+    /// - a page gets the views of the translation [`Self::refill_for`]
+    ///   gives it;
+    /// - a page that no storage holds gets zero bytes ([`stand_in`]).
+    ///
+    /// Each search reads the page table that the next batch reads
+    /// ([`Self::next_batch_table`]). A run that meets a page whose search
+    /// refuses the store takes no alignment interrupt.
+    pub(super) fn store_alignment_ahead(&self, insn: &PpuInstruction, mem: &GuestMemory) -> bool {
+        let table = self.next_batch_table();
+        let mut views = Vec::new();
+        // The operand of a store that the misaligned caching-inhibited rule
+        // refuses spans two pages at most. Each probe adds one page, or the
+        // zero bytes of a page that no storage holds.
+        for _ in 0..3 {
+            let miss = match self.probe(insn, mem, &views) {
+                ExecuteVerdict::Fault(PpuFault::Interrupt(PpuInterrupt::Alignment {
+                    store,
+                    ..
+                })) => return store,
+                ExecuteVerdict::MemFault(MemError::Unmapped(miss))
+                | ExecuteVerdict::StoreFault(MemError::Unmapped(miss)) => miss.addr,
+                _ => return false,
+            };
+            let Some(t) = self.store_translation(mem, &table, miss) else {
+                return false;
+            };
+            let added = views.len();
+            push_views(&t, mem, &mut views);
+            let held = views[added..]
+                .iter()
+                .any(|v| v.base <= miss && miss - v.base < v.bytes.len() as u64);
+            if !held {
+                views.push(stand_in(&t, miss));
+            }
+        }
+        false
+    }
+
+    /// The translation that [`Self::refill_for`] gives a store at `ea`
+    /// when its searches read the page table entry groups with the bytes of
+    /// `table` over them. Returns `None` when the searches refuse the store.
+    /// The unit keeps nothing of the searches.
+    fn store_translation(
+        &self,
+        mem: &GuestMemory,
+        table: &[(ByteRange, u8)],
+        ea: u64,
+    ) -> Option<Translation> {
+        let search = |access| self.search_table(mem, table, ea, access).ok()?.result.ok();
+        search(Access::Store).or_else(|| search(Access::Load).filter(|t| t.inhibited && t.changed))
+    }
+
+    /// The bytes that the next batch's table searches read over the memory
+    /// of this batch, in the order they commit:
+    /// - the R and C writes that the block kept;
+    /// - the buffered stores, at their real addresses, in program order.
+    ///
+    /// A later byte replaces an earlier byte at the same address. The
+    /// commit pipeline applies them in that order, because
+    /// [`Self::publish_table_writes`] puts the R and C writes ahead of the
+    /// stores.
+    fn next_batch_table(&self) -> Vec<(ByteRange, u8)> {
+        let mut out = self.table_writes.clone();
+        for (ea, len, value) in self.store_buf.values_from(0) {
+            // The stored bytes are the low `len` bytes of the value.
+            let bytes = &value.to_be_bytes()[16 - usize::from(len)..];
+            let mut done = 0;
+            for (ra, n) in self.real_store_pieces(ea, len) {
+                let piece = &bytes[done..done + usize::from(n)];
+                // A translated piece ends below 2^43, so each of its bytes
+                // has a range.
+                out.extend(piece.iter().zip(ra..).filter_map(|(&byte, at)| {
+                    Some((ByteRange::new(GuestAddr::new(at), 1)?, byte))
+                }));
+                done += usize::from(n);
+            }
+        }
+        out
+    }
+
     /// The region views of the cached data translations: each
     /// translation's piece of each region of `mem`, at its effective
     /// address, as [`push_views`] gives them.
@@ -386,7 +473,7 @@ impl PpuExecutionUnit {
     /// The table search of `ea` for `access`. The unit keeps nothing of
     /// it.
     ///
-    /// The search sees the R and C writes the block made.
+    /// The search reads each group with the bytes of `writes` over it.
     ///
     /// # Errors
     ///
@@ -394,6 +481,7 @@ impl PpuExecutionUnit {
     fn search_table(
         &self,
         mem: &GuestMemory,
+        writes: &[(ByteRange, u8)],
         ea: u64,
         access: Access,
     ) -> Result<TableSearch, PpuFault> {
@@ -406,8 +494,8 @@ impl PpuExecutionUnit {
         // storage holds is an access to nonexistent storage.
         let unbacked = std::cell::Cell::new(false);
         let read = std::cell::RefCell::new(Vec::with_capacity(2));
-        let (result, entry) = translate_entry(ea, access, sup, |addr| {
-            match read_pteg(mem, addr, &self.table_writes) {
+        let (result, entry) =
+            translate_entry(ea, access, sup, |addr| match read_pteg(mem, addr, writes) {
                 Some((range, group)) => {
                     read.borrow_mut().push(range);
                     Some(group)
@@ -416,8 +504,7 @@ impl PpuExecutionUnit {
                     unbacked.set(true);
                     None
                 }
-            }
-        });
+            });
         if unbacked.get() {
             return Err(PpuFault::Checkstop);
         }
@@ -509,8 +596,9 @@ impl PpuExecutionUnit {
         access: Access,
         change: bool,
     ) -> Result<Translation, RefillStop> {
+        // The search sees the R and C writes the block made.
         let search = self
-            .search_table(mem, ea, access)
+            .search_table(mem, &self.table_writes, ea, access)
             .map_err(RefillStop::Fault)?;
         let wrote = match search.entry {
             Some(hit) => self.note_entry_writes(hit, change && search.result.is_ok())?,
@@ -585,8 +673,9 @@ impl PpuExecutionUnit {
     /// searches added after the counts `(writes, reads)`.
     ///
     /// The unit drops them for a misaligned store that takes the alignment
-    /// interrupt. Its table searches are speculative, so the PPE performs
-    /// none of their writes.
+    /// interrupt in this batch, or when it runs again after its batch ends.
+    /// Its table searches are speculative, so the PPE performs none of
+    /// their writes.
     ///
     /// [CBE-Handbook p:90 s:4.2.6.8] Footnote 4: a misaligned caching-inhibited store is speculative, so its table lookup is not performed when it takes the alignment interrupt.
     pub(super) fn drop_searches(&mut self, (writes, reads): (usize, usize)) {

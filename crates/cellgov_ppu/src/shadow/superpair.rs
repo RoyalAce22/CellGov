@@ -878,6 +878,10 @@ mod tests;
 mod proptests;
 
 #[cfg(test)]
+#[path = "tests/superpair_refusal_tests.rs"]
+mod refusal_tests;
+
+#[cfg(test)]
 #[path = "tests/superpair_compare_bc_tests.rs"]
 mod compare_bc_tests;
 

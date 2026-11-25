@@ -81,6 +81,19 @@ pub(super) fn state_seed() -> impl Strategy<Value = StateSeed> {
 }
 
 impl StateSeed {
+    /// A seed with the GPRs `gpr`. The other registers and the memory
+    /// seed are 0.
+    pub(super) fn with_gprs(gpr: [u64; 32]) -> Self {
+        Self {
+            gpr: gpr.to_vec(),
+            cr: 0,
+            lr: 0,
+            ctr: 0,
+            xer: 0,
+            memory: 0,
+        }
+    }
+
     /// A fresh state with the seed's registers; two calls give two
     /// equal states.
     pub(super) fn state(&self) -> PpuState {

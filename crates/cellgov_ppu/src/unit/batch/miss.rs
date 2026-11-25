@@ -95,7 +95,9 @@ impl PpuExecutionUnit {
     ///
     /// When the batch ends ahead of the instruction, the unit drops the C
     /// writes of its attempts. The next batch runs the instruction again,
-    /// and it writes C again when the page table permits the store.
+    /// and it writes C again when the page table permits the store. When a
+    /// misaligned store takes the alignment interrupt in that run, the unit
+    /// also drops the R writes and the group reads now.
     ///
     /// [CBE-Handbook p:90 s:4.2.6.8] Footnote 4: a misaligned caching-inhibited store is speculative, so its table lookup is not performed when it takes the alignment interrupt.
     #[inline]
@@ -108,6 +110,7 @@ impl PpuExecutionUnit {
         attempt: &Attempt,
         exit: FaultExit,
     ) -> MissStep {
+        let store_miss = matches!(exit, FaultExit::Mem(_, true));
         let step = self.refill_step(mem, effects, regions, translating, attempt, exit);
         let exit = match &step {
             MissStep::Stop(exit) => exit,
@@ -115,8 +118,23 @@ impl PpuExecutionUnit {
             // The store can still take a storage exception on a later
             // page when it runs again, so its C writes do not publish
             // with this batch.
+            // [CBE-Handbook p:90 s:4.2.6.8] Footnote 4: a misaligned caching-inhibited store is speculative, so its table lookup is not performed when it takes the alignment interrupt.
+            // The run in the next batch makes its own searches, so a
+            // store that takes that interrupt there keeps none from this
+            // batch. Each other access keeps its R writes, because its
+            // table lookups are nonspeculative.
+            // The prediction reads the table writes that publish with this
+            // batch, so the unit drops the C writes first. The R writes of
+            // the attempts stay until then, and no R bit changes a
+            // translation.
             MissStep::EndBatch => {
                 self.drop_change_writes(attempt.searches_before.0);
+                if store_miss
+                    && !refused_at_any_alignment(&attempt.insn)
+                    && self.store_alignment_ahead(&attempt.insn, mem)
+                {
+                    self.drop_searches(attempt.searches_before);
+                }
                 return step;
             }
             MissStep::Rerun => return step,

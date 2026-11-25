@@ -72,6 +72,10 @@ mod inhibited_store_reference_tests;
 mod crossing_store_change_tests;
 
 #[cfg(test)]
+#[path = "tests/ended_batch_inhibited_store_tests.rs"]
+mod ended_batch_inhibited_store_tests;
+
+#[cfg(test)]
 #[path = "tests/entry_write_range_tests.rs"]
 mod entry_write_range_tests;
 
@@ -146,6 +150,10 @@ mod witness_fault_prefix_tests;
 #[cfg(test)]
 #[path = "tests/fused_refusal_tests.rs"]
 mod fused_refusal_tests;
+
+#[cfg(test)]
+#[path = "tests/fused_std_pair_region_end_tests.rs"]
+mod fused_std_pair_region_end_tests;
 
 #[cfg(test)]
 #[path = "tests/fused_lis_entry_tests.rs"]

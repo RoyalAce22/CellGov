@@ -9,7 +9,7 @@ use crate::instruction::{FusedPair, PpuInstruction};
 use crate::shadow::quicken::quicken_insn;
 use crate::shadow::semantics_support::{
     compare_immediate, cr_field, displacement, ds_displacement, reg, run_pair, run_sequence,
-    state_seed, MEM_BASE,
+    state_seed, StateSeed, MEM_BASE,
 };
 use crate::state::PpuState;
 use crate::timing::classify;
@@ -726,6 +726,80 @@ fn aim_compare(
     }
 }
 
+/// Checks that the fused `a; b` leaves the machine where its halves do,
+/// from `seed`, and returns the verdict of both runs.
+///
+/// `aim` holds the nudge of an aimed compare.
+pub(super) fn check_pair(
+    a: PpuInstruction,
+    b: PpuInstruction,
+    seed: &StateSeed,
+    aim: Option<i16>,
+) -> Result<ExecuteVerdict, TestCaseError> {
+    let mem = seed.memory();
+    let mut halves = seed.state();
+    let mut pair = seed.state();
+    let (a, b) = match aim {
+        Some(nudge) => {
+            let aimed = aim_compare(a, b, &mut halves, &mem, nudge);
+            prop_assert_eq!(aim_compare(a, b, &mut pair, &mem, nudge), aimed);
+            aimed
+        }
+        None => (a, b),
+    };
+    let Some(fused) = make_super_pair(a, b) else {
+        return Err(TestCaseError::fail(format!("{a:?} + {b:?} did not fuse")));
+    };
+    prop_assert!(fused.is_super_pair());
+
+    let (verdict_halves, effects_halves) = run_sequence(&[a, b], &mut halves, &mem);
+    let (verdict_pair, effects_pair) = run_pair(&fused, &mut pair, &mem);
+
+    prop_assert_eq!(&verdict_pair, &verdict_halves);
+    let refused = !matches!(
+        verdict_pair,
+        ExecuteVerdict::Continue | ExecuteVerdict::Branch
+    );
+    if refused
+        && matches!(
+            fused,
+            PpuInstruction::Fused(
+                FusedPair::LduLdu { .. }
+                    | FusedPair::LwzLwz { .. }
+                    | FusedPair::LdLdAny { .. }
+                    | FusedPair::LbzLbz { .. }
+                    | FusedPair::OrLwz { .. }
+            )
+        )
+    {
+        // The ldu, lwz, ld and lbz pairs write no register until both loads
+        // pass. The or; lwz pair writes no register until its load passes.
+        // A refused pair thus leaves the state it began in. The batch's
+        // split rerun reaches the halves' state from there.
+        prop_assert_eq!(pair.fingerprint(), seed.state().fingerprint());
+    } else {
+        prop_assert_eq!(pair.fingerprint(), halves.fingerprint());
+    }
+    if refused && matches!(fused, PpuInstruction::Fused(FusedPair::StdStd { .. })) {
+        // The std pair checks both doublewords' bounds before it stages
+        // either, and `run_pair` gives only plain regions, so a refused
+        // pair stages nothing. The batch's split rerun then
+        // stages the first doubleword, as the halves do
+        // (`unit/tests/fused_std_pair_region_end_tests.rs`).
+        prop_assert_eq!(effects_pair, Vec::new());
+    } else {
+        prop_assert_eq!(effects_pair, effects_halves);
+    }
+    // The executor reports a refusal inside the second half at the
+    // pair's address. The batch then runs the pair split, so the
+    // unit stops at the second slot as the halves do
+    // (`unit/tests/fused_refusal_tests.rs`).
+    if !refused {
+        prop_assert_eq!(pair.pc, halves.pc);
+    }
+    Ok(verdict_pair)
+}
+
 proptest! {
     // Seven of the forty arms are compares that need an aimed
     // operand to show an off-by-one. Four times the default count
@@ -738,55 +812,7 @@ proptest! {
         seed in state_seed(),
         aim in proptest::option::weighted(0.8, -1i16..=1),
     ) {
-        let mem = seed.memory();
-        let mut halves = seed.state();
-        let mut pair = seed.state();
-        let (a, b) = match aim {
-            Some(nudge) => {
-                let aimed = aim_compare(a, b, &mut halves, &mem, nudge);
-                prop_assert_eq!(aim_compare(a, b, &mut pair, &mem, nudge), aimed);
-                aimed
-            }
-            None => (a, b),
-        };
-        let Some(fused) = make_super_pair(a, b) else {
-            return Err(TestCaseError::fail(format!("{a:?} + {b:?} did not fuse")));
-        };
-        prop_assert!(fused.is_super_pair());
-
-        let (verdict_halves, effects_halves) = run_sequence(&[a, b], &mut halves, &mem);
-        let (verdict_pair, effects_pair) = run_pair(&fused, &mut pair, &mem);
-
-        prop_assert_eq!(&verdict_pair, &verdict_halves);
-        let refused = !matches!(verdict_pair, ExecuteVerdict::Continue | ExecuteVerdict::Branch);
-        if refused
-            && matches!(
-                fused,
-                PpuInstruction::Fused(
-                    FusedPair::LduLdu { .. }
-                        | FusedPair::LwzLwz { .. }
-                        | FusedPair::LdLdAny { .. }
-                        | FusedPair::LbzLbz { .. }
-                        | FusedPair::OrLwz { .. }
-                )
-            )
-        {
-            // The ldu, lwz, ld and lbz pairs write no register until both loads
-            // pass. The or; lwz pair writes no register until its load passes.
-            // A refused pair thus leaves the state it began in. The batch's
-            // split rerun reaches the halves' state from there.
-            prop_assert_eq!(pair.fingerprint(), seed.state().fingerprint());
-        } else {
-            prop_assert_eq!(pair.fingerprint(), halves.fingerprint());
-        }
-        prop_assert_eq!(effects_pair, effects_halves);
-        // The executor reports a refusal inside the second half at the
-        // pair's address. The batch then runs the pair split, so the
-        // unit stops at the second slot as the halves do
-        // (`unit/tests/fused_refusal_tests.rs`).
-        if matches!(verdict_pair, ExecuteVerdict::Continue | ExecuteVerdict::Branch) {
-            prop_assert_eq!(pair.pc, halves.pc);
-        }
+        check_pair(a, b, &seed, aim)?;
     }
 
     #[test]
