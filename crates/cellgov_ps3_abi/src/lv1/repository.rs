@@ -232,8 +232,8 @@ const GAME_OS_341_DUMP: NodeSource = NodeSource::PsdevwikiDump {
 /// The dump is of firmware 3.41, which no logged boot is. No source gives
 /// the values for 1.50, 1.94 or 3.70. At 4.93 the console captures
 /// [`BOOT_RECORD_CAPTURE`], [`DEBUG_SUPPORT_CAPTURE`],
-/// [`FLASH_EXT_CAPTURE`] and [`BUS_CAPTURE`] give each value that the 4.93
-/// boot reads.
+/// [`FLASH_EXT_CAPTURE`], [`HW_CONFIG_CAPTURE`] and [`BUS_CAPTURE`] give
+/// each value that the 4.93 boot reads.
 const DUMP_FIRMWARE_BEFORE_4_93: &[&str] = &["1.50", "1.94", "3.70"];
 
 /// The console capture of the 4.93 kernel's boot repository record, on
@@ -249,7 +249,7 @@ pub const BOOT_RECORD_CAPTURE: &str = "tests/micro/lv2_repository_boot_nodes/ps3
 pub const BOOT_RECORD_4_93: u64 = 0x8000_0000_0037_a5a0;
 
 /// The firmware of [`BOOT_RECORD_CAPTURE`], [`DEBUG_SUPPORT_CAPTURE`],
-/// [`FLASH_EXT_CAPTURE`] and [`BUS_CAPTURE`].
+/// [`FLASH_EXT_CAPTURE`], [`HW_CONFIG_CAPTURE`] and [`BUS_CAPTURE`].
 const CAPTURE_FIRMWARE: &[&str] = &["4.93"];
 
 /// The value at offset `offset` of the 4.93 boot record, as
@@ -300,6 +300,15 @@ pub const FLASH_EXT_CAPTURE: &str = "tests/micro/lv1_repository_flash/peek/cech2
 /// The lv1 address of the first value of the node that
 /// [`FLASH_EXT_CAPTURE`] read.
 const FLASH_EXT_V1_ADDRESS: u64 = 0x0068_8d78;
+
+/// The console capture of lpar 1's `sys.hw.config` node in lv1's
+/// repository, on the reference console at firmware 4.93. Its README
+/// gives the method.
+pub const HW_CONFIG_CAPTURE: &str = "tests/micro/lv1_repository_hw_config/peek/cech20-cex-493";
+
+/// The lv1 address of the first value of the node that
+/// [`HW_CONFIG_CAPTURE`] read.
+const HW_CONFIG_V1_ADDRESS: u64 = 0x0068_9678;
 
 /// The console capture of lpar 1's bus nodes in lv1's repository, on the
 /// reference console at firmware 4.93. Its README gives the method.
@@ -612,6 +621,30 @@ pub const NODES: &[RepositoryNode] = &[
             address: FLASH_EXT_V1_ADDRESS,
         },
     ),
+    // `sys.hw.config`. The 4.93 boot reads it in the constructor that
+    // keeps v1 at +8 of its object
+    // [OFW-4.93 lv2_kernel a:0x80000000000a1f3c-0x80000000000a1f7c]. A
+    // second function reads it and keeps two bits of v1
+    // [OFW-4.93 lv2_kernel a:0x8000000000287764-0x8000000000287774]. A
+    // third reads it and tests only the sign of v1
+    // [OFW-4.93 lv2_kernel a:0x80000000000b3ec0-0x80000000000b3ed0]. No
+    // read site loads v2.
+    node(
+        LPAR_ID_PME,
+        [
+            first_field(b"sys", 0),
+            field(b"hw", 0),
+            field(b"config", 0),
+            0,
+        ],
+        0x4e00_ffff_0203_bc3c,
+        SecondValue::Given(0),
+        CAPTURE_FIRMWARE,
+        NodeSource::Lv1NodeCapture {
+            capture: HW_CONFIG_CAPTURE,
+            address: HW_CONFIG_V1_ADDRESS,
+        },
+    ),
     // `bi.pu` at index 0: the logical PU id. Linux reads it in
     // `ps3_repository_read_pu_id`.
     node(
@@ -829,6 +862,10 @@ mod debug_support_tests;
 #[cfg(test)]
 #[path = "tests/repository_flash_ext_tests.rs"]
 mod flash_ext_tests;
+
+#[cfg(test)]
+#[path = "tests/repository_hw_config_tests.rs"]
+mod hw_config_tests;
 
 #[cfg(test)]
 #[path = "tests/repository_bus_tests.rs"]
