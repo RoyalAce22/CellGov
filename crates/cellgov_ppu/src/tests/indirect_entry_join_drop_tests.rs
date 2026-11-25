@@ -4,6 +4,7 @@ use std::iter::once;
 use super::constants::Value;
 use super::join_flow::{Bounds, JoinFlow, JoinWords};
 use super::lost::{join_origins, Origins};
+use super::reach::Reach;
 use super::tests::word;
 use super::toc::FunctionWords;
 use super::*;
@@ -55,7 +56,16 @@ fn drops_of(words: Vec<u32>, bounds: &Bounds, counting: bool) -> Vec<(usize, Joi
     let function_words = FunctionWords::new(&code, &functions);
     let every = Value::sorted(Vec::new());
     let join_words = JoinWords::new(&code);
-    JoinFlow::run(&join_words, &function_words.tocs, &every, bounds, counting).drops()
+    let reach = Reach::every(&code);
+    JoinFlow::run(
+        &join_words,
+        &function_words.tocs,
+        &every,
+        bounds,
+        &reach,
+        counting,
+    )
+    .drops()
 }
 
 /// The counted drops of one `JoinFlow` run.

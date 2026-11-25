@@ -1,5 +1,5 @@
 use super::hypercall_ctr_decrement_tests::{bc, quiet, window, QUIET_SC, SC, VECTOR};
-use super::hypercall_entry_tests::{code, data_bytes, ordinals, word, Segment};
+use super::hypercall_entry_tests::{code, data_bytes, ordinals, pointers, word, Segment};
 use super::hypercall_join_drop_tests::RAISED_LIMIT;
 use super::hypercall_tests::KERNEL;
 use super::*;
@@ -202,7 +202,8 @@ fn a_real_mode_bctr_of_a_gpr_that_a_later_branch_brings_enters_the_step_of_that_
 }
 
 /// A branch in virtual mode reaches the word at the named address
-/// itself, which the `blt` path steps to the window's `nop`.
+/// itself, which the `blt` path steps to the window's `nop`. A code
+/// pointer names the code at [`OUTSIDE`].
 ///
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
 #[test]
@@ -211,7 +212,13 @@ fn a_virtual_mode_bctr_of_a_gpr_stepped_after_a_join_enters_the_step_of_each_con
     words.push(skip(3));
     words.extend(build_kernel(3, NOWHERE));
     words.extend([addi(3, 3, 4), mtctr(3), bctr()]);
-    assert_eq!(sites(OUTSIDE, &words), WINDOW_UNRESOLVED);
+    let segments = [
+        code(OUTSIDE, &words),
+        window(&[]),
+        quiet(),
+        pointers(&[OUTSIDE]),
+    ];
+    assert_eq!(ordinals(0, &segments), WINDOW_UNRESOLVED);
 }
 
 /// The ordinals when an indirect branch can reach an address that the

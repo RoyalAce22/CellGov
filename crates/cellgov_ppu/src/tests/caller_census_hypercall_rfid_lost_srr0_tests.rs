@@ -1,4 +1,4 @@
-use super::hypercall_entry_tests::{code, ordinals, word, Segment};
+use super::hypercall_entry_tests::{code, ordinals, pointers, word, Segment};
 use super::hypercall_real_mode_switch_tests::{lis_sf, mtspr, ori, RFID};
 use super::hypercall_tests::{b, li, NOP};
 use super::*;
@@ -31,9 +31,11 @@ fn windows() -> Segment {
 /// the `rfid` can enter the `nop` of each window, and the join drops one
 /// of those addresses. With `through` set, a `b` to the next word then
 /// makes a second join, which only the join flow reaches. The stub gives
-/// SRR1 IR, with SF too when `sf` is set.
+/// SRR1 IR, with SF too when `sf` is set. Code pointers name the first
+/// word of each path.
 fn lost_srr0(sf: bool, through: bool) -> Vec<(u64, Option<u16>)> {
     let join = STUB + 8 * PATHS;
+    let starts: Vec<u64> = (0..PATHS).map(|path| STUB + 8 * path).collect();
     let mut stub = Vec::new();
     for path in 0..PATHS {
         let at = STUB + 8 * path + 4;
@@ -56,7 +58,7 @@ fn lost_srr0(sf: bool, through: bool) -> Vec<(u64, Option<u16>)> {
         stub.push(li(5, i16::try_from(MSR_IR).expect("a low MSR bit")));
     }
     stub.extend([mtspr(SPR_SRR1, 5), RFID]);
-    ordinals(0, &[code(STUB, &stub), windows()])
+    ordinals(0, &[code(STUB, &stub), windows(), pointers(&starts)])
 }
 
 /// [PPC-Book3 p:13 s:2.3] `rfid` fetches from SRR0 0:61 || 0b00 when SF = 1 in the new MSR, and from 32 zeros || SRR0 32:61 || 0b00 when SF = 0.

@@ -1,6 +1,6 @@
 use super::hypercall_ctr_decrement_tests::{bc, into_window, quiet, window, QUIET_SC, SC, VECTOR};
 use super::hypercall_ctr_virtual_tests::{bctr, build, sites, LOADER, NO_ENTRY, OUTSIDE};
-use super::hypercall_entry_tests::{code, ordinals, word, Segment};
+use super::hypercall_entry_tests::{code, ordinals, pointers, word, Segment};
 use super::hypercall_tests::{li, NOP};
 use super::*;
 use cellgov_ps3_abi::hw::ppc_isa::{PPC_BLR, PPC_SC_1};
@@ -36,7 +36,8 @@ pub(super) fn copy_stub(between: &[u32]) -> Segment {
 /// at [`OUTSIDE`] is a `bdnz` to a `blr`, then `between`, then `bctr`.
 ///
 /// A path at [`LOADER`] loads 75 and branches to address 0, so the `sc`
-/// at 4 resolves unless a `bctr` enters address 0.
+/// at 4 resolves unless a `bctr` enters address 0. A code pointer names
+/// [`OUTSIDE`].
 pub(super) fn after_bdnz_falls_through(between: &[u32]) -> Vec<(u64, Option<u16>)> {
     let to_zero = word(PpuInstruction::B {
         offset: 0,
@@ -52,6 +53,7 @@ pub(super) fn after_bdnz_falls_through(between: &[u32]) -> Vec<(u64, Option<u16>
         code(LOADER, &[li(11, 75), to_zero]),
         code(OUTSIDE, &words),
         quiet(),
+        pointers(&[OUTSIDE]),
     ];
     ordinals(NO_ENTRY, &segments)
 }

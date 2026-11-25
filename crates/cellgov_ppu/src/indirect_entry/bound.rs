@@ -10,6 +10,7 @@ use super::constants::{Constants, Value};
 use super::ctr_flow::CtrFlow;
 use super::join_flow::{Bounds, JoinFlow, JoinWords};
 use super::lost::Origins;
+use super::reach::Reach;
 use super::real_mode::{real_mode_entries, Switches};
 use super::toc::{function_tocs, FunctionToc, FunctionWords};
 use crate::caller_census::{CallerScanError, JoinDrop};
@@ -59,6 +60,46 @@ impl FileSegment<'_> {
             .step_by(4)
             .map_while(|offset| self.bytes.get(offset..)?.first_chunk::<4>().copied())
             .map(u32::from_be_bytes)
+    }
+
+    /// Each value that a load of 1, 2, 4 or 8 bytes at any address of the
+    /// file bytes gives: in either byte order, and with zero and with
+    /// sign extension. The list can hold a value more than once.
+    ///
+    /// [PPC-Book1 p:34 s:3.3.2] `lbz` puts the byte into RT bits 56:63 and sets RT bits 0:55 to 0.
+    /// [PPC-Book1 p:38 s:3.3.2] `lwa` fills RT bits 0:31 with a copy of bit 0 of the loaded word.
+    fn loads(&self) -> impl Iterator<Item = u64> + '_ {
+        (0..self.bytes.len()).flat_map(move |offset| {
+            let bytes = &self.bytes[offset..];
+            let byte = bytes.first().map(|&byte| u64::from(byte));
+            let half = bytes.first_chunk::<2>().map(|half| {
+                let [be, le] = [u16::from_be_bytes(*half), u16::from_le_bytes(*half)];
+                [be, le].map(|value| {
+                    [
+                        u64::from(value),
+                        i64::from(value.cast_signed()).cast_unsigned(),
+                    ]
+                })
+            });
+            let word = bytes.first_chunk::<4>().map(|word| {
+                let [be, le] = [u32::from_be_bytes(*word), u32::from_le_bytes(*word)];
+                [be, le].map(|value| {
+                    [
+                        u64::from(value),
+                        i64::from(value.cast_signed()).cast_unsigned(),
+                    ]
+                })
+            });
+            let double = bytes
+                .first_chunk::<8>()
+                .map(|double| [[u64::from_be_bytes(*double), u64::from_le_bytes(*double)]]);
+            half.into_iter()
+                .flatten()
+                .chain(word.into_iter().flatten())
+                .chain(double.into_iter().flatten())
+                .flatten()
+                .chain(byte)
+        })
     }
 
     /// The code address, the TOC and the environment of a function
@@ -240,6 +281,13 @@ const REFINEMENTS: usize = 16;
 ///
 /// The named words only grow, so the rounds end.
 ///
+/// The rounds step only the words of a [`Reach`] set. It starts at the
+/// ELF entry, the interrupt vectors and each value that a load of the
+/// file bytes gives, and each round adds the words that the named words
+/// reach. After the rounds, the bound also adds the
+/// words that the targets and the switches reach, and runs the rounds
+/// again until the set stops growing. The set only grows, so this ends.
+///
 /// When the rounds end with a lost target, the bound refines `JoinFlow`
 /// and runs the rounds again from the named words it has:
 /// - it takes the origins of each lost value that an `mtctr`, a `bclr`
@@ -251,6 +299,9 @@ const REFINEMENTS: usize = 16;
 /// none. The refinement stops when no lost target remains, when it can
 /// raise no bound, or after [`REFINEMENTS`] runs. A loop that steps a
 /// constant brings more constants than any bound, so it stays lost.
+///
+/// A lost target that remains can enter any word. So the bound then adds
+/// every word to the set and runs again, and the refinement goes on.
 ///
 /// # Errors
 ///
@@ -264,10 +315,12 @@ pub(crate) fn indirect_entries(
     let mut bound = Bound {
         code,
         files,
+        real_mode: real_mode_entries(elf, code),
         named: BTreeSet::new(),
         real_named: BTreeSet::new(),
         low_named: BTreeSet::new(),
         tables: BTreeSet::new(),
+        bcctrs: unlinked_bcctrs(code).collect(),
         targets: BTreeMap::new(),
         ctr_writes: BTreeMap::new(),
         lost_ctr_writes: BTreeMap::new(),
@@ -284,76 +337,70 @@ pub(crate) fn indirect_entries(
             bound.name(i64::from(value.cast_signed()).cast_unsigned());
         }
     }
-    bound.tables.extend(tables_after_bcctr(code));
     let functions = function_tocs(files, code);
     let every = Value::sorted(functions.values().flatten().copied().collect());
     let mut words = FunctionWords::new(code, &functions);
     let join_words = JoinWords::new(code);
+    let mut reach = Reach::new(code);
+    reach.grow(bound.real_mode.iter().copied());
+    // The bound does not yet name the value of an unaligned load, a byte
+    // load, a halfword load or a byte-reversed load. Each can be a code
+    // address, so the reach set starts at each such value.
+    reach.grow(files.iter().flat_map(FileSegment::loads));
     let mut bounds = Bounds::default();
     let mut refinements = 0;
-    let mut lost_origins = BTreeMap::new();
-    let lost_targets = loop {
-        bound.rounds(&mut words, &join_words, &every, &bounds)?;
-        let lost_writes: BTreeSet<(usize, u64)> = bound.lost_ctr_writes.keys().copied().collect();
-        let mut flow = CtrFlow::new(code, &bound.ctr_writes, &lost_writes);
-        flow.run();
-        let mut lost_targets = flow.bcctr_targets(&mut bound.targets);
-        lost_targets.extend(bound.lost_returns.keys());
-        lost_targets.extend(bound.lost_rfids.keys());
-        if lost_targets.is_empty() {
-            break lost_targets;
+    loop {
+        let mut indirect = bound.reached(&mut reach, &mut words, &join_words, &every, &bounds)?;
+        if indirect.lost_targets.is_empty() {
+            return Ok(indirect);
         }
         // The last round named no new word, so this run repeats its flow,
         // with the same drop ids, and counts each drop.
-        let drops = JoinFlow::run(&join_words, &words.tocs, &every, &bounds, true).drops();
+        let drops = JoinFlow::run(&join_words, &words.tocs, &every, &bounds, &reach, true).drops();
         let origins = bound.lost_values().map(|(_, origins)| origins);
-        if refinements == REFINEMENTS || !bounds.raise(origins, &drops) {
-            lost_origins = bound.lost_origins(&drops);
-            break lost_targets;
+        if refinements < REFINEMENTS && bounds.raise(origins, &drops) {
+            refinements += 1;
+            continue;
         }
-        refinements += 1;
-    };
-    let mut entries = real_mode_entries(elf, code);
-    entries.extend(bound.named);
-    let mut indirect = IndirectBound {
-        entries,
-        real_named: bound.real_named,
-        low_named: bound.low_named,
-        targets: bound.targets,
-        lost_targets,
-        lost_origins,
-        ..IndirectBound::default()
-    };
-    let switches = Switches::find(code, &words.tocs, &every, &indirect);
-    indirect.real_mode_switches = switches.targets;
-    indirect.unbounded_switches = switches.unbounded;
-    indirect.mode32_switches = switches.mode32;
-    indirect.unbounded_mode32_switches = switches.unbounded_mode32;
-    Ok(indirect)
+        if reach.fill() {
+            continue;
+        }
+        indirect.lost_origins = bound.lost_origins(&drops);
+        return Ok(indirect);
+    }
 }
 
-/// The address of the word after each `bcctr` of `code` that does not
-/// link, in each [`Width`]. A relative jump table can start there.
+/// The index of the segment, the index of the word there and the address
+/// of each `bcctr` of `code` that does not link. A relative jump table can
+/// start at the word after it.
 ///
 /// [PPC-Book1 p:25 s:2.4] `bcctr` branches to the address in CTR.
-fn tables_after_bcctr(code: &Code) -> impl Iterator<Item = (u64, Width)> + '_ {
+fn unlinked_bcctrs(code: &Code) -> impl Iterator<Item = (usize, usize, u64)> + '_ {
     code.segments()
         .iter()
-        .flat_map(CodeSegment::addressed)
-        .filter(|&(_, raw)| {
+        .enumerate()
+        .flat_map(|(index, segment)| {
+            segment
+                .addressed()
+                .enumerate()
+                .map(move |(word, (address, raw))| (index, word, address, raw))
+        })
+        .filter(|&(_, _, _, raw)| {
             matches!(
                 crate::decode::decode(raw),
                 Ok(PpuInstruction::Bcctr { link: false, .. })
             )
         })
-        .filter_map(|(address, _)| address.checked_add(4))
-        .flat_map(|start| [(start, Width::Full), (start, Width::Low)])
+        .map(|(index, word, address, _)| (index, word, address))
 }
 
-/// The bound as it grows, without the real-mode entries.
+/// The bound as it grows.
 pub(super) struct Bound<'a> {
     code: &'a Code,
     files: &'a [FileSegment<'a>],
+    /// The real-mode entries: the ELF entry and the words in the
+    /// interrupt vectors.
+    real_mode: BTreeSet<u64>,
     /// The words of the code that the image names, and the targets of
     /// the relative jump tables.
     named: BTreeSet<u64>,
@@ -365,6 +412,10 @@ pub(super) struct Bound<'a> {
     /// mode that reads it, which the next call to [`Self::jump_tables`]
     /// reads. A later round can add an address again.
     tables: BTreeSet<(u64, Width)>,
+    /// Each `bcctr` that does not link, as [`unlinked_bcctrs`] gives it,
+    /// that the reach set does not hold yet. When the set takes one, its
+    /// next word starts a relative jump table.
+    bcctrs: Vec<(usize, usize, u64)>,
     /// The targets of the `bclr` words, from the TOCs of the latest
     /// round.
     targets: BTreeMap<u64, BTreeSet<u64>>,
@@ -393,46 +444,131 @@ fn note<K: Ord>(lost: &mut BTreeMap<K, Origins>, key: K, origins: &Origins) {
 }
 
 impl Bound<'_> {
-    /// Runs the rounds of the bound until a round names no new word.
+    /// Runs the rounds, the CTR flow and the switch scan until `reach`
+    /// stops growing, and returns the bound without its lost origins.
+    ///
+    /// After the rounds, `reach` takes the words that each target and
+    /// each switch reaches. When it grows, the rounds run again.
+    fn reached(
+        &mut self,
+        reach: &mut Reach<'_>,
+        words: &mut FunctionWords,
+        join_words: &JoinWords<'_>,
+        every: &Value,
+        bounds: &Bounds,
+    ) -> Result<IndirectBound, CallerScanError> {
+        let code = self.code;
+        loop {
+            self.rounds(reach, words, join_words, every, bounds)?;
+            let lost_writes: BTreeSet<(usize, u64)> =
+                self.lost_ctr_writes.keys().copied().collect();
+            let mut flow = CtrFlow::new(code, &self.ctr_writes, &lost_writes, reach);
+            flow.run();
+            let mut lost_targets = flow.bcctr_targets(&mut self.targets);
+            lost_targets.extend(self.lost_returns.keys());
+            lost_targets.extend(self.lost_rfids.keys());
+            let mut entries = self.real_mode.clone();
+            entries.extend(&self.named);
+            let mut indirect = IndirectBound {
+                entries,
+                real_named: self.real_named.clone(),
+                low_named: self.low_named.clone(),
+                targets: self.targets.clone(),
+                lost_targets,
+                ..IndirectBound::default()
+            };
+            let switches = Switches::find(code, &words.tocs, every, &indirect, reach);
+            let starts = indirect
+                .targets
+                .values()
+                .flatten()
+                .chain(&switches.targets)
+                .chain(&switches.mode32)
+                .copied();
+            if reach.grow(starts) {
+                continue;
+            }
+            indirect.real_mode_switches = switches.targets;
+            indirect.unbounded_switches = switches.unbounded;
+            indirect.mode32_switches = switches.mode32;
+            indirect.unbounded_mode32_switches = switches.unbounded_mode32;
+            return Ok(indirect);
+        }
+    }
+
+    /// Runs the rounds of the bound until a round names no new word and
+    /// `reach` takes no new word.
+    ///
+    /// Each round first adds to `reach` the words that the named words and
+    /// the targets of the last round reach. The rounds run at least once.
     ///
     /// `bounds` holds the raised bounds of `JoinFlow`. The origins that
     /// the last round records name the drops of its `JoinFlow` run.
     fn rounds(
         &mut self,
+        reach: &mut Reach<'_>,
         words: &mut FunctionWords,
         join_words: &JoinWords<'_>,
         every: &Value,
         bounds: &Bounds,
     ) -> Result<(), CallerScanError> {
         let code = self.code;
+        let mut stepped = None;
         loop {
             let before = self.named_lens();
-            let reached: BTreeSet<u64> = self
+            let starts = self
+                .named
+                .iter()
+                .chain(&self.real_named)
+                .chain(&self.low_named)
+                .chain(self.targets.values().flatten())
+                .copied();
+            let grew = reach.grow(starts);
+            if !grew && stepped == Some(before) {
+                return Ok(());
+            }
+            stepped = Some(before);
+            self.tables_after_reached_bcctrs(reach);
+            let named: BTreeSet<u64> = self
                 .named
                 .iter()
                 .chain(&self.real_named)
                 .chain(&self.low_named)
                 .copied()
                 .collect();
-            words.grow(&reached);
+            words.grow(&named);
             self.targets.clear();
             self.ctr_writes.clear();
             self.lost_ctr_writes.clear();
             self.lost_returns.clear();
             self.lost_rfids.clear();
             for (index, segment) in code.segments().iter().enumerate() {
-                self.code_constants(index, segment, words.tocs.segment(index), every, None);
+                let tocs = words.tocs.segment(index);
+                self.code_constants(index, segment, tocs, every, None, reach);
             }
-            let joins = JoinFlow::run(join_words, &words.tocs, every, bounds, false);
+            let joins = JoinFlow::run(join_words, &words.tocs, every, bounds, reach, false);
             for (index, segment) in code.segments().iter().enumerate() {
                 let tocs = words.tocs.segment(index);
-                self.code_constants(index, segment, tocs, every, Some(&joins));
+                self.code_constants(index, segment, tocs, every, Some(&joins), reach);
             }
             self.jump_tables()?;
-            if self.named_lens() == before {
-                return Ok(());
-            }
         }
+    }
+
+    /// Adds a relative jump table in each [`Width`] at the word after each
+    /// `bcctr` of [`Self::bcctrs`] that `reach` holds, and drops that
+    /// `bcctr` from the list.
+    fn tables_after_reached_bcctrs(&mut self, reach: &Reach<'_>) {
+        let tables = &mut self.tables;
+        self.bcctrs.retain(|&(index, word, address)| {
+            if !reach.contains(index, word) {
+                return true;
+            }
+            if let Some(start) = address.checked_add(4) {
+                tables.extend([(start, Width::Full), (start, Width::Low)]);
+            }
+            false
+        });
     }
 
     /// The address of each `mtctr`, `bclr` and `rfid` that takes a lost
@@ -550,6 +686,10 @@ impl Bound<'_> {
     /// Without `joins`, the scan follows each straight-line path. With
     /// `joins`, each join word starts with what [`JoinFlow`] gives it.
     ///
+    /// The scan steps only the words that `reach` holds. A word that
+    /// `reach` does not hold names nothing, and the next word starts with
+    /// no constant.
+    ///
     /// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00, and `bcctr` reaches CTR0:61 || 0b00.
     /// [PPC-Book3 p:13 s:2.3] `rfid` fetches from SRR0 0:61 || 0b00 when SF = 1 in the new MSR, and from 32 zeros || SRR0 32:61 || 0b00 when SF = 0.
     pub(super) fn code_constants(
@@ -559,9 +699,14 @@ impl Bound<'_> {
         tocs: &[FunctionToc],
         every: &Value,
         joins: Option<&JoinFlow<'_>>,
+        reach: &Reach<'_>,
     ) {
         let mut constants = Constants::default();
         for (word, ((address, raw), &toc)) in segment.addressed().zip(tocs).enumerate() {
+            if !reach.contains(index, word) {
+                constants = Constants::default();
+                continue;
+            }
             if let Some(entered) = joins.and_then(|joins| joins.entered((index, word))) {
                 constants = entered;
             }

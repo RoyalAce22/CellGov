@@ -1,4 +1,4 @@
-use super::hypercall_entry_tests::{code, ordinals, word, Segment};
+use super::hypercall_entry_tests::{code, ordinals, pointers, word, Segment};
 use super::hypercall_tests::{li, KERNEL, NOP};
 use super::*;
 use cellgov_ps3_abi::hw::ppc_isa::{PPC_BLR, PPC_SC_1};
@@ -31,10 +31,10 @@ pub(super) fn window(other: i16) -> Segment {
     )
 }
 
-/// The window's site, with `other` in the window and `stub` as one more
-/// segment.
+/// The window's site, with `other` in the window, `stub` as one more
+/// segment and a code pointer to [`OUTSIDE`], where a stub starts.
 pub(super) fn site(other: i16, stub: Segment) -> Vec<(u64, Option<u16>)> {
-    ordinals(0, &[stub, window(other)])
+    ordinals(0, &[stub, window(other), pointers(&[OUTSIDE])])
 }
 
 /// `lis rt,0; ori rt,rt,address`.
@@ -214,7 +214,7 @@ const HIGH_WORD: u64 = 0x0000_0001_0000_5000;
 /// A stub at [`HIGH_WORD`] gives r5 the value 0 and runs `set`. The word
 /// after `set` is at 0x1_0000_5008. The low word of that address is the
 /// real address of [`OUTSIDE`] + 8, where a `b` goes to the path past
-/// the window's `blr`.
+/// the window's `blr`. A code pointer names the stub.
 ///
 /// [PPC-Book3 p:91 s:8.3] `mtmsr` with L = 0 changes no MSR bit in 0:31, so MSR\[SF\] keeps its value.
 /// [PPC-Book3 p:22 s:3.4] `mtmsrd` with L = 0 places the OR of RS bits 0 and 1 into MSR\[SF\].
@@ -230,7 +230,10 @@ fn an_mtmsr_keeps_the_high_word_of_its_successor_and_an_mtmsrd_with_sf_0_drops_i
     });
     let census = |set: u32| {
         let stub = code(HIGH_WORD, &[li(5, 0), set, NOP]);
-        ordinals(0, &[stub, code(low, &[b]), window(76)])
+        ordinals(
+            0,
+            &[stub, code(low, &[b]), window(76), pointers(&[HIGH_WORD])],
+        )
     };
     assert_eq!(census(mtmsr(5, false)), [(SC, Some(75))]);
     assert_eq!(census(mtmsrd(5, false)), [(SC, None)]);

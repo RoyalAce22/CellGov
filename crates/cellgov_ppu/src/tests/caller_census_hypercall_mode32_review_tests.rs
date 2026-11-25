@@ -1,4 +1,4 @@
-use super::hypercall_entry_tests::{code, ordinals, word};
+use super::hypercall_entry_tests::{code, ordinals, pointers, word};
 use super::hypercall_real_mode_switch_tests::{lis_sf, mtspr, ori, RFID};
 use super::hypercall_tests::{b, li, NOP};
 use super::*;
@@ -18,7 +18,7 @@ const STUB: u64 = 0x6000;
 const BUILDER: u64 = 0x7000;
 
 /// The stub at [`BUILDER`] names 0x1_0000_3004, whose low-order 32 bits
-/// are the address of the window's `nop`.
+/// are the address of the window's `nop`. Code pointers name both stubs.
 ///
 /// [PPC-Book3 p:13 s:2.3] `rfid` fetches from 32 zeros || SRR0 32:61 || 0b00 when SF = 0 in the new MSR.
 #[test]
@@ -51,6 +51,7 @@ fn an_rfid_to_a_loaded_srr0_with_sf_at_0_enters_the_low_word_when_no_bcctr_or_bc
             code(STUB, &switch),
             code(BUILDER, &builder),
             code(WINDOW, &[li(11, 75), NOP, PPC_SC_1, b(0)]),
+            pointers(&[STUB, BUILDER]),
         ];
         ordinals(0, &segments)
     };

@@ -1,4 +1,4 @@
-use super::hypercall_entry_tests::{code, ordinals, word, Segment};
+use super::hypercall_entry_tests::{code, ordinals, pointers, word, Segment};
 use super::hypercall_real_mode_switch_tests::{
     lis_sf, mtmsrd, mtspr, ori, site, window, OUTSIDE, RFID, SC, WINDOW,
 };
@@ -76,7 +76,8 @@ fn an_rfid_outside_real_mode_to_srr0_with_low_bits_set_enters_its_word() {
 /// [`MTMSRD`] with IR at 1. The fall-through reaches the `mtmsrd` with
 /// r5 = MSR_IR, but from stub A the `mtmsrd` clears IR. Then the path
 /// past the window's `blr` runs in real mode, and its `ba` reaches the
-/// window's `nop` with r11 = 76.
+/// window's `nop` with r11 = 76. Code pointers name stub A and the stub
+/// at [`SECOND`].
 ///
 /// [PPC-Book3 p:13 s:2.3] `rfid` fetches from SRR0 0:61 || 0b00 when SF = 1 in the new MSR, and from 32 zeros || SRR0 32:61 || 0b00 when SF = 0.
 /// [PPC-Book3 p:22 s:3.4] `mtmsrd` with L = 0 sets MSR\[IR\] to RS\[IR\] | RS\[PR\] and MSR\[SF\] to RS bit 0 | RS bit 1.
@@ -84,7 +85,8 @@ fn an_rfid_outside_real_mode_to_srr0_with_low_bits_set_enters_its_word() {
 fn an_rfid_outside_real_mode_to_srr0_with_low_bits_set_is_a_join_of_the_switch_scan() {
     let census = |srr0: u64| {
         let stub_a = rfid_ir_set(&[li(5, 0)], srr0);
-        ordinals(0, &[stub_a, mtmsrd_stub(), window(76)])
+        let named = pointers(&[OUTSIDE, SECOND]);
+        ordinals(0, &[stub_a, mtmsrd_stub(), window(76), named])
     };
     assert_eq!(census(MTMSRD | 1), [(SC, None)]);
     assert_eq!(census((MTMSRD + 4) | 1), [(SC, Some(75))]);

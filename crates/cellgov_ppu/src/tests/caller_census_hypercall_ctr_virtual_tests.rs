@@ -1,5 +1,5 @@
 use super::hypercall_ctr_decrement_tests::{bc, quiet, window, QUIET_SC, SC};
-use super::hypercall_entry_tests::{code, data_bytes, ordinals, word, Segment};
+use super::hypercall_entry_tests::{code, data_bytes, ordinals, pointers, word, Segment};
 use super::hypercall_tests::{li, KERNEL, NOP};
 use super::*;
 use cellgov_ps3_abi::hw::ppc_isa::{PPC_BLR, PPC_SC_1};
@@ -57,11 +57,12 @@ fn ctr_stub(low: u16, between: &[u32]) -> Segment {
 }
 
 /// The ordinals of the window and of the quiet window, with `more` as
-/// more segments.
+/// more segments and a code pointer to [`OUTSIDE`], where a stub starts.
 pub(super) fn sites(more: Vec<Segment>) -> Vec<(u64, Option<u16>)> {
     let mut segments = more;
     segments.push(window(&[]));
     segments.push(quiet());
+    segments.push(pointers(&[OUTSIDE]));
     ordinals(NO_ENTRY, &segments)
 }
 
@@ -115,6 +116,7 @@ fn a_bctr_outside_real_mode_after_a_bdnz_falls_through_enters_address_zero() {
         code(LOADER, &[li(11, 75), to_zero]),
         code(OUTSIDE, &[bc(0b10000, 8), bctr(), PPC_BLR]),
         quiet(),
+        pointers(&[OUTSIDE]),
     ];
     assert_eq!(
         ordinals(NO_ENTRY, &segments),

@@ -1,4 +1,4 @@
-use super::hypercall_entry_tests::{code, data_bytes, ordinals, word, Segment};
+use super::hypercall_entry_tests::{code, data_bytes, ordinals, pointers, word, Segment};
 use super::hypercall_real_mode_switch_tests::{
     build, lis_sf, msr_stub, mtmsr, mtmsrd, mtspr, ori, shift_left, site, window, OUTSIDE, PAST,
     RFID, SC,
@@ -128,17 +128,30 @@ fn a_word_between_the_srr1_write_and_rfid_that_a_branch_reaches_forgets_srr1() {
 }
 
 /// The image names word 0 of the stub, before the SRR1 write, or word 3.
+/// A code pointer also names word 0, so the scan reaches the SRR1 write
+/// on both.
 #[test]
 fn a_word_between_the_srr1_write_and_rfid_that_the_image_names_forgets_srr1() {
     let named = |address: u64| data_bytes(KERNEL + 0x8_0000, address.to_be_bytes().to_vec());
-    let before = [late_srr0(&[]), named(OUTSIDE), window(76)];
+    let before = [
+        late_srr0(&[]),
+        named(OUTSIDE),
+        window(76),
+        pointers(&[OUTSIDE]),
+    ];
     assert_eq!(ordinals(0, &before), [(SC, Some(75))]);
-    let between = [late_srr0(&[]), named(LATE), window(76)];
+    let between = [
+        late_srr0(&[]),
+        named(LATE),
+        window(76),
+        pointers(&[OUTSIDE]),
+    ];
     assert_eq!(ordinals(0, &between), [(SC, None)]);
 }
 
 /// The `bcctr` targets the real address of word 0 of the stub, before
-/// the SRR1 write, or of word 3.
+/// the SRR1 write, or of word 3. Code pointers name the `bcctr` path and
+/// word 0 of the stub, so the scan reaches the SRR1 write on both.
 ///
 /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
 #[test]
@@ -148,16 +161,18 @@ fn a_word_between_the_srr1_write_and_rfid_at_the_real_address_of_a_bcctr_target_
         bi: 0,
         link: false,
     });
+    let path = KERNEL + 0x7000;
     let to = |address: u64| {
         let real = i16::try_from(address & 0xFFFF).expect("a low real address");
         code(
-            KERNEL + 0x7000,
+            path,
             &[li(12, real), word(PpuInstruction::Mtctr { rs: 12 }), bctr],
         )
     };
-    let before = [late_srr0(&[]), to(OUTSIDE), window(76)];
+    let named = || pointers(&[path, OUTSIDE]);
+    let before = [late_srr0(&[]), to(OUTSIDE), window(76), named()];
     assert_eq!(ordinals(0, &before), [(SC, Some(75))]);
-    let between = [late_srr0(&[]), to(LATE), window(76)];
+    let between = [late_srr0(&[]), to(LATE), window(76), named()];
     assert_eq!(ordinals(0, &between), [(SC, None)]);
 }
 
@@ -180,7 +195,8 @@ fn a_call_or_a_link_to_the_next_word_between_the_msr_build_and_mtmsrd_forgets_rs
 
 /// The first `rfid` enters word 0 or word 1 of the second stub at the
 /// low word of its SRR0. Word 1 is a join that only a switch target
-/// makes. Word 0 builds SRR1 itself.
+/// makes. Word 0 builds SRR1 itself. Code pointers name the first stub
+/// and word 0 of the second, so the scan reaches the SRR1 build.
 ///
 /// [PPC-Book3 p:13 s:2.3] With SF = 0 in the new MSR, `rfid` fetches from 32 zeros || SRR0 32:61 || 0b00.
 #[test]
@@ -198,15 +214,26 @@ fn a_switch_target_forgets_the_srr1_that_the_path_before_it_builds() {
     let mut words = vec![li(4, i16::try_from(MSR_IR).expect("a low MSR bit"))];
     words.extend(build(3, PAST));
     words.extend([mtspr(SPR_SRR0, 3), mtspr(SPR_SRR1, 4), RFID]);
-    let to_word_0 = [first(second), code(second, &words), window(76)];
+    let to_word_0 = [
+        first(second),
+        code(second, &words),
+        window(76),
+        pointers(&[OUTSIDE, second]),
+    ];
     assert_eq!(ordinals(0, &to_word_0), [(SC, Some(75))]);
-    let to_word_1 = [first(second + 4), code(second, &words), window(76)];
+    let to_word_1 = [
+        first(second + 4),
+        code(second, &words),
+        window(76),
+        pointers(&[OUTSIDE, second]),
+    ];
     assert_eq!(ordinals(0, &to_word_1), [(SC, None)]);
 }
 
 /// A word of another segment shares the real address of the window's
 /// middle word, and the image names that word. No 32-bit half of the
-/// naming doubleword names a word of the code.
+/// naming doubleword names a word of the code. A code pointer names the
+/// `rfid` stub.
 ///
 /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
 #[test]
@@ -225,6 +252,7 @@ fn an_unbounded_rfid_enters_the_real_address_of_each_named_word() {
                     KERNEL + 0x8_0000,
                     (KERNEL + HIGH + 4).to_be_bytes().to_vec(),
                 ),
+                pointers(&[OUTSIDE]),
             ],
         )
     };

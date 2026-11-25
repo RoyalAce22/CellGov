@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::function_toc_tests::{
     b, bound_of, branch_through, indirect_bound_of, padded, OTHER_TOC,
 };
-use super::tests::{at, word};
-use super::toc_tests::{build_from_toc, TOC};
+use super::tests::{at, pointer, word};
+use super::toc_tests::{build_from_toc, descriptor_bytes, DATA, TOC};
 use super::*;
 use cellgov_ps3_abi::hw::ppc_isa::PPC_NOP;
 
@@ -49,7 +49,8 @@ fn a_descriptor_that_names_a_word_inside_a_function_leaves_the_functions_toc_on_
 
 #[test]
 fn a_toc_that_the_path_builds_into_a_first_word_stays_in_r2_beside_the_descriptors_toc() {
-    // No function reaches words 0 and 1, which build TOC in r2.
+    // No function reaches words 0 and 1, which build TOC in r2. A code
+    // pointer names word 0, so word 0 is an entry.
     let mut words = vec![
         word(PpuInstruction::Addis {
             rt: 2,
@@ -63,9 +64,28 @@ fn a_toc_that_the_path_builds_into_a_first_word_stays_in_r2_beside_the_descripto
         }),
     ];
     words.extend(branch_through(10, TOC));
+    let words = padded(words, 12);
+    let code = Code::new(vec![CodeSegment {
+        vaddr: at(0),
+        words: words.clone(),
+    }]);
+    let code_bytes: Vec<u8> = words.iter().flat_map(|word| word.to_be_bytes()).collect();
+    let data = descriptor_bytes(at(2), OTHER_TOC, 0);
+    let files = [
+        FileSegment {
+            vaddr: at(0),
+            bytes: &code_bytes,
+        },
+        FileSegment {
+            vaddr: DATA,
+            bytes: &data,
+        },
+        pointer(),
+    ];
+    let bound = indirect_entries(&[], &files, &code).expect("every jump table ends");
     assert_eq!(
-        bound_of(&padded(words, 12), &[(2, OTHER_TOC)]),
-        BTreeSet::from([at(2), at(10), at(11)])
+        bound.entries,
+        BTreeSet::from([at(0), at(2), at(10), at(11)])
     );
 }
 

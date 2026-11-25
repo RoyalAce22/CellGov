@@ -1,4 +1,4 @@
-use super::hypercall_entry_tests::{code, ordinals, word, Segment};
+use super::hypercall_entry_tests::{code, ordinals, pointers, word, Segment};
 use super::hypercall_real_mode_switch_tests::{
     lis_sf, mtmsr, mtmsrd, mtspr, ori, window, RFID, SC,
 };
@@ -94,7 +94,10 @@ fn after_build_high(low: u16, rest: &[u32]) -> Vec<u32> {
 fn a_bcctr_or_bclr_after_an_mtmsrd_that_clears_sf_enters_the_low_word_of_its_target() {
     let census = |msr: &[u32], branch: [u32; 2]| {
         let rest = after_build_high(0x3004, &branch);
-        ordinals(0, &[mtmsrd_stub(msr, &rest), low_window()])
+        ordinals(
+            0,
+            &[mtmsrd_stub(msr, &rest), low_window(), pointers(&[STUB])],
+        )
     };
     let bcctr = [word(PpuInstruction::Mtctr { rs: 3 }), bctr()];
     let bclr = [word(PpuInstruction::Mtlr { rs: 3 }), PPC_BLR];
@@ -117,14 +120,18 @@ fn a_bcctr_of_a_loaded_ctr_in_32_bit_mode_enters_the_low_word_of_a_built_constan
             imm: 0,
         });
         let rest = after_build_high(0x3004, &[ld, word(PpuInstruction::Mtctr { rs: 6 }), bctr()]);
-        ordinals(0, &[mtmsrd_stub(msr, &rest), low_window()])
+        ordinals(
+            0,
+            &[mtmsrd_stub(msr, &rest), low_window(), pointers(&[STUB])],
+        )
     };
     assert_eq!(census(&msr_ir()), [(LOW_SC, None)]);
     assert_eq!(census(&msr_sf_ir()), [(LOW_SC, Some(75))]);
 }
 
 /// The `bctr` of 0x1_0000_3004 is in the second stub. The switch stub
-/// ends with `b .`, or with a branch to the second stub.
+/// ends with `b .`, or with a branch to the second stub. Code pointers
+/// name both stubs.
 ///
 /// [PPC-Book1 p:25 s:2.4] The registers that `bclr` and `bcctr` alter are CTR and LR, so the MSR at the target is the MSR at the branch.
 #[test]
@@ -135,6 +142,7 @@ fn only_a_bcctr_that_control_reaches_from_a_32_bit_switch_enters_the_low_word() 
             mtmsrd_stub(&msr_ir(), &[end]),
             code(OTHER_STUB, &rest),
             low_window(),
+            pointers(&[STUB, OTHER_STUB]),
         ];
         ordinals(0, &segments)
     };
@@ -149,7 +157,8 @@ fn only_a_bcctr_that_control_reaches_from_a_32_bit_switch_enters_the_low_word() 
 
 /// An `rfid` with the SRR1 that `srr1` builds in r4 enters the second
 /// stub. With SRR1 = 0 the stub runs in real mode with SF at 0, and its
-/// `mtmsr` sets IR to 1 and keeps SF.
+/// `mtmsr` sets IR to 1 and keeps SF. A code pointer names the first
+/// stub.
 ///
 /// [PPC-Book3 p:13 s:2.3] `rfid` places the OR of SRR1 bits 0 and 1 into MSR\[SF\].
 /// [PPC-Book3 p:91 s:8.3] `mtmsr` with L = 0 sets MSR\[IR\] to RS\[IR\] | RS\[PR\] and leaves MSR bits 0:31 unchanged.
@@ -178,7 +187,12 @@ fn an_mtmsr_after_a_real_mode_switch_with_sf_at_0_keeps_32_bit_mode() {
             0x3004,
             &[word(PpuInstruction::Mtctr { rs: 3 }), bctr()],
         ));
-        let segments = [code(STUB, &switch), code(OTHER_STUB, &target), low_window()];
+        let segments = [
+            code(STUB, &switch),
+            code(OTHER_STUB, &target),
+            low_window(),
+            pointers(&[STUB]),
+        ];
         ordinals(0, &segments)
     };
     assert_eq!(census(li(4, 0)), [(LOW_SC, None)]);
@@ -186,7 +200,8 @@ fn an_mtmsr_after_a_real_mode_switch_with_sf_at_0_keeps_32_bit_mode() {
 }
 
 /// The `rfid` takes SRR0 from a load and SRR1 from r5, which `msr`
-/// builds. The `bctr` of 0x1_0000_3004 is in the second stub.
+/// builds. The `bctr` of 0x1_0000_3004 is in the second stub. Code
+/// pointers name both stubs.
 ///
 /// [PPC-Book3 p:13 s:2.3] `rfid` places the OR of SRR1 bits 0 and 1 into MSR\[SF\].
 #[test]
@@ -200,7 +215,12 @@ fn an_rfid_to_a_loaded_srr0_with_sf_at_0_lets_every_bcctr_enter_the_low_word() {
         switch.extend_from_slice(msr);
         switch.extend([mtspr(SPR_SRR0, 3), mtspr(SPR_SRR1, 5), RFID]);
         let other = after_build_high(0x3004, &[word(PpuInstruction::Mtctr { rs: 3 }), bctr()]);
-        let segments = [code(STUB, &switch), code(OTHER_STUB, &other), low_window()];
+        let segments = [
+            code(STUB, &switch),
+            code(OTHER_STUB, &other),
+            low_window(),
+            pointers(&[STUB, OTHER_STUB]),
+        ];
         ordinals(0, &segments)
     };
     assert_eq!(census(&msr_ir()), [(LOW_SC, None)]);
@@ -221,7 +241,8 @@ fn a_bclr_in_32_bit_mode_enters_the_low_word_of_a_return_point() {
             link: true,
         });
         let caller = code(0x1_0000_3000, &[bl, NOP, spin()]);
-        ordinals(0, &[mtmsrd_stub(msr, &[PPC_BLR]), caller, low_window()])
+        let stub = mtmsrd_stub(msr, &[PPC_BLR]);
+        ordinals(0, &[stub, caller, low_window(), pointers(&[STUB])])
     };
     assert_eq!(census(&msr_ir()), [(LOW_SC, None)]);
     assert_eq!(census(&msr_sf_ir()), [(LOW_SC, Some(75))]);
@@ -232,6 +253,7 @@ fn a_bclr_in_32_bit_mode_enters_the_low_word_of_a_return_point() {
 /// `mtmsrd r5,0`, which then clears IR, so the `ba` reaches the path
 /// past the window's `blr` in real mode. That path enters the window's
 /// `nop` with r11 = 76. At 0x7000 the stub sets r5 = `MSR_IR` first.
+/// Code pointers name both stubs.
 ///
 /// [PPC-Book3 p:22 s:3.4] `mtmsrd` with L = 0 sets MSR\[IR\] to RS\[IR\] | RS\[PR\] and MSR\[SF\] to RS bit 0 | RS bit 1.
 /// [PPC-Book1 p:20 s:2.4.1] In 32-bit mode a branch sets the high-order 32 bits of its target address to 0.
@@ -254,6 +276,7 @@ fn a_word_that_a_bcctr_in_32_bit_mode_enters_is_a_join_of_the_switch_scan() {
             mtmsrd_stub(&msr_ir(), &rest),
             code(OTHER_STUB, &other),
             window(76),
+            pointers(&[STUB, OTHER_STUB]),
         ];
         ordinals(0, &segments)
     };

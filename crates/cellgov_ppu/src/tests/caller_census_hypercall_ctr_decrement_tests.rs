@@ -1,4 +1,4 @@
-use super::hypercall_entry_tests::{code, ordinals, word, Segment};
+use super::hypercall_entry_tests::{code, ordinals, pointers, word, Segment};
 use super::hypercall_tests::{li, KERNEL, NOP};
 use super::*;
 use cellgov_ps3_abi::hw::ppc_isa::{PPC_BLR, PPC_SC_1};
@@ -210,6 +210,7 @@ fn a_bctr_after_a_bdnz_outside_real_mode_leaves_every_site_unresolved() {
         stub(OUTSIDE, 0x3005, &[bc(0b10000, 4)]),
         window(&[]),
         quiet(),
+        pointers(&[OUTSIDE]),
     ];
     assert_eq!(ordinals(0, &segments), [(SC, None), (QUIET_SC, None)]);
 }

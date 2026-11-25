@@ -1,4 +1,4 @@
-use super::tests::{at, bound, word};
+use super::tests::{at, bound, pointer, word};
 use super::*;
 use cellgov_ps3_abi::hw::ppc_isa::PPC_NOP;
 use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_IR, MSR_PR};
@@ -117,7 +117,7 @@ fn an_rfid_that_can_keep_ir_with_sf_at_0_enters_the_low_word_of_srr0() {
         (r4(MSR_PR), "PR"),
         ([ld, PPC_NOP, PPC_NOP], "loaded"),
     ] {
-        assert_eq!(rfid_bound(srr1), BTreeSet::from([at(11)]), "{text}");
+        assert_eq!(rfid_bound(srr1), BTreeSet::from([at(0), at(11)]), "{text}");
     }
 }
 
@@ -149,7 +149,7 @@ fn an_rfid_with_srr1_bit_0_or_1_at_1_or_ir_at_0_enters_no_low_word() {
         (high_bit_and_ir(62), "bit 1 and IR"),
         (r4(0), "IR at 0"),
     ] {
-        assert_eq!(rfid_bound(srr1), BTreeSet::new(), "{text}");
+        assert_eq!(rfid_bound(srr1), BTreeSet::from([at(0)]), "{text}");
     }
 }
 
@@ -182,7 +182,7 @@ fn an_rfid_past_a_branch_target_enters_the_low_word_that_the_branch_brings() {
         PPC_NOP,
         PPC_NOP,
     ];
-    assert_eq!(bound(&words, false), BTreeSet::from([at(12)]));
+    assert_eq!(bound(&words, false), BTreeSet::from([at(0), at(12)]));
 }
 
 /// With SF at 0 the `rfid` fetches word 11, the low-order 32 bits of the
@@ -221,8 +221,8 @@ fn an_rfid_past_a_branch_from_the_srr0_written_before_it_is_an_unbounded_32_bit_
         vaddr: at(0),
         words: words.to_vec(),
     }]);
-    let bound = indirect_entries(&[], &[], &code).expect("no jump table");
-    assert_eq!(bound.entries, BTreeSet::new());
+    let bound = indirect_entries(&[], &[pointer()], &code).expect("no jump table");
+    assert_eq!(bound.entries, BTreeSet::from([at(0)]));
     assert_eq!(bound.unbounded_mode32_switches, BTreeSet::from([at(9)]));
     let low_words = crate::hypercall_cfg::low_indirect_words(&code, &bound);
     let low: BTreeSet<u64> = low_words.collect();

@@ -1,5 +1,5 @@
 use super::hypercall_ctr_decrement_tests::{quiet, window, QUIET_SC, SC, VECTOR};
-use super::hypercall_entry_tests::{code, data_bytes, ordinals, word, Segment};
+use super::hypercall_entry_tests::{code, data_bytes, ordinals, pointers, word, Segment};
 use super::hypercall_tests::KERNEL;
 use super::*;
 use cellgov_ps3_abi::hw::ppc_isa::PPC_BLR;
@@ -68,7 +68,8 @@ fn loaded_back(at: u64, rt: u8, tail: &[u32]) -> Segment {
 /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
 #[test]
 fn a_real_mode_bctr_of_a_constant_a_routine_builds_enters_the_word_at_its_real_address() {
-    let offset = i32::try_from(ROUTINE.wrapping_sub(VECTOR).cast_signed()).expect("in reach");
+    let call = VECTOR + 8;
+    let offset = i32::try_from(ROUTINE.wrapping_sub(call).cast_signed()).expect("in reach");
     let mut stub = build(3, 0x3000).to_vec();
     stub.extend([
         word(PpuInstruction::B {
@@ -116,7 +117,8 @@ fn a_real_mode_blr_of_a_constant_loaded_back_from_memory_enters_the_word_at_its_
 }
 
 /// No `bcctr` or `bclr` runs in real mode, and a branch in virtual mode
-/// reaches only the word at the address itself.
+/// reaches only the word at the address itself. A code pointer names the
+/// stub, so its constant names the second window's `sc`.
 ///
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
 #[test]
@@ -125,6 +127,7 @@ fn a_virtual_mode_bctr_of_a_constant_leaves_the_word_at_its_real_address_resolve
         loaded_back(OUTSIDE, 4, &[mtctr(4), bctr()]),
         window(&[]),
         quiet(),
+        pointers(&[OUTSIDE]),
     ];
     assert_eq!(
         ordinals(0, &segments),

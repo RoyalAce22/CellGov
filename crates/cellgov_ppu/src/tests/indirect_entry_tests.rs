@@ -14,21 +14,40 @@ pub(super) fn at(index: u64) -> u64 {
     BASE + 4 * index
 }
 
-/// The bound of an image whose only segment is the code `words`.
+/// The address of the data segment that [`pointer`] gives. No other
+/// segment of a test holds it.
+const POINTER: u64 = 0x3_0000;
+
+/// A data segment at [`POINTER`] that holds the address of word 0, as a
+/// table of code pointers does. The bound names word 0, so control
+/// reaches the code from there and word 0 is an entry.
+pub(super) fn pointer() -> FileSegment<'static> {
+    const BYTES: [u8; 8] = BASE.to_be_bytes();
+    FileSegment {
+        vaddr: POINTER,
+        bytes: &BYTES,
+    }
+}
+
+/// The bound of an image whose only code segment is the code `words`.
 ///
-/// With `readable` set, the code is also the file bytes that the bound
-/// reads for doublewords and jump tables.
+/// The file bytes hold [`pointer`], so the entries hold word 0. With
+/// `readable` set, the code is also file bytes that the bound reads for
+/// doublewords and jump tables.
 pub(super) fn bound(words: &[u32], readable: bool) -> BTreeSet<u64> {
     let code = Code::new(vec![CodeSegment {
         vaddr: BASE,
         words: words.to_vec(),
     }]);
     let bytes: Vec<u8> = words.iter().flat_map(|word| word.to_be_bytes()).collect();
-    let files = [FileSegment {
-        vaddr: BASE,
-        bytes: &bytes,
-    }];
-    let files: &[FileSegment<'_>] = if readable { &files } else { &[] };
+    let files = [
+        pointer(),
+        FileSegment {
+            vaddr: BASE,
+            bytes: &bytes,
+        },
+    ];
+    let files: &[FileSegment<'_>] = if readable { &files } else { &files[..1] };
     indirect_entries(&[], files, &code)
         .expect("every jump table ends")
         .entries
@@ -60,7 +79,7 @@ fn a_jump_table_ends_at_the_first_offset_that_reaches_no_code() {
         PPC_NOP,
         PPC_NOP,
     ];
-    assert_eq!(bound(&words, true), BTreeSet::from([at(5), at(6)]));
+    assert_eq!(bound(&words, true), BTreeSet::from([at(0), at(5), at(6)]));
 }
 
 #[test]
@@ -75,10 +94,13 @@ fn a_jump_table_that_runs_past_the_entry_limit_is_refused() {
             words: words.clone(),
         }]);
         let bytes: Vec<u8> = words.iter().flat_map(|word| word.to_be_bytes()).collect();
-        let files = [FileSegment {
-            vaddr: BASE,
-            bytes: &bytes,
-        }];
+        let files = [
+            pointer(),
+            FileSegment {
+                vaddr: BASE,
+                bytes: &bytes,
+            },
+        ];
         indirect_entries(&[], &files, &code).map(|bound| bound.entries)
     };
     assert_eq!(
@@ -107,8 +129,8 @@ fn a_jump_table_ends_at_an_offset_that_reaches_back_into_it() {
         ];
         bound(&words, true)
     };
-    assert_eq!(table(0), BTreeSet::from([at(5)]));
-    assert_eq!(table(4), BTreeSet::from([at(5)]));
+    assert_eq!(table(0), BTreeSet::from([at(0), at(5)]));
+    assert_eq!(table(4), BTreeSet::from([at(0), at(5)]));
 }
 
 #[test]
@@ -159,5 +181,5 @@ fn mflr_after_a_branch_and_link_to_the_next_word_names_that_word() {
         PPC_NOP,
         PPC_NOP,
     ];
-    assert_eq!(bound(&words, false), BTreeSet::from([at(1), at(4)]));
+    assert_eq!(bound(&words, false), BTreeSet::from([at(0), at(1), at(4)]));
 }

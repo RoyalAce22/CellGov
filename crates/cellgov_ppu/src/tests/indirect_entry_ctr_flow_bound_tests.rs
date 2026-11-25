@@ -36,7 +36,8 @@ fn bl_routine(from: usize) -> u32 {
 fn run(code: &Code, flow: impl FnOnce(&CtrFlow<'_>)) {
     let writes = BTreeMap::new();
     let lost_writes = BTreeSet::from([(0, BASE)]);
-    let mut ctr_flow = CtrFlow::new(code, &writes, &lost_writes);
+    let reach = Reach::every(code);
+    let mut ctr_flow = CtrFlow::new(code, &writes, &lost_writes, &reach);
     ctr_flow.run();
     flow(&ctr_flow);
 }

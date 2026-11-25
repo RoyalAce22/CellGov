@@ -1,4 +1,4 @@
-use super::hypercall_entry_tests::{code, ordinals, word};
+use super::hypercall_entry_tests::{code, ordinals, pointers, word};
 use super::hypercall_tests::{li, KERNEL, NOP};
 use super::*;
 use cellgov_ps3_abi::hw::ppc_isa::PPC_SC_1;
@@ -13,7 +13,8 @@ const START: u64 = CODE + 4;
 const END: u32 = 0x0010_0000;
 
 /// `bctr`, then a relative jump table with one entry for each of
-/// `targets` and an [`END`] entry, then `li r11,74; nop; sc 1`.
+/// `targets` and an [`END`] entry, then `li r11,74; nop; sc 1`. A code
+/// pointer names the `bctr`.
 fn table_then_window(targets: &[u64]) -> Vec<(u64, Option<u16>)> {
     let mut words = vec![word(PpuInstruction::Bcctr {
         bo: 0b10100,
@@ -26,7 +27,7 @@ fn table_then_window(targets: &[u64]) -> Vec<(u64, Option<u16>)> {
             .map(|&target| u32::try_from(target - START).expect("a small offset")),
     );
     words.extend([END, li(11, 74), NOP, PPC_SC_1]);
-    ordinals(0, &[code(CODE, &words)])
+    ordinals(0, &[code(CODE, &words), pointers(&[CODE])])
 }
 
 /// The address of the window's `li r11` after a table of `entries`

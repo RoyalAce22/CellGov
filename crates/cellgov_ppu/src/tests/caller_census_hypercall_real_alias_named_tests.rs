@@ -1,5 +1,5 @@
 use super::hypercall_ctr_decrement_tests::{window as plain_window, VECTOR};
-use super::hypercall_entry_tests::{code, data_bytes, ordinals, word, Segment};
+use super::hypercall_entry_tests::{code, data_bytes, ordinals, pointers, word, Segment};
 use super::hypercall_real_mode_switch_tests::{mtspr, window, OUTSIDE, PAST, RFID, SC};
 use super::hypercall_tests::KERNEL;
 use super::*;
@@ -68,19 +68,26 @@ fn a_real_mode_bctr_enters_the_word_at_the_real_address_of_a_doubleword_no_segme
 }
 
 /// The unbounded `rfid` can put each word into real mode, so the `bctr`
-/// can load 0x3004 and enter the window's `nop` with r11 unset.
+/// can load 0x3004 and enter the window's `nop` with r11 unset. Code
+/// pointers name the `bctr` path and the `rfid` path.
 ///
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
 /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
 #[test]
 fn under_an_unbounded_rfid_a_bctr_enters_the_word_at_the_real_address_of_a_doubleword() {
-    let without = [loaded_bctr(VIRTUAL), unbounded_rfid(), plain_window(&[])];
+    let without = [
+        loaded_bctr(VIRTUAL),
+        unbounded_rfid(),
+        plain_window(&[]),
+        pointers(&[VIRTUAL, OUTSIDE]),
+    ];
     assert_eq!(ordinals(0, &without), [(SC, Some(75))]);
     let segments = [
         loaded_bctr(VIRTUAL),
         unbounded_rfid(),
         plain_window(&[]),
         doubleword(NOP_REAL),
+        pointers(&[VIRTUAL, OUTSIDE]),
     ];
     assert_eq!(ordinals(0, &segments), [(SC, None)]);
 }

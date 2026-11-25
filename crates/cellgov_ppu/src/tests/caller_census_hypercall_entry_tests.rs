@@ -41,6 +41,22 @@ pub(super) fn data_bytes(vaddr: u64, bytes: Vec<u8>) -> Segment {
     }
 }
 
+/// The address of the data segment that [`pointers`] gives. No other
+/// segment of a test holds it.
+pub(super) const POINTERS: u64 = 0x2000_0000;
+
+/// A data segment at [`POINTERS`] that holds the address of each word of
+/// `targets`, as a table of code pointers does.
+pub(super) fn pointers(targets: &[u64]) -> Segment {
+    data_bytes(
+        POINTERS,
+        targets
+            .iter()
+            .flat_map(|target| target.to_be_bytes())
+            .collect(),
+    )
+}
+
 /// A writable data segment at `vaddr` that holds one doubleword.
 fn data(vaddr: u64, doubleword: u64) -> Segment {
     Segment {
@@ -199,7 +215,7 @@ fn a_word_the_code_builds_the_address_of_leaves_the_site_unresolved() {
             }),
         ];
         words.extend(window());
-        ordinals(0, &[code(CODE, &words)])
+        ordinals(0, &[code(CODE, &words), pointers(&[CODE])])
     };
     assert_eq!(building(0x1C), [(CODE + 0x24, Some(74))]);
     assert_eq!(building(0x20), [(CODE + 0x24, None)]);
@@ -223,7 +239,7 @@ fn a_jump_table_target_after_the_load_leaves_the_site_unresolved() {
             0x0010_0000,
         ];
         words.extend(window());
-        ordinals(0, &[code(CODE, &words)])
+        ordinals(0, &[code(CODE, &words), pointers(&[CODE])])
     };
     assert_eq!(table(CODE + 0xC), [(CODE + 0x14, Some(74))]);
     assert_eq!(table(CODE + 0x10), [(CODE + 0x14, None)]);

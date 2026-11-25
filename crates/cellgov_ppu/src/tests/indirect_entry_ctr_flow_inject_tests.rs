@@ -12,9 +12,10 @@ fn injected(state: &CtrState, copies: &CtrState, before: &SlotSet) -> (CtrState,
         words: vec![PPC_NOP],
     }]);
     let (writes, lost_writes) = (BTreeMap::new(), BTreeSet::new());
-    let mut flow = CtrFlow::new(&code, &writes, &lost_writes);
+    let reach = Reach::every(&code);
+    let mut flow = CtrFlow::new(&code, &writes, &lost_writes, &reach);
     flow.at[0][0] = state.clone();
-    let mut work = Worklist::new(&code);
+    let mut work = Worklist::new(&code, &reach);
     assert_eq!(work.pop(), Some((0, 0)));
     assert_eq!(work.pop(), None);
     flow.inject((0, 0), copies, before, &mut work);

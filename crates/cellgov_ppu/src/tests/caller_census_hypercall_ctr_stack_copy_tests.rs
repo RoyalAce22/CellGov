@@ -2,7 +2,7 @@ use super::hypercall_ctr_copy_tests::{after_bdnz_falls_through, call, copy_stub,
 use super::hypercall_ctr_decrement_tests::{bc, quiet, window, QUIET_SC, SC, VECTOR};
 use super::hypercall_ctr_return_copy_tests::{routine, ROUTINE};
 use super::hypercall_ctr_virtual_tests::{bctr, build, sites, LOADER, NO_ENTRY, OUTSIDE};
-use super::hypercall_entry_tests::{code, ordinals, word};
+use super::hypercall_entry_tests::{code, ordinals, pointers, word};
 use super::hypercall_tests::{li, NOP};
 use super::*;
 use cellgov_ps3_abi::hw::ppc_isa::PPC_SC_1;
@@ -92,7 +92,7 @@ fn after_a_routine_that_returns_a_slot(body: &[u32]) -> Vec<(u64, Option<u16>)> 
 /// loads 75 and branches to `nop`, so that `sc` resolves unless a `bctr`
 /// enters `nop`. A stub at [`OUTSIDE`] builds `KERNEL | low` in CTR,
 /// stores a copy of CTR at 16(r1), runs `between`, moves r0 into CTR,
-/// and branches there.
+/// and branches there. A code pointer names the stub.
 fn after_a_load_of_part_of_a_copy(nop: u16, low: u16, between: &[u32]) -> Vec<(u64, Option<u16>)> {
     let to_nop = word(PpuInstruction::B {
         offset: i32::from(nop),
@@ -108,6 +108,7 @@ fn after_a_load_of_part_of_a_copy(nop: u16, low: u16, between: &[u32]) -> Vec<(u
         code(LOADER, &[li(11, 75), to_nop]),
         code(OUTSIDE, &stub),
         quiet(),
+        pointers(&[OUTSIDE]),
     ];
     ordinals(NO_ENTRY, &segments)
 }

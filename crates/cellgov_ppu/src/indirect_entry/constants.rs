@@ -89,6 +89,15 @@ impl Value {
 ///
 /// A register that can also hold a constant that the scan dropped is
 /// lost. Its mark holds the origins of the dropped constants.
+///
+/// An LR that the scan does not know holds the return point of a call,
+/// because the bound takes each such `bclr` to return there. A routine can
+/// also step a copy of that LR and return to the result, past the return
+/// point. So a GPR that an arithmetic, logical or rotate word, or the
+/// address update of a load or a store, computes from such a copy is lost,
+/// unless the word copies the value unchanged. A GPR that such a word
+/// computes from a lost GPR of this kind is also lost. The usual save and
+/// restore of LR stays a plain copy of the return point.
 #[derive(Debug, Default)]
 pub(super) struct Constants {
     pub(super) gprs: [Option<Value>; 32],
@@ -99,6 +108,16 @@ pub(super) struct Constants {
     pub(super) lr: BTreeMap<u64, Value>,
     /// The origins of LR when it is lost.
     pub(super) lr_lost: Option<Origins>,
+    /// Whether LR can also hold a value that the scan does not know, when
+    /// [`Self::lr`] holds a constant.
+    pub(super) lr_unknown: bool,
+    /// The GPRs that hold an unstepped copy of an LR that the scan does not
+    /// know, as a mask with bit `n` set for GPR `n`.
+    pub(super) lr_copies: u32,
+    /// The GPRs that hold a value that a word computed from a copy of an
+    /// LR that the scan does not know, other than an unchanged copy, as a
+    /// mask with bit `n` set for GPR `n`. Each of these GPRs is lost.
+    pub(super) lr_stepped: u32,
     srr0: Option<Value>,
     srr1: Option<Value>,
     /// The origins of SRR0 when it is lost.
@@ -118,6 +137,15 @@ impl Constants {
             *self = Self::default();
             return None;
         };
+        let lr_copy = self.lr_copy_write(&decoded);
+        let value = self.step_decoded(address, decoded);
+        self.after_lr_copy_write(&decoded, lr_copy);
+        value
+    }
+
+    /// Steps over the decoded word `decoded` at `address`, and returns the
+    /// constants it writes into a GPR.
+    fn step_decoded(&mut self, address: u64, decoded: PpuInstruction) -> Option<Value> {
         if let Some((gpr, value)) = self.written(decoded) {
             let lost = self.copied_lost(decoded);
             self.lost_gprs.set(gpr, lost);
@@ -128,6 +156,7 @@ impl Constants {
             PpuInstruction::Mtlr { rs } => {
                 self.lr = self.written_by(rs, address);
                 self.lr_lost = self.lost(rs).cloned();
+                self.lr_unknown = self.lr_copies & gpr_bit(rs) != 0;
             }
             PpuInstruction::B { link, .. } => self.after_branch(address, 0b10100, link),
             PpuInstruction::Bc { bo, link, .. }
@@ -408,6 +437,65 @@ impl Constants {
             .unwrap_or_default()
     }
 
+    /// The GPR that `decoded` writes from LR or from a copy of an LR that
+    /// the scan does not know, and how it writes it.
+    ///
+    /// A word that computes its result from a stepped copy steps it, even
+    /// when the word gives its source unchanged.
+    ///
+    /// An `mflr` copies an LR that the scan does not know when one of these
+    /// is true:
+    /// - [`Self::lr`] holds no constant;
+    /// - LR can also hold a value that the scan does not know.
+    ///
+    /// [PPC-Book1 p:82 s:3.3.13] `mflr`, a form of `mfspr`, copies LR into RT.
+    fn lr_copy_write(&self, decoded: &PpuInstruction) -> Option<(u8, LrCopyWrite)> {
+        if let PpuInstruction::Mflr { rt } = *decoded {
+            return (self.lr.is_empty() || self.lr_unknown).then_some((rt, LrCopyWrite::Copy));
+        }
+        let tracked = self.lr_copies | self.lr_stepped;
+        if tracked == 0 {
+            return None;
+        }
+        let (rt, sources) = computed_from(decoded)?;
+        if sources & tracked == 0 {
+            return None;
+        }
+        let unchanged = sources & self.lr_stepped == 0
+            && (matches!(decoded, PpuInstruction::Mr { .. })
+                || GprStep::of(*decoded).is_some_and(|step| step.step.keeps_value()));
+        Some((
+            rt,
+            if unchanged {
+                LrCopyWrite::Copy
+            } else {
+                LrCopyWrite::Stepped
+            },
+        ))
+    }
+
+    /// Updates the copies of an LR that the scan does not know after the
+    /// step over `decoded`, and marks a stepped copy as lost.
+    ///
+    /// `write` is what [`Self::lr_copy_write`] gave before the step. A GPR
+    /// that the word surely writes holds no copy and no stepped copy, unless
+    /// `write` puts one there.
+    fn after_lr_copy_write(&mut self, decoded: &PpuInstruction, write: Option<(u8, LrCopyWrite)>) {
+        if self.lr_copies | self.lr_stepped != 0 {
+            let written = surely_written_gprs(decoded);
+            self.lr_copies &= !written;
+            self.lr_stepped &= !written;
+        }
+        match write {
+            Some((rt, LrCopyWrite::Copy)) => self.lr_copies |= gpr_bit(rt),
+            Some((rt, LrCopyWrite::Stepped)) => {
+                self.lr_stepped |= gpr_bit(rt);
+                self.lost_gprs.join_gpr(rt, &Origins::unnamed());
+            }
+            None => {}
+        }
+    }
+
     /// Steps over a branch at `address` with the BO field `bo`, which
     /// writes LR when `link` is set.
     ///
@@ -426,6 +514,7 @@ impl Constants {
             self.srr0 = None;
             self.srr1 = None;
             self.lr_lost = None;
+            self.lr_unknown = false;
             self.lr = address
                 .checked_add(4)
                 .map(|value| BTreeMap::from([(address, Value::One(value))]))
@@ -540,6 +629,157 @@ impl Step {
             Self::RotateAnd { sh, mask } => value.rotate_left(sh) & mask,
         }
     }
+
+    /// Whether the step gives each value unchanged.
+    fn keeps_value(self) -> bool {
+        matches!(
+            self,
+            Self::Add(0)
+                | Self::Or(0)
+                | Self::RotateAnd {
+                    sh: 0,
+                    mask: u64::MAX
+                }
+        )
+    }
+}
+
+/// How a word writes a GPR from LR or from a copy of an LR that the scan
+/// does not know.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LrCopyWrite {
+    /// The word copies the value unchanged.
+    Copy,
+    /// The word computes a different value from the copy.
+    Stepped,
+}
+
+/// The mask with bit `gpr` set.
+fn gpr_bit(gpr: u8) -> u32 {
+    1u32.checked_shl(u32::from(gpr)).unwrap_or(0)
+}
+
+/// The GPR that the arithmetic, logical, rotate or shift word `decoded`
+/// writes, and the GPRs that it computes the result from, as a mask.
+///
+/// The result is `None` for each other word. A load computes its address
+/// from its base GPR but loads its result from storage, so it is such a
+/// word. The update form of a load or a store also places that address
+/// into RA, so for it the result is RA, computed from RA and from RB when
+/// the word is indexed.
+///
+/// [PPC-Book1 p:33 s:3.3.2] A load with update places the EA into RA.
+/// [PPC-Book1 p:40 s:3.3.3] A store with update places the EA into RA.
+/// [PPC-Book1 p:105 s:4.6.2] A floating-point load with update places (RA) + EXTS(D), or (RA) + (RB), into RA.
+/// [PPC-Book1 p:107 s:4.6.3] A floating-point store with update writes the EA into RA.
+/// [PPC-Book1 p:51 s:3.3.8] `addi` and `addis` add EXTS(SI) or EXTS(SI || 0x0000) to RA, or to 0 when RA is 0.
+/// [PPC-Book1 p:51 s:3.3.8] An arithmetic instruction places its result into RT.
+/// [PPC-Book1 p:65 s:3.3.11] A logical instruction places its result into RA.
+/// [PPC-Book1 p:71 s:3.3.12] A rotate or shift instruction returns its result to a GPR, RA.
+/// [PPC-Book1 p:76 s:3.3.12.1] `rldimi` inserts the rotated RS into RA under the mask, so the result also holds bits of RA.
+fn computed_from(decoded: &PpuInstruction) -> Option<(u8, u32)> {
+    use PpuInstruction as I;
+    let base = |ra: u8| if ra == 0 { 0 } else { gpr_bit(ra) };
+    Some(match *decoded {
+        I::Addi { rt, ra, .. } | I::Addis { rt, ra, .. } => (rt, base(ra)),
+        I::Subfic { rt, ra, .. }
+        | I::Mulli { rt, ra, .. }
+        | I::Addic { rt, ra, .. }
+        | I::AddicDot { rt, ra, .. }
+        | I::Neg { rt, ra, .. }
+        | I::Addze { rt, ra, .. }
+        | I::Subfze { rt, ra, .. }
+        | I::Subfme { rt, ra, .. }
+        | I::Addme { rt, ra, .. } => (rt, gpr_bit(ra)),
+        I::Add { rt, ra, rb, .. }
+        | I::Subf { rt, ra, rb, .. }
+        | I::Subfc { rt, ra, rb, .. }
+        | I::Addc { rt, ra, rb, .. }
+        | I::Subfe { rt, ra, rb, .. }
+        | I::Adde { rt, ra, rb, .. }
+        | I::Mullw { rt, ra, rb, .. }
+        | I::Mulhwu { rt, ra, rb, .. }
+        | I::Mulhw { rt, ra, rb, .. }
+        | I::Mulhdu { rt, ra, rb, .. }
+        | I::Mulhd { rt, ra, rb, .. }
+        | I::Mulld { rt, ra, rb, .. }
+        | I::Divw { rt, ra, rb, .. }
+        | I::Divwu { rt, ra, rb, .. }
+        | I::Divd { rt, ra, rb, .. }
+        | I::Divdu { rt, ra, rb, .. } => (rt, gpr_bit(ra) | gpr_bit(rb)),
+        I::Or { ra, rs, rb, .. }
+        | I::Orc { ra, rs, rb, .. }
+        | I::And { ra, rs, rb, .. }
+        | I::Andc { ra, rs, rb, .. }
+        | I::Nor { ra, rs, rb, .. }
+        | I::Xor { ra, rs, rb, .. }
+        | I::Eqv { ra, rs, rb, .. }
+        | I::Nand { ra, rs, rb, .. }
+        | I::Slw { ra, rs, rb, .. }
+        | I::Srw { ra, rs, rb, .. }
+        | I::Sraw { ra, rs, rb, .. }
+        | I::Srad { ra, rs, rb, .. }
+        | I::Sld { ra, rs, rb, .. }
+        | I::Srd { ra, rs, rb, .. }
+        | I::Rlwnm { ra, rs, rb, .. }
+        | I::Rldcl { ra, rs, rb, .. }
+        | I::Rldcr { ra, rs, rb, .. } => (ra, gpr_bit(rs) | gpr_bit(rb)),
+        I::Ori { ra, rs, .. }
+        | I::Oris { ra, rs, .. }
+        | I::Xori { ra, rs, .. }
+        | I::Xoris { ra, rs, .. }
+        | I::AndiDot { ra, rs, .. }
+        | I::AndisDot { ra, rs, .. }
+        | I::Extsh { ra, rs, .. }
+        | I::Extsb { ra, rs, .. }
+        | I::Extsw { ra, rs, .. }
+        | I::Cntlzw { ra, rs, .. }
+        | I::Cntlzd { ra, rs, .. }
+        | I::Popcntb { ra, rs }
+        | I::Srawi { ra, rs, .. }
+        | I::Sradi { ra, rs, .. }
+        | I::Rlwinm { ra, rs, .. }
+        | I::RlwinmMask { ra, rs, .. }
+        | I::Rldicl { ra, rs, .. }
+        | I::Rldicr { ra, rs, .. }
+        | I::Rldic { ra, rs, .. }
+        | I::Mr { ra, rs }
+        | I::Slwi { ra, rs, .. }
+        | I::Srwi { ra, rs, .. }
+        | I::Clrlwi { ra, rs, .. }
+        | I::Clrldi { ra, rs, .. }
+        | I::Sldi { ra, rs, .. }
+        | I::Srdi { ra, rs, .. } => (ra, gpr_bit(rs)),
+        I::Rlwimi { ra, rs, .. } | I::Rldimi { ra, rs, .. } => (ra, gpr_bit(rs) | gpr_bit(ra)),
+        I::Lhau { ra, .. }
+        | I::Lwzu { ra, .. }
+        | I::Lbzu { ra, .. }
+        | I::Lhzu { ra, .. }
+        | I::Ldu { ra, .. }
+        | I::Stwu { ra, .. }
+        | I::Stdu { ra, .. }
+        | I::Stbu { ra, .. }
+        | I::Sthu { ra, .. }
+        | I::Lfsu { ra, .. }
+        | I::Lfdu { ra, .. }
+        | I::Stfsu { ra, .. }
+        | I::Stfdu { ra, .. } => (ra, gpr_bit(ra)),
+        I::Lwzux { ra, rb, .. }
+        | I::Lbzux { ra, rb, .. }
+        | I::Lhzux { ra, rb, .. }
+        | I::Ldux { ra, rb, .. }
+        | I::Lhaux { ra, rb, .. }
+        | I::Lwaux { ra, rb, .. }
+        | I::Stdux { ra, rb, .. }
+        | I::Sthux { ra, rb, .. }
+        | I::Stwux { ra, rb, .. }
+        | I::Stbux { ra, rb, .. }
+        | I::Lfsux { ra, rb, .. }
+        | I::Lfdux { ra, rb, .. }
+        | I::Stfsux { ra, rb, .. }
+        | I::Stfdux { ra, rb, .. } => (ra, gpr_bit(ra) | gpr_bit(rb)),
+        _ => return None,
+    })
 }
 
 /// Whether control never goes from `decoded` to the next word, for a

@@ -1,4 +1,4 @@
-use super::hypercall_entry_tests::{code, ordinals, word, Segment};
+use super::hypercall_entry_tests::{code, ordinals, pointers, word, Segment};
 use super::hypercall_tests::{li, KERNEL, NOP};
 use super::*;
 use cellgov_ps3_abi::hw::ppc_isa::{PPC_BLR, PPC_SC_1};
@@ -113,17 +113,20 @@ fn a_real_mode_bctr_to_a_loaded_address_adds_no_path_to_an_unnamed_word() {
     assert_eq!(site(76, vec![stub]), [(SC, Some(75))]);
 }
 
+/// A code pointer names the stub, so its `mtctr` records the built
+/// address.
 #[test]
 fn a_bctr_to_a_built_address_outside_real_mode_adds_no_path() {
     let [lis, ori] = build_past();
     let stub = code(OUTSIDE, &[lis, ori, mtctr_r3(), bctr()]);
-    assert_eq!(site(76, vec![stub]), [(SC, Some(75))]);
+    assert_eq!(site(76, vec![stub, pointers(&[OUTSIDE])]), [(SC, Some(75))]);
 }
 
 #[test]
 fn a_real_mode_bctr_whose_mtctr_runs_outside_real_mode_puts_its_absolute_branch_in_real_mode() {
     // The vector word branches straight to the `bctr`. The `bctr` then
-    // runs in real mode with the CTR that the `mtctr` wrote earlier.
+    // runs in real mode with the CTR that the `mtctr` wrote earlier. A
+    // code pointer names the code at OUTSIDE, where the `mtctr` runs.
     let [lis, ori] = build_past();
     let built = || code(OUTSIDE, &[lis, ori, mtctr_r3(), bctr()]);
     let to_bctr = word(PpuInstruction::B {
@@ -132,8 +135,9 @@ fn a_real_mode_bctr_whose_mtctr_runs_outside_real_mode_puts_its_absolute_branch_
         link: false,
     });
     let vector = || code(VECTOR, &[to_bctr]);
-    assert_eq!(site(76, vec![vector(), built()]), [(SC, None)]);
-    assert_eq!(site(75, vec![vector(), built()]), [(SC, Some(75))]);
+    let named = || pointers(&[OUTSIDE]);
+    assert_eq!(site(76, vec![vector(), built(), named()]), [(SC, None)]);
+    assert_eq!(site(75, vec![vector(), built(), named()]), [(SC, Some(75))]);
 }
 
 /// [PPC-Book1 p:20 s:2.4.1] BO 1a00t decrements CTR, then branches if CTR is not 0.
@@ -153,7 +157,7 @@ fn a_bdnz_to_the_next_word_between_mtctr_and_bctr_leaves_the_site_unresolved() {
 
 /// A `bctr` to [`BETWEEN`] enters the window after its `li r11` only
 /// when it runs in real mode, where it reaches the word at that real
-/// address.
+/// address. A code pointer names the stub at [`OUTSIDE`].
 ///
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
 #[test]
@@ -163,5 +167,8 @@ fn a_real_mode_bctr_to_the_real_address_of_a_word_before_sc_leaves_the_site_unre
         code(at, &[lis, ori, mtctr_r3(), bctr()])
     };
     assert_eq!(site(75, vec![stub(VECTOR)]), [(SC, None)]);
-    assert_eq!(site(75, vec![stub(OUTSIDE)]), [(SC, Some(75))]);
+    assert_eq!(
+        site(75, vec![stub(OUTSIDE), pointers(&[OUTSIDE])]),
+        [(SC, Some(75))]
+    );
 }

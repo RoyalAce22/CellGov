@@ -1,5 +1,5 @@
 use super::hypercall_ctr_decrement_tests::VECTOR;
-use super::hypercall_entry_tests::{code, data_bytes, ordinals, word, Segment};
+use super::hypercall_entry_tests::{code, data_bytes, ordinals, pointers, word, Segment};
 use super::hypercall_jump_table_alias_tests::{branch_through_table, build_low, window, CODE, END};
 use super::hypercall_tests::{li, KERNEL};
 use super::*;
@@ -12,7 +12,8 @@ fn words(at: u64, words: &[u32]) -> Segment {
 /// The code builds 0xFFFF_FFFF_FFFF_FFF8, so 32-bit code reads the table
 /// at 0xFFFF_FFF8. Its first two entries reach the code's first word.
 /// Its third entry is at 0x0 and reaches the window's `nop` at 0x5004.
-/// The values 0x1_0008 and 0x500C name no word of the window.
+/// The values 0x1_0008 and 0x500C name no word of the window. A code
+/// pointer names the code.
 ///
 /// [PPC-Book1 p:15 s:1.12.2] Effective address arithmetic wraps from 2^64 - 1 to 0 in 64-bit mode, and from 2^32 - 1 to 0 in 32-bit mode.
 #[test]
@@ -22,6 +23,7 @@ fn a_32_bit_jump_table_continues_at_0_after_the_last_word_below_4_gib() {
         words(0xFFFF_FFF8, &[0x0001_0008, 0x0001_0008]),
         words(0x0, &[0x500C, END]),
         window(0x5000),
+        pointers(&[CODE]),
     ];
     assert_eq!(ordinals(0, &segments), [(0x5008, None)]);
 }

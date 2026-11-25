@@ -115,9 +115,23 @@
 //! can move a dropped constant without its mark, as the limits above
 //! state. Each of those cases is a defect.
 //!
-//! Data that decodes as code can add words to the bound. Data that
-//! decodes as code, or an extra word, can also bring more constants of
-//! one register to a branch target than [`JoinFlow`] keeps. Then
+//! The scan takes the constants, the CTR and LR targets, the lost
+//! targets, the relative jump tables after a `bcctr` and the switches
+//! only from the words that control can reach. Control reaches a word by
+//! fall-throughs and direct branches from the ELF entry, an interrupt
+//! vector, a named word, a target or a switch. It also starts at each
+//! value that a load of 1, 2, 4 or 8 bytes of the file bytes gives, which
+//! can be a code address that the bound does not name yet. A lost target
+//! can enter any word, so then the scan takes them from every word.
+//!
+//! So a word that the bound misses as an entry also loses the constants
+//! of the code that only that word reaches. This makes the defect of a
+//! missing word larger.
+//!
+//! Data that decodes as code can still add words to the bound, through
+//! its doublewords and 32-bit words, or when control reaches it. Data
+//! that decodes as code, or an extra word, can also bring more constants
+//! of one register to a branch target than [`JoinFlow`] keeps. Then
 //! [`JoinFlow`] can drop a constant that it keeps without them. On each
 //! word that a function reaches, the bound takes r2 to hold a TOC that a
 //! descriptor gives, or a constant that the paths to the word leave in
@@ -131,6 +145,7 @@ mod constants;
 mod ctr_flow;
 mod join_flow;
 mod lost;
+mod reach;
 mod real_mode;
 mod slot_set;
 mod toc;
@@ -191,3 +206,11 @@ mod lost_srr_tests;
 #[cfg(test)]
 #[path = "../tests/indirect_entry_join_drop_tests.rs"]
 mod join_drop_tests;
+
+#[cfg(test)]
+#[path = "../tests/indirect_entry_reach_tests.rs"]
+mod reach_tests;
+
+#[cfg(test)]
+#[path = "../tests/indirect_entry_byte_load_tests.rs"]
+mod byte_load_tests;

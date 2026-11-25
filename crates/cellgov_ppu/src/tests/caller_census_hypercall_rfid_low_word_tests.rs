@@ -1,4 +1,4 @@
-use super::hypercall_entry_tests::{code, ordinals, word, Segment};
+use super::hypercall_entry_tests::{code, ordinals, pointers, word, Segment};
 use super::hypercall_real_mode_switch_tests::{
     lis_sf, mtmsrd, mtspr, ori, window, OUTSIDE, RFID, SC,
 };
@@ -69,14 +69,15 @@ fn low_mtmsrd_stub() -> Segment {
 
 /// SRR0 names the low window's `nop` in its low word, and SRR1 keeps IR
 /// at 1. With SF at 0 the `rfid` enters the `nop`, which lies between
-/// the `li r11` and the `sc`.
+/// the `li r11` and the `sc`. A code pointer names the stub.
 ///
 /// [PPC-Book3 p:13 s:2.3] `rfid` fetches from SRR0 0:61 || 0b00 when SF = 1 in the new MSR, and from 32 zeros || SRR0 32:61 || 0b00 when SF = 0.
 #[test]
 fn an_rfid_outside_real_mode_with_sf_at_0_enters_the_low_word_of_srr0() {
     let census = |low: u16, srr1: &[u32]| {
         let window = code(LOW_WINDOW, &[li(11, 75), NOP, PPC_SC_1, PPC_BLR]);
-        ordinals(0, &[rfid_high(&[], low, srr1), window])
+        let named = pointers(&[OUTSIDE]);
+        ordinals(0, &[rfid_high(&[], low, srr1), window, named])
     };
     let sf_ir = [lis_sf(4), ori(4, MSR_IR)];
     assert_eq!(census(0x3004, &srr1_ir()), [(LOW_SC, None)]);
@@ -91,7 +92,8 @@ fn an_rfid_outside_real_mode_with_sf_at_0_enters_the_low_word_of_srr0() {
 ///
 /// On the second path the `mtmsrd` clears IR. The `ba` then runs in real
 /// mode and reaches the path past the window's `blr`, which enters the
-/// window's `nop` with r11 = 76.
+/// window's `nop` with r11 = 76. Code pointers name stub A and the stub
+/// at [`LOW_STUB`].
 ///
 /// [PPC-Book3 p:13 s:2.3] `rfid` fetches from SRR0 0:61 || 0b00 when SF = 1 in the new MSR, and from 32 zeros || SRR0 32:61 || 0b00 when SF = 0.
 /// [PPC-Book3 p:22 s:3.4] `mtmsrd` with L = 0 sets MSR\[IR\] to RS\[IR\] | RS\[PR\] and MSR\[SF\] to RS bit 0 | RS bit 1.
@@ -99,7 +101,8 @@ fn an_rfid_outside_real_mode_with_sf_at_0_enters_the_low_word_of_srr0() {
 fn an_rfid_outside_real_mode_with_sf_at_0_is_a_join_of_the_switch_scan() {
     let census = |low: u16| {
         let stub_a = rfid_high(&[li(5, 0)], low, &srr1_ir());
-        ordinals(0, &[stub_a, low_mtmsrd_stub(), window(76)])
+        let named = pointers(&[OUTSIDE, LOW_STUB]);
+        ordinals(0, &[stub_a, low_mtmsrd_stub(), window(76), named])
     };
     assert_eq!(census(0x6004), [(SC, None)]);
     assert_eq!(census(0x6008), [(SC, Some(75))]);

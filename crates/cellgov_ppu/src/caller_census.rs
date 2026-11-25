@@ -1041,3 +1041,15 @@ mod hypercall_jump_table_alias_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_jump_table_entry_tests.rs"]
 mod hypercall_jump_table_entry_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_reach_tests.rs"]
+mod hypercall_reach_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_skip_return_tests.rs"]
+mod hypercall_skip_return_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_stepped_lr_tests.rs"]
+mod hypercall_stepped_lr_tests;

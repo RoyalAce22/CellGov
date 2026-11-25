@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::constants::{ends_path, Constants, Value};
 use super::ctr_flow::{calls, links_to_next_word, positions};
 use super::lost::{join_origins, LostGprs, Origins};
+use super::reach::Reach;
 use super::toc::WordTocs;
 use crate::caller_census::{JoinDrop, JoinRegister};
 use crate::hypercall_cfg::{branch_target, Code};
@@ -46,6 +47,14 @@ struct Brought {
     /// The origins of LR when it can also hold a constant that the flow
     /// dropped.
     lr_lost: Option<Origins>,
+    /// Whether LR can hold a value that the scan does not know on a path.
+    lr_unknown: bool,
+    /// The GPRs that hold a copy of an LR that the scan does not know on a
+    /// path, as a mask with bit `n` set for GPR `n`.
+    lr_copies: u32,
+    /// The GPRs that hold a stepped copy of an LR that the scan does not
+    /// know on a path, as [`Constants::lr_stepped`] holds them.
+    lr_stepped: u32,
     /// The origins of SRR0 and of SRR1 when each can also hold a
     /// constant that the flow dropped. The flow brings no SRR0 or SRR1
     /// constant to a join word.
@@ -62,6 +71,9 @@ impl Brought {
         constants.lost_gprs.clone_from(&self.lost_gprs);
         constants.lr.clone_from(&self.lr);
         constants.lr_lost.clone_from(&self.lr_lost);
+        constants.lr_unknown = self.lr_unknown;
+        constants.lr_copies = self.lr_copies;
+        constants.lr_stepped = self.lr_stepped;
         [constants.srr0_lost, constants.srr1_lost] = self.srrs_lost.clone();
         constants
     }
@@ -102,6 +114,12 @@ impl Brought {
             }
         }
         changed |= join_origins(&mut self.lr_lost, path.lr_lost.as_ref());
+        let lr_unknown = self.lr_unknown || path.lr_unknown || path.lr.is_empty();
+        let lr_copies = self.lr_copies | path.lr_copies;
+        let lr_stepped = self.lr_stepped | path.lr_stepped;
+        let own = (self.lr_unknown, self.lr_copies, self.lr_stepped);
+        changed |= (lr_unknown, lr_copies, lr_stepped) != own;
+        (self.lr_unknown, self.lr_copies, self.lr_stepped) = (lr_unknown, lr_copies, lr_stepped);
         let limit = join.limit(JoinRegister::Lr);
         let mut dropped = Vec::new();
         for (&by, value) in &path.lr {
@@ -264,12 +282,18 @@ fn taken(address: u64, raw: u32) -> Option<u64> {
 /// only grows, to at most its bound of constants and a lost mark with at
 /// most one origin for each drop, so the flow ends.
 ///
+/// A path goes only through the words of a [`Reach`] set. A word of the
+/// set whose word before is not in the set also starts a path: a join
+/// word with what the paths to it bring, and each other word with no
+/// constant.
+///
 /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
 pub(super) struct JoinFlow<'a> {
     words: &'a JoinWords<'a>,
     tocs: &'a WordTocs,
     every: &'a Value,
     bounds: &'a Bounds,
+    reach: &'a Reach<'a>,
     /// What the paths to each join word bring, by the slot of the join
     /// word.
     at: Vec<Brought>,
@@ -281,7 +305,8 @@ impl<'a> JoinFlow<'a> {
     ///
     /// `tocs` holds the TOC of each word, and `every` holds each TOC that
     /// a descriptor gives. `bounds` holds the join words where a register
-    /// keeps more than [`JOIN_LIMIT`] constants.
+    /// keeps more than [`JOIN_LIMIT`] constants. The paths go through the
+    /// words that `reach` holds.
     ///
     /// With `counting`, the flow keeps the constants that each drop
     /// dropped, so [`Self::drops`] can count them. The flow is the same
@@ -291,6 +316,7 @@ impl<'a> JoinFlow<'a> {
         tocs: &'a WordTocs,
         every: &'a Value,
         bounds: &'a Bounds,
+        reach: &'a Reach<'a>,
         counting: bool,
     ) -> Self {
         let mut flow = Self {
@@ -298,6 +324,7 @@ impl<'a> JoinFlow<'a> {
             tocs,
             every,
             bounds,
+            reach,
             at: vec![Brought::default(); words.joins.len()],
             drops: Drops {
                 counting,
@@ -307,7 +334,14 @@ impl<'a> JoinFlow<'a> {
         let mut work = Worklist::new(&words.steps);
         for (index, steps) in words.steps.iter().enumerate().rev() {
             for word in (0..steps.len()).rev() {
-                if word == 0 || steps[word].join.is_some() || steps[word - 1].ends {
+                if !reach.contains(index, word) {
+                    continue;
+                }
+                if word == 0
+                    || steps[word].join.is_some()
+                    || steps[word - 1].ends
+                    || !reach.contains(index, word - 1)
+                {
                     work.push((index, word));
                 }
             }
@@ -339,6 +373,9 @@ impl<'a> JoinFlow<'a> {
         let raws = segment.words.get(first..).unwrap_or_default();
         let tocs = self.tocs.segment(index).get(first..).unwrap_or_default();
         for (word, (&raw, &toc)) in (first..).zip(raws.iter().zip(tocs)) {
+            if !self.reach.contains(index, word) {
+                return;
+            }
             let step = &steps[word];
             if let Some(slot) = step.join.filter(|_| word != first) {
                 self.join_into(slot, &constants, work);
@@ -358,6 +395,10 @@ impl<'a> JoinFlow<'a> {
     /// Joins `constants` into the join word at `slot`, and queues the word
     /// when what it gets changes.
     fn join_into(&mut self, slot: usize, constants: &Constants, work: &mut Worklist) {
+        let (index, word) = self.words.joins[slot];
+        if !self.reach.contains(index, word) {
+            return;
+        }
         let at = JoinAt {
             slot,
             raised: self.bounds.0.get(&slot),

@@ -10,6 +10,7 @@ use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_BIT1, MSR_SF, SPR_SRR0, SPR_SRR1};
 
 use super::bound::IndirectBound;
 use super::constants::{Constants, Value};
+use super::reach::Reach;
 use super::toc::{FunctionSteps, WordTocs};
 use crate::hypercall_cfg::{low_indirect_words, real_indirect_words, Code, CodeSegment};
 use crate::instruction::spr_number;
@@ -46,10 +47,18 @@ impl Switches {
     /// than by a fall-through. So the scan repeats until no real-mode
     /// switch adds a target.
     /// The targets are words of the code, so the repeats end.
-    pub(super) fn find(code: &Code, tocs: &WordTocs, every: &Value, bound: &IndirectBound) -> Self {
+    ///
+    /// The scan steps only the words that `reach` holds.
+    pub(super) fn find(
+        code: &Code,
+        tocs: &WordTocs,
+        every: &Value,
+        bound: &IndirectBound,
+        reach: &Reach<'_>,
+    ) -> Self {
         let mut joins = joins(code, bound);
         loop {
-            let switches = Self::scan(code, tocs, every, &joins);
+            let switches = Self::scan(code, tocs, every, &joins, reach);
             let before = joins.len();
             joins.extend(
                 switches
@@ -63,13 +72,28 @@ impl Switches {
         }
     }
 
-    /// The switches of `code`, when control enters each word of `joins`
-    /// with no constant that the scan knows.
-    fn scan(code: &Code, tocs: &WordTocs, every: &Value, joins: &BTreeSet<u64>) -> Self {
+    /// The switches of the words of `code` that `reach` holds, when
+    /// control enters each word of `joins` with no constant that the scan
+    /// knows.
+    ///
+    /// A word that `reach` does not hold switches nothing, and the next
+    /// word starts with no constant.
+    fn scan(
+        code: &Code,
+        tocs: &WordTocs,
+        every: &Value,
+        joins: &BTreeSet<u64>,
+        reach: &Reach<'_>,
+    ) -> Self {
         let mut switches = Self::default();
         for (index, segment) in code.segments().iter().enumerate() {
             let mut constants = Constants::default();
-            for ((address, raw), &toc) in segment.addressed().zip(tocs.segment(index)) {
+            let words = segment.addressed().zip(tocs.segment(index)).enumerate();
+            for (word, ((address, raw), &toc)) in words {
+                if !reach.contains(index, word) {
+                    constants = Constants::default();
+                    continue;
+                }
                 if joins.contains(&address) {
                     constants = Constants::default();
                 }

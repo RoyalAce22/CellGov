@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use cellgov_ps3_abi::hw::ppc_isa::PPC_BO_BIT2;
 
 use super::constants::{never_falls_through, GprStep, Step, Value};
+use super::reach::Reach;
 use super::slot_set::{Slot, SlotSet};
 use super::toc::FunctionSteps;
 use crate::caller_census::surely_written_gprs;
@@ -662,9 +663,13 @@ impl StackAccess {
 /// word changes. Each state only grows, from finite sets of constants,
 /// so the flow ends.
 ///
+/// The flow steps only the words of a [`Reach`] set. A word outside the
+/// set gets no state, and its `bcctr` reaches no target.
+///
 /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
 pub(super) struct CtrFlow<'a> {
     code: &'a Code,
+    reach: &'a Reach<'a>,
     /// The constants that each `mtctr` copies, as
     /// [`Bound::code_constants`] keeps them.
     ///
@@ -679,14 +684,17 @@ pub(super) struct CtrFlow<'a> {
 }
 
 impl<'a> CtrFlow<'a> {
-    /// The flow before its first step, with no CTR on any word.
+    /// The flow before its first step, with no CTR on any word. The flow
+    /// steps the words that `reach` holds.
     pub(super) fn new(
         code: &'a Code,
         writes: &'a BTreeMap<(usize, u64), Value>,
         lost_writes: &'a BTreeSet<(usize, u64)>,
+        reach: &'a Reach<'a>,
     ) -> Self {
         Self {
             code,
+            reach,
             writes,
             lost_writes,
             at: code
@@ -723,7 +731,7 @@ impl<'a> CtrFlow<'a> {
         let mut returned_gprs = 0;
         let mut returned_slots = SlotSet::default();
         let mut injected = SlotSet::default();
-        let mut work = Worklist::new(code);
+        let mut work = Worklist::new(code, self.reach);
         while let Some((index, word)) = work.pop() {
             let segment = &code.segments()[index];
             let address = segment.vaddr + (word as u64) * 4;
@@ -778,6 +786,9 @@ impl<'a> CtrFlow<'a> {
         work: &mut Worklist,
     ) {
         let (index, word) = position;
+        if !self.reach.contains(index, word) {
+            return;
+        }
         let state = &mut self.at[index][word];
         let changed = if state.slots.lost.shares(injected) {
             let grew = !copies.slots.lost.shares(injected);
@@ -795,7 +806,7 @@ impl<'a> CtrFlow<'a> {
     /// when its state changes.
     fn join_into(&mut self, position: (usize, usize), state: &CtrState, work: &mut Worklist) {
         let (index, word) = position;
-        if self.at[index][word].join(state) {
+        if self.reach.contains(index, word) && self.at[index][word].join(state) {
             work.push(position);
         }
     }
@@ -927,9 +938,11 @@ impl<'a> CtrFlow<'a> {
         targets: &mut BTreeMap<u64, BTreeSet<u64>>,
     ) -> BTreeSet<u64> {
         let mut lost = BTreeSet::new();
-        for (segment, states) in self.code.segments().iter().zip(&self.at) {
-            for ((address, raw), state) in segment.addressed().zip(states) {
-                if !matches!(crate::decode::decode(raw), Ok(PpuInstruction::Bcctr { .. })) {
+        for (index, (segment, states)) in self.code.segments().iter().zip(&self.at).enumerate() {
+            for (word, ((address, raw), state)) in segment.addressed().zip(states).enumerate() {
+                if !self.reach.contains(index, word)
+                    || !matches!(crate::decode::decode(raw), Ok(PpuInstruction::Bcctr { .. }))
+                {
                     continue;
                 }
                 let ctr = &state.ctr;
@@ -1011,25 +1024,32 @@ struct Worklist {
 }
 
 impl Worklist {
-    /// A worklist that holds each word of `code`, with the first word
-    /// next.
-    fn new(code: &Code) -> Self {
-        Self {
-            queued: code
-                .segments()
-                .iter()
-                .map(|segment| vec![true; segment.words.len()])
-                .collect(),
-            pending: code
-                .segments()
-                .iter()
-                .enumerate()
-                .flat_map(|(index, segment)| {
-                    (0..segment.words.len()).map(move |word| (index, word))
-                })
-                .rev()
-                .collect(),
-        }
+    /// A worklist that holds each word of `code` that `reach` holds, with
+    /// the first word next.
+    fn new(code: &Code, reach: &Reach<'_>) -> Self {
+        let queued: Vec<Vec<bool>> = code
+            .segments()
+            .iter()
+            .enumerate()
+            .map(|(index, segment)| {
+                (0..segment.words.len())
+                    .map(|word| reach.contains(index, word))
+                    .collect()
+            })
+            .collect();
+        let pending = queued
+            .iter()
+            .enumerate()
+            .flat_map(|(index, words)| {
+                words
+                    .iter()
+                    .enumerate()
+                    .filter(|&(_, &queued)| queued)
+                    .map(move |(word, _)| (index, word))
+            })
+            .rev()
+            .collect();
+        Self { queued, pending }
     }
 
     /// Takes the next word.
