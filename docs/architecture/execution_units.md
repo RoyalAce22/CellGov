@@ -54,7 +54,7 @@ The `PpuInstruction` set covers:
 - the supervisor and hypervisor instructions (`rfid`, `hrfid`,
   `mfmsr`, `mtmsr`, `mtmsrd`, `lq`, `stq`, the `slb` and `tlb`
   families) and an `mfspr` or `mtspr` of a privileged SPR, which
-  execute to a privileged-instruction fault.
+  execute to a privileged-instruction fault in problem state.
 
 The variant count also includes:
 

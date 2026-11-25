@@ -32,10 +32,11 @@ fn all_flips() -> Vec<Flip> {
 }
 
 /// The lanes the pairwise tests cover: every scalar lane, and the first
-/// and last lane of the FPR, VR and VSCR groups. Pairs over all 137 lanes
-/// would be 38 million hashes held at once; the keys of the lanes left
+/// and last lane of the FPR, VR and VSCR groups. Pairs over all 138 lanes
+/// would be 39 million hashes held at once; the keys of the lanes left
 /// out are drawn from the same stream and checked by the single-bit,
-/// lane-swap and key tests.
+/// lane-swap and key tests. The supervisor lane holds a digest and is
+/// left out too; `supervisor_lane_tests` covers the words under it.
 fn pair_lanes() -> Vec<usize> {
     let mut lanes: Vec<usize> = (0..LANE_FPR0).collect();
     lanes.extend([
@@ -77,7 +78,8 @@ fn patterned() -> [u64; LANE_COUNT] {
 /// through, as `boot run --state-hash-census` sampled them at dispatches
 /// 2^20, 40 * 2^20 and 100 * 2^20. The FPSCR and VRSAVE lanes are 0, and
 /// [`bases`] leaves the FPR, VR and VSCR lanes 0: the state hashed none
-/// of them when the boot ran.
+/// of them when the boot ran. The supervisor lane is 0 too: a title
+/// process holds no supervisor registers.
 const TITLE_STATES: [[u64; LANE_FPR0]; 3] = [
     [
         0x73,
@@ -371,7 +373,11 @@ fn lanes_place_each_field_at_its_index() {
         assert_eq!(l[73 + 2 * k], 500 + k as u64, "vr{k} low half");
     }
     assert_eq!(l[136], u64::from(VSCR_NJ | VSCR_SAT));
-    assert_eq!(LANE_COUNT, 137);
+    assert_eq!(l[137], 0, "a title process carries no supervisor registers");
+    let registers = crate::supervisor::SupervisorState::new(1);
+    s.set_supervisor(Some(registers.clone()));
+    assert_eq!(lanes(&s.fingerprint())[137], registers.digest());
+    assert_eq!(LANE_COUNT, 138);
 }
 
 // --- Part 2: structural tests over every base ---

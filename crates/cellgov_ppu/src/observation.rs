@@ -10,6 +10,7 @@ use crate::exec::ExecuteVerdict;
 use crate::instruction::fuzz::PpuPermittedDelta;
 use crate::state::PpuState;
 use crate::store_buffer::{PendingStore, StoreBuffer};
+use crate::supervisor::SupervisorState;
 
 /// Architecturally visible PPU state.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +41,8 @@ pub struct PpuArchitecturalState {
     pub tb: u64,
     /// Local reservation register.
     pub reservation: Option<ReservedLine>,
+    /// The supervisor registers; `None` for a title process.
+    pub supervisor: Option<SupervisorState>,
 }
 
 impl PpuArchitecturalState {
@@ -60,6 +63,7 @@ impl PpuArchitecturalState {
             vscr: fields.vscr,
             tb: fields.tb,
             reservation: fields.reservation,
+            supervisor: fields.supervisor,
         }
     }
 
@@ -82,6 +86,7 @@ impl PpuArchitecturalState {
             vscr,
             tb,
             reservation,
+            supervisor,
         } = self;
         state.set_gpr_all(*gpr);
         state.set_fpr_all(*fpr);
@@ -96,6 +101,7 @@ impl PpuArchitecturalState {
         state.set_vscr(*vscr);
         state.tb = *tb;
         state.set_reservation(*reservation);
+        state.set_supervisor(supervisor.clone());
     }
 
     /// The fields the state hash covers.
@@ -112,6 +118,7 @@ impl PpuArchitecturalState {
             fpr: self.fpr,
             vr: self.vr,
             vscr: self.vscr,
+            supervisor: self.supervisor.as_ref().map_or(0, SupervisorState::digest),
         }
     }
 }
@@ -352,6 +359,7 @@ fn state_differs_outside(
         || first.vscr != second.vscr
         || first.tb != second.tb
         || first.reservation != second.reservation
+        || first.supervisor != second.supervisor
 }
 
 fn masked_state_fields(

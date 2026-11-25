@@ -126,6 +126,7 @@ impl TraceRecord {
                 fpr,
                 vr,
                 vscr,
+                supervisor,
             } => {
                 write_u64(buf, *step);
                 write_u64(buf, *pc);
@@ -155,6 +156,7 @@ impl TraceRecord {
                     write_u128(buf, *r);
                 }
                 write_u32(buf, *vscr);
+                write_u64(buf, *supervisor);
             }
             TraceRecord::HostInvariantBreak { reason } => {
                 buf.push(u8::from(*reason));
@@ -445,6 +447,7 @@ impl TraceRecord {
                     *r = read_u128(bytes, &mut pos)?;
                 }
                 let vscr = read_u32(bytes, &mut pos)?;
+                let supervisor = read_u64(bytes, &mut pos)?;
                 TraceRecord::PpuStateFull {
                     step,
                     pc,
@@ -459,6 +462,7 @@ impl TraceRecord {
                     fpr,
                     vr,
                     vscr,
+                    supervisor,
                 }
             }
             TAG_HOST_INVARIANT_BREAK => {

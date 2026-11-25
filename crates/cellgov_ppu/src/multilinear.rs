@@ -16,6 +16,7 @@
 //! | 40..=71   | `fpr[0..32]`, raw bit patterns                                                   |
 //! | 72..=135  | `vr[k]`: lane `72 + 2k` is bits 0:63 (the high half), lane `73 + 2k` bits 64:127 |
 //! | 136       | `vscr`, zero-extended                                                            |
+//! | 137       | the supervisor registers' digest ([`supervisor_lane`]), 0 for a title process    |
 //!
 //! It then computes
 //!
@@ -40,9 +41,12 @@
 //! The bound holds only while the first and the last of these conditions
 //! stay true. The middle one is a check on the committed keys:
 //!
-//! - The lane encoding is fixed-length and injective. The reservation
-//!   takes two lanes, so no reservation and a reservation of line 0 give
-//!   different vectors.
+//! - The lane encoding is fixed-length and injective, except for the
+//!   supervisor lane. The reservation takes two lanes, so no reservation
+//!   and a reservation of line 0 give different vectors. The supervisor
+//!   lane holds a Multilinear-128 hash of the supervisor block under its
+//!   own keys. Two distinct blocks give the same lane with a probability
+//!   of at most 2^-64, so the bound for a pair of states is 2^-63.
 //! - The keys are distinct and nonzero. [LemireKaser2014 p:4 s:3] The
 //!   theorem draws each key uniformly and does not need this; the check
 //!   rejects a fixed key that ignores a lane or makes two lanes
@@ -70,7 +74,7 @@ use cellgov_exec::PpuFingerprint;
 use cellgov_ps3_abi::hw::ppu::{FPR_COUNT, GPR_COUNT, VR_COUNT};
 
 /// Number of 64-bit lanes the hash reads from one state.
-pub const LANE_COUNT: usize = LANE_VSCR + 1;
+pub const LANE_COUNT: usize = LANE_SUPERVISOR + 1;
 
 /// Lane of the link register; GPR `k` is lane `k`.
 pub const LANE_LR: usize = GPR_COUNT;
@@ -95,6 +99,8 @@ pub const LANE_FPR0: usize = GPR_COUNT + 8;
 pub const LANE_VR0: usize = LANE_FPR0 + FPR_COUNT;
 /// Lane of the vector status and control register, zero-extended.
 pub const LANE_VSCR: usize = LANE_VR0 + 2 * VR_COUNT;
+/// Lane of the supervisor registers' digest, 0 for a title process.
+pub const LANE_SUPERVISOR: usize = LANE_VSCR + 1;
 
 /// Number of keys: one additive key and one multiplier per lane.
 pub const KEY_COUNT: usize = LANE_COUNT + 1;
@@ -249,14 +255,18 @@ pub const KEYS: [u128; KEY_COUNT] = [
     0x7207_6cae_dab9_cd77_933d_40d0_47d5_c211,
     0x521d_6aec_56c0_137b_4972_307f_6da2_e896,
     0x6381_fc65_071e_876d_e5eb_a2b5_b975_969a,
+    0xf981_9878_b605_2e93_42ca_b1f6_2747_38af,
 ];
 
 /// The domain tag [`SCHEME_ID`] starts from.
 ///
-/// The derivation sees the lane count and the keys, but not [`lanes`],
-/// [`accumulate_with`] or [`finish`]. A change to one of those needs a
-/// new version suffix when the lane count and the keys stay the same.
-pub const SCHEME_TAG: &[u8] = b"cellgov-ppu-multilinear/v1";
+/// The derivation reads the lane count and the keys. When those stay
+/// the same, a change to one of these items needs a new version suffix:
+///
+/// - [`lanes`], [`accumulate_with`] or [`finish`]
+/// - [`SUPERVISOR_KEYS`] or [`supervisor_lane`]
+/// - the word order of [`crate::supervisor::SupervisorState::words`]
+pub const SCHEME_TAG: &[u8] = b"cellgov-ppu-multilinear/v2";
 
 /// The id of the multilinear hash scheme.
 pub const SCHEME_ID: u64 = scheme_id(SCHEME_TAG, &KEYS);
@@ -276,7 +286,7 @@ pub const fn scheme_id(tag: &[u8], keys: &[u128; KEY_COUNT]) -> u64 {
 }
 
 /// The next output of a SplitMix64 stream, whose state is `state`.
-fn splitmix64(state: &mut u64) -> u64 {
+const fn splitmix64(state: &mut u64) -> u64 {
     *state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
     let mut z = *state;
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
@@ -317,7 +327,43 @@ pub fn lanes(fp: &PpuFingerprint) -> [u64; LANE_COUNT] {
         (out[LANE_VR0 + 2 * k], out[LANE_VR0 + 2 * k + 1]) = vr_lanes(v);
     }
     out[LANE_VSCR] = u64::from(fp.vscr);
+    out[LANE_SUPERVISOR] = fp.supervisor;
     out
+}
+
+/// Number of 64-bit words [`supervisor_lane`] reads from a supervisor
+/// block.
+///
+/// [`crate::supervisor::SupervisorState::words`] gives the order: 11
+/// register words, then two words for each of the 64 SLB entries.
+pub const SUPERVISOR_WORDS: usize = 11 + 2 * 64;
+
+/// The seed of the SplitMix64 stream that [`SUPERVISOR_KEYS`] comes from.
+pub const SUPERVISOR_KEY_SEED: u64 = 1;
+
+/// The keys of the supervisor digest: an additive key, then one
+/// multiplier per word, from the stream at [`SUPERVISOR_KEY_SEED`].
+pub const SUPERVISOR_KEYS: [u128; SUPERVISOR_WORDS + 1] = {
+    let mut state = SUPERVISOR_KEY_SEED;
+    let mut keys = [0u128; SUPERVISOR_WORDS + 1];
+    let mut i = 0;
+    while i < keys.len() {
+        let hi = splitmix64(&mut state);
+        let lo = splitmix64(&mut state);
+        keys[i] = ((hi as u128) << 64) | lo as u128;
+        i += 1;
+    }
+    keys
+};
+
+/// The supervisor lane of a block whose words are `words`: the high
+/// half of their Multilinear-128 accumulator under [`SUPERVISOR_KEYS`].
+pub fn supervisor_lane(words: &[u64; SUPERVISOR_WORDS]) -> u64 {
+    let mut acc = SUPERVISOR_KEYS[0];
+    for (key, &w) in SUPERVISOR_KEYS[1..].iter().zip(words) {
+        acc = acc.wrapping_add(key.wrapping_mul(u128::from(w)));
+    }
+    finish(acc)
 }
 
 /// The high-half and low-half lanes of a vector register.
@@ -377,3 +423,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/multilinear_indexed_key_tests.rs"]
 mod indexed_key_tests;
+
+#[cfg(test)]
+#[path = "tests/supervisor_lane_tests.rs"]
+mod supervisor_lane_tests;

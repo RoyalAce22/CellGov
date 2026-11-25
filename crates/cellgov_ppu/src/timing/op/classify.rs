@@ -242,8 +242,10 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
         | I::Extsh { ra, rs, rc }
         | I::Extsb { ra, rs, rc }
         | I::Extsw { ra, rs, rc } => one(logical(Op::on(unit::FXU).src(gpr(rs)), ra, rc)),
-        // The PPE raises an illegal- or privileged-instruction interrupt for these. The
-        // instruction never retires, so it reads and writes nothing.
+        // In problem state the PPE raises an illegal- or privileged-instruction interrupt
+        // for these, and the instruction reads and writes nothing. A privileged form that a
+        // thread runs in supervisor state takes the same one FXU op, with no register
+        // dependence.
         I::Popcntb { .. } | I::Mcrxr { .. } | I::PpeIllegal { .. } | I::PpePrivileged { .. } => {
             one(Op::on(unit::FXU))
         }

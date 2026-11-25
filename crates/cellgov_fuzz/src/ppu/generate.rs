@@ -286,6 +286,9 @@ pub(super) fn random_state(rng: &mut Rng) -> Result<PpuState, GeneratorError> {
         vscr: random_vscr(rng)?,
         tb,
         reservation,
+        // A generated case runs as a title process, with no supervisor
+        // registers.
+        supervisor: None,
     };
     let mut state = PpuState::new();
     drawn.apply(&mut state);

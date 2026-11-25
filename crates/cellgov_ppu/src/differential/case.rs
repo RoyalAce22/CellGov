@@ -9,8 +9,9 @@ use crate::state::PpuState;
 
 /// Architectural register snapshot used by [`InstructionCase`].
 ///
-/// The [`PpuArchitecturalState`] without the PC and the time base
-/// (the harness runs one instruction). Reservation state is
+/// The [`PpuArchitecturalState`] without the PC, the time base and the
+/// supervisor registers: the harness runs one instruction in problem
+/// state. Reservation state is
 /// included so `lwarx` / `ldarx` / `stwcx` / `stdcx` replay
 /// faithfully.
 /// [Armstrong2019 p:71:24 s:7] A trace comparison between two
@@ -67,7 +68,8 @@ impl PpuStateSnapshot {
         Self::from(&PpuArchitecturalState::capture(state))
     }
 
-    /// Copy this snapshot into `state`, leaving PC and TB untouched.
+    /// Copy this snapshot into `state`, leaving the PC, the TB and the
+    /// supervisor registers untouched.
     ///
     /// The copy writes the FPSCR as every FPSCR write does, which is how
     /// the `mtfsf 0xFF` seed of a console probe writes it:
@@ -90,7 +92,8 @@ impl PpuStateSnapshot {
 }
 
 impl From<&PpuArchitecturalState> for PpuStateSnapshot {
-    /// Every field but the PC and the time base.
+    /// Every field but the PC, the time base and the supervisor
+    /// registers.
     fn from(state: &PpuArchitecturalState) -> Self {
         let PpuArchitecturalState {
             gpr,
@@ -106,6 +109,7 @@ impl From<&PpuArchitecturalState> for PpuStateSnapshot {
             vscr,
             tb: _,
             reservation,
+            supervisor: _,
         } = *state;
         Self {
             gpr,

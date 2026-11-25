@@ -587,6 +587,7 @@ fn runtime_routes_full_states_to_zoom_trace_not_main_trace() {
                 fpr: std::array::from_fn(|k| 0x4000_0000_0000_0000 | k as u64),
                 vr: std::array::from_fn(|k| (k as u128) << 64 | 0x77),
                 vscr: 0x0001_0001,
+                supervisor: 0x5e5e_0000_0000_0001,
             },
         )]],
         step_idx: Cell::new(0),
@@ -622,10 +623,12 @@ fn runtime_routes_full_states_to_zoom_trace_not_main_trace() {
             fpr,
             vr,
             vscr,
+            supervisor,
             ..
         } => {
             assert_eq!(*pc, 0x104);
             assert_eq!((*cr, *fpscr), (0x4000_0000, 0x8200_40f8));
+            assert_eq!(*supervisor, 0x5e5e_0000_0000_0001);
             assert_eq!(
                 (fpr[3], vr[7], *vscr),
                 (0x4000_0000_0000_0003, 7 << 64 | 0x77, 0x0001_0001)

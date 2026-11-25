@@ -432,7 +432,7 @@ The runtime drains a step's barriers through
 When `trace_per_step` is set, the unit emits one `PpuStateHash` per
 retired instruction: 25 bytes, step + pc + 64-bit Multilinear-128
 hash of GPR + LR + CTR + XER + CR + reservation + FPSCR + VRSAVE +
-FPR + VR + VSCR (`cellgov_ppu::multilinear`).
+FPR + VR + VSCR + supervisor digest (`cellgov_ppu::multilinear`).
 
 The fingerprint input set is one field list,
 `cellgov_exec::PpuFingerprint`. The hash, the `PpuStateFull`
@@ -461,7 +461,7 @@ the unit.
 ### Zoom window
 
 `set_full_state_window(Some((lo, hi)))` enables a bounded-window
-second stream of `PpuStateFull` records. Each is 1090 bytes, the
+second stream of `PpuStateFull` records. Each is 1098 bytes, the
 same fingerprint input set uncompressed. They go to a separate
 `zoom_trace` sink so the main per-step stream stays homogeneous.
 The off branch costs one predicted-away test in the hot loop.

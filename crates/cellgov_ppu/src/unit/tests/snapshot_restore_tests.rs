@@ -175,6 +175,13 @@ fn randomized_state(seed: u64) -> PpuArchitecturalState {
         reservation: Some(ReservedLine::containing(
             w.next() & cellgov_ps3_abi::hw::ppu::CELL_EA_LIMIT,
         )),
+        supervisor: Some({
+            let mut s = crate::supervisor::SupervisorState::new(w.next());
+            s.srr0 = w.next();
+            s.sprg[2] = w.next();
+            s.slb[7].esid_v = w.next();
+            s
+        }),
     }
 }
 
@@ -223,6 +230,7 @@ fn assert_differs_in_every_field(a: &PpuSnapshot, b: &PpuSnapshot) {
     assert_ne!(s.vscr, t.vscr, "vscr");
     assert_ne!(s.tb, t.tb, "tb");
     assert_ne!(s.reservation, t.reservation, "reservation");
+    assert_ne!(s.supervisor, t.supervisor, "supervisor");
     assert_ne!(a.status, b.status, "status");
     assert_ne!(a.break_pc, b.break_pc, "break_pc");
     assert_ne!(a.break_skip, b.break_skip, "break_skip");
@@ -265,5 +273,9 @@ fn every_projection_agrees_with_the_snapshot_on_the_fields_it_carries() {
     assert_eq!(
         fingerprint.reservation_line,
         s.reservation.map(|line| line.addr())
+    );
+    assert_eq!(
+        fingerprint.supervisor,
+        s.supervisor.as_ref().map_or(0, |block| block.digest())
     );
 }

@@ -21,6 +21,7 @@ fn zoom_bytes(state: &PpuState) -> Vec<u8> {
         fpr,
         vr,
         vscr,
+        supervisor,
     } = state.fingerprint();
     let mut w = TraceWriter::new();
     w.record(&TraceRecord::PpuStateFull {
@@ -37,6 +38,7 @@ fn zoom_bytes(state: &PpuState) -> Vec<u8> {
         fpr,
         vr,
         vscr,
+        supervisor,
     });
     w.take_bytes()
 }
@@ -161,6 +163,22 @@ fn vscr_divergence_is_hash_visible_and_diff_nameable() {
     let mut b = PpuState::new();
     b.set_sat();
     assert_hash_and_diff_agree(&a, &b, "vscr");
+}
+
+#[test]
+fn supervisor_divergence_is_hash_visible_and_diff_nameable() {
+    use crate::supervisor::SupervisorState;
+    let a = PpuState::new();
+    let mut b = PpuState::new();
+    b.set_supervisor(Some(SupervisorState::new(0)));
+    assert_hash_and_diff_agree(&a, &b, "supervisor");
+    let mut a = PpuState::new();
+    a.set_supervisor(Some(SupervisorState::new(0)));
+    let mut b = PpuState::new();
+    let mut registers = SupervisorState::new(0);
+    registers.slb[63].vsid_flags = 1 << 7;
+    b.set_supervisor(Some(registers));
+    assert_hash_and_diff_agree(&a, &b, "supervisor");
 }
 
 #[test]

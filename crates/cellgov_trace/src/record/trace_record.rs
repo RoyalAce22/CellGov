@@ -23,7 +23,7 @@ use super::reasons::{
 ///
 /// A stream whose first record is not `RunIdentity` is version 1 and
 /// carries no run identity.
-pub const TRACE_FORMAT_VERSION: u32 = 8;
+pub const TRACE_FORMAT_VERSION: u32 = 9;
 
 /// [`TraceRecord::UnsyncedCodeFetch`] `sequence` bit: a `dcbst` on the
 /// line ran after the store.
@@ -128,8 +128,8 @@ pub enum TraceRecord {
     },
     /// Per-step PPU state fingerprint at instruction retire.
     ///
-    /// `hash` covers GPR + LR + CTR + XER + CR + FPSCR + VRSAVE, the
-    /// reservation, FPR, VR and VSCR, under the scheme the stream's
+    /// `hash` covers every [`PpuStateFull`](Self::PpuStateFull) field but
+    /// `step` and `pc`, under the scheme the stream's
     /// [`StateHashScheme`](Self::StateHashScheme) record names. The stream
     /// carries one per retired instruction while per-step tracing is
     /// active.
@@ -145,10 +145,10 @@ pub enum TraceRecord {
     ///
     /// Opt-in `[lo, hi]` window only, never on the hot path. Carries the
     /// full fingerprint input set of [`PpuStateHash`](Self::PpuStateHash)
-    /// uncompressed -- GPR, LR, CTR, XER, CR, FPSCR, VRSAVE, reservation,
-    /// FPR, VR, VSCR -- so a hash divergence always names the disagreeing
-    /// field in the zoom diff. `step` matches `PpuStateHash::step` for
-    /// the same instruction.
+    /// uncompressed, so a hash divergence always names the disagreeing
+    /// field in the zoom diff. The supervisor registers appear only as
+    /// their digest, so a divergence there names no single register.
+    /// `step` matches `PpuStateHash::step` for the same instruction.
     PpuStateFull {
         /// Per-thread retired-instruction counter.
         step: u64,
@@ -176,6 +176,9 @@ pub enum TraceRecord {
         vr: [u128; 32],
         /// Vector status and control register.
         vscr: u32,
+        /// The supervisor registers' digest, or 0 for a thread with no
+        /// supervisor registers.
+        supervisor: u64,
     },
     /// Host-side invariant break observed during `Lv2Host::dispatch`.
     /// One record per `record_invariant_break` call in `cellgov_lv2`.
@@ -415,7 +418,7 @@ impl TraceRecord {
             TAG_UNIT_WOKEN => 1 + 8 + 1,
             TAG_PPU_STATE_HASH => 1 + 8 * 3,
             TAG_PPU_STATE_FULL => {
-                1 + 8 + 8 + 8 * 32 + 8 * 3 + 4 + 1 + 8 + 4 + 4 + 8 * 32 + 16 * 32 + 4
+                1 + 8 + 8 + 8 * 32 + 8 * 3 + 4 + 1 + 8 + 4 + 4 + 8 * 32 + 16 * 32 + 4 + 8
             }
             TAG_HOST_INVARIANT_BREAK => 1 + 1,
             TAG_SYSCALL_ENTERED => 1 + 8 + 8 + 8 * 8 + 1,

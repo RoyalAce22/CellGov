@@ -43,6 +43,7 @@ pub mod shadow;
 pub mod sprx;
 pub mod state;
 pub mod store_buffer;
+pub mod supervisor;
 pub mod tap;
 mod timing;
 mod unit;

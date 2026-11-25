@@ -75,6 +75,7 @@ fn one_of_each() -> Vec<TraceRecord> {
             fpr: [54; 32],
             vr: [55; 32],
             vscr: 56,
+            supervisor: 57,
         },
         TraceRecord::HostInvariantBreak {
             reason: TracedInvariantBreakReason::Unspecified,

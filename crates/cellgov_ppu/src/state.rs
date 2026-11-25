@@ -9,8 +9,10 @@ use cellgov_sync::ReservedLine;
 
 use crate::multilinear::{
     lane_delta, reservation_lanes, vr_lanes, LANE_CR, LANE_CTR, LANE_FPR0, LANE_FPSCR, LANE_LR,
-    LANE_RESERVATION_LINE, LANE_RESERVATION_TAG, LANE_VR0, LANE_VRSAVE, LANE_VSCR, LANE_XER,
+    LANE_RESERVATION_LINE, LANE_RESERVATION_TAG, LANE_SUPERVISOR, LANE_VR0, LANE_VRSAVE, LANE_VSCR,
+    LANE_XER,
 };
+use crate::supervisor::SupervisorState;
 
 /// Build a 4-bit CR field for compare instructions: `LT|GT|EQ|SO`.
 /// Exactly one of `lt`/`gt`/`eq` is set; `so` is the sticky overflow
@@ -158,8 +160,8 @@ pub struct PpuState {
     vscr: u32,
     /// Instrument flag (hash-excluded): set by `mtvrsave`.
     pub vrsave_written: bool,
-    /// Per-step flag (hash-excluded): set by `mftb` and `mftbu`, read
-    /// and cleared once per step.
+    /// Per-step flag (hash-excluded): set by `mftb`, `mftbu` and a move
+    /// to or from the decrementer, read and cleared once per step.
     ///
     /// The step that set it emits one `ClockRead` effect, which the
     /// schedule explorer pairs against every other step.
@@ -201,6 +203,9 @@ pub struct PpuState {
     ///
     /// [PPC-Book2 p:10 s:1.7.3.1] Reservation state: lwarx/ldarx sets, stwcx./stdcx. tests + clears.
     reservation: Option<ReservedLine>,
+    /// The supervisor registers of a thread that runs the kernel; `None`
+    /// for a title process.
+    supervisor: Option<Box<SupervisorState>>,
     /// The Multilinear-128 accumulator of the hashed lanes outside the
     /// register banks, which keep their own. Each setter of a hashed lane adds
     /// that lane's change, so [`Self::state_hash`] reads the bank sums
@@ -222,6 +227,7 @@ pub(crate) struct PpuObservationFields {
     pub vscr: u32,
     pub tb: u64,
     pub reservation: Option<ReservedLine>,
+    pub supervisor: Option<SupervisorState>,
 }
 
 impl PpuState {
@@ -260,6 +266,7 @@ impl PpuState {
             ctrl: _,
             tb,
             reservation,
+            supervisor,
             // Derived from the fields above.
             acc: _,
         } = self;
@@ -277,6 +284,7 @@ impl PpuState {
             vscr: *vscr,
             tb: *tb,
             reservation: *reservation,
+            supervisor: supervisor.as_deref().cloned(),
         }
     }
 
@@ -313,6 +321,7 @@ impl PpuState {
             ctrl: PS3_PROCESS_CTRL,
             tb: 0,
             reservation: None,
+            supervisor: None,
             acc: crate::multilinear::KEYS[0].wrapping_add(lane_delta(
                 LANE_VSCR,
                 0,
@@ -506,6 +515,44 @@ impl PpuState {
         self.reservation = r;
     }
 
+    /// The supervisor registers, or `None` for a title process.
+    #[inline]
+    pub fn supervisor(&self) -> Option<&SupervisorState> {
+        self.supervisor.as_deref()
+    }
+
+    /// Give the thread the supervisor registers `registers`, or remove
+    /// them with `None`.
+    pub fn set_supervisor(&mut self, registers: Option<SupervisorState>) {
+        let old = self.supervisor_lane();
+        self.supervisor = registers.map(Box::new);
+        self.acc = self
+            .acc
+            .wrapping_add(lane_delta(LANE_SUPERVISOR, old, self.supervisor_lane()));
+    }
+
+    /// Run `f` on the supervisor registers and keep the hash current;
+    /// `None` when the thread has none.
+    pub(crate) fn update_supervisor<R>(
+        &mut self,
+        f: impl FnOnce(&mut SupervisorState) -> R,
+    ) -> Option<R> {
+        let old = self.supervisor_lane();
+        let out = f(self.supervisor.as_deref_mut()?);
+        self.acc = self
+            .acc
+            .wrapping_add(lane_delta(LANE_SUPERVISOR, old, self.supervisor_lane()));
+        Some(out)
+    }
+
+    /// The supervisor registers' state-hash lane: their digest, or 0 for
+    /// a title process.
+    fn supervisor_lane(&self) -> u64 {
+        self.supervisor
+            .as_deref()
+            .map_or(0, SupervisorState::digest)
+    }
+
     /// Read CR field `field` (0..=7) as a 4-bit LT/GT/EQ/SO nibble.
     ///
     /// [PPC-Book1 p:29 s:2.3.1] CR0 bits: 0=LT, 1=GT, 2=EQ, 3=SO.
@@ -685,6 +732,9 @@ impl PpuState {
                 .wrapping_add(KEYS[LANE_VR0 + 2 * k + 2].wrapping_mul(u128::from(lo)));
         }
         acc.wrapping_add(KEYS[LANE_VSCR + 1].wrapping_mul(u128::from(self.vscr)))
+            .wrapping_add(
+                KEYS[LANE_SUPERVISOR + 1].wrapping_mul(u128::from(self.supervisor_lane())),
+            )
     }
 }
 
@@ -722,6 +772,7 @@ impl Clone for PpuState {
             ctrl: self.ctrl,
             tb: self.tb,
             reservation: self.reservation,
+            supervisor: self.supervisor.clone(),
             acc: self.acc,
         }
     }

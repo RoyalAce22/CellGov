@@ -177,6 +177,7 @@ impl PpuReferenceInputState {
             vscr: self.vscr.unwrap_or(base.vscr),
             tb: self.tb,
             reservation: self.reservation.map(cellgov_sync::ReservedLine::containing),
+            supervisor: None,
         };
         let mut state = PpuState::new();
         input.apply(&mut state);

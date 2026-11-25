@@ -476,6 +476,9 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             None => ExecuteVerdict::Fault(PpuFault::illegal("ppe-illegal word")),
         },
         PpuInstruction::PpePrivileged { raw } => {
+            if let Some(verdict) = crate::supervisor::execute(raw, state) {
+                return verdict;
+            }
             match crate::instruction::ppe_privileged_mnemonic(raw) {
                 Some(mnemonic) => ExecuteVerdict::Fault(PpuFault::privileged(mnemonic)),
                 None => ExecuteVerdict::Fault(PpuFault::privileged("ppe-privileged word")),
@@ -680,14 +683,17 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             ExecuteVerdict::Continue
         }
         // CTRL names the reading hardware thread; the unit sets it from the
-        // PPE placement for each batch. SPRG3 reads as the reference console
-        // reads it from a process's main thread.
+        // PPE placement for each batch.
         PpuInstruction::Mfctrl { rt } => {
             state.set_gpr(rt as usize, u64::from(state.ctrl));
             ExecuteVerdict::Continue
         }
+        // A title process reads SPRG3 as the reference console reads it
+        // from a process's main thread.
+        // [PPC-Book3 p:16 s:3.3.3] Problem-state software may copy SPRG3 to a GPR, so a thread with supervisor registers reads the SPRG3 the kernel wrote.
         PpuInstruction::Mfsprg3 { rt } => {
-            state.set_gpr(rt as usize, PS3_PROCESS_SPRG3);
+            let sprg3 = state.supervisor().map_or(PS3_PROCESS_SPRG3, |s| s.sprg[3]);
+            state.set_gpr(rt as usize, sprg3);
             ExecuteVerdict::Continue
         }
         // [AltiVec-PEM p:2-6 s:2.3.3 VRSAVE Register] mtvrsave:

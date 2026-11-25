@@ -204,6 +204,9 @@ fn compare_state(
         vscr,
         tb,
         reservation,
+        // A reference case runs as a title process, and no capture holds
+        // supervisor registers.
+        supervisor: _,
     } = observed;
     use PpuReferenceComponent as C;
     compare_value(C::StateGpr, &expected.gpr, &gpr.to_vec(), comparison);

@@ -506,7 +506,8 @@ impl PpuExecutionUnit {
             self.state.set_reservation(None);
         }
 
-        // `mftb` and `mftbu` set the flag, and each step starts clear.
+        // `mftb`, `mftbu` and a decrementer move set the flag, and each
+        // step starts clear.
         self.state.clock_read = false;
 
         if let Some(code) = ctx.syscall_return() {
@@ -557,7 +558,8 @@ impl PpuExecutionUnit {
         Ok(insn)
     }
 
-    /// Gives an `mftb` / `mftbu` the time base at its issue cycle.
+    /// Gives an `mftb` / `mftbu`, or a move to or from the decrementer,
+    /// the time base at its issue cycle.
     ///
     /// The run has one time base: a read returns no less than any read
     /// before it, on this unit or another.
@@ -570,11 +572,15 @@ impl PpuExecutionUnit {
         insn: &instruction::PpuInstruction,
         ops: &[crate::timing::Op],
     ) {
-        let (
-            instruction::PpuInstruction::Mftb { .. } | instruction::PpuInstruction::Mftbu { .. },
-            [op],
-        ) = (insn, ops)
-        else {
+        let reads_time_base = match insn {
+            instruction::PpuInstruction::Mftb { .. }
+            | instruction::PpuInstruction::Mftbu { .. } => true,
+            instruction::PpuInstruction::PpePrivileged { raw } => {
+                crate::supervisor::moves_decrementer(*raw, &self.state)
+            }
+            _ => false,
+        };
+        let (true, [op]) = (reads_time_base, ops) else {
             return;
         };
         let issue = self.timing.issue_cycle(step_pc, op);

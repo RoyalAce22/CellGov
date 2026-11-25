@@ -203,6 +203,9 @@ pub struct PpuFingerprint {
     pub vr: [u128; 32],
     /// Vector status and control register.
     pub vscr: u32,
+    /// The supervisor registers' digest, or 0 for a thread with no
+    /// supervisor registers.
+    pub supervisor: u64,
 }
 
 /// Canonical SPU fingerprint input set.

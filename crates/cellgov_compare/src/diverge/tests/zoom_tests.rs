@@ -36,6 +36,7 @@ fn full(step: u64, pc: u64, gpr: [u64; 32]) -> TraceRecord {
         fpr: [0u64; 32],
         vr: [0u128; 32],
         vscr: 0,
+        supervisor: 0,
     }
 }
 
@@ -54,6 +55,7 @@ fn full_resv(step: u64, reservation_line: Option<u64>) -> TraceRecord {
         fpr: [0u64; 32],
         vr: [0u128; 32],
         vscr: 0,
+        supervisor: 0,
     }
 }
 
@@ -159,6 +161,7 @@ fn zoom_lookup_diffs_include_every_non_gpr_field_in_order() {
         fpr: a_fpr,
         vr: a_vr,
         vscr: 0x0001_0000,
+        supervisor: 0,
     }]);
     let b = encode(&[TraceRecord::PpuStateFull {
         step: 0,
@@ -174,13 +177,25 @@ fn zoom_lookup_diffs_include_every_non_gpr_field_in_order() {
         fpr: [0u64; 32],
         vr: [0u128; 32],
         vscr: 0x0001_0001,
+        supervisor: 0x5e5e,
     }]);
     match zoom_lookup(&a, &b, 0) {
         ZoomLookup::Found { diffs, .. } => {
             let names: Vec<&str> = diffs.iter().map(|d| d.field).collect();
             assert_eq!(
                 names,
-                vec!["lr", "ctr", "xer", "cr", "fpscr", "vrsave", "fpr2", "vr9", "vscr"]
+                vec![
+                    "lr",
+                    "ctr",
+                    "xer",
+                    "cr",
+                    "fpscr",
+                    "vrsave",
+                    "fpr2",
+                    "vr9",
+                    "vscr",
+                    "supervisor"
+                ]
             );
             assert_eq!((diffs[4].a, diffs[4].b), (5, 500));
             assert_eq!((diffs[5].a, diffs[5].b), (6, 600));

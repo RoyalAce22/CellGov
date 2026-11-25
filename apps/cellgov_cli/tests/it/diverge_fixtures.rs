@@ -199,6 +199,7 @@ pub(crate) fn ppu_zoom_bytes(mem: &GuestMemory, n: usize, window: (u64, u64)) ->
             fpr,
             vr,
             vscr,
+            supervisor,
         } = fingerprint;
         writer.record(&TraceRecord::PpuStateFull {
             step,
@@ -214,6 +215,7 @@ pub(crate) fn ppu_zoom_bytes(mem: &GuestMemory, n: usize, window: (u64, u64)) ->
             fpr,
             vr,
             vscr,
+            supervisor,
         });
     }
     writer.take_bytes()

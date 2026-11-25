@@ -11,6 +11,7 @@ pub mod ppu_interrupt;
 pub mod ppu_issue;
 pub mod ppu_spr;
 pub mod ppu_status;
+pub mod ppu_supervisor;
 pub mod rsx;
 pub mod spu;
 pub mod spu_fpscr;
