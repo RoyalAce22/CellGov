@@ -54,10 +54,9 @@
 //! 4. It returns 0 for a port with no connection at +128
 //!    [OFW-4.93 lv1 a:0x2DF880].
 //! 5. For a connected port, it takes the lock that +0 of the plug table
-//!    leads to. It gives
-//!    the raise function [OFW-4.93 lv1 a:0x2C65B8] the thread's lv1
-//!    context at +8 of the table and the plug at +144 of the port
-//!    [OFW-4.93 lv1 a:0x2DF884-0x2DF8C8]. It then returns 0
+//!    points to. It gives the raise function [OFW-4.93 lv1 a:0x2C65B8]
+//!    the thread's lv1 context at +8 of the table and the plug at +144 of
+//!    the port [OFW-4.93 lv1 a:0x2DF884-0x2DF8C8]. It then returns 0
 //!    [OFW-4.93 lv1 a:0x2DF8F0].
 //!
 //! The send function returns 0 for a status of 0

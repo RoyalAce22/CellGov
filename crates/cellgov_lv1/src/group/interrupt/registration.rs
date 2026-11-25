@@ -46,7 +46,7 @@ pub(crate) const GROUP: Group = Group {
         HashedSurface {
             name: "the irq outlet of the virtual UART and its plug connection",
             source: Some(IRQ_OUTLET_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(29),
         },
         HashedSurface {
             name: "the paused PPE hardware threads and their decrementer wake flags",
@@ -56,17 +56,17 @@ pub(crate) const GROUP: Group = Group {
         HashedSurface {
             name: "the event receive ports with a pending event",
             source: Some(PENDING_EVENT_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(29),
         },
         HashedSurface {
             name: "the status shadows of the logical PPE threads",
             source: Some(IRQ_STATUS_SHADOW_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(29),
         },
         HashedSurface {
             name: "the paused PPE hardware threads that lv1 woke",
             source: Some(WOKEN_THREAD_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(29),
         },
     ],
 };
@@ -99,8 +99,12 @@ pub(crate) const IRQ_STATUS_SHADOW_SOURCE: u8 = 147;
 /// thread in thread order.
 pub(crate) const WOKEN_THREAD_SOURCE: u8 = 148;
 
-/// The interrupt group's state: the interrupt state bitmaps, the event
-/// receive ports, the irq outlets and the paused threads.
+/// The interrupt group's state.
+///
+/// The state holds:
+/// - the interrupt state bitmaps and the status shadows;
+/// - the event receive ports, the irq outlets and the pending events;
+/// - the paused threads and their wakes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InterruptGroupState {
     bitmaps: IrqStateBitmapState,
@@ -110,7 +114,7 @@ pub struct InterruptGroupState {
 
 impl InterruptGroupState {
     /// The interrupt state bitmap that each logical PPE thread
-    /// registered.
+    /// registered, and the status shadow of each thread.
     pub fn bitmaps(&self) -> &IrqStateBitmapState {
         &self.bitmaps
     }
@@ -120,7 +124,8 @@ impl InterruptGroupState {
         &self.ports
     }
 
-    /// The PPE hardware threads that lv1 paused.
+    /// The PPE hardware threads that lv1 paused, and the paused threads
+    /// that lv1 woke.
     pub fn paused(&self) -> &PausedThreadState {
         &self.paused
     }

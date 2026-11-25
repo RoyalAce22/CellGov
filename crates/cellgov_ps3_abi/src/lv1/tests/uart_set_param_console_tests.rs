@@ -20,8 +20,8 @@ const SLOT_PORT: u64 = 72;
 const SLOT_RECORD: u64 = 80;
 const SLOT_BYTES: u64 = 16;
 
-/// The offset of the doubleword whose high word is the count
-/// [OFW-4.93 lv2_kernel a:0x800000000001796c].
+/// The offset of the doubleword whose high word is the count of
+/// registered ports [OFW-4.93 lv2_kernel a:0x800000000001796c].
 const COUNT: u64 = 136;
 
 /// The port record's offsets of the port number and the mask
@@ -63,7 +63,7 @@ fn capture() -> Vec<(String, u64, u64)> {
         .collect()
 }
 
-/// The value of `field` at `address` in `rows`.
+/// The value of `field` in `rows`. The row's address must be `address`.
 fn word(rows: &[(String, u64, u64)], field: &str, address: u64) -> u64 {
     let (_, at, value) = rows
         .iter()
@@ -87,8 +87,7 @@ fn the_mask_capture_reads_the_stock_toc_slot_and_three_registered_ports() {
     assert_eq!(word(&rows, "count", RECORD + COUNT) >> 32, ports_4_93);
 }
 
-/// The capture reads the mask 2 for each port: a mask that lv1 accepts,
-/// and one that lets lv1 raise the port's interrupt. The kernel's read
+/// A nonzero mask lets lv1 raise the port's interrupt. The kernel's read
 /// function adds 2 to the mask when lv1 reads 0 bytes
 /// [OFW-4.93 lv2_kernel a:0x8000000000016b9c-0x8000000000016be0].
 #[test]

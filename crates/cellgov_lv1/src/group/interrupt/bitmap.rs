@@ -82,7 +82,7 @@ impl LaneValue for IrqStateBitmapRegistration {
     }
 }
 
-/// The doublewords of a thread's status shadow.
+/// The number of doublewords in a thread's status shadow.
 pub const SHADOW_DOUBLEWORDS: usize = (IRQ_STATUS_BYTES / 8) as usize;
 
 // The status doubleword of every u8 plug indexes a shadow doubleword.
@@ -101,9 +101,8 @@ pub struct StatusShadowWrite {
 
 /// One thread's status shadow.
 ///
-/// These fields:
-/// - fields 1 and 2: the logical PPE id and the thread;
-/// - fields 3 to 6: the shadow doublewords, in order.
+/// Fields 1 and 2 are the logical PPE id and the thread. Fields 3 to 6
+/// are the shadow doublewords, in order.
 struct StatusShadow {
     key: IrqStateBitmapKey,
     doublewords: [u64; SHADOW_DOUBLEWORDS],
@@ -176,10 +175,12 @@ impl IrqStateBitmapState {
 
     /// The sync-state terms of the bitmaps and the shadows.
     ///
-    /// Each bitmap is one object of the lane source
-    /// `IRQ_STATE_BITMAP_SOURCE`, and each shadow with a set bit is one
-    /// object of the lane source `IRQ_STATUS_SHADOW_SOURCE`. Each object's
-    /// key is its index in key order. A state with no bitmap and no set
+    /// The objects are of these lane sources:
+    /// - each bitmap is one object of `IRQ_STATE_BITMAP_SOURCE`;
+    /// - each shadow with a set bit is one object of
+    ///   `IRQ_STATUS_SHADOW_SOURCE`.
+    ///
+    /// Each object's key is its index in key order. A state with no bitmap and no set
     /// shadow bit adds no term.
     pub fn sync_term(&self) -> u128 {
         let bitmaps =

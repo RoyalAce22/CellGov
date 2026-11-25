@@ -5,23 +5,23 @@
 //! the buffer. lv1's services write those bytes; see
 //! [`cellgov_ps3_abi::lv1::uart`]. CellGov answers these calls:
 //! - a call that fails a check;
-//! - a read of a service port, whose receive buffer holds no byte while
-//!   CellGov answers no `write_virtual_uart`.
+//! - a read of a service port, whose receive buffer holds no byte while no
+//!   request that the partition sent to the port is complete.
 //!
 //! The answer reads only the memory regions that the hypervisor holds, and
 //! carries no change.
 
 use cellgov_ps3_abi::lv1::call::READ_VIRTUAL_UART;
-use cellgov_ps3_abi::lv1::interrupt::region_lookup_base;
 use cellgov_ps3_abi::lv1::uart::{
     game_os_service_port, game_os_virtual_uart_port, virtual_uart_read_handler,
     READ_VIRTUAL_UART_NO_PORT_R3, READ_VIRTUAL_UART_NO_REGION_R3, READ_VIRTUAL_UART_REGION_R3,
     VIRTUAL_UART_PORT_MAX, VIRTUAL_UART_READ_ADDRESS_MAX,
 };
 
+use super::buffer::{self, BufferCheck};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
-use crate::group::memory::region::{self as memory, MemoryRegion};
+use crate::group::memory::region::MemoryRegion;
 use crate::request::HypercallRequest;
 
 /// The hypercalls this module answers.
@@ -66,12 +66,7 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 ///
 /// lv1 checks that it holds the port before it looks up the region.
 /// CellGov knows only the ports in the capture, so it makes the region
-/// checks only for those ports. It makes them for these regions:
-/// - the real mode region, whose base is 0. lv1 checks its class and its
-///   page array as it does for `configure_virtual_uart_irq`, whose kernel
-///   call passes them on the console.
-/// - each region that `allocate_memory` created. Each passes the class
-///   check and the page array check; see [`allocated_region_size`].
+/// checks only for those ports; see [`buffer::check`].
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
@@ -84,10 +79,11 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 ///
 /// A call that passes the checks for a service port gets r3 = 0 and
 /// r4 = 0:
-/// - The port's service writes nothing to the port before the partition's
-///   first request; see [`cellgov_ps3_abi::lv1::uart`].
-/// - The partition sends a request with `write_virtual_uart`, which CellGov
-///   does not answer. So the port's receive buffer is empty.
+/// - The port's service writes nothing to the port before the partition
+///   sends a complete request; see [`cellgov_ps3_abi::lv1::uart`].
+/// - CellGov answers a `write_virtual_uart` only when the partition's bytes
+///   on the port hold no complete request. So the port's receive buffer is
+///   empty.
 /// - lv1's read function reads 0 bytes from an empty buffer with a live
 ///   peer [OFW-4.93 lv1 a:0x2F09F8-0x2F0A64]. The handler stores the sum,
 ///   0, in r4 [OFW-4.93 lv1 a:0x2F452C-0x2F4538].
@@ -115,32 +111,22 @@ pub(crate) fn read(
             "a virtual UART port that no source shows lv1 holds or lacks",
         );
     }
-    let base = region_lookup_base(address);
-    let region_size = if base == 0 {
-        let Some(rm_size) = memory::real_mode_size(firmware) else {
+    match buffer::check(firmware, regions, address, size) {
+        BufferCheck::Held(_) => {}
+        BufferCheck::NoRegion => return lv1_answer(READ_VIRTUAL_UART_NO_REGION_R3),
+        BufferCheck::TooFewBytes => return lv1_answer(READ_VIRTUAL_UART_REGION_R3),
+        BufferCheck::RealModeSizeUnknown => {
             return refuse(
                 request,
                 "a virtual UART read buffer at a firmware whose real mode size no source gives",
             );
-        };
-        rm_size
-    } else {
-        let Some(region_size) = allocated_region_size(regions, base) else {
+        }
+        BufferCheck::RegionNotHeld => {
             return refuse(
                 request,
                 "a virtual UART read buffer in a memory region that CellGov does not hold",
             );
-        };
-        region_size
-    };
-    // lv1's lookup finds no region when the base plus the size is not
-    // above r4 [OFW-4.93 lv1 a:0x2CE798-0x2CE7A8].
-    let offset = address - base;
-    if offset >= region_size {
-        return lv1_answer(READ_VIRTUAL_UART_NO_REGION_R3);
-    }
-    if region_size - offset < size {
-        return lv1_answer(READ_VIRTUAL_UART_REGION_R3);
+        }
     }
     if game_os_service_port(firmware, port).is_some() {
         return lv1_answer(0);
@@ -149,26 +135,6 @@ pub(crate) fn read(
         request,
         "a virtual UART read of a port whose receive buffer an lv1 service fills",
     )
-}
-
-/// The size of the region that `allocate_memory` created at the base
-/// `base`, or `None` when the hypervisor holds no such region.
-///
-/// Such a region passes the class check and the page array check of
-/// `read_virtual_uart`:
-/// - The constructor that the worker calls [OFW-4.93 lv1 a:0x2DF244]
-///   stores the word of the TOC slot at r2 - 8096 at +72
-///   [OFW-4.93 lv1 a:0x2DEA48] [OFW-4.93 lv1 a:0x2DEAAC]
-///   [OFW-4.93 lv1 a:0x2CF474] [OFW-4.93 lv1 a:0x2CF4C4]. That word
-///   [OFW-4.93 lv1 a:0x358098] is the word of the slot at r2 - 5872 that
-///   the handler checks [OFW-4.93 lv1 a:0x358948].
-/// - The constructor stores the region's page object at +176
-///   [OFW-4.93 lv1 a:0x2DEAE0-0x2DEAE8].
-fn allocated_region_size(regions: &[MemoryRegion], base: u64) -> Option<u64> {
-    regions
-        .iter()
-        .find(|region| region.lpar_address == base)
-        .map(|region| region.size)
 }
 
 #[cfg(test)]

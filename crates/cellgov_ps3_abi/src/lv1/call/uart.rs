@@ -18,7 +18,9 @@ pub const READ_VIRTUAL_UART: u64 = 162;
 /// - r5 is the number of bytes to send.
 /// - r4 returns the number of bytes that lv1 wrote.
 ///
-/// Linux `drivers/ps3/ps3-vuart.c` makes the call in this form.
+/// Linux `drivers/ps3/ps3-vuart.c` makes the call in this form. The lv1
+/// handler [OFW-4.93 lv1 a:0x2F2AF4] reads the inputs in this form; see
+/// [`crate::lv1::uart`].
 pub const WRITE_VIRTUAL_UART: u64 = 163;
 
 /// `set_virtual_uart_param`: three inputs and no output.

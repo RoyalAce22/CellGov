@@ -188,10 +188,9 @@ pub(crate) fn connect_plug(
     HypercallDisposition::Answered(answer)
 }
 
-/// lv1's success answer on the clear path: the cleared status doubleword
-/// write for a thread with a registered bitmap, and the shadow change when
-/// the plug's bit was set. `None` when no storage holds the status
-/// doubleword.
+/// lv1's success answer on the clear path, as [`connect_plug`] gives it.
+///
+/// Returns `None` when no storage holds the status doubleword.
 fn clear_path_answer(
     request: &HypercallRequest,
     bitmaps: &IrqStateBitmapState,

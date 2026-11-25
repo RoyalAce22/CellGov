@@ -104,9 +104,9 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
 /// - no source gives the port r3 at `firmware`;
-/// - the call leaves a mask other than 0, and lv1 raises the port's
-///   interrupt, or CellGov does not hold the port's traffic. The refusal
-///   names the mask bit; see [`status::mask_refusal`].
+/// - the call leaves a mask other than 0 with which lv1 can raise the
+///   port's interrupt. The refusal names the mask bit; see
+///   [`status::mask_refusal`].
 pub(crate) fn set_param(
     request: &HypercallRequest,
     firmware: Option<&str>,

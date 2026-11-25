@@ -62,7 +62,8 @@ fn each_service_buffer_is_both_buffer_sizes_of_the_captured_port() {
     }
 }
 
-/// No image read shows the service that holds the peer of port 0.
+/// No read of the firmware images shows the service that holds the peer
+/// of port 0.
 #[test]
 fn no_service_port_row_exists_for_port_0_or_a_firmware_whose_lv1_is_not_read() {
     for (firmware, port) in [("4.93", 0), ("4.93", 1), ("4.92", 2), ("3.70", 10), ("", 2)] {

@@ -21,8 +21,8 @@ const SLOT_PORT: u64 = 72;
 const SLOT_RECORD: u64 = 80;
 const SLOT_BYTES: u64 = 16;
 
-/// The offset of the doubleword whose high word is the count
-/// [OFW-4.93 lv2_kernel a:0x800000000001796c].
+/// The offset of the doubleword whose high word is the count of
+/// registered ports [OFW-4.93 lv2_kernel a:0x800000000001796c].
 const COUNT: u64 = 136;
 
 /// The port record's offsets of the port number, the transmit buffer
@@ -34,7 +34,7 @@ const PORT: u64 = 0;
 const TX: u64 = 384;
 const RX: u64 = 392;
 
-/// The init value of an empty slot's port number
+/// The initial value of an empty slot's port number
 /// [OFW-4.93 lv2_kernel a:0x8000000000017c5c-0x8000000000017c6c].
 const NO_PORT: u64 = 256;
 
@@ -71,7 +71,7 @@ fn capture() -> Vec<(String, u64, u64)> {
         .collect()
 }
 
-/// The value of `field` at `address` in `rows`.
+/// The value of `field` in `rows`. The row's address must be `address`.
 fn word(rows: &[(String, u64, u64)], field: &str, address: u64) -> u64 {
     let (_, at, value) = rows
         .iter()

@@ -1,6 +1,6 @@
 //! The interrupt status that lv1 computes for a port after each call of
-//! `set_virtual_uart_param`, and the mask bit that raises the port's
-//! interrupt.
+//! `set_virtual_uart_param` and each `write_virtual_uart` that writes a
+//! byte, and the mask bit that raises the port's interrupt.
 //!
 //! lv1 raises the port's interrupt when the status and the mask share a
 //! bit; see [`cellgov_ps3_abi::lv1::uart`]. CellGov delivers no such
@@ -17,15 +17,15 @@ use cellgov_ps3_abi::lv1::uart::{
 
 use super::VirtualUartPortParams;
 
-/// The input that CellGov does not model when the port's values `params`
-/// make lv1 raise the port's interrupt, or can make it raise it.
+/// The refusal for the port's values `params` when lv1 can raise the port's interrupt.
 ///
 /// The value is `None` in these cases:
 /// - the mask is 0;
 /// - the port is a service port, and its status and mask share no bit.
 ///
-/// The value names the lowest mask bit that raises the interrupt, or the
-/// lowest mask bit when CellGov does not hold the port's traffic.
+/// The refusal names one mask bit:
+/// - for a service port, the lowest mask bit that raises the interrupt;
+/// - for a port whose traffic CellGov does not hold, the lowest mask bit.
 pub(super) fn mask_refusal(firmware: &str, params: &VirtualUartPortParams) -> Option<&'static str> {
     let mask = params.interrupt_mask;
     if mask == 0 {
@@ -51,9 +51,15 @@ pub(super) fn mask_refusal(firmware: &str, params: &VirtualUartPortParams) -> Op
 ///   transmit buffer size other than 0; see
 ///   [`cellgov_ps3_abi::lv1::uart::VIRTUAL_UART_PARAM_TX_BUFFER_SIZE`].
 /// - lv1's write function puts the bytes that the port sends in the
-///   peer's receive buffer [OFW-4.93 lv1 a:0x2F04E4-0x2F0530]. The
-///   partition sends with `write_virtual_uart`, which CellGov does not
-///   answer. So the peer's receive buffer holds no byte.
+///   peer's receive buffer [OFW-4.93 lv1 a:0x2F04E4-0x2F0530]. CellGov
+///   answers `write_virtual_uart` only for bytes of a request that is not
+///   complete. The service reads them at a time that no image read gives.
+///   So the peer's receive buffer holds 0 bytes, or at most the bytes of
+///   that request.
+///
+/// The traffic gives the peer 0 bytes. lv1 sets the transmit bit for 0
+/// bytes, so a mask with the transmit bit gets a refusal: lv1 can raise the
+/// interrupt. A peer with more bytes changes only the transmit bit.
 fn service_port_traffic(firmware: &str, port: u64) -> Option<VirtualUartTraffic> {
     game_os_service_port(firmware, port)?;
     let row = game_os_virtual_uart_port(firmware, port)?;
@@ -64,7 +70,7 @@ fn service_port_traffic(firmware: &str, port: u64) -> Option<VirtualUartTraffic>
     })
 }
 
-/// The lowest set bit of `bits`, which is not 0.
+/// The lowest set bit of `bits`, or 0 when `bits` is 0.
 const fn lowest_bit(bits: u64) -> u64 {
     bits & bits.wrapping_neg()
 }

@@ -9,9 +9,13 @@
 //!   and the interrupt status that lv1 computes after each call;
 //! - the handler of `read_virtual_uart` (hypercall 162), its checks, and
 //!   the writers of a port's receive buffer;
+//! - the handler of `write_virtual_uart` (hypercall 163), its checks, and
+//!   the bytes that it writes to the peer's receive buffer;
 //! - the ports of lv1's system manager and dispatcher manager, and the
 //!   bytes that their receive buffers hold at the GameOS kernel's first
-//!   read.
+//!   read;
+//! - the request header that the dispatcher manager reads, and the
+//!   GameOS kernel's first request.
 //!
 //! The facts come from the 4.93 `lv1.self`, decrypted offline and read
 //! with `cellgov dev disasm`. The repository holds no byte of lv1, only
@@ -141,8 +145,7 @@
 //! size. lv1 makes the endpoints when it makes the partition, so no image
 //! read gives their sizes; see [`GAME_OS_VIRTUAL_UART_PORTS`].
 //!
-//! The two sizes can change while the partition runs, through lv1's own
-//! code and not through a hypercall of this group:
+//! lv1's own code can change the two sizes while the partition runs:
 //! - The endpoint holds its peer in a weak reference at +56, whose target
 //!   is at +72 [OFW-4.93 lv1 a:0x2EF734-0x2EF744]. A function links two
 //!   endpoints as peers [OFW-4.93 lv1 a:0x2EFE6C-0x2EFEC0], and another
@@ -212,7 +215,7 @@
 //!   holds a listener, it removes the new listener from the list again
 //!   [OFW-4.93 lv1 a:0x2F0FBC-0x2F1058].
 //! - The other builders of the same form add their listener to an object
-//!   that they make, and not to an endpoint
+//!   that they make. That object is no endpoint
 //!   [OFW-4.93 lv1 a:0x209E5C-0x209ED4] [OFW-4.93 lv1 a:0x22E0B4-0x22E12C]
 //!   [OFW-4.93 lv1 a:0x2F55D8-0x2F5668].
 //!
@@ -239,7 +242,7 @@
 //!   [OFW-4.93 lv1 a:0x2F221C-0x2F2278]. It gives the outlet to the event
 //!   function when the count becomes 1
 //!   [OFW-4.93 lv1 a:0x2F227C-0x2F2280] [OFW-4.93 lv1 a:0x2F2394-0x2F239C].
-//! - Otherwise it clears the port's shadow bit, only when the bit is set
+//! - Otherwise, when the port's shadow bit is set, it clears the bit
 //!   [OFW-4.93 lv1 a:0x2F22DC-0x2F2334].
 //!
 //! So a call that leaves the mask at 0 sets no shadow bit, and changes no
@@ -314,8 +317,66 @@
 //! buffer lv1 translates through the function [OFW-4.93 lv1 a:0x29D074]
 //! [OFW-4.93 lv1 a:0x2A9DB8] [OFW-4.93 lv1 a:0x2A9E20]. For most ports, no
 //! image read shows when lv1's services make these writes, or which bytes
-//! they write. The two service ports are the exception; see the next
-//! section.
+//! they write. The two service ports are the exception; see the section
+//! on the service ports.
+//!
+//! # Writing a port
+//!
+//! The handler of hypercall 163 [OFW-4.93 lv1 a:0x2F2AF4] keeps r3, r4
+//! and r5 [OFW-4.93 lv1 a:0x2F2B08] [OFW-4.93 lv1 a:0x2F2B2C-0x2F2B30].
+//! It does these steps in this order:
+//! 1. It refuses r3 above [`VIRTUAL_UART_PORT_MAX`]
+//!    [OFW-4.93 lv1 a:0x2F2B90-0x2F2B94].
+//! 2. It refuses r4 above [`VIRTUAL_UART_WRITE_ADDRESS_MAX`].
+//! 3. It reads the port's endpoint from the slot of r3 in the table at
+//!    +152 of the virtual UART object. It refuses a slot with no endpoint
+//!    [OFW-4.93 lv1 a:0x2F2BA8-0x2F2C68].
+//! 4. It looks up the memory region of r4 with the function
+//!    [OFW-4.93 lv1 a:0x2CE74C] [OFW-4.93 lv1 a:0x2F2C6C-0x2F2C98]. It
+//!    makes the checks of `read_virtual_uart` on the region: the class
+//!    [OFW-4.93 lv1 a:0x2F2C9C-0x2F2CAC], the r5 bytes from r4 to the end
+//!    [OFW-4.93 lv1 a:0x2F2CB0-0x2F2CC0], and the page array at +176
+//!    [OFW-4.93 lv1 a:0x2F2CC4-0x2F2CCC].
+//! 5. It refuses an endpoint with no peer that has a reference
+//!    [OFW-4.93 lv1 a:0x2F2CF8-0x2F2D3C] [OFW-4.93 lv1 a:0x2F2F24-0x2F2F28].
+//! 6. For each page of the buffer, it gives the endpoint, the page's real
+//!    address and the bytes left in the page to the write function
+//!    [OFW-4.93 lv1 a:0x2F2D40-0x2F2D90]. It stops after a write of 0
+//!    bytes, or when no byte is left [OFW-4.93 lv1 a:0x2F2D9C-0x2F2DF0].
+//! 7. It stores the sum of the bytes in the return slot of r4, and returns
+//!    0 [OFW-4.93 lv1 a:0x2F2DF4-0x2F2E00] [OFW-4.93 lv1 a:0x2F2E68].
+//!
+//! The return slot is the slot that `read_virtual_uart` writes
+//! [OFW-4.93 lv1 a:0x2F452C-0x2F4538]. A refusal skips the store, and the
+//! vector's entry zeroes the return slots [OFW-4.93 lv1 a:0x0C08]. So r4
+//! returns 0 for a call that fails, and r5 to r10 return 0. A call with
+//! r5 = 0 gives no byte to the write function, and returns r3 = 0 and
+//! r4 = 0. See [`WRITE_VIRTUAL_UART_NO_PORT_R3`] for the r3 of each check.
+//!
+//! The write function [OFW-4.93 lv1 a:0x2F0494] writes to the receive
+//! buffer of the endpoint's peer:
+//! - When the endpoint has a peer with a reference, it gives the peer to
+//!   the function [OFW-4.93 lv1 a:0x2F00F4]
+//!   [OFW-4.93 lv1 a:0x2F04E4-0x2F0530].
+//! - That function copies the lesser of the bytes asked for and the free
+//!   bytes of the peer's buffer: the size at +112 less the count at +120
+//!   [OFW-4.93 lv1 a:0x2F0290-0x2F02BC]. It copies to the write pointer at
+//!   +88, which wraps in the buffer at +104
+//!   [OFW-4.93 lv1 a:0x2F02C0-0x2F0318].
+//! - After it copies one or more bytes, it stores the new write pointer
+//!   and count [OFW-4.93 lv1 a:0x2F0324-0x2F0334]. It then calls the
+//!   listeners of the peer [OFW-4.93 lv1 a:0x2F0358-0x2F03AC]. The write
+//!   function then calls the listeners of the endpoint
+//!   [OFW-4.93 lv1 a:0x2F0548-0x2F059C], which compute the interrupt
+//!   status that the section on the interrupt status gives.
+//! - When the endpoint has no such peer, or that function fails
+//!   [OFW-4.93 lv1 a:0x2F0534-0x2F0538], it returns 7 when the byte at
+//!   +128 of the endpoint is not 0, and 0x9FE5F901 when that byte is 0
+//!   [OFW-4.93 lv1 a:0x2F062C-0x2F0644].
+//!
+//! So a call that passes the checks writes all r5 bytes when the peer's
+//! receive buffer has r5 free bytes. The service that holds the peer
+//! reads them; see the next section.
 //!
 //! # The service ports
 //!
@@ -362,8 +423,8 @@
 //!
 //! Each call of the send function sends one of these messages:
 //! - a reply, from a request handler that the receive function calls;
-//! - a command, service id 3, when the system manager shuts the partition
-//!   down [OFW-4.93 lv1 a:0x44CC10-0x44CC1C] [OFW-4.93 lv1 a:0x44F54C];
+//! - a command, service id 3, when the system manager stops the partition
+//!   [OFW-4.93 lv1 a:0x44CC10-0x44CC1C] [OFW-4.93 lv1 a:0x44F54C];
 //! - an external event, service id 4, of a power or thermal event
 //!   [OFW-4.93 lv1 a:0x44CC80-0x44CC8C] [OFW-4.93 lv1 a:0x452FE8-0x452FFC].
 //!
@@ -397,12 +458,42 @@
 //!   [OFW-4.93 lv1 a:0x5BD524] [OFW-4.93 lv1 a:0x5BD540].
 //!
 //! The service function's send function has no other caller. Two other
-//! socket write functions are reached only through tables of function
-//! descriptors [OFW-4.93 lv1 a:0x5D356C] [OFW-4.93 lv1 a:0x5D3674]. The
-//! image read does not show which objects call them. Each write to the
-//! port that the image read shows is a reply to a request. So the reading
-//! that the evidence supports is this: the dispatcher manager writes
-//! nothing to port 10 before the partition sends a request.
+//! socket write functions have no direct caller: tables of function
+//! descriptors hold them [OFW-4.93 lv1 a:0x5D356C]
+//! [OFW-4.93 lv1 a:0x5D3674]. The image read does not show which objects
+//! call them. Each write to the port that the image read shows is a reply
+//! to a request. So the evidence supports this reading: the dispatcher
+//! manager writes nothing to port 10 before the partition sends a request.
+//!
+//! ## The dispatcher manager's requests
+//!
+//! The port function [OFW-4.93 lv1 a:0x5BD888] reads a request in this
+//! order:
+//! 1. It reads a header of [`DISPATCHER_HEADER_BYTES`] bytes from the port
+//!    [OFW-4.93 lv1 a:0x5BD8B4-0x5BD8E4]. The read function calls the
+//!    loop [OFW-4.93 lv1 a:0x5BF300-0x5BF318] that reads until it holds
+//!    each byte that it asks for [OFW-4.93 lv1 a:0x5BEFE0-0x5BF058].
+//! 2. It looks up the service id that the header gives; see
+//!    [`dispatcher_header_service`].
+//! 3. It reads or discards the request bytes that the header counts, and
+//!    only then replies; see [`dispatcher_header_request_bytes`].
+//!
+//! Step 3 has three paths:
+//! - For a service id that the lookup does not find, it discards the
+//!   bytes [OFW-4.93 lv1 a:0x5BD930-0x5BD93C]. It then replies with a
+//!   return value alone [OFW-4.93 lv1 a:0x5BD980].
+//! - When it cannot get a buffer for the larger of the two sizes in the
+//!   header, it discards the bytes [OFW-4.93 lv1 a:0x5BD994-0x5BD9D0]. It
+//!   then replies with a return value alone [OFW-4.93 lv1 a:0x5BDAFC].
+//! - Otherwise it reads the bytes [OFW-4.93 lv1 a:0x5BDA18-0x5BDA28], and
+//!   sends them to a socket that it connects to the service.
+//!
+//! The discard function reads pieces of at most 64 bytes until it holds
+//! each byte [OFW-4.93 lv1 a:0x5BD6A4-0x5BD71C]. So the dispatcher manager
+//! writes nothing to port 10 until the partition sends the header and each
+//! request byte that it counts. The reply then comes from the service, or
+//! has a return value that depends on the dispatcher manager's own state
+//! [OFW-4.93 lv1 a:0x5BD948-0x5BD97C]. No image read gives the reply.
 //!
 //! ## The kernel's reads
 //!
@@ -420,12 +511,46 @@
 //! system manager loop opens port 2
 //! [OFW-4.93 lv2_kernel a:0x8000000000264388], and reads a 16-byte message
 //! header [OFW-4.93 lv2_kernel a:0x8000000000264bb0-0x8000000000264bc0].
-//! CellGov's hypervisor refuses `write_virtual_uart`. CellGov's boot of
-//! the kernel makes its first read on port 10, with no such call before
-//! it. When lv1 reads 0 bytes, the kernel adds the value 2 to the port's
-//! interrupt mask with hypercall 164, and waits for the port's interrupt
+//! CellGov's boot of the kernel makes its first read on port 10 before
+//! its first `write_virtual_uart`. When lv1 reads 0 bytes, the kernel adds
+//! the value 2 to the port's interrupt mask with hypercall 164, and waits
+//! for the port's interrupt
 //! [OFW-4.93 lv2_kernel a:0x8000000000016b9c-0x8000000000016be0]
 //! [OFW-4.93 lv2_kernel a:0x8000000000016aa8-0x8000000000016ac8].
+//!
+//! ## The kernel's first request
+//!
+//! The kernel writes each port through one function, which sends
+//! hypercall 163 with the port from its port record
+//! [OFW-4.93 lv2_kernel a:0x8000000000016fc8-0x8000000000016fd8]. In
+//! CellGov's boot, the kernel's first two calls write port 10: a header,
+//! then the request bytes that it counts. The request object of the
+//! kernel holds the request id and the service id; see
+//! [`GAME_OS_FIRST_DISPATCHER_REQUEST`].
+//!
+//! The kernel's dispatcher client sends a request in this form:
+//! - The client's constructor sets the client's request count to 0 and
+//!   its port to 10 [OFW-4.93 lv2_kernel a:0x8000000000212408]
+//!   [OFW-4.93 lv2_kernel a:0x8000000000212428]
+//!   [OFW-4.93 lv2_kernel a:0x8000000000212440].
+//! - The send function gives the low word of the service id, the request
+//!   size and the reply size to the header function
+//!   [OFW-4.93 lv2_kernel a:0x80000000002131b0-0x8000000000213208]. For
+//!   the class of the first request, both sizes are 0x38
+//!   [OFW-4.93 lv2_kernel a:0x8000000000229c34].
+//! - The header function puts the request count in the word at +0, then
+//!   increments the count. It puts the service id, the request size and
+//!   the reply size in the words at +4, +8 and +12
+//!   [OFW-4.93 lv2_kernel a:0x80000000002121f4-0x80000000002121fc]
+//!   [OFW-4.93 lv2_kernel a:0x800000000021221c-0x8000000000212230].
+//! - It writes the 16 header bytes, then the request bytes
+//!   [OFW-4.93 lv2_kernel a:0x8000000000212284-0x80000000002122ac].
+//! - The request bytes start with the request id and the service id, as
+//!   big-endian doublewords
+//!   [OFW-4.93 lv2_kernel a:0x8000000000212e10-0x8000000000212eac].
+//!
+//! So the client's first request has a header with tag 0, service
+//! 0x19000, 0x38 request bytes and 0x38 reply bytes.
 
 use crate::hw::ppu_mmu::SMALL_PAGE_LOG2;
 
@@ -952,6 +1077,76 @@ pub const READ_VIRTUAL_UART_NO_REGION_R3: u64 = 0x0000_0002_FFFF_FFFA;
 /// - the r5 bytes from r4 to the region's end.
 pub const READ_VIRTUAL_UART_REGION_R3: u64 = 0x0000_0002_FFFF_FFF8;
 
+/// The handler of hypercall 163 in one firmware's lv1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VirtualUartWriteHandler {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The address of the `write_virtual_uart` handler.
+    pub handler: u32,
+}
+
+/// Each firmware whose lv1 image shows the handler, ascending.
+///
+/// The address is the entry of hypercall 163 in the live 4.93 hypercall
+/// table ([`super::table::LIVE_TABLE_HANDLERS`]).
+pub const VIRTUAL_UART_WRITE_HANDLERS: &[VirtualUartWriteHandler] = &[VirtualUartWriteHandler {
+    firmware: "4.93",
+    handler: 0x2F2AF4,
+}];
+
+/// The handler of the firmware version `firmware`, or `None` when no lv1
+/// image read shows it.
+pub fn virtual_uart_write_handler(firmware: &str) -> Option<&'static VirtualUartWriteHandler> {
+    VIRTUAL_UART_WRITE_HANDLERS
+        .iter()
+        .find(|handler| handler.firmware == firmware)
+}
+
+/// The largest buffer address that `write_virtual_uart` looks up. The
+/// handler refuses an r4 above 2^62 - 1, unsigned
+/// [OFW-4.93 lv1 a:0x2F2B98-0x2F2BA4].
+pub const VIRTUAL_UART_WRITE_ADDRESS_MAX: u64 = 0x3FFF_FFFF_FFFF_FFFF;
+
+/// The r3 of `write_virtual_uart` for a port that lv1 does not hold:
+/// `LV1_NO_ENTRY` (-6), with r3 marked in the high word
+/// [OFW-4.93 lv1 a:0x2F2EC8-0x2F2ED4].
+///
+/// The handler returns this r3 in these cases:
+/// - r3 is above [`VIRTUAL_UART_PORT_MAX`];
+/// - the table holds no endpoint for r3;
+/// - the write function returns 7 before it writes a byte
+///   [OFW-4.93 lv1 a:0x2F2E9C-0x2F2EA0].
+///
+/// Another failure of the write function before it writes a byte returns
+/// `LV1_WRONG_STATE` for 0x9FE5F901, or 0xFFFF8000 for other values
+/// [OFW-4.93 lv1 a:0x2F2EA4-0x2F2EC4]. A failure after it writes one or
+/// more bytes returns 0 with the sum in r4
+/// [OFW-4.93 lv1 a:0x2F2E94-0x2F2E98].
+pub const WRITE_VIRTUAL_UART_NO_PORT_R3: u64 = 0x0000_0001_FFFF_FFFA;
+
+/// The r3 of `write_virtual_uart` for a buffer address that no memory
+/// region holds: `LV1_NO_ENTRY` (-6), with r4 marked in the high word
+/// [OFW-4.93 lv1 a:0x2F2EF0-0x2F2EFC].
+///
+/// The handler returns this r3 in these cases:
+/// - r4 is above [`VIRTUAL_UART_WRITE_ADDRESS_MAX`];
+/// - no region holds r4 [OFW-4.93 lv1 a:0x2F2C94-0x2F2C98];
+/// - the region has no page array [OFW-4.93 lv1 a:0x2F2CC8-0x2F2CCC].
+pub const WRITE_VIRTUAL_UART_NO_REGION_R3: u64 = 0x0000_0002_FFFF_FFFA;
+
+/// The r3 of `write_virtual_uart` for a region that fails one of these
+/// checks: `LV1_TYPE_MISMATCH` (-8), with r4 marked in the high word
+/// [OFW-4.93 lv1 a:0x2F2F10-0x2F2F1C]:
+/// - the region's class;
+/// - the r5 bytes from r4 to the region's end.
+pub const WRITE_VIRTUAL_UART_REGION_R3: u64 = 0x0000_0002_FFFF_FFF8;
+
+/// The r3 of `write_virtual_uart` for a port with no peer that has a
+/// reference: `LV1_WRONG_STATE` (-11), with r3 marked in the high word
+/// [OFW-4.93 lv1 a:0x2F2EDC-0x2F2EE8].
+pub const WRITE_VIRTUAL_UART_NO_PEER_R3: u64 = 0x0000_0001_FFFF_FFF5;
+
 /// An lv1 service that holds the peer of a port of the GameOS partition's
 /// virtual UART.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1013,6 +1208,48 @@ pub fn game_os_service_port(firmware: &str, port: u64) -> Option<&'static GameOs
         .find(|row| row.firmware == firmware && row.port == port)
 }
 
+/// The bytes of the header of a request that the dispatcher manager reads
+/// from its port first [OFW-4.93 lv1 a:0x5BD8B8-0x5BD8BC].
+pub const DISPATCHER_HEADER_BYTES: u64 = 16;
+
+/// The service id that the request header `header` gives: its big-endian
+/// word at +4.
+///
+/// The port function looks up that word [OFW-4.93 lv1 a:0x5BD910-0x5BD920].
+pub const fn dispatcher_header_service(header: &[u8; DISPATCHER_HEADER_BYTES as usize]) -> u32 {
+    u32::from_be_bytes([header[4], header[5], header[6], header[7]])
+}
+
+/// The count of request bytes after the request header `header`: its
+/// big-endian word at +8.
+///
+/// The port function gives that word to the discard function
+/// [OFW-4.93 lv1 a:0x5BD934-0x5BD93C], and to the read of the request
+/// bytes [OFW-4.93 lv1 a:0x5BDA18-0x5BDA28].
+pub const fn dispatcher_header_request_bytes(
+    header: &[u8; DISPATCHER_HEADER_BYTES as usize],
+) -> u32 {
+    u32::from_be_bytes([header[8], header[9], header[10], header[11]])
+}
+
+/// The service id of the 4.93 GameOS kernel's first request to the
+/// dispatcher manager.
+///
+/// The constructor of the kernel's request object stores it at +16
+/// [OFW-4.93 lv2_kernel a:0x8000000000229950]
+/// [OFW-4.93 lv2_kernel a:0x800000000022995c].
+pub const GAME_OS_FIRST_DISPATCHER_SERVICE: u32 = 0x19000;
+
+/// The request id of the 4.93 GameOS kernel's first request to the
+/// dispatcher manager.
+///
+/// The constructor of the kernel's request object stores it at +8
+/// [OFW-4.93 lv2_kernel a:0x800000000022994c]
+/// [OFW-4.93 lv2_kernel a:0x8000000000229958]. In CellGov's boot, the
+/// request bytes that the kernel sends start with this id, as a
+/// big-endian doubleword.
+pub const GAME_OS_FIRST_DISPATCHER_REQUEST: u64 = 0x19002;
+
 #[cfg(test)]
 #[path = "tests/uart_tests.rs"]
 mod tests;
@@ -1048,3 +1285,7 @@ mod read_tests;
 #[cfg(test)]
 #[path = "tests/uart_service_port_tests.rs"]
 mod service_port_tests;
+
+#[cfg(test)]
+#[path = "tests/uart_write_tests.rs"]
+mod write_tests;

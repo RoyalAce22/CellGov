@@ -190,8 +190,8 @@ impl EventReceivePortState {
     /// - each port with a pending event is one object of
     ///   `PENDING_EVENT_SOURCE`.
     ///
-    /// Each object's key is its index in id order. A state with no port
-    /// and no outlet adds no term.
+    /// Each object's key is its index in id order. A state with no port,
+    /// no outlet and no pending event adds no term.
     pub fn sync_term(&self) -> u128 {
         let term = |source: u8, objects: &BTreeMap<u64, EventReceivePort>| {
             (0u64..)

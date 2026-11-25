@@ -11,8 +11,7 @@ use cellgov_time::GuestTicks;
 const KERNEL_SC: u64 = 0x8000_0000_0001_6b7c;
 
 /// The port that the 4.93 kernel opened on the console, from the capture
-/// `lv2_vuart_port_params`, whose peer no image read shows: the one 4.93
-/// row of [`GAME_OS_VIRTUAL_UART_PORTS`] that no service holds.
+/// `lv2_vuart_port_params`, whose peer no image read shows.
 fn non_service_port() -> u64 {
     let ports: Vec<u64> = GAME_OS_VIRTUAL_UART_PORTS
         .iter()

@@ -63,9 +63,11 @@ fn kernel_port_sizes(port: u64) -> (u64, u64) {
     (rx, tx)
 }
 
-/// A thread 0 call of hypercall 165 for parameter `param` of port `port`,
-/// at the kernel's `sc` for the transmit buffer size when `param` is 5 and
-/// at its `sc` for the receive buffer size otherwise.
+/// A thread 0 call of hypercall 165 for parameter `param` of port `port`.
+///
+/// The call is at one of the kernel's two `sc` addresses:
+/// - `param` 5: the `sc` for the transmit buffer size.
+/// - any other `param`: the `sc` for the receive buffer size.
 fn request(port: u64, param: u64) -> HypercallRequest {
     let sc = if param == 5 {
         KERNEL_TX_SC

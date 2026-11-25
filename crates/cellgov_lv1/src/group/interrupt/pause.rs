@@ -119,7 +119,8 @@ impl PausedThreadState {
     /// Each paused thread is one object of the lane source
     /// `PAUSED_THREAD_SOURCE`, and each woken thread is one object of the
     /// lane source `WOKEN_THREAD_SOURCE`. Each object's key is its index
-    /// in thread order. A state with no paused thread adds no term.
+    /// in thread order. A state with no paused thread and no wake adds no
+    /// term.
     pub fn sync_term(&self) -> u128 {
         let paused = (0u64..)
             .zip(self.threads())

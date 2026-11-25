@@ -2,7 +2,6 @@ use super::*;
 use crate::Hypervisor;
 use cellgov_event::UnitId;
 use cellgov_mem::GuestMemory;
-use cellgov_ps3_abi::lv1::call::WRITE_VIRTUAL_UART;
 use cellgov_time::GuestTicks;
 
 /// The `sc` of the 4.93 kernel's read
@@ -96,12 +95,4 @@ fn the_hypervisor_answers_the_kernel_s_service_port_reads_with_0_bytes_and_keeps
         assert_eq!(hv.dispatch_with(&r, &storage), read_0_bytes(), "{port}");
     }
     assert_eq!(hv.groups().uart(), &before);
-}
-
-/// A service writes its port before a shutdown or an external event only
-/// to reply to the partition's request; see [`cellgov_ps3_abi::lv1::uart`].
-#[test]
-fn no_handler_answers_write_virtual_uart_so_the_service_ports_stay_empty() {
-    assert!(crate::answered_numbers().contains(&READ_VIRTUAL_UART));
-    assert!(!crate::answered_numbers().contains(&WRITE_VIRTUAL_UART));
 }

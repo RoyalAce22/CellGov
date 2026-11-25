@@ -2,8 +2,8 @@
 //! event receive port.
 //!
 //! lv1 sets the port's pending byte. For a connected port, it raises the
-//! plug's bit in the status shadow of the plug's thread. It wakes that
-//! thread when the thread is paused and the bit is unmasked; see
+//! plug's bit in the status shadow of the plug's thread. When that thread
+//! is in a pause and its mask holds the bit, lv1 wakes the thread; see
 //! [`cellgov_ps3_abi::lv1::send_event`]. The hypervisor keeps the pending
 //! ports, the shadows and the wakes, and hashes them.
 //!
@@ -104,17 +104,21 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 ///   the thread's bitmap. For a plug bit that the bitmap's mask holds, it
 ///   carries lv1's wake of the thread too, unless lv1 already woke it.
 ///
-/// An r3 that names an irq outlet, the logical PPE, an address space or a
-/// logical SPE gets [`SEND_EVENT_NO_ENTRY_R3`] with r4 to r10 cleared.
+/// The answer is [`SEND_EVENT_NO_ENTRY_R3`] with r4 to r10 cleared when r3
+/// names one of these objects:
+/// - an irq outlet;
+/// - the logical PPE;
+/// - an address space;
+/// - a logical SPE.
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
 /// - r3 names no object that CellGov holds;
 /// - the raise is for a plug of the calling thread, whose return lv1
 ///   checks for an external interrupt;
-/// - the raise is for a plug of a running thread, which the
-///   interprocessor interrupt from lv1 interrupts (lv1 sends that
-///   interrupt to a paused thread on another CPU too, at 0x2C663C);
+/// - the raise is for a plug of a running thread, which lv1 signals with
+///   an interprocessor interrupt. lv1 sends that interrupt to a paused
+///   thread on another CPU too, at 0x2C663C;
 /// - the raise is for a thread with no registered bitmap;
 /// - no storage holds the plug's status and mask doublewords.
 pub(crate) fn send_event(
@@ -163,9 +167,13 @@ pub(crate) fn send_event(
 }
 
 /// Adds lv1's raise of the plug bit `value ^ shadow` of the thread `key`
-/// to `answer`, or gives the input that CellGov does not model.
+/// to `answer`.
 ///
 /// `value` is the status doubleword `index` with the bit set.
+///
+/// # Errors
+///
+/// Returns the refusal text for an input that CellGov does not model.
 fn raise(
     request: &HypercallRequest,
     state: &SendState<'_>,
