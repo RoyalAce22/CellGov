@@ -39,6 +39,11 @@ pub(crate) const GROUP: Group = Group {
             source: Some(SELECTED_ADDRESS_SPACE_SOURCE),
             stamp: Stamp::Version(23),
         },
+        HashedSurface {
+            name: "the real address of each memory region's storage",
+            source: Some(REGION_STORAGE_SOURCE),
+            stamp: Stamp::Pending,
+        },
     ],
 };
 
@@ -56,6 +61,10 @@ pub(crate) const ADDRESS_SPACE_SOURCE: u8 = 79;
 
 /// The lane source of the vas id that the partition's PPE selected.
 pub(crate) const SELECTED_ADDRESS_SPACE_SOURCE: u8 = 80;
+
+/// The lane source of the real addresses of the regions' storage, one
+/// object per region that has storage, keyed by its creation index.
+pub(crate) const REGION_STORAGE_SOURCE: u8 = 128;
 
 /// The memory group's state: the partition's memory regions and its
 /// virtual address spaces.

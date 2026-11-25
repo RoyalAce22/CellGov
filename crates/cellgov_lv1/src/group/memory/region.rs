@@ -1,9 +1,15 @@
 //! Hypercall 0, `allocate_memory`, and the memory regions the hypervisor
 //! keeps for the partition.
 //!
-//! The hypervisor keeps each region it creates and the partition's region
-//! counter. `allocate_memory` reads both, and `map_htab` reads the
-//! counter.
+//! The hypervisor keeps each region that `allocate_memory` creates, the
+//! real address of each region's storage, and the partition's region
+//! counter. These calls read them:
+//! - `allocate_memory` reads the regions and the counter;
+//! - `map_htab` and `construct_logical_spe` read the counter, and the
+//!   regions they create take only a counter value here;
+//! - `write_htab_entry` reads the regions and their storage.
+
+use std::collections::BTreeMap;
 
 use cellgov_mem::lanes::{self, LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::call::ALLOCATE_MEMORY;
@@ -17,7 +23,8 @@ use cellgov_ps3_abi::lv1::memory::{
 use cellgov_ps3_abi::lv1::partition::LPAR_ID_GAME_OS;
 use cellgov_ps3_abi::lv1::repository::{field, first_field, lookup, RepositoryKey};
 
-use super::{REGION_COUNTER_SOURCE, REGION_SOURCE};
+use super::storage::{self, ALLOCATED_STORAGE_BASE};
+use super::{REGION_COUNTER_SOURCE, REGION_SOURCE, REGION_STORAGE_SOURCE};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::request::HypercallRequest;
@@ -62,11 +69,14 @@ impl LaneValue for MemoryRegion {
     }
 }
 
-/// The partition's memory regions and its region counter.
+/// The partition's memory regions, their storage and its region counter.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MemoryState {
     next_counter: Option<u64>,
     regions: Vec<MemoryRegion>,
+    /// The real address of the storage of each region that has storage,
+    /// by the region's creation index.
+    storage: BTreeMap<u64, u64>,
 }
 
 impl MemoryState {
@@ -81,9 +91,29 @@ impl MemoryState {
         self.next_counter
     }
 
-    /// Keeps `region` and moves the counter past the value it took.
+    /// The real address of the storage of the region with the creation
+    /// index `index`, or `None` when the region has no storage.
+    pub fn storage_real(&self, index: u64) -> Option<u64> {
+        self.storage.get(&index).copied()
+    }
+
+    /// Keeps `region`, gives it storage when the storage has room, and
+    /// moves the counter past the value it took.
+    ///
+    /// The region's storage starts after the storage of the last region
+    /// that has storage; see [`storage::placement`].
     pub(crate) fn create(&mut self, region: MemoryRegion) {
         self.take_counter(region.counter);
+        let end = match self.storage.last_key_value() {
+            Some((&index, &real)) => {
+                let size = self.regions.get(index as usize).map_or(0, |r| r.size);
+                real.saturating_add(size)
+            }
+            None => ALLOCATED_STORAGE_BASE,
+        };
+        if let Some(real) = storage::placement(end, &region) {
+            self.storage.insert(self.regions.len() as u64, real);
+        }
         self.regions.push(region);
     }
 
@@ -93,12 +123,16 @@ impl MemoryState {
         self.next_counter = Some(counter.saturating_add(1));
     }
 
-    /// The sync-state terms of the regions and the counter.
+    /// The sync-state terms of the regions, their storage and the counter.
     ///
-    /// Each region is one object of the lane source `REGION_SOURCE`, keyed
-    /// by its creation index. The counter is object 0 of
-    /// the lane source `REGION_COUNTER_SOURCE`. A state with no region adds
-    /// no term.
+    /// The terms have these objects:
+    /// - each region is one object of the lane source `REGION_SOURCE`,
+    ///   keyed by its creation index;
+    /// - the real address of each region's storage is one object of the
+    ///   lane source `REGION_STORAGE_SOURCE`, with the same key;
+    /// - the counter is object 0 of the lane source `REGION_COUNTER_SOURCE`.
+    ///
+    /// A state with no region adds no term.
     pub fn sync_term(&self) -> u128 {
         let mut sum = match self.next_counter {
             Some(counter) => lanes::value_term(REGION_COUNTER_SOURCE, 0, &counter),
@@ -106,6 +140,9 @@ impl MemoryState {
         };
         for (index, region) in (0u64..).zip(&self.regions) {
             sum = sum.wrapping_add(lanes::value_term(REGION_SOURCE, index, region));
+        }
+        for (&index, real) in &self.storage {
+            sum = sum.wrapping_add(lanes::value_term(REGION_STORAGE_SOURCE, index, real));
         }
         sum
     }
@@ -277,3 +314,7 @@ mod hash_tests;
 #[cfg(test)]
 #[path = "tests/memory_check_tests.rs"]
 mod check_tests;
+
+#[cfg(test)]
+#[path = "tests/memory_storage_hash_tests.rs"]
+mod storage_hash_tests;

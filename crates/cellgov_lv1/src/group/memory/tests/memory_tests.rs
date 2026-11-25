@@ -213,7 +213,7 @@ fn an_allocation_with_no_firmware_or_a_floor_firmware_is_refused() {
 fn an_allocation_whose_counter_reaches_the_exponent_bits_is_refused() {
     let memory = MemoryState {
         next_counter: Some(1 << 22),
-        regions: Vec::new(),
+        ..MemoryState::default()
     };
     assert_eq!(
         allocate(&request([0x10_0000, 20, 0, 0]), Some("4.93"), &memory),

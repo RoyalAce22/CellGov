@@ -65,6 +65,9 @@ pub use group::memory::page_table::{
     page_table_storage, PAGE_TABLE_STORAGE_BASE, PAGE_TABLE_STORAGE_BYTES,
 };
 pub use group::memory::region::{MemoryRegion, MemoryState};
+pub use group::memory::storage::{
+    allocated_storage, ALLOCATED_STORAGE_BASE, ALLOCATED_STORAGE_BYTES,
+};
 pub use group::memory::{MemoryChange, MemoryGroupState};
 pub use group::network::{NetworkChange, NetworkState};
 pub use group::partition::repository::RepositoryRead;

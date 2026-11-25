@@ -10,49 +10,49 @@ use cellgov_ps3_abi::lv1::page_table::PTE_M;
 use super::*;
 
 /// The segment that the program's SLB entry maps: EA 0xC000_0000.
-const ESID_EA: u32 = 0xC000;
+pub(super) const ESID_EA: u32 = 0xC000;
 /// The segment's VSID.
-const VSID: u32 = 0x123;
+pub(super) const VSID: u32 = 0x123;
 /// The data page: page 1 of the segment, at real address 0x2_0000.
-const DATA_PAGE: u32 = 0x1000;
+pub(super) const DATA_PAGE: u32 = 0x1000;
 const DATA_RA_HIGH: u32 = 0x2;
 /// PP = 2: loads and stores for both keys.
-const PP_READ_WRITE: u32 = 0x2;
+pub(super) const PP_READ_WRITE: u32 = 0x2;
 /// The data page's entry: slot 0 of its primary group, whose hash is the
 /// VSID XOR the page index, in a 256 KB table of 2^11 groups.
-const SLOT: u32 = ((VSID ^ 1) & 0x7FF) * 8;
+pub(super) const SLOT: u32 = ((VSID ^ 1) & 0x7FF) * 8;
 /// The vas id that the 4.93 hypervisor gives the kernel's address space.
-fn vas_id() -> u32 {
+pub(super) fn vas_id() -> u32 {
     let id = game_os_boot_vas_id("4.93").expect("the 4.93 boot vas id");
     u32::try_from(id).expect("the vas id fits a 32-bit word")
 }
 
-fn li(rd: u32, value: u32) -> u32 {
+pub(super) fn li(rd: u32, value: u32) -> u32 {
     0x3800_0000 | (rd << 21) | value
 }
 
-fn lis(rd: u32, value: u32) -> u32 {
+pub(super) fn lis(rd: u32, value: u32) -> u32 {
     0x3C00_0000 | (rd << 21) | value
 }
 
-fn ori(ra: u32, rs: u32, value: u32) -> u32 {
+pub(super) fn ori(ra: u32, rs: u32, value: u32) -> u32 {
     0x6000_0000 | (rs << 21) | (ra << 16) | value
 }
 
-fn oris(ra: u32, rs: u32, value: u32) -> u32 {
+pub(super) fn oris(ra: u32, rs: u32, value: u32) -> u32 {
     0x6400_0000 | (rs << 21) | (ra << 16) | value
 }
 
-fn mr(ra: u32, rs: u32) -> u32 {
+pub(super) fn mr(ra: u32, rs: u32) -> u32 {
     0x7C00_0378 | (rs << 21) | (ra << 16) | (rs << 11)
 }
 
-fn hypercall(number: u64) -> [u32; 2] {
+pub(super) fn hypercall(number: u64) -> [u32; 2] {
     [li(11, number as u32), SC_1]
 }
 
 /// Sends r8, all 8 bytes, to the logical console.
-fn send_r8() -> Vec<u32> {
+pub(super) fn send_r8() -> Vec<u32> {
     let mut code = vec![mr(5, 8), li(3, 0), li(4, 8)];
     code.extend(hypercall(LOGICAL_CONSOLE_SEND));
     code
@@ -60,7 +60,7 @@ fn send_r8() -> Vec<u32> {
 
 /// Reads the four entries from the data page's slot and sends r8, their
 /// low halfwords, to the console.
-fn read_and_send() -> Vec<u32> {
+pub(super) fn read_and_send() -> Vec<u32> {
     let mut code = vec![li(3, 0), li(4, SLOT)];
     code.extend(hypercall(READ_HTAB_ENTRIES));
     code.extend(send_r8());

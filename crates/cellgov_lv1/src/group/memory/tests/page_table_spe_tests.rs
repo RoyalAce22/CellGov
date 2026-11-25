@@ -95,6 +95,7 @@ fn write(index: u64, d0: u64, d1: u64, storage: &GuestMemory) -> HypercallDispos
         Some("4.93"),
         &spaces(),
         &spes(),
+        &MemoryState::default(),
         storage,
     )
 }

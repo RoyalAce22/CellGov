@@ -163,6 +163,43 @@ pub const ALLOCATE_MEMORY_R5_R3: u64 = 0x0000_0004_FFFF_FFFA;
 /// [OFW-4.93 lv1 a:0x2DF014].
 pub const ALLOCATE_MEMORY_FLAGS_R3: u64 = 0x0000_0008_FFFF_FFEF;
 
+/// The r3 of `write_htab_entry` for a valid entry whose page lies in a
+/// region that `allocate_memory` created and is larger than the region's
+/// pages: `LV1_ACCESS_VIOLATION` (-5), with r6 marked.
+///
+/// After its argument checks, the 4.93 `allocate_memory` worker does
+/// these steps:
+/// 1. It keeps the size, the page size exponent and an array of page
+///    addresses in an 80-byte object
+///    [OFW-4.93 lv1 a:0x2DF05C-0x2DF0D4].
+/// 2. It gives each page of the region a page from lv1's page allocator
+///    [OFW-4.93 lv1 a:0x2DF0FC-0x2DF12C]. The allocator fills the page
+///    with zeros [OFW-4.93 lv1 a:0x2C14F8-0x2C1508].
+/// 3. It constructs the region [OFW-4.93 lv1 a:0x2DF244]. The region
+///    keeps its address at +80 [OFW-4.93 lv1 a:0x2CF4C8], the page size
+///    exponent at +160 [OFW-4.93 lv1 a:0x2CF4F8] and the object at +176
+///    [OFW-4.93 lv1 a:0x2DEAE0-0x2DEAE8].
+/// 4. The region's class is in the TOC slot at r2 - 8104
+///    [OFW-4.93 lv1 a:0x2DEAC4-0x2DEACC] [OFW-4.93 lv1 a:0x358090].
+///
+/// `write_htab_entry` calls the method at +24 of that class
+/// [OFW-4.93 lv1 a:0x3621E8] [OFW-4.93 lv1 a:0x347BC8] with the page's
+/// offset in the region. The method does these steps in this order:
+/// 1. It checks that the region is live and is the caller's
+///    [OFW-4.93 lv1 a:0x2DDFC0-0x2DE000] [OFW-4.93 lv1 a:0x2DDE54-0x2DDE80].
+///    A region that the caller's `allocate_memory` created passes.
+/// 2. A page shift above the exponent at +160 returns the code
+///    0x997997D2B58E3C02 [OFW-4.93 lv1 a:0x2DE008-0x2DE01C]
+///    [OFW-4.93 lv1 a:0x2DE080]. The handler gives this r3 for that code
+///    [OFW-4.93 lv1 a:0x2ED5C4-0x2ED5DC] [OFW-4.93 lv1 a:0x2ED60C-0x2ED618].
+/// 3. The real address is the address of the page that holds the offset,
+///    plus the offset in that page [OFW-4.93 lv1 a:0x2DE020-0x2DE050].
+///
+/// The method does not read the writer's read only flag. The capture
+/// `lv1_allocated_page_translation` reads the cited code, slot, class
+/// entry and descriptor in the reference console's lv1.
+pub const WRITE_HTAB_ALLOCATED_PAGE_SIZE_R3: u64 = 0x0000_0008_FFFF_FFFB;
+
 #[cfg(test)]
 #[path = "tests/memory_tests.rs"]
 mod tests;
@@ -174,3 +211,7 @@ mod console_tests;
 #[cfg(test)]
 #[path = "tests/memory_check_tests.rs"]
 mod check_tests;
+
+#[cfg(test)]
+#[path = "tests/memory_allocated_page_console_tests.rs"]
+mod allocated_page_console_tests;

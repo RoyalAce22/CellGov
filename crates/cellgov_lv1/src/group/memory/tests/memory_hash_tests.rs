@@ -39,6 +39,8 @@ fn memory_sync_term_lane_vector_golden() {
         lane(REGION_SOURCE, 1, 3, 16),
         lane(REGION_SOURCE, 1, 4, 1),
         lane(REGION_SOURCE, 1, 5, 3),
+        lane(REGION_STORAGE_SOURCE, 1, 0, 1),
+        lane(REGION_STORAGE_SOURCE, 1, 1, ALLOCATED_STORAGE_BASE),
     ];
     let sum = lanes.into_iter().fold(0u128, u128::wrapping_add);
     assert_eq!(memory.sync_term(), sum);

@@ -33,6 +33,7 @@ use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 use super::address_space::{AddressSpace, AddressSpaceChange, AddressSpaceState};
 use super::region as memory;
 use super::region::MemoryState;
+use super::storage::{self, AllocatedPage};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal, PageTableLoad};
 use crate::group::hypercall::Hypercall;
 use crate::group::spe::shadow::{region_page, SpeRegionPage};
@@ -46,11 +47,13 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[
         name: "write_htab_entry",
         cost: None,
         handler: |request, input| {
+            let memory = input.groups.memory();
             write_entry(
                 request,
                 input.firmware,
-                input.groups.memory().spaces(),
+                memory.spaces(),
                 input.groups.spe().spes(),
+                memory.regions(),
                 input.storage,
             )
         },
@@ -350,42 +353,51 @@ enum NoRealPage {
     Refused(&'static str),
 }
 
+/// The partition's regions that a valid entry's page can lie in.
+#[derive(Clone, Copy)]
+struct Regions<'a> {
+    spaces: &'a AddressSpaceState,
+    spes: &'a LogicalSpeState,
+    allocated: &'a MemoryState,
+}
+
 /// The real address of `page`, or why the entry gets none.
 ///
 /// lv1 looks the logical partition address up in the partition's memory
 /// regions and maps the page there [OFW-4.93 lv1 a:0x2D2510]
-/// [OFW-4.93 lv1 a:0x2D30C4]. CellGov models three kinds of region:
-/// - the mapping of a page table that `spaces` holds, whose page lies in
+/// [OFW-4.93 lv1 a:0x2D30C4]. CellGov models four kinds of region:
+/// - the mapping of a page table that `regions` holds, whose page lies in
 ///   the page table storage at the same offset;
-/// - a region of a logical SPE in `spes`, as [`region_page`] answers it
-///   for `doubleword1`;
+/// - a region of a logical SPE, as [`region_page`] answers it for
+///   `doubleword1`;
+/// - a region that `allocate_memory` created, as
+///   [`storage::region_page`] answers it;
 /// - the real mode region of `firmware`, which CellGov holds at real
 ///   address 0 below the page table storage, so the real address is the
 ///   logical partition address.
 fn real_page(
     firmware: &str,
-    spaces: &AddressSpaceState,
-    spes: &LogicalSpeState,
+    regions: Regions<'_>,
     storage: &GuestMemory,
     page: Page,
     doubleword1: u64,
 ) -> Result<u64, NoRealPage> {
     let size = 1u64 << page.shift;
     let end = page.address.checked_add(size);
-    let in_mapping = spaces.spaces().iter().find_map(|space| {
+    let in_mapping = regions.spaces.spaces().iter().find_map(|space| {
         let mapping = space.mapping?;
         let table = htab_size(space.htab_size_exp);
         let inside = page.address >= mapping && end.is_some_and(|end| end <= mapping + table);
         inside.then(|| PAGE_TABLE_STORAGE_BASE + (page.address - mapping))
     });
-    let real = match in_mapping {
-        Some(real) => real,
-        None => match region_page(spes, page.address, page.shift, doubleword1) {
-            Some(SpeRegionPage::Shadow(real)) => real,
-            Some(SpeRegionPage::Lv1(r3)) => return Err(NoRealPage::Lv1(r3)),
-            Some(SpeRegionPage::Refused(what)) => return Err(NoRealPage::Refused(what)),
-            None => real_mode_page(firmware, page.address, end)?,
-        },
+    let real = if let Some(real) = in_mapping {
+        real
+    } else if let Some(answer) = region_page(regions.spes, page.address, page.shift, doubleword1) {
+        spe_real(answer)?
+    } else if let Some(answer) = storage::region_page(regions.allocated, page.address, page.shift) {
+        allocated_real(answer)?
+    } else {
+        real_mode_page(firmware, page.address, end)?
     };
     if !storage.holds(real, size) || real > STORED_MEMORY_LIMIT {
         return Err(NoRealPage::Refused(
@@ -393,6 +405,28 @@ fn real_page(
         ));
     }
     Ok(real)
+}
+
+/// The real address of a page in a region of a logical SPE, or why the
+/// entry gets none.
+fn spe_real(answer: SpeRegionPage) -> Result<u64, NoRealPage> {
+    match answer {
+        SpeRegionPage::Shadow(real) => Ok(real),
+        SpeRegionPage::Lv1(r3) => Err(NoRealPage::Lv1(r3)),
+        SpeRegionPage::Refused(what) => Err(NoRealPage::Refused(what)),
+    }
+}
+
+/// The real address of a page in an allocated region, or why the entry
+/// gets none.
+fn allocated_real(answer: AllocatedPage) -> Result<u64, NoRealPage> {
+    match answer {
+        AllocatedPage::Stored(real) => Ok(real),
+        AllocatedPage::Lv1(r3) => Err(NoRealPage::Lv1(r3)),
+        AllocatedPage::NoStorage => Err(NoRealPage::Refused(
+            "a valid entry whose page lies in an allocated memory region with no storage",
+        )),
+    }
 }
 
 /// The real address of a page at the logical partition address `address`
@@ -421,19 +455,24 @@ fn real_mode_page(firmware: &str, address: u64, end: Option<u64>) -> Result<u64,
 /// A call that fails one of lv1's checks gets lv1's own r3, with r4 to
 /// r10 cleared. See [`WRITE_HTAB_INDEX_R3`] for the checks and their
 /// order. lv1 checks the address space first, and CellGov answers it
-/// only as [`named_space`] allows. lv1 checks an entry for a shadow page
-/// of a logical SPE in `spes` after the duplicate search; see
-/// [`cellgov_ps3_abi::lv1::spe`].
+/// only as [`named_space`] allows. lv1 translates the page of a valid
+/// entry after the duplicate search, for these regions:
+/// - a shadow page of a logical SPE in `spes`; see
+///   [`cellgov_ps3_abi::lv1::spe`];
+/// - a region in `allocated`; see
+///   [`cellgov_ps3_abi::lv1::memory::WRITE_HTAB_ALLOCATED_PAGE_SIZE_R3`].
 ///
 /// The call is a refusal in these cases:
 /// - [`named_space`] refuses it;
-/// - a valid entry maps a page that [`real_page`] refuses;
+/// - a valid entry that duplicates no entry in its group maps a page that
+///   [`real_page`] refuses;
 /// - no storage holds the entry's two groups.
 pub(crate) fn write_entry(
     request: &HypercallRequest,
     firmware: Option<&str>,
     spaces: &AddressSpaceState,
     spes: &LogicalSpeState,
+    allocated: &MemoryState,
     storage: &GuestMemory,
 ) -> HypercallDisposition {
     let space = match named_space(request, firmware, spaces) {
@@ -455,11 +494,15 @@ pub(crate) fn write_entry(
     if valid(doubleword0) {
         // named_space refuses a call with no firmware version.
         let firmware = firmware.unwrap_or_default();
-        let translated = match real_page(firmware, spaces, spes, storage, page, doubleword1) {
-            Ok(real) => Ok(real),
-            Err(NoRealPage::Lv1(r3)) => Err(r3),
-            Err(NoRealPage::Refused(what)) => return refuse(request, what),
+        let regions = Regions {
+            spaces,
+            spes,
+            allocated,
         };
+        // lv1 searches the group before it translates the page
+        // [OFW-4.93 lv1 a:0x2D2F20-0x2D3038], so a duplicate answers before
+        // any translation result, a CellGov refusal included.
+        let translated = real_page(firmware, regions, storage, page, doubleword1);
         match duplicate(storage, space, index, doubleword0) {
             Some(true) => return lv1_answer(WRITE_HTAB_DUPLICATE_R3),
             Some(false) => {}
@@ -467,7 +510,8 @@ pub(crate) fn write_entry(
         }
         real = match translated {
             Ok(real) => real,
-            Err(r3) => return lv1_answer(r3),
+            Err(NoRealPage::Lv1(r3)) => return lv1_answer(r3),
+            Err(NoRealPage::Refused(what)) => return refuse(request, what),
         };
     }
     let stored = stored_doubleword1(doubleword1, real, page.large_page_bits);
@@ -561,3 +605,7 @@ mod vas_tests;
 #[cfg(test)]
 #[path = "tests/page_table_spe_tests.rs"]
 mod spe_tests;
+
+#[cfg(test)]
+#[path = "tests/page_table_allocated_tests.rs"]
+mod allocated_tests;

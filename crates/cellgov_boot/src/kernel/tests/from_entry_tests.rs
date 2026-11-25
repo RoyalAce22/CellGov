@@ -16,6 +16,9 @@ mod reader;
 #[path = "from_entry_page_table_tests.rs"]
 mod page_table;
 
+#[path = "from_entry_allocated_tests.rs"]
+mod allocated;
+
 /// A firmware for which CellGov serves the repository values of the
 /// psdevwiki dump.
 const FW: &str = "1.50";
