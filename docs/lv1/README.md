@@ -158,10 +158,19 @@ re-extraction differs. `repository_rows_are_well_formed` checks the logged set, 
 text of each key, the order of each boot's reads and the source of each
 served node without reading external data.
 
-`tables/repository.tsv` has 48 rows, one per node that
-`cellgov_ps3_abi::lv1::repository::NODES` serves: its key, its two
-values, the firmware CellGov serves its values to and its source. The
-source can be of another firmware: the psdevwiki dump is of 3.41. A read at a
+`tables/repository.tsv` has 59 rows. Each row holds a
+node's key, its two values, the firmware CellGov serves its values to
+and its source. Each row is one of these nodes:
+
+- a node that `cellgov_ps3_abi::lv1::repository::NODES` serves;
+- a node that lv1's storage registration writes and a logged boot reads
+  with an answer. Its values come from
+  `cellgov_ps3_abi::lv1::storage_registration`, the registration after lv1
+  registered each device of the captured bus table. The hypervisor
+  answers such a node only after the registration, so a logged refusal
+  of it needs no row.
+
+The source can be of another firmware: the psdevwiki dump is of 3.41. A read at a
 firmware that no row of its key names is a refusal, except for a key of
 `cellgov_ps3_abi::lv1::repository::ABSENT_NODES`. A capture that walked the
 whole repository list shows that key has no node at that firmware, so the
