@@ -16,6 +16,7 @@
 //! state of the storage devices. So a close of a storage bus that the
 //! partition holds open is a refusal.
 
+use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::lv1::call::CLOSE_DEVICE;
 use cellgov_ps3_abi::lv1::device_bus::{
     close_device_check_r3, close_device_handler, open_device_path_read, opens_storage_bus,
@@ -24,9 +25,11 @@ use cellgov_ps3_abi::lv1::device_bus::{
 use cellgov_ps3_abi::lv1::network::{STATUS_INDICATOR_BUS, STATUS_INDICATOR_DEVICE};
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
+use super::mmio_unmap::maps_mmio;
 use super::{DeviceBusChange, DeviceBusState, OpenDevice};
 use crate::answer::{HypercallAnswer, HypercallDisposition, UnmodelledError};
 use crate::group::hypercall::Hypercall;
+use crate::group::memory::address_space::AddressSpaceState;
 use crate::group::network::NetworkChange;
 use crate::request::HypercallRequest;
 
@@ -35,7 +38,15 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
     number: CLOSE_DEVICE,
     name: "close_device",
     cost: None,
-    handler: |request, input| close_device(request, input.firmware, input.groups.device_bus()),
+    handler: |request, input| {
+        close_device(
+            request,
+            input.firmware,
+            input.groups.device_bus(),
+            input.groups.memory().spaces(),
+            input.storage,
+        )
+    },
 }];
 
 /// The network device: device 0 of bus 1.
@@ -55,6 +66,13 @@ const OTHER_DEVICE: UnmodelledError = UnmodelledError::new(
 const STORAGE_BUS: UnmodelledError = UnmodelledError::new(
     "a close of the storage bus that the partition holds open, whose lv1 path reads the state of \
      the storage devices and their requests",
+);
+
+/// The close of a device with an MMIO mapping whose region a page table
+/// entry maps.
+const MAPPED_PAGE: UnmodelledError = UnmodelledError::new(
+    "a close_device while a page table entry maps a page of the MMIO of a mapping of the device, \
+     whose release calls methods of the region's users that are not read",
 );
 
 /// The close at a firmware whose handler no lv1 image read shows.
@@ -89,18 +107,27 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// - The teardown's poll of a hardware register completes.
 /// - The teardown's wait on the indicator's memory region ends.
 ///
+/// For each MMIO mapping that the close removes, lv1 calls the free of
+/// `unmap_device_mmio_region`. The model assumes that this free finds the
+/// mapping's address and that its wait for the region's users ends when
+/// no page table entry maps the mapping's MMIO.
+///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
 /// - the partition holds the storage bus open;
-/// - the call names another device of a bus that passes the checks.
+/// - the call names another device of a bus that passes the checks;
+/// - a valid entry of a page table in `storage` maps a page of the MMIO
+///   of a mapping of the open device; see [`maps_mmio`].
 pub(crate) fn close_device(
     request: &HypercallRequest,
     firmware: Option<&str>,
     state: &DeviceBusState,
+    spaces: &AddressSpaceState,
+    storage: &GuestMemory,
 ) -> HypercallDisposition {
-    if firmware.and_then(close_device_handler).is_none() {
+    let Some(firmware) = firmware.filter(|fw| close_device_handler(fw).is_some()) else {
         return UNREAD_FIRMWARE.refusal(request);
-    }
+    };
     let (bus, device) = (request.r(3), request.r(4));
     if let Some(r3) = close_device_check_r3(bus, device) {
         return lv1_answer(r3);
@@ -117,6 +144,13 @@ pub(crate) fn close_device(
     }
     if !state.is_open(device) {
         return lv1_answer(CLOSE_DEVICE_NOT_OPEN_R3);
+    }
+    if state
+        .mmio_mappings()
+        .filter(|mapping| mapping.bus == device.bus && mapping.device == device.device)
+        .any(|mapping| maps_mmio(firmware, &mapping, spaces, storage))
+    {
+        return MAPPED_PAGE.refusal(request);
     }
     let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []);
     answer.push_change(DeviceBusChange::Closed(device));
@@ -137,3 +171,7 @@ mod state_tests;
 #[cfg(test)]
 #[path = "tests/console_close_device_tests.rs"]
 mod console_tests;
+
+#[cfg(test)]
+#[path = "tests/close_device_mmio_tests.rs"]
+mod mmio_tests;

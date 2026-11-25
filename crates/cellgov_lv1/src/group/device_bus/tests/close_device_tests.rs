@@ -55,8 +55,23 @@ fn state_with(changes: &[DeviceBusChange]) -> DeviceBusState {
     state
 }
 
+/// The close of `call` at `firmware` with no address space.
+fn close_at(
+    call: &HypercallRequest,
+    firmware: Option<&str>,
+    state: &DeviceBusState,
+) -> HypercallDisposition {
+    close_device(
+        call,
+        firmware,
+        state,
+        &AddressSpaceState::default(),
+        &GuestMemory::new(0),
+    )
+}
+
 fn close(state: &DeviceBusState, bus: u64, device: u64) -> HypercallDisposition {
-    close_device(&request(bus, device), Some("4.93"), state)
+    close_at(&request(bus, device), Some("4.93"), state)
 }
 
 fn answered(r3: u64) -> HypercallDisposition {
@@ -196,7 +211,7 @@ fn the_close_of_a_storage_bus_that_is_open_is_a_refusal() {
     let state = state_with(&[DeviceBusChange::StorageBusOpened(StorageBusOpen { r5: 0 })]);
     let call = request(4, u64::MAX);
     assert_eq!(
-        close_device(&call, Some("4.93"), &state),
+        close_at(&call, Some("4.93"), &state),
         refused(&call, STORAGE_BUS.what)
     );
 }
@@ -208,7 +223,7 @@ fn a_close_of_a_device_that_lv1_finds_through_unmodelled_state_is_a_refusal() {
     for (bus, device) in cases {
         let call = request(bus, device);
         assert_eq!(
-            close_device(&call, Some("4.93"), &DeviceBusState::default()),
+            close_at(&call, Some("4.93"), &DeviceBusState::default()),
             refused(&call, OTHER_DEVICE.what),
             "bus {bus} device {device}"
         );
@@ -221,7 +236,7 @@ fn a_close_at_a_firmware_whose_handler_is_not_read_is_a_refusal() {
     let call = request(1, 0);
     for firmware in [None, Some("4.92"), Some("3.70")] {
         assert_eq!(
-            close_device(&call, firmware, &state),
+            close_at(&call, firmware, &state),
             refused(&call, UNREAD_FIRMWARE.what),
             "{firmware:?}"
         );

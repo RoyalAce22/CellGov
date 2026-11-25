@@ -6,6 +6,7 @@ use super::super::open::open_device;
 use super::*;
 use crate::{GroupStates, StateChange};
 use cellgov_event::UnitId;
+use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::lv1::call::{CLOSE_DEVICE, OPEN_DEVICE};
 use cellgov_ps3_abi::lv1::device_bus::GAME_OS_MMIO_MAPPINGS;
 use cellgov_time::GuestTicks;
@@ -93,7 +94,13 @@ fn map(groups: &mut GroupStates) -> (u64, u64, Vec<StateChange>) {
 
 fn close(groups: &mut GroupStates) -> (u64, u64, Vec<StateChange>) {
     let request = call(CLOSE_DEVICE, &[DEVICE_1.bus, DEVICE_1.device]);
-    let disposition = close_device(&request, Some("4.93"), groups.device_bus());
+    let disposition = close_device(
+        &request,
+        Some("4.93"),
+        groups.device_bus(),
+        groups.memory().spaces(),
+        &GuestMemory::new(0),
+    );
     apply(groups, disposition)
 }
 

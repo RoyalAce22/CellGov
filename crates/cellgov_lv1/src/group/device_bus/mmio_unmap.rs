@@ -169,7 +169,7 @@ pub(crate) fn unmap_mmio(
 /// A table with no storage holds no entry, because `write_htab_entry`
 /// writes no entry to it. A mapping whose real address no source gives
 /// has no entry, because `write_htab_entry` refuses its pages.
-fn maps_mmio(
+pub(super) fn maps_mmio(
     firmware: &str,
     mapping: &MmioMapping,
     spaces: &AddressSpaceState,

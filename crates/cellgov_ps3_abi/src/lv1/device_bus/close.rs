@@ -94,6 +94,10 @@
 //! 5. It stores -1 at +112, clears the open flag and returns 0
 //!    [OFW-4.93 lv1 a:0x22968C-0x2296A0].
 //!
+//! The MMIO step calls the free of `unmap_device_mmio_region`
+//! [OFW-4.93 lv1 a:0x229428]. So the close also calls the methods of the
+//! region's users that the free calls before the release.
+//!
 //! The unmap step walks each region of the list at +96, lv1's own region
 //! too [OFW-4.93 lv1 a:0x226AAC-0x226AC0] [OFW-4.93 lv1 a:0x226B34-0x226B3C].
 //! It acts on each mapping whose word at +88 is 0 and whose partition at
