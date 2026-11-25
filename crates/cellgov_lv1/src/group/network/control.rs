@@ -10,9 +10,9 @@
 
 use cellgov_ps3_abi::lv1::call::NET_CONTROL;
 use cellgov_ps3_abi::lv1::network::{
-    net_control_device_r3, net_control_handler, net_control_request_range_r3,
-    net_control_vlan_selector, VlanSelector, NET_CONTROL_GET_MAC_ADDRESS, NET_CONTROL_GET_VLAN_ID,
-    NET_CONTROL_VLAN_SELECTOR_R3,
+    net_control_device_r3, net_control_handler, net_control_request_range_r3, net_control_vlan_id,
+    VlanAnswer, VlanFields, CONSOLE_VLAN_FIELDS, NET_CONTROL_GET_MAC_ADDRESS,
+    NET_CONTROL_GET_VLAN_ID,
 };
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
@@ -34,6 +34,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
             input.firmware,
             input.groups.device_bus(),
             &SYNTHETIC_CONSOLE_IDENTITY,
+            CONSOLE_VLAN_FIELDS,
         )
     },
 }];
@@ -59,12 +60,6 @@ const UNMODELLED_REQUEST: UnmodelledError = UnmodelledError::new(
     "a net_control request from 2 to 11 other than 4, whose answer CellGov does not model",
 );
 
-/// The call for VLAN selector 5.
-const FLAGGED_VLAN_SELECTOR: UnmodelledError = UnmodelledError::new(
-    "a net_control VLAN id for selector 5, whose answer reads a byte of the network device's \
-     global object that no lv1 reading gives",
-);
-
 /// lv1's own r3 with r4 to r10 cleared.
 fn lv1_answer(r3: u64) -> HypercallDisposition {
     HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, []))
@@ -78,36 +73,32 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// their order. A call that passes them gets these answers:
 /// - Request 1 gets 0 in r3, the MAC address of `identity` in r4, and 0
 ///   in r5 to r10.
-/// - Request 4 gets 0 in r3, the VLAN id of the selector in r6 in r4, and
-///   0 in r5 to r10. A selector without an id gets
-///   [`NET_CONTROL_VLAN_SELECTOR_R3`] with r4 to r10 cleared.
+/// - Request 4 gets the answer of [`net_control_vlan_id`] for the selector
+///   in r6 and `vlan_fields`. An id is r4, with 0 in r3 and in r5 to r10.
+///   A failure is r3, with r4 to r10 cleared.
 ///
 /// The model makes these assumptions:
 /// - An open network device has the state word 2, because the open sets
 ///   it.
 /// - The device's flag byte at +0 is not 0, as the console capture reads
-///   it. No lv1 code read stores that byte.
+///   it. No image read shows a store to that byte.
 /// - The doubleword that request 1 reads is the device's MAC address.
 ///   CellGov serves the address of `identity` there.
-/// - Bit 63 of the doubleword at +32 of the global object is 0, so
-///   request 4 gives the ids of its table. No lv1 code read stores that
-///   doubleword, and a console read of it reads the page that holds the
-///   MAC address. When the bit is set, lv1 gives
-///   [`NET_CONTROL_VLAN_NONE_R3`](cellgov_ps3_abi::lv1::network::NET_CONTROL_VLAN_NONE_R3)
-///   for each selector instead.
+/// - The global object holds `vlan_fields` at +28 and +32. The registration
+///   passes [`CONSOLE_VLAN_FIELDS`], which the console capture reads after
+///   the boot. No image read shows a store to either field.
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
 /// - the partition did not open the network device;
 /// - r5 is a code that only the privilege bit passes;
-/// - r5 is a code from 2 to 11 other than 4;
-/// - r5 is 4 and r6 is the selector 5, whose id the byte at +28 of the
-///   global object selects.
+/// - r5 is a code from 2 to 11 other than 4.
 pub(crate) fn net_control(
     request: &HypercallRequest,
     firmware: Option<&str>,
     devices: &DeviceBusState,
     identity: &ConsoleIdentity,
+    vlan_fields: VlanFields,
 ) -> HypercallDisposition {
     if firmware.and_then(net_control_handler).is_none() {
         return UNREAD_FIRMWARE.refusal(request);
@@ -127,7 +118,10 @@ pub(crate) fn net_control(
     }
     match code {
         NET_CONTROL_GET_MAC_ADDRESS => success(identity.mac_address),
-        NET_CONTROL_GET_VLAN_ID => vlan_id(request),
+        NET_CONTROL_GET_VLAN_ID => match net_control_vlan_id(request.r(6), vlan_fields) {
+            VlanAnswer::Id(id) => success(id),
+            VlanAnswer::Failed(r3) => lv1_answer(r3),
+        },
         _ => UNMODELLED_REQUEST.refusal(request),
     }
 }
@@ -140,16 +134,6 @@ fn success(r4: u64) -> HypercallDisposition {
     ))
 }
 
-/// Request 4 for the selector in r6, with bit 63 of the capability
-/// doubleword taken as 0.
-fn vlan_id(request: &HypercallRequest) -> HypercallDisposition {
-    match net_control_vlan_selector(request.r(6)) {
-        VlanSelector::Fixed(id) => success(id),
-        VlanSelector::Flagged => FLAGGED_VLAN_SELECTOR.refusal(request),
-        VlanSelector::Illegal => lv1_answer(NET_CONTROL_VLAN_SELECTOR_R3),
-    }
-}
-
 #[cfg(test)]
 #[path = "tests/control_tests.rs"]
 mod tests;
@@ -157,3 +141,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/control_vlan_tests.rs"]
 mod vlan_tests;
+
+#[cfg(test)]
+#[path = "tests/control_vlan_fields_tests.rs"]
+mod vlan_fields_tests;

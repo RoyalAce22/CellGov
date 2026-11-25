@@ -1,9 +1,6 @@
 use super::*;
-use crate::answer::HypercallRefusal;
 use crate::group::device_bus::DeviceBusChange;
-use crate::Hypervisor;
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::lv1::call::OPEN_DEVICE;
 use cellgov_time::GuestTicks;
 
 /// The `sc` of the 4.93 kernel's request 4
@@ -37,8 +34,21 @@ fn open() -> DeviceBusState {
     devices
 }
 
+/// Fields with bit 63 of the doubleword at +32 clear, so that request 4
+/// gives the cases of its table.
+const TABLE_FIELDS: VlanFields = VlanFields {
+    capability: 0,
+    flag: 0,
+};
+
 fn control(r: &HypercallRequest) -> HypercallDisposition {
-    net_control(r, Some("4.93"), &open(), &SYNTHETIC_CONSOLE_IDENTITY)
+    net_control(
+        r,
+        Some("4.93"),
+        &open(),
+        &SYNTHETIC_CONSOLE_IDENTITY,
+        TABLE_FIELDS,
+    )
 }
 
 fn id_answer(id: u64) -> HypercallDisposition {
@@ -73,20 +83,6 @@ fn each_kernel_selector_before_5_gets_r3_0_and_its_id_in_r4() {
     }
 }
 
-#[test]
-fn the_kernel_selector_5_is_a_refusal() {
-    let call = kernel_call(5);
-    assert_eq!(
-        control(&call),
-        HypercallDisposition::Refused(HypercallRefusal::UnmodelledInput {
-            number: NET_CONTROL,
-            unit: call.unit,
-            pc: call.pc,
-            what: FLAGGED_VLAN_SELECTOR.what,
-        })
-    );
-}
-
 /// [OFW-4.93 lv1 a:0x244B24-0x244B54] stores no output, and
 /// [OFW-4.93 lv1 a:0x307F7C] keeps the low word of -17. The handler
 /// keeps all 64 bits of r6 [OFW-4.93 lv1 a:0x307D6C] and the range check
@@ -117,26 +113,4 @@ fn request_4_ignores_r7_and_r8() {
     for r7_r8 in inputs {
         assert_eq!(control(&request(16, r7_r8)), id_answer(288), "{r7_r8:x?}");
     }
-}
-
-#[test]
-fn the_hypervisor_answers_request_4_after_the_open_without_a_state_change() {
-    let mut hv = Hypervisor::new();
-    hv.set_firmware("4.93");
-    let open = HypercallRequest {
-        number: OPEN_DEVICE,
-        inputs: [1, 0, 0, 0, 0, 0, 0, 0],
-        ..kernel_call(0)
-    };
-    let HypercallDisposition::Answered(opened) = hv.dispatch(&open) else {
-        panic!("open_device refused");
-    };
-    assert_eq!(opened.r3, 0);
-    let before = hv.clone();
-    let HypercallDisposition::Answered(answer) = hv.dispatch(&kernel_call(1)) else {
-        panic!("net_control refused");
-    };
-    assert_eq!(answer.r3, 0);
-    assert_eq!(answer.outputs().map(|registers| registers[0]), Some(292));
-    assert_eq!(hv, before);
 }

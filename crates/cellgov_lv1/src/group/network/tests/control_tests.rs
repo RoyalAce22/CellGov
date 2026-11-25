@@ -48,7 +48,13 @@ fn open() -> DeviceBusState {
 }
 
 fn control(r: &HypercallRequest, devices: &DeviceBusState) -> HypercallDisposition {
-    net_control(r, Some("4.93"), devices, &SYNTHETIC_CONSOLE_IDENTITY)
+    net_control(
+        r,
+        Some("4.93"),
+        devices,
+        &SYNTHETIC_CONSOLE_IDENTITY,
+        CONSOLE_VLAN_FIELDS,
+    )
 }
 
 fn answered(r3: u64) -> HypercallDisposition {
@@ -86,7 +92,13 @@ fn request_1_gives_the_mac_address_of_the_identity_that_the_hypervisor_serves() 
     };
     assert_ne!(other.mac_address, SYNTHETIC_CONSOLE_IDENTITY.mac_address);
     assert_eq!(
-        net_control(&kernel_call(), Some("4.93"), &open(), &other),
+        net_control(
+            &kernel_call(),
+            Some("4.93"),
+            &open(),
+            &other,
+            CONSOLE_VLAN_FIELDS
+        ),
         mac_answer(OTHER_MAC)
     );
 }
@@ -219,7 +231,13 @@ fn a_call_at_a_firmware_whose_handler_is_not_read_is_a_refusal() {
     let call = kernel_call();
     for firmware in [None, Some("3.70"), Some("4.92")] {
         assert_eq!(
-            net_control(&call, firmware, &open(), &SYNTHETIC_CONSOLE_IDENTITY),
+            net_control(
+                &call,
+                firmware,
+                &open(),
+                &SYNTHETIC_CONSOLE_IDENTITY,
+                CONSOLE_VLAN_FIELDS
+            ),
             refused(&call, UNREAD_FIRMWARE.what),
             "{firmware:?}"
         );

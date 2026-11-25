@@ -305,7 +305,10 @@
 //! zero-extended. The case reads no input other than r6.
 //!
 //! No lv1 code read stores the doubleword at +32 or the byte at +28 of the
-//! global object.
+//! global object. The console capture [`NET_CONTROL_VLAN_FIELDS_CAPTURE`]
+//! reads both; see [`CONSOLE_VLAN_FIELDS`]. Bit 63 of the doubleword is
+//! set there, so the console's lv1 gives -6 for each selector; see
+//! [`net_control_vlan_id`].
 //!
 //! # The 4.93 kernel's calls of `net_control` request 4
 //!
@@ -657,6 +660,91 @@ pub const NET_CONTROL_VLAN_SELECTOR_R3: u64 = zero_extended(LV1_ILLEGAL_PARAMETE
 /// [OFW-4.93 lv1 a:0x245014-0x245018] [OFW-4.93 lv1 a:0x307F7C].
 pub const NET_CONTROL_VLAN_NONE_R3: u64 = zero_extended(LV1_NO_ENTRY);
 
+/// The bit of the doubleword at +32 of the global object that makes
+/// request [`NET_CONTROL_GET_VLAN_ID`] fail with
+/// [`NET_CONTROL_VLAN_NONE_R3`]: bit 63, the low bit
+/// [OFW-4.93 lv1 a:0x244DE0-0x244DEC].
+pub const NET_CONTROL_VLAN_NONE_BIT: u64 = 1;
+
+/// The id that selector 5 gives when the byte at +28 of the global
+/// object is 0 [OFW-4.93 lv1 a:0x244EC8-0x244ED0]
+/// [OFW-4.93 lv1 a:0x244E88-0x244E8C].
+pub const NET_CONTROL_VLAN_FLAG_CLEAR_ID: u64 = 294;
+
+/// The id that selector 5 gives when the byte at +28 of the global
+/// object is not 0 [OFW-4.93 lv1 a:0x244ED4-0x244EE0].
+pub const NET_CONTROL_VLAN_FLAG_SET_ID: u64 = 296;
+
+/// The console capture of the two fields of the network device's global
+/// object that request [`NET_CONTROL_GET_VLAN_ID`] reads.
+///
+/// The path is relative to the workspace root. Its README gives the
+/// method and the analysis.
+pub const NET_CONTROL_VLAN_FIELDS_CAPTURE: &str = "tests/micro/lv1_network_vlan_fields";
+
+/// The offset in the global object of [`VlanFields::capability`]
+/// [OFW-4.93 lv1 a:0x244DE0].
+pub const NET_CONTROL_VLAN_CAPABILITY_OFFSET: u64 = 32;
+
+/// The offset in the global object of [`VlanFields::flag`]
+/// [OFW-4.93 lv1 a:0x244EC8].
+pub const NET_CONTROL_VLAN_FLAG_OFFSET: u64 = 28;
+
+/// The fields of the network device's global object that request
+/// [`NET_CONTROL_GET_VLAN_ID`] reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VlanFields {
+    /// The doubleword at [`NET_CONTROL_VLAN_CAPABILITY_OFFSET`].
+    pub capability: u64,
+    /// The byte at [`NET_CONTROL_VLAN_FLAG_OFFSET`].
+    pub flag: u8,
+}
+
+/// The fields that the reference console's lv1 holds after the boot to
+/// the XMB, as the capture [`NET_CONTROL_VLAN_FIELDS_CAPTURE`] reads them.
+///
+/// No lv1 code read stores either field. The capture does not show the
+/// values at the time of the kernel's first request 4.
+pub const CONSOLE_VLAN_FIELDS: VlanFields = VlanFields {
+    capability: 1,
+    flag: 0,
+};
+
+/// The answer of request [`NET_CONTROL_GET_VLAN_ID`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VlanAnswer {
+    /// r3 = 0, with this id in r4 and 0 in r5
+    /// [OFW-4.93 lv1 a:0x244C28-0x244C34].
+    Id(u64),
+    /// This r3. The case stores no output
+    /// [OFW-4.93 lv1 a:0x244B28-0x244B54].
+    Failed(u64),
+}
+
+/// The answer of request [`NET_CONTROL_GET_VLAN_ID`] for the selector
+/// `selector` when the global object holds `fields`.
+///
+/// The case does these steps in this order:
+/// 1. When `fields.capability` has [`NET_CONTROL_VLAN_NONE_BIT`] set, it
+///    fails with [`NET_CONTROL_VLAN_NONE_R3`]. No other bit changes the
+///    answer.
+/// 2. It fails a selector that [`net_control_vlan_selector`] gives as
+///    [`VlanSelector::Illegal`] with [`NET_CONTROL_VLAN_SELECTOR_R3`].
+/// 3. For [`VlanSelector::Flagged`], it gives
+///    [`NET_CONTROL_VLAN_FLAG_CLEAR_ID`] when `fields.flag` is 0, and
+///    [`NET_CONTROL_VLAN_FLAG_SET_ID`] otherwise.
+pub const fn net_control_vlan_id(selector: u64, fields: VlanFields) -> VlanAnswer {
+    if fields.capability & NET_CONTROL_VLAN_NONE_BIT != 0 {
+        return VlanAnswer::Failed(NET_CONTROL_VLAN_NONE_R3);
+    }
+    match net_control_vlan_selector(selector) {
+        VlanSelector::Fixed(id) => VlanAnswer::Id(id),
+        VlanSelector::Flagged if fields.flag == 0 => VlanAnswer::Id(NET_CONTROL_VLAN_FLAG_CLEAR_ID),
+        VlanSelector::Flagged => VlanAnswer::Id(NET_CONTROL_VLAN_FLAG_SET_ID),
+        VlanSelector::Illegal => VlanAnswer::Failed(NET_CONTROL_VLAN_SELECTOR_R3),
+    }
+}
+
 /// What the switch of request [`NET_CONTROL_GET_VLAN_ID`] gives for one
 /// selector when bit 63 of the capability doubleword is clear.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -860,3 +948,11 @@ mod control_vlan_tests;
 #[cfg(test)]
 #[path = "tests/network_control_vlan_console_tests.rs"]
 mod control_vlan_console_tests;
+
+#[cfg(test)]
+#[path = "tests/network_control_vlan_fields_tests.rs"]
+mod control_vlan_fields_tests;
+
+#[cfg(test)]
+#[path = "tests/network_control_vlan_fields_console_tests.rs"]
+mod control_vlan_fields_console_tests;

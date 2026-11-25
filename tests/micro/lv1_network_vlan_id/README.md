@@ -111,7 +111,7 @@ to a number below 256 gets r3 = 0x00000000FFFFFFFD from the vector (the
 captures `lv1_problem_state_sc` and `lv1_hypercall_table`).
 
 The capture does not read bit 63 of the doubleword at +32 or the byte
-at +28 of the global object. Both are in the page of lv1 heap that holds
-the console's MAC address. So which of the two answers the console
-gives for each selector, the table's id or -6, comes from the code
-alone; CellGov takes the bit as 0.
+at +28 of the global object. The capture `lv1_network_vlan_fields` reads
+both: the doubleword at +32 is 1, so bit 63 is set, and lv1 gives -6
+for each selector before the table is read. CellGov answers from those
+fields (`CONSOLE_VLAN_FIELDS`).
