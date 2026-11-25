@@ -9,7 +9,7 @@ use cellgov_time::GuestTicks;
 /// [OFW-4.93 lv2_kernel a:0x80000000002653c0].
 const PC: u64 = 0x8000_0000_0026_53c0;
 
-fn request(inputs: [u64; 4]) -> HypercallRequest {
+pub(super) fn request(inputs: [u64; 4]) -> HypercallRequest {
     let mut all = [0; 8];
     all[..4].copy_from_slice(&inputs);
     HypercallRequest {
@@ -41,7 +41,7 @@ fn bi_4_93(n2: &[u8], n3: u64, n4: &[u8]) -> u64 {
 /// computes them from `bi.rgntotal` and `rm_size`
 /// [OFW-4.93 lv2_kernel a:0x800000000000cca8-0x800000000000ccf8]
 /// [OFW-4.93 lv2_kernel a:0x8000000000265368-0x800000000026541c].
-fn kernel_sizes_4_93() -> (u64, u64) {
+pub(super) fn kernel_sizes_4_93() -> (u64, u64) {
     let total = bi_4_93(b"rgntotal", 0, b"");
     let pu = bi_4_93(b"pu", 0, b"");
     let rm_size = bi_4_93(b"pu", pu, b"rm_size");
@@ -49,7 +49,7 @@ fn kernel_sizes_4_93() -> (u64, u64) {
     (total - rm_size - remainder, remainder & !0xffff)
 }
 
-fn hypervisor_4_93() -> Hypervisor {
+pub(super) fn hypervisor_4_93() -> Hypervisor {
     let mut hv = Hypervisor::new();
     hv.set_firmware("4.93");
     hv

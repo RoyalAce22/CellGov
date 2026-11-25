@@ -93,7 +93,7 @@ boxes are ranges the boot leaves without a region.
 ```mermaid
 block-beta
   columns 1
-  alloc["<b>lv1 allocated memory</b><br/>0x12000000 - 0x12FFFFFF<br/>16 MB"]
+  alloc["<b>lv1 allocated memory</b><br/>0x12000000 - 0x1999FFFF<br/>the partition's memory past the real mode region at 4.93"]
   gap3["no region<br/>0x11010000 - 0x11FFFFFF"]
   shadow["<b>lv1 shadow pages</b><br/>0x11000000 - 0x1100FFFF<br/>16 pages of 4 KB"]
   gap2["no region<br/>0x10100000 - 0x10FFFFFF"]

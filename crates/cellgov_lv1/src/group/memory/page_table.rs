@@ -726,6 +726,10 @@ mod spe_tests;
 mod allocated_tests;
 
 #[cfg(test)]
+#[path = "tests/page_table_boot_region_tests.rs"]
+mod boot_region_tests;
+
+#[cfg(test)]
 #[path = "tests/page_table_mmio_tests.rs"]
 mod mmio_tests;
 

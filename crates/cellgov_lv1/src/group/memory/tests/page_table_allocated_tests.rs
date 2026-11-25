@@ -17,7 +17,7 @@ const VAS_ID: u64 = 2;
 /// The kernel's first boot region in the console capture
 /// `lv2_repository_boot_nodes`: 0x7900000 bytes in 1 MB pages at counter
 /// value 2.
-const FIRST: MemoryRegion = MemoryRegion {
+pub(super) const FIRST: MemoryRegion = MemoryRegion {
     lpar_address: 0x0000_6C00_1000_0000,
     size: 0x790_0000,
     page_size_exp: 20,
@@ -35,12 +35,22 @@ const SECOND: MemoryRegion = MemoryRegion {
     counter: 3,
 };
 
+/// A region of one 1 MB page after the two boot regions. The boot regions
+/// fill the storage, so this region gets no storage.
+const PAST_STORAGE: MemoryRegion = MemoryRegion {
+    lpar_address: 0x0000_6400_0200_0000,
+    size: 0x10_0000,
+    page_size_exp: 20,
+    unit_id: 1,
+    counter: 4,
+};
+
 /// The entry index, doubleword 0 and doubleword 1 of the first call that
 /// CellGov's boot of the 4.93 kernel makes for a page of its second
 /// region [OFW-4.93 lv2_kernel a:0x800000000005e4f0]. Doubleword 1 holds
 /// the page at offset 0x80000 of the region, N and M, with PP = 0b00.
 const KERNEL_INDEX: u64 = 0x1;
-const KERNEL_D0: u64 = 0x1041;
+pub(super) const KERNEL_D0: u64 = 0x1041;
 const KERNEL_D1: u64 = 0x0000_5000_0038_0000 | PTE_M | PTE_N;
 
 fn request(index: u64, d0: u64, d1: u64) -> HypercallRequest {
@@ -78,17 +88,28 @@ fn boot_regions() -> MemoryState {
     memory
 }
 
-fn storage() -> GuestMemory {
+fn boot_regions_and_one_past_the_storage() -> MemoryState {
+    let mut memory = boot_regions();
+    memory.create(PAST_STORAGE);
+    assert_eq!(memory.storage_real(2), None);
+    memory
+}
+
+pub(super) fn storage() -> GuestMemory {
     GuestMemory::from_regions(vec![page_table_storage(), allocated_storage()]).expect("storage")
 }
 
-fn write(d0: u64, d1: u64, storage: &GuestMemory) -> HypercallDisposition {
+pub(super) fn write(d0: u64, d1: u64, storage: &GuestMemory) -> HypercallDisposition {
+    write_in(&boot_regions(), d0, d1, storage)
+}
+
+fn write_in(memory: &MemoryState, d0: u64, d1: u64, storage: &GuestMemory) -> HypercallDisposition {
     write_entry(
         &request(KERNEL_INDEX, d0, d1),
         Some("4.93"),
         &spaces(),
         &LogicalSpeState::default(),
-        &boot_regions(),
+        memory,
         &DeviceBusState::default(),
         storage,
     )
@@ -101,10 +122,10 @@ fn refusal_what(d: &HypercallDisposition) -> Option<&'static str> {
     }
 }
 
-#[test]
-fn the_kernels_entry_in_its_second_boot_region_maps_the_regions_storage() {
+/// The success answer that stores [`KERNEL_D0`] and `stored` at entry
+/// [`KERNEL_INDEX`] of the page table.
+pub(super) fn stored_answer(stored: u64) -> HypercallDisposition {
     let mut bytes = KERNEL_D0.to_be_bytes().to_vec();
-    let stored = (ALLOCATED_STORAGE_BASE + 0x8_0000) | PTE_M | PTE_N;
     bytes.extend_from_slice(&stored.to_be_bytes());
     let mut answer = HypercallAnswer::lv1_status(0, [0; 7]);
     answer.effects.push(Effect::SharedWriteIntent {
@@ -117,9 +138,15 @@ fn the_kernels_entry_in_its_second_boot_region_maps_the_regions_storage() {
         source: UnitId::new(1),
         source_time: GuestTicks::new(63_971),
     });
+    HypercallDisposition::Answered(answer)
+}
+
+#[test]
+fn the_kernels_entry_in_its_second_boot_region_maps_the_regions_storage() {
+    let stored = (ALLOCATED_STORAGE_BASE + FIRST.size + 0x8_0000) | PTE_M | PTE_N;
     assert_eq!(
         write(KERNEL_D0, KERNEL_D1, &storage()),
-        HypercallDisposition::Answered(answer)
+        stored_answer(stored)
     );
 }
 
@@ -135,8 +162,13 @@ fn a_1_mb_page_in_the_64_kb_page_region_gets_lv1s_page_size_r3() {
 }
 
 #[test]
-fn a_page_of_the_first_boot_region_is_refused_for_want_of_storage() {
-    let d = write(KERNEL_D0, FIRST.lpar_address | PTE_M, &storage());
+fn a_page_of_a_region_past_the_storage_is_refused_for_want_of_storage() {
+    let d = write_in(
+        &boot_regions_and_one_past_the_storage(),
+        KERNEL_D0,
+        PAST_STORAGE.lpar_address | PTE_M,
+        &storage(),
+    );
     assert_eq!(
         refusal_what(&d),
         Some("a valid entry whose page lies in an allocated memory region with no storage")
@@ -159,7 +191,12 @@ fn a_duplicate_entry_for_a_page_with_no_storage_answers_duplicate_entry() {
         .apply_commit(range, &KERNEL_D0.to_be_bytes())
         .expect("commit");
     assert_eq!(
-        write(KERNEL_D0, FIRST.lpar_address | PTE_M, &storage),
+        write_in(
+            &boot_regions_and_one_past_the_storage(),
+            KERNEL_D0,
+            PAST_STORAGE.lpar_address | PTE_M,
+            &storage
+        ),
         lv1_answer(WRITE_HTAB_DUPLICATE_R3)
     );
 }

@@ -25,13 +25,14 @@ fn a_stored_region_adds_its_real_address_under_the_storage_source() {
 fn a_region_with_no_storage_adds_no_storage_term() {
     let region = MemoryRegion {
         lpar_address: 0x0000_6C00_1000_0000,
-        size: 0x790_0000,
+        size: storage::ALLOCATED_STORAGE_BYTES + 0x10_0000,
         page_size_exp: 20,
         unit_id: 1,
         counter: 2,
     };
     let mut memory = MemoryState::default();
     memory.create(region);
+    assert_eq!(memory.storage_real(0), None);
     let expected = lanes::value_term(REGION_COUNTER_SOURCE, 0, &3u64)
         .wrapping_add(lanes::value_term(REGION_SOURCE, 0, &region));
     assert_eq!(memory.sync_term(), expected);

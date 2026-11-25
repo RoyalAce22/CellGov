@@ -26,7 +26,8 @@ const RM_SIZE: u64 = 0x0800_0000;
 const BUFFER: u64 = 0x0049_7940;
 
 /// The kernel's first boot region in the console capture
-/// `lv2_repository_boot_nodes`, which gets no storage.
+/// `lv2_repository_boot_nodes`. The guest memory of these tests does not
+/// hold the region's storage.
 const FIRST: MemoryRegion = MemoryRegion {
     lpar_address: 0x0000_6C00_1000_0000,
     size: 0x790_0000,

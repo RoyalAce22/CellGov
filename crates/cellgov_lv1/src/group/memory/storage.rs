@@ -21,18 +21,24 @@ use super::region::{MemoryRegion, MemoryState};
 ///
 /// CellGov chooses the address, with these properties:
 /// - It lies above the storage of the shadow pages.
+/// - It is a multiple of 1 MB, the largest page size of a region, so the
+///   first region of the storage starts at the base.
 /// - Each byte is at or below [`STORED_MEMORY_LIMIT`], so an entry that
 ///   maps a page of the storage stores the WIMG of memory, M.
 ///
-/// The compiler checks the second property.
+/// The compiler checks the second and third properties.
 pub const ALLOCATED_STORAGE_BASE: u64 = 0x1200_0000;
 
-/// The size of the storage in bytes.
+/// The size of the storage in bytes: the GameOS partition's memory past
+/// its real mode region at 4.93.
 ///
-/// CellGov chooses the size. A region whose range does not fit in the
-/// storage gets no storage.
-pub const ALLOCATED_STORAGE_BYTES: u64 = 16 << 20;
+/// This size is `bi.rgntotal` (0x0F9A_0000) less `rm_size` (0x0800_0000).
+/// `allocate_memory` refuses a region past this memory, so each region it
+/// creates fits, unless its page size alignment leaves a gap before it.
+/// A region whose range does not fit in the storage gets no storage.
+pub const ALLOCATED_STORAGE_BYTES: u64 = 0x079A_0000;
 
+const _: () = assert!(ALLOCATED_STORAGE_BASE.is_multiple_of(1 << 20));
 const _: () = assert!(ALLOCATED_STORAGE_BASE + ALLOCATED_STORAGE_BYTES - 1 <= STORED_MEMORY_LIMIT);
 
 /// The region that holds the pages of the allocated regions, for a boot

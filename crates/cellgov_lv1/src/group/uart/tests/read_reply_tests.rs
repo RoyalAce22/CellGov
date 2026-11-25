@@ -231,7 +231,7 @@ fn a_read_of_an_empty_buffer_reads_0_bytes() {
 }
 
 /// The kernel's first boot region in the console capture
-/// `lv2_repository_boot_nodes`, which gets no storage.
+/// `lv2_repository_boot_nodes`, whose storage starts at the storage base.
 const FIRST: MemoryRegion = MemoryRegion {
     lpar_address: 0x0000_6C00_1000_0000,
     size: 0x790_0000,
@@ -241,7 +241,7 @@ const FIRST: MemoryRegion = MemoryRegion {
 };
 
 /// The kernel's second boot region in the same capture, whose storage
-/// starts at the storage base.
+/// starts after the storage of the first region.
 const SECOND: MemoryRegion = MemoryRegion {
     lpar_address: 0x0000_5000_0030_0000,
     size: 0xA_0000,
@@ -250,9 +250,9 @@ const SECOND: MemoryRegion = MemoryRegion {
     counter: 3,
 };
 
-/// The second region has creation index 1, and its storage starts at the
-/// storage base. So the bytes go to the storage base plus the buffer's
-/// offset in the region.
+/// The second region's storage starts after the first region's storage.
+/// So the bytes go to that address plus the buffer's offset in the
+/// region.
 #[test]
 fn a_read_into_an_allocated_region_writes_the_bytes_at_the_region_s_storage() {
     let mut memory = MemoryState::default();
@@ -268,7 +268,7 @@ fn a_read_into_an_allocated_region_writes_the_bytes_at_the_region_s_storage() {
         read_in(&r, &holding(&HELD, 0), &memory, &storage),
         taken_at(
             &r,
-            crate::ALLOCATED_STORAGE_BASE + 0x100,
+            crate::ALLOCATED_STORAGE_BASE + FIRST.size + 0x100,
             &HELD[..4],
             &HELD[4..]
         )

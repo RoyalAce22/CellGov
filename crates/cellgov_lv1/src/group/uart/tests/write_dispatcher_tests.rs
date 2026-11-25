@@ -54,7 +54,7 @@ fn peer_buffer() -> u64 {
 }
 
 /// The kernel's first boot region in the console capture
-/// `lv2_repository_boot_nodes`, which gets no storage.
+/// `lv2_repository_boot_nodes`, whose storage starts at the storage base.
 const FIRST: MemoryRegion = MemoryRegion {
     lpar_address: 0x0000_6C00_1000_0000,
     size: 0x790_0000,
@@ -63,8 +63,18 @@ const FIRST: MemoryRegion = MemoryRegion {
     counter: 2,
 };
 
+/// A region of one 1 MB page after the two boot regions, which fill the
+/// storage. So this region gets no storage.
+const PAST_STORAGE: MemoryRegion = MemoryRegion {
+    lpar_address: 0x0000_6400_0200_0000,
+    size: 0x10_0000,
+    page_size_exp: 20,
+    unit_id: 1,
+    counter: 4,
+};
+
 /// The kernel's second boot region in the same capture, whose storage
-/// starts at the storage base.
+/// starts after the storage of the first region.
 const SECOND: MemoryRegion = MemoryRegion {
     lpar_address: 0x0000_5000_0030_0000,
     size: 0xA_0000,
@@ -357,9 +367,12 @@ fn a_write_is_answered_only_while_its_bytes_fit_with_the_request_s_bytes_in_the_
 
 #[test]
 fn a_buffer_in_a_region_with_no_storage_is_a_refusal() {
-    let r = request(FIRST.lpar_address + 0x100, 16);
+    let mut memory = boot_regions();
+    memory.create(PAST_STORAGE);
+    assert_eq!(memory.storage_real(2), None);
+    let r = request(PAST_STORAGE.lpar_address + 0x100, 16);
     assert_eq!(
-        write_with(&r, &UartState::default(), &boot_regions(), &storage(&[])),
+        write_with(&r, &UartState::default(), &memory, &storage(&[])),
         refused(
             &r,
             "a virtual UART write buffer whose bytes CellGov's storage does not hold"

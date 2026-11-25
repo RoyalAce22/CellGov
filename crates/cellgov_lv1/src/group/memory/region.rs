@@ -171,7 +171,7 @@ impl MemoryState {
 /// It is `bi.rgntotal` less the real mode size, or `None` when no
 /// repository source gives either value. Linux `ps3_mm_init` asks lv1
 /// for this amount for its one high region.
-fn partition_pool(firmware: &str) -> Option<u64> {
+pub(super) fn partition_pool(firmware: &str) -> Option<u64> {
     let bi = first_field(b"bi", 0);
     let total = game_os_node(bi, field(b"rgntotal", 0), 0, 0, firmware)?;
     total.checked_sub(real_mode_size(firmware)?)
@@ -330,3 +330,7 @@ mod check_tests;
 #[cfg(test)]
 #[path = "tests/memory_storage_hash_tests.rs"]
 mod storage_hash_tests;
+
+#[cfg(test)]
+#[path = "tests/memory_boot_storage_tests.rs"]
+mod boot_storage_tests;

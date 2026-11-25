@@ -39,11 +39,20 @@ fn boot_regions() -> MemoryState {
     memory
 }
 
-#[test]
-fn the_4_93_boot_regions_store_only_the_second_at_the_storage_base() {
-    let memory = boot_regions();
-    assert_eq!(memory.storage_real(0), None);
-    assert_eq!(memory.storage_real(1), Some(ALLOCATED_STORAGE_BASE));
+/// A region of one 1 MB page after the two boot regions, which fill the
+/// storage.
+const PAST_STORAGE: MemoryRegion = MemoryRegion {
+    lpar_address: 0x0000_6400_0200_0000,
+    size: 0x10_0000,
+    page_size_exp: 20,
+    unit_id: 1,
+    counter: 4,
+};
+
+fn boot_regions_and_one_past_the_storage() -> MemoryState {
+    let mut memory = boot_regions();
+    memory.create(PAST_STORAGE);
+    memory
 }
 
 #[test]
@@ -100,13 +109,14 @@ fn a_region_that_ends_at_the_storage_end_fits_and_a_larger_one_does_not() {
 fn a_page_of_a_stored_region_lies_at_its_offset_in_the_storage() {
     let memory = boot_regions();
     let page = SECOND.lpar_address + 0x8_0000;
+    let real = ALLOCATED_STORAGE_BASE + FIRST.size + 0x8_0000;
     assert_eq!(
         region_page(&memory, page, 12),
-        Some(AllocatedPage::Stored(ALLOCATED_STORAGE_BASE + 0x8_0000))
+        Some(AllocatedPage::Stored(real))
     );
     assert_eq!(
         region_page(&memory, page, 16),
-        Some(AllocatedPage::Stored(ALLOCATED_STORAGE_BASE + 0x8_0000))
+        Some(AllocatedPage::Stored(real))
     );
 }
 
@@ -121,9 +131,10 @@ fn a_page_larger_than_its_regions_pages_gets_lv1s_r3() {
 
 #[test]
 fn a_page_of_a_region_with_no_storage_is_no_storage_and_one_past_every_region_is_none() {
-    let memory = boot_regions();
+    let memory = boot_regions_and_one_past_the_storage();
+    assert_eq!(memory.storage_real(2), None);
     assert_eq!(
-        region_page(&memory, FIRST.lpar_address + 0x10_0000, 20),
+        region_page(&memory, PAST_STORAGE.lpar_address + 0x8_0000, 20),
         Some(AllocatedPage::NoStorage)
     );
     assert_eq!(
