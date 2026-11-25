@@ -1852,7 +1852,7 @@ Usage: cellgov dev hypercall-census [OPTIONS] --fw <VERSION> --pup-sha256 <SHA25
 | --- | --- | --- |
 | `--fw` | `VERSION` | Select the firmware version from `pup.tsv`. Required. |
 | `--pup-sha256` | `SHA256` | Use the source PUP's SHA-256 from `pup.tsv`. Required. |
-| `--output-dir` | `DIR` | Write the two hypercall site tables to this directory. Default `docs/lv2`. |
+| `--output-dir` | `DIR` | Write the two hypercall site tables to this directory. Default `docs/lv1`. |
 
 #### `cellgov dev repository-census`
 
@@ -1875,7 +1875,7 @@ Usage: cellgov dev repository-census [OPTIONS] --fw <VERSION> --pup-sha256 <SHA2
 | --- | --- | --- |
 | `--fw` | `VERSION` | Select the firmware version from `pup.tsv`. Required. |
 | `--pup-sha256` | `SHA256` | Use the source PUP's SHA-256 from `pup.tsv`. Required. |
-| `--output-dir` | `DIR` | Write the repository read table to this directory. Default `docs/lv2`. |
+| `--output-dir` | `DIR` | Write the repository read table to this directory. Default `docs/lv1`. |
 | `--max-steps` | `N` | Stop the boot after this many runtime steps. Default `1000000`. |
 
 #### `cellgov dev rpcs3-attribute`
