@@ -16,7 +16,7 @@
 //! gives. The tests therefore compare differences of loops, and a second
 //! test names the sector cost.
 
-use crate::console_ppu_issue_timing::{replay, Replay, Seed};
+use crate::console_ppu_issue_timing::{replay_warmed_for, Replay, Seed};
 use crate::console_ppu_issue_touch_set_forms::{console_cycles, console_words, touches};
 use crate::console_ppu_issue_touch_set_pressure::{looped, CONFLICT, IN_BUFFER, IN_GROUP};
 use cellgov_ps3_abi::hw::ppu_issue::PPU_SECTOR_CROSS_LOAD_CYCLES;
@@ -71,6 +71,15 @@ fn body(k: usize) -> Vec<u32> {
     }
 }
 
+/// The passes that warm a replay. The passes walk the L1 sets and the
+/// 64 KB groups in a cycle of 256 passes. After that cycle and 8 passes
+/// more, each pass costs the same cycles as at the 512th pass; after 256
+/// it does not.
+const WARM_PASSES: u64 = 264;
+
+/// The passes a replay times after [`WARM_PASSES`].
+const TIMED_PASSES: u64 = 8;
+
 /// CellGov's cycles a pass for loop `k`.
 fn cellgov_cycles(k: usize) -> f64 {
     let r = Replay {
@@ -78,7 +87,7 @@ fn cellgov_cycles(k: usize) -> f64 {
         words: looped(&body(k)),
         seeds: SEEDS,
     };
-    replay(&r, 0).expect("the loop replays")
+    replay_warmed_for(&r, WARM_PASSES, TIMED_PASSES).expect("the loop replays")
 }
 
 #[test]

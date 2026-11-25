@@ -115,16 +115,31 @@ fn stalls_a_divide_early(n: usize, k: usize) -> bool {
 fn beside_a_sibling_of_spaced_divides_the_model_times_the_loop_near_the_console() {
     let w = console_words();
     let iterations = iterations(&w);
-    for &k in &KS {
-        for &n in NS.iter().filter(|&&n| !stalls_a_divide_early(n, k)) {
-            let console = console_median(&w, n, k);
-            let cellgov = replay(n, k, iterations);
-            assert!(
-                (cellgov - console).abs() / console <= BAND,
-                "{n} divides, {k} addi after each: CellGov {cellgov:.2} cycles an \
-                 iteration, the console {console:.2}"
-            );
-        }
+    let cells: Vec<(usize, usize)> = KS
+        .iter()
+        .flat_map(|&k| NS.iter().map(move |&n| (n, k)))
+        .filter(|&(n, k)| !stalls_a_divide_early(n, k))
+        .collect();
+    // A shorter replay or warm-up moves a cell's cycles, since each
+    // replay times how the loop lines up with the sibling's rounds. The
+    // cells' replays run on threads of their own, joined in order.
+    let cellgov: Vec<f64> = std::thread::scope(|scope| {
+        let threads: Vec<_> = cells
+            .iter()
+            .map(|&(n, k)| scope.spawn(move || replay(n, k, iterations)))
+            .collect();
+        threads
+            .into_iter()
+            .map(|t| t.join().expect("a cell's replay"))
+            .collect()
+    });
+    for (&(n, k), &cellgov) in cells.iter().zip(&cellgov) {
+        let console = console_median(&w, n, k);
+        assert!(
+            (cellgov - console).abs() / console <= BAND,
+            "{n} divides, {k} addi after each: CellGov {cellgov:.2} cycles an \
+             iteration, the console {console:.2}"
+        );
     }
 }
 

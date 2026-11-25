@@ -12,7 +12,7 @@
 //! an iteration no farther from the fastest run than the slowest run is,
 //! except the loops `RESIDUALS` names.
 
-use crate::console_ppu_issue_timing::{replay, Replay, Seed, ONE_LINE};
+use crate::console_ppu_issue_timing::{replay_beside_for, Replay, Seed, Sibling, ONE_LINE};
 use cellgov_ps3_abi::hw::ppu_issue::PPU_CYCLES_PER_TB_TICK;
 
 const CONSOLE: &str =
@@ -152,21 +152,30 @@ const LOOPS: [&[u32]; LOOP_COUNT] = [
     &LOOP_10, &LOOP_11, &LOOP_12, &LOOP_13, &LOOP_14, &LOOP_15, &LOOP_16,
 ];
 
+/// No sibling: each loop replays alone.
+const ALONE: Sibling = Sibling {
+    words: &[],
+    seeds: &[],
+};
+
+/// Iterations each replay times, after as many that warm it. Each loop
+/// gives the same cycles at 128 as at 512, and 512 takes the tests past
+/// their time budget. At 32 loop 7 still gives other cycles.
+const REPLAY_ITERATIONS: u64 = 128;
+
+/// Loop `k` replayed alone, in cycles an iteration.
+fn cellgov_loop_cycles(k: usize) -> f64 {
+    let r = Replay {
+        loop_index: k,
+        words: LOOPS[k],
+        seeds: &[Seed::Gpr(7, ONE_LINE)],
+    };
+    replay_beside_for(&r, 0, &ALONE, REPLAY_ITERATIONS).expect("the loop replays")
+}
+
 /// Each loop replayed alone, in cycles an iteration.
 fn cellgov_cycles() -> Vec<f64> {
-    let seeds: &'static [Seed] = &[Seed::Gpr(7, ONE_LINE)];
-    LOOPS
-        .iter()
-        .enumerate()
-        .map(|(k, words)| {
-            let r = Replay {
-                loop_index: k,
-                words,
-                seeds,
-            };
-            replay(&r, 0).expect("the loop replays")
-        })
-        .collect()
+    (0..LOOP_COUNT).map(cellgov_loop_cycles).collect()
 }
 
 /// The loops the model times outside the console's spread, each with the
@@ -234,7 +243,6 @@ fn the_issue_model_times_each_store_queue_drain_loop_within_the_console_s_spread
 #[test]
 fn stores_two_to_a_block_cost_less_than_stores_one_to_a_block() {
     let w = console_words();
-    let cycles = cellgov_cycles();
     // Loop 11 runs 32 stores two to a block, loop 8 one to a block.
     let (two, _) = console_cycles(&w, 11);
     let (one, _) = console_cycles(&w, 8);
@@ -242,11 +250,10 @@ fn stores_two_to_a_block_cost_less_than_stores_one_to_a_block() {
         two < one,
         "the console gathers: {two:.3} two to a block, {one:.3} one to a block"
     );
+    let (two_cellgov, one_cellgov) = (cellgov_loop_cycles(11), cellgov_loop_cycles(8));
     assert!(
-        cycles[11] < cycles[8],
-        "CellGov {:.3} two to a block, {:.3} one to a block; the console {two:.3} \
-         and {one:.3}",
-        cycles[11],
-        cycles[8],
+        two_cellgov < one_cellgov,
+        "CellGov {two_cellgov:.3} two to a block, {one_cellgov:.3} one to a block; the \
+         console {two:.3} and {one:.3}",
     );
 }

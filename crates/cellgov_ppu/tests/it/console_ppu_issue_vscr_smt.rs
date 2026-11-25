@@ -5,7 +5,9 @@
 //! flag and counts its rounds in memory, with no time-base read. Five
 //! chains run on the main thread alone and beside each sibling.
 
-use crate::console_ppu_issue_sibling_rate::{cellgov_kept, sibling_loop, COUNT, STOP, TOLERANCE};
+use crate::console_ppu_issue_sibling_rate::{
+    cellgov_kept_for, sibling_loop, COUNT, STOP, TOLERANCE,
+};
 use crate::console_ppu_issue_timing::{replay_beside, Replay, Seed, Sibling};
 use cellgov_ps3_abi::hw::ppu_issue::PPU_CYCLES_PER_TB_TICK;
 
@@ -232,6 +234,12 @@ fn console_kept(w: &[u64], phase: usize, chain: usize) -> f64 {
 /// held set.
 const KEPT_DIFFERENCES: [(usize, usize); 5] = [(1, 1), (2, 1), (2, 2), (2, 4), (3, 1)];
 
+/// Iterations each replay of a cell times, after as many that warm it.
+/// At 128 each cell's share lies within 0.6% of its share at 512, and 512
+/// takes the test past its time budget. At 64 the sibling finishes too few
+/// rounds in the timed half, and a share moves by up to a fifth.
+const KEPT_ITERATIONS: u64 = 128;
+
 #[test]
 fn each_sibling_keeps_its_console_share_of_its_rate_beside_each_chain() {
     let w = console_words();
@@ -240,7 +248,7 @@ fn each_sibling_keeps_its_console_share_of_its_rate_beside_each_chain() {
     let rows: Vec<(usize, usize, f64, f64)> = (1..=PHASES)
         .flat_map(|p| (0..CHAINS).map(move |c| (p, c)))
         .map(|(p, c)| {
-            let cellgov = cellgov_kept(&chains[c], &siblings[p - 1]);
+            let cellgov = cellgov_kept_for(&chains[c], &siblings[p - 1], KEPT_ITERATIONS);
             (p, c, cellgov, console_kept(&w, p, c))
         })
         .collect();

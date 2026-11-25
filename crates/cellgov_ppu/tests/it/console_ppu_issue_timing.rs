@@ -711,6 +711,22 @@ pub(crate) fn replay_measured(r: &Replay, siblings: usize, sibling: &Sibling) ->
     replay_counted(r, siblings, sibling, REPLAY_ITERATIONS, false, CODE)
 }
 
+/// [`replay_measured`], with the loop run twice `iterations` times.
+pub(crate) fn replay_measured_for(
+    r: &Replay,
+    siblings: usize,
+    sibling: &Sibling,
+    iterations: u64,
+) -> Option<Measured> {
+    replay_counted(r, siblings, sibling, iterations, false, CODE)
+}
+
+/// [`replay`] alone, with `warm` iterations that warm the loop before the
+/// `timed` iterations it times.
+pub(crate) fn replay_warmed_for(r: &Replay, warm: u64, timed: u64) -> Option<f64> {
+    replay_window(r, 0, &PROBE_SIBLING, warm, timed, false, CODE).map(|m| m.cycles)
+}
+
 /// [`replay_measured`], with the loop run twice `iterations` times from
 /// `at`. With `shadowed`, the loop's unit runs from a predecoded shadow
 /// of the loop.
@@ -719,6 +735,19 @@ fn replay_counted(
     siblings: usize,
     sibling: &Sibling,
     iterations: u64,
+    shadowed: bool,
+    at: u64,
+) -> Option<Measured> {
+    replay_window(r, siblings, sibling, iterations, iterations, shadowed, at)
+}
+
+/// [`replay_counted`], with `warm` iterations before the `timed` ones.
+fn replay_window(
+    r: &Replay,
+    siblings: usize,
+    sibling: &Sibling,
+    warm: u64,
+    timed: u64,
     shadowed: bool,
     at: u64,
 ) -> Option<Measured> {
@@ -763,8 +792,8 @@ fn replay_counted(
         let state = ppu.state_mut();
         state.pc = at;
         match counter {
-            Some(k) => state.set_gpr(k, 2 * iterations),
-            None => state.set_ctr(2 * iterations),
+            Some(k) => state.set_gpr(k, warm + timed),
+            None => state.set_ctr(warm + timed),
         }
         for seed in seeds {
             match *seed {
@@ -833,7 +862,7 @@ fn replay_counted(
     // A sibling's instructions cost fewer cycles than most loops', so the
     // scheduler gives it several steps for each of the loop's. A loop
     // with an inner loop runs up to four times its words an iteration.
-    let bound = 4 * (2 * iterations * (words.len() as u64 + 1) + 16) * (16 * siblings as u64 + 1);
+    let bound = 4 * ((warm + timed) * (words.len() as u64 + 1) + 16) * (16 * siblings as u64 + 1);
     for _ in 0..bound {
         let s = state(&rt);
         if s.pc == exit {
@@ -846,7 +875,7 @@ fn replay_counted(
             }
             sibling_was_at_head = at_head;
         }
-        if halfway.is_none() && s.pc == at && left(&s) == iterations {
+        if halfway.is_none() && s.pc == at && left(&s) == timed {
             halfway = Some((
                 rt.registry().clock(unit).raw(),
                 sibling_mark(&rt, sibling_rounds),
@@ -875,7 +904,7 @@ fn replay_counted(
         _ => None,
     };
     Some(Measured {
-        cycles: (rt.registry().clock(unit).raw() - halfway) as f64 / iterations as f64,
+        cycles: (rt.registry().clock(unit).raw() - halfway) as f64 / timed as f64,
         sibling_cycles,
         r3: state(&rt).gpr[3],
     })

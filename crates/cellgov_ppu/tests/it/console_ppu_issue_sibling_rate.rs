@@ -8,7 +8,9 @@
 //! replay runs the same loop words as the sibling.
 
 use crate::console_ppu_issue_shared::eight;
-use crate::console_ppu_issue_timing::{replay, replay_measured, Replay, Seed, Sibling};
+use crate::console_ppu_issue_timing::{
+    replay, replay_beside_for, replay_measured, replay_measured_for, Replay, Seed, Sibling,
+};
 use cellgov_ps3_abi::hw::ppu_issue::PPU_CYCLES_PER_TB_TICK;
 
 const CONSOLE: &str = "../../tests/micro/ppu_issue_sibling/ps3/cech20-cex-493/cgov_frame.bin";
@@ -61,6 +63,11 @@ fn console_kept(w: &[u64], phase: usize, chain: usize) -> f64 {
 /// it: the loop runs as the replay's own, its closing branch replaced by
 /// a count down of r21.
 fn cellgov_alone(sibling: &Sibling) -> f64 {
+    replay(&alone_replay(sibling), 0).expect("the sibling's loop replays alone")
+}
+
+/// The sibling's loop as the replay's own loop, for the alone rate.
+fn alone_replay(sibling: &Sibling) -> Replay {
     let n = sibling.words.len();
     let mut words: Vec<u32> = sibling.words[..n - 1].to_vec();
     // addi r21,r21,-1; cmpdi r21,0; bne back to the head.
@@ -70,17 +77,33 @@ fn cellgov_alone(sibling: &Sibling) -> f64 {
     words.push(0x4082_0000 | back);
     let mut seeds = sibling.seeds.to_vec();
     seeds.push(Seed::Counter(21));
-    let r = Replay {
+    Replay {
         loop_index: 0,
         words: Box::leak(words.into_boxed_slice()),
         seeds: Box::leak(seeds.into_boxed_slice()),
-    };
-    replay(&r, 0).expect("the sibling's loop replays alone")
+    }
 }
 
 /// The share of its alone rate CellGov's sibling keeps beside `chain`.
 pub(crate) fn cellgov_kept(chain: &Replay, sibling: &Sibling) -> f64 {
     kept_of(cellgov_alone(sibling), chain, sibling)
+}
+
+/// No sibling: the replay runs alone.
+const ALONE: Sibling = Sibling {
+    words: &[],
+    seeds: &[],
+};
+
+/// The kept share, with the sibling's loop alone and the chain each run
+/// twice `iterations` times.
+pub(crate) fn cellgov_kept_for(chain: &Replay, sibling: &Sibling, iterations: u64) -> f64 {
+    let alone = replay_beside_for(&alone_replay(sibling), 0, &ALONE, iterations)
+        .expect("the sibling's loop replays alone");
+    let beside = replay_measured_for(chain, 1, sibling, iterations)
+        .and_then(|m| m.sibling_cycles)
+        .expect("the sibling ran beside the chain");
+    alone / beside
 }
 
 /// The same share, with `alone` the sibling's cycles a round alone.

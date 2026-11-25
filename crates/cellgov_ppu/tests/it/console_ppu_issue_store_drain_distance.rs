@@ -5,7 +5,7 @@
 //! The probe times twenty-six loops with `mftb`, five runs each. Every
 //! store addresses one data line, which r29 holds.
 
-use crate::console_ppu_issue_timing::{replay, Replay, Seed, ONE_LINE};
+use crate::console_ppu_issue_timing::{replay_beside_for, Replay, Seed, Sibling, ONE_LINE};
 use cellgov_ps3_abi::hw::ppu_issue::PPU_CYCLES_PER_TB_TICK;
 
 const CONSOLE: &str =
@@ -126,6 +126,17 @@ fn bodies() -> [Vec<u32>; LOOPS] {
     ]
 }
 
+/// No sibling: each loop replays alone.
+const ALONE: Sibling = Sibling {
+    words: &[],
+    seeds: &[],
+};
+
+/// Iterations each replay times, after as many that warm it. Each loop
+/// gives the same cycles at 8 as at 512, and 512 takes the tests past
+/// their time budget. At 4 most loops still give other cycles.
+const REPLAY_ITERATIONS: u64 = 8;
+
 /// CellGov's cycles an iteration for loop `k`.
 fn cellgov_cycles(k: usize) -> f64 {
     let r = Replay {
@@ -133,7 +144,7 @@ fn cellgov_cycles(k: usize) -> f64 {
         words: looped(&bodies()[k]),
         seeds: &[Seed::Gpr(29, ONE_LINE)],
     };
-    replay(&r, 0).expect("the loop replays")
+    replay_beside_for(&r, 0, &ALONE, REPLAY_ITERATIONS).expect("the loop replays")
 }
 
 /// The share of a loop's fastest console run the model may lie on either
