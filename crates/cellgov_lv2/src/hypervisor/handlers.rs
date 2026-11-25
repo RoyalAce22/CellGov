@@ -2,17 +2,19 @@
 
 use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::lv1::call::{
-    ALLOCATE_MEMORY, CONSTRUCT_VIRTUAL_ADDRESS_SPACE, GET_LOGICAL_PARTITION_ID, GET_LOGICAL_PPE_ID,
-    LOGICAL_CONSOLE_CONSTRUCT, LOGICAL_CONSOLE_FLUSH, LOGICAL_CONSOLE_SEND, MAP_HTAB,
-    READ_HTAB_ENTRIES, READ_REPOSITORY_NODE, SELECT_VIRTUAL_ADDRESS_SPACE, WRITE_HTAB_ENTRY,
+    ALLOCATE_MEMORY, CONFIGURE_IRQ_STATE_BITMAP, CONSTRUCT_VIRTUAL_ADDRESS_SPACE,
+    GET_LOGICAL_PARTITION_ID, GET_LOGICAL_PPE_ID, LOGICAL_CONSOLE_CONSTRUCT, LOGICAL_CONSOLE_FLUSH,
+    LOGICAL_CONSOLE_SEND, MAP_HTAB, READ_HTAB_ENTRIES, READ_REPOSITORY_NODE,
+    SELECT_VIRTUAL_ADDRESS_SPACE, WRITE_HTAB_ENTRY,
 };
 use cellgov_ps3_abi::lv1::partition::LPAR_ID_GAME_OS;
 
 use super::address_space::AddressSpaceState;
 use super::answer::{HypercallAnswer, HypercallDisposition};
+use super::interrupt::IrqStateBitmapState;
 use super::memory::MemoryState;
 use super::request::HypercallRequest;
-use super::{address_space, console, memory, page_table, ppe, repository, vector};
+use super::{address_space, console, interrupt, memory, page_table, ppe, repository, vector};
 
 /// The numbers a handler answers, ascending. Every other number takes
 /// the null backend, unless lv1's vector answers it first.
@@ -21,6 +23,7 @@ pub const ANSWERED: &[u64] = &[
     WRITE_HTAB_ENTRY,
     CONSTRUCT_VIRTUAL_ADDRESS_SPACE,
     SELECT_VIRTUAL_ADDRESS_SPACE,
+    CONFIGURE_IRQ_STATE_BITMAP,
     GET_LOGICAL_PPE_ID,
     GET_LOGICAL_PARTITION_ID,
     READ_REPOSITORY_NODE,
@@ -37,8 +40,10 @@ pub fn answers(number: u64) -> bool {
 }
 
 /// The disposition of `request` from a hypervisor that answers for the
-/// firmware version `firmware` and holds the memory regions `memory` and
-/// the virtual address spaces `spaces`.
+/// firmware version `firmware` and holds these states:
+/// - the memory regions `memory`;
+/// - the virtual address spaces `spaces`;
+/// - the interrupt state bitmaps `bitmaps`.
 ///
 /// `storage` is the caller's real address space. The page table calls
 /// read the page table there.
@@ -51,6 +56,7 @@ pub fn answer(
     firmware: Option<&str>,
     memory: &MemoryState,
     spaces: &AddressSpaceState,
+    bitmaps: &IrqStateBitmapState,
     storage: &GuestMemory,
 ) -> HypercallDisposition {
     if let Some(disposition) = vector::vector_disposition(request, firmware) {
@@ -61,6 +67,9 @@ pub fn answer(
         WRITE_HTAB_ENTRY => page_table::write_entry(request, firmware, spaces, storage),
         CONSTRUCT_VIRTUAL_ADDRESS_SPACE => address_space::construct(request, firmware, spaces),
         SELECT_VIRTUAL_ADDRESS_SPACE => address_space::select(request, firmware, spaces, storage),
+        CONFIGURE_IRQ_STATE_BITMAP => {
+            interrupt::configure_bitmap(request, firmware, bitmaps, storage)
+        }
         GET_LOGICAL_PPE_ID => ppe::logical_ppe_id(request, firmware),
         GET_LOGICAL_PARTITION_ID => {
             HypercallDisposition::Answered(HypercallAnswer::success(vec![LPAR_ID_GAME_OS]))

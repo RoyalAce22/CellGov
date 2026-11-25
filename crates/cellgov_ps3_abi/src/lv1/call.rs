@@ -113,6 +113,19 @@ pub const CONSTRUCT_VIRTUAL_ADDRESS_SPACE: u64 = 2;
 /// [`CONSTRUCT_VIRTUAL_ADDRESS_SPACE`] returned.
 pub const SELECT_VIRTUAL_ADDRESS_SPACE: u64 = 7;
 
+/// `configure_irq_state_bitmap`: register the interrupt state bitmap of
+/// one hardware thread of a logical PPE.
+///
+/// The inputs:
+/// - r3 is the logical PPE id.
+/// - r4 is the hardware thread.
+/// - r5 is the bitmap's logical partition address.
+///
+/// There is no output. Linux `arch/powerpc/platforms/ps3/interrupt.c`,
+/// `ps3_init_IRQ`, makes the call in this form. The 4.93 lv1 handler
+/// reads the inputs in this form; see [`super::interrupt`].
+pub const CONFIGURE_IRQ_STATE_BITMAP: u64 = 11;
+
 /// `get_logical_ppe_id`: no input, and the id of the caller's logical
 /// PPE in r4. Linux `arch/powerpc/platforms/ps3/repository.c`,
 /// `ps3_repository_read_mm_info`, makes the call in this form. The 4.93

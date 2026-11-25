@@ -8,6 +8,7 @@ use cellgov_ps3_abi::lv1::repository::RepositoryKey;
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
 use super::address_space::AddressSpaceChange;
+use super::interrupt::IrqStateBitmapRegistration;
 use super::memory::MemoryRegion;
 
 /// Bytes a logical console send gave the console.
@@ -50,6 +51,9 @@ pub struct HypercallAnswer {
     /// The page table and large page sizes that the calling thread
     /// loads, which the runtime gives the thread.
     pub page_table: Option<PageTableLoad>,
+    /// The interrupt state bitmap the call registered, which the
+    /// hypervisor keeps.
+    pub irq_state_bitmap: Option<IrqStateBitmapRegistration>,
 }
 
 /// The translation registers that lv1 loads on the calling thread when
@@ -79,6 +83,7 @@ impl HypercallAnswer {
             region: None,
             address_space: None,
             page_table: None,
+            irq_state_bitmap: None,
         }
     }
 }

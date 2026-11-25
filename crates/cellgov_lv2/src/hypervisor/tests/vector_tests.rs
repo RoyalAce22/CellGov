@@ -13,7 +13,7 @@ use cellgov_time::GuestTicks;
 use super::{null_backend, vector_disposition};
 use crate::hypervisor::{
     answer, AddressSpaceState, HypercallAnswer, HypercallDisposition, HypercallRefusal,
-    HypercallRequest, HypercallWitness, Hypervisor, MemoryState, ANSWERED,
+    HypercallRequest, HypercallWitness, Hypervisor, IrqStateBitmapState, MemoryState, ANSWERED,
 };
 
 fn request(number: u64, problem_state: bool) -> HypercallRequest {
@@ -38,6 +38,7 @@ fn answered(r3: u64, outputs: Vec<u64>) -> HypercallDisposition {
         region: None,
         address_space: None,
         page_table: None,
+        irq_state_bitmap: None,
     })
 }
 
@@ -77,6 +78,7 @@ fn a_number_past_the_table_reaches_the_null_backend_where_no_image_gives_the_cou
                 firmware,
                 &MemoryState::default(),
                 &AddressSpaceState::default(),
+                &IrqStateBitmapState::default(),
                 &GuestMemory::new(0)
             ),
             unmodelled(&r),
@@ -96,6 +98,7 @@ fn every_problem_state_call_below_256_answers_no_privilege_at_4_93() {
                 Some("4.93"),
                 &MemoryState::default(),
                 &AddressSpaceState::default(),
+                &IrqStateBitmapState::default(),
                 &GuestMemory::new(0)
             ),
             answered(PROBLEM_STATE_DENIED_R3, vec![0; 7]),
@@ -156,7 +159,7 @@ fn an_entry_invalid_at_4_93_stops_the_run_at_another_firmware() {
 
 #[test]
 fn every_answered_number_has_a_handler_in_the_live_4_93_table() {
-    assert_eq!(ANSWERED.len(), 12);
+    assert_eq!(ANSWERED.len(), 13);
     for &number in ANSWERED {
         assert!(
             matches!(table_entry("4.93", number), Some(TableEntry::Handler(_))),

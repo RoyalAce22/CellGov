@@ -6,6 +6,7 @@
 //! - the firmware version the [`Hypervisor`] answers for;
 //! - the partition's memory regions the [`Hypervisor`] holds;
 //! - the partition's virtual address spaces the [`Hypervisor`] holds;
+//! - the interrupt state bitmaps the [`Hypervisor`] holds;
 //! - the caller's real address space, which holds the page table.
 //!
 //! It returns a [`HypercallDisposition`]:
@@ -14,8 +15,8 @@
 //! - a typed refusal, which stops the run.
 //!
 //! No handler writes guest state. An answer can carry a new memory
-//! region or a change to the address spaces, and [`Hypervisor`] keeps
-//! it.
+//! region, a change to the address spaces or a registered bitmap, and
+//! [`Hypervisor`] keeps it.
 //!
 //! Before a handler runs, the hypervisor gives the answers of lv1's own
 //! `sc` vector: a number past the hypercall table, and a problem-state
@@ -29,6 +30,7 @@ mod answer;
 mod console;
 mod cost;
 mod handlers;
+mod interrupt;
 mod memory;
 mod page_table;
 mod ppe;
@@ -43,6 +45,7 @@ pub use answer::{
 };
 pub use cost::cost;
 pub use handlers::{answer, answers, ANSWERED};
+pub use interrupt::{IrqStateBitmapKey, IrqStateBitmapRegistration, IrqStateBitmapState};
 pub use memory::{MemoryRegion, MemoryState};
 pub use page_table::{page_table_storage, PAGE_TABLE_STORAGE_BASE, PAGE_TABLE_STORAGE_BYTES};
 pub use repository::RepositoryRead;

@@ -8,6 +8,7 @@
 //! - the checks and outputs of the virtual address space calls
 //! - the checks and outputs of the page table calls
 //! - the logical PPE id and the call that returns it
+//! - the checks and effects of the interrupt state bitmap call
 //! - the statuses of a refused storage write
 //!
 //! A hypercall is `sc` with LEV = 1 from supervisor state. r11 holds
@@ -17,6 +18,7 @@
 pub mod address_space;
 pub mod call;
 pub mod dispatch;
+pub mod interrupt;
 pub mod memory;
 pub mod page_table;
 pub mod partition;

@@ -1,7 +1,7 @@
-//! The hypervisor's state: the partition's memory regions and virtual
-//! address spaces, and its own records of the witnesses of numbers with
-//! no handler, the guest TTY sink, the repository reads and the refusal
-//! that stopped the run.
+//! The hypervisor's state: the partition's memory regions, virtual
+//! address spaces and interrupt state bitmaps, and its own records of
+//! the witnesses of numbers with no handler, the guest TTY sink, the
+//! repository reads and the refusal that stopped the run.
 
 use std::collections::BTreeMap;
 
@@ -12,6 +12,7 @@ use cellgov_time::GuestTicks;
 use super::address_space::{AddressSpaceChange, AddressSpaceState};
 use super::answer::{HypercallDisposition, HypercallRefusal};
 use super::handlers::{answer, answers};
+use super::interrupt::IrqStateBitmapState;
 use super::memory::MemoryState;
 use super::repository::{read_record, RepositoryRead};
 use super::request::HypercallRequest;
@@ -28,19 +29,20 @@ pub struct HypercallWitness {
 }
 
 /// CellGov's hypervisor, the firmware version it answers for, the
-/// partition's memory regions and virtual address spaces, and its
-/// records.
+/// partition's memory regions, virtual address spaces and interrupt
+/// state bitmaps, and its records.
 ///
 /// The firmware version selects the values that the repository reads,
 /// the allocations and the address space calls answer. The answers
-/// depend on the memory regions and the address spaces, so they are
-/// guest state, and [`Self::sync_term`] hashes them. No answer depends
-/// on the records.
+/// depend on the memory regions, the address spaces and the bitmaps, so
+/// they are guest state, and [`Self::sync_term`] hashes them. No answer
+/// depends on the records.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Hypervisor {
     firmware: Option<String>,
     memory: MemoryState,
     address_spaces: AddressSpaceState,
+    irq_state_bitmaps: IrqStateBitmapState,
     witnesses: BTreeMap<u64, HypercallWitness>,
     console: Vec<u8>,
     repository_reads: Vec<RepositoryRead>,
@@ -76,6 +78,7 @@ impl Hypervisor {
     /// - a created memory region joins the partition's regions;
     /// - a change to the address spaces applies, and a page table
     ///   mapping moves the region counter past the value it took;
+    /// - a registered interrupt state bitmap joins the bitmaps;
     /// - a console write appends its bytes to the TTY sink;
     /// - a repository read that reaches its handler appends its record,
     ///   answered or refused;
@@ -92,6 +95,7 @@ impl Hypervisor {
             self.firmware.as_deref(),
             &self.memory,
             &self.address_spaces,
+            &self.irq_state_bitmaps,
             storage,
         );
         // A read that lv1's vector answers or refuses never reaches the
@@ -122,6 +126,9 @@ impl Hypervisor {
                     }
                     self.address_spaces.apply(change);
                 }
+                if let Some(registration) = answer.irq_state_bitmap {
+                    self.irq_state_bitmaps.register(registration);
+                }
                 if let Some(write) = &answer.console {
                     self.console.extend_from_slice(write.bytes());
                 }
@@ -143,12 +150,20 @@ impl Hypervisor {
         &self.address_spaces
     }
 
+    /// The interrupt state bitmap that each logical PPE thread
+    /// registered.
+    pub fn irq_state_bitmaps(&self) -> &IrqStateBitmapState {
+        &self.irq_state_bitmaps
+    }
+
     /// The sync-state terms of the hypervisor's guest state: its memory
-    /// regions and its address spaces. The records add no term.
+    /// regions, its address spaces and its interrupt state bitmaps. The
+    /// records add no term.
     pub fn sync_term(&self) -> u128 {
         self.memory
             .sync_term()
             .wrapping_add(self.address_spaces.sync_term())
+            .wrapping_add(self.irq_state_bitmaps.sync_term())
     }
 
     /// Each number with no handler that the hypervisor saw, ascending.

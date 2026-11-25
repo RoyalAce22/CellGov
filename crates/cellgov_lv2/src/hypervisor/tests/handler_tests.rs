@@ -1,5 +1,5 @@
 use super::*;
-use crate::hypervisor::{AddressSpaceState, HypercallRefusal};
+use crate::hypervisor::{AddressSpaceState, HypercallRefusal, IrqStateBitmapState};
 use cellgov_event::UnitId;
 use cellgov_mem::GuestMemory;
 use cellgov_time::GuestTicks;
@@ -23,13 +23,14 @@ fn answer(r: &HypercallRequest, firmware: Option<&str>) -> HypercallDisposition 
         firmware,
         &MemoryState::default(),
         &AddressSpaceState::default(),
+        &IrqStateBitmapState::default(),
         &GuestMemory::new(0),
     )
 }
 
 #[test]
 fn the_answered_numbers_ascend() {
-    assert_eq!(ANSWERED.len(), 12);
+    assert_eq!(ANSWERED.len(), 13);
     for pair in ANSWERED.windows(2) {
         assert!(pair[0] < pair[1], "{pair:?}");
     }
@@ -58,7 +59,7 @@ fn every_number_with_no_handler_takes_the_null_backend_by_number() {
 
 #[test]
 fn no_answered_number_takes_the_null_backend() {
-    assert_eq!(ANSWERED.len(), 12);
+    assert_eq!(ANSWERED.len(), 13);
     for &number in ANSWERED {
         let d = answer(&request(number), None);
         assert!(

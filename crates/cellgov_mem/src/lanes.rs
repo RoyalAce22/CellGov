@@ -231,6 +231,9 @@ pub mod source {
     pub const HYPERVISOR_ADDRESS_SPACE: u8 = 79;
     /// The vas id that the partition's PPE selected.
     pub const HYPERVISOR_SELECTED_ADDRESS_SPACE: u8 = 80;
+    /// The interrupt state bitmaps registered with the hypervisor, one
+    /// object per logical PPE thread in key order.
+    pub const HYPERVISOR_IRQ_STATE_BITMAP: u8 = 81;
 }
 
 const OBJECT_BITS: u32 = 32;
