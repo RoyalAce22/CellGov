@@ -507,6 +507,12 @@
 //! object, and a console capture of that object gives the reply; see
 //! [`GAME_OS_SYSTEM_MANAGER_REPLIES`].
 //!
+//! For payload byte 1 = 1, the handler replies with service id 0x0A and 8
+//! payload bytes. It then writes the bytes that the system manager keeps
+//! for the partition [OFW-4.93 lv1 a:0x44DF2C-0x44DFC8]. At the first
+//! GameOS boot after lv1 starts, it keeps 0 bytes; see
+//! [`GAME_OS_SYSTEM_MANAGER_REPLIES`].
+//!
 //! ## The dispatcher manager
 //!
 //! The secure loader code of `ss_server3.fself` asks the dispatcher
@@ -1634,11 +1640,19 @@ pub const fn system_manager_reply_header(
 pub const SYSTEM_MANAGER_SELECTOR_OFFSET: usize = 1;
 
 /// The console capture of the reply fields that the 4.93 kernel kept from
-/// the system manager's reply of service id 0x0B.
+/// the system manager's replies of service ids 0x0B and 0x0A.
 ///
 /// The path is relative to the workspace root. Its README gives the
 /// method and the kernel addresses.
 pub const SYSTEM_MANAGER_REPLY_CAPTURE: &str = "tests/micro/lv2_system_manager_reply";
+
+/// The most bytes that the system manager's init keeps for the reply of
+/// service id 0x0A.
+///
+/// The init sets the count to byte 5 of the block at vaddr 0xC000D35B
+/// only when that byte is not above 128 [OFW-4.93 lv1 a:0x44CFE0]
+/// [OFW-4.93 lv1 a:0x4527D0-0x452800].
+pub const SYSTEM_MANAGER_INIT_STORED_MAX: u64 = 128;
 
 /// The system manager's reply to one request of the GameOS kernel, at one
 /// firmware.
@@ -1655,9 +1669,38 @@ pub struct GameOsSystemManagerReply {
     pub reply_service: u8,
     /// The payload bytes of the reply.
     pub payload: &'static [u8],
+    /// The bytes that the handler writes after the payload.
+    pub trailing: &'static [u8],
+}
+
+impl GameOsSystemManagerReply {
+    /// The payload count in the reply's header.
+    ///
+    /// The send function adds its r7 to its payload count
+    /// [OFW-4.93 lv1 a:0x44C4CC]. A handler that writes bytes after the
+    /// payload gives their count in r7 [OFW-4.93 lv1 a:0x44DF50].
+    pub const fn header_count(&self) -> usize {
+        self.payload.len() + self.trailing.len()
+    }
+
+    /// The bytes that the system manager writes to its port for this reply
+    /// to a request with the tag `tag`, or `None` when the header count
+    /// does not fit in a word.
+    ///
+    /// The bytes are the header of [`system_manager_reply_header`], the
+    /// payload, and then the trailing bytes. The handler writes the
+    /// trailing bytes after the send function returns
+    /// [OFW-4.93 lv1 a:0x44DF64-0x44DFC8].
+    pub fn written_bytes(&self, tag: u32) -> Option<Vec<u8>> {
+        let count = u32::try_from(self.header_count()).ok()?;
+        let head = system_manager_reply_header(self.reply_service, count, tag);
+        Some([&head[..], self.payload, self.trailing].concat())
+    }
 }
 
 /// Each system manager reply that a source gives.
+///
+/// ## Service id 0x0B
 ///
 /// The handler of service id 9 replies to payload byte 1 = 2 with service
 /// id 0x0B, its tag and 16 payload bytes
@@ -1684,14 +1727,62 @@ pub struct GameOsSystemManagerReply {
 /// - Bytes 1 and 2 hold the byte at +24 of that object and a byte of
 ///   system manager state [OFW-4.93 lv1 a:0x44F3D0-0x44F3DC]. The
 ///   constructor sets +24 to 1 [OFW-4.93 lv1 a:0x4501D4].
-pub const GAME_OS_SYSTEM_MANAGER_REPLIES: &[GameOsSystemManagerReply] =
-    &[GameOsSystemManagerReply {
+///
+/// ## Service id 0x0A
+///
+/// The handler of service id 9 replies to payload byte 1 = 1 with service
+/// id 0x0A, its tag and 8 payload bytes
+/// [OFW-4.93 lv1 a:0x44DF2C-0x44DF60]:
+/// - byte 0 is the request's payload byte 1 [OFW-4.93 lv1 a:0x44DF58];
+/// - byte 1 is 0 [OFW-4.93 lv1 a:0x44DF38];
+/// - bytes 2 and 3 are the low halfword of the count at vaddr
+///   0xC000D1A0 [OFW-4.93 lv1 a:0x44DF44] [OFW-4.93 lv1 a:0x44DF54];
+/// - bytes 4 to 7 are 0 [OFW-4.93 lv1 a:0x44DF5C].
+///
+/// Its r7 is the count. It then writes the count's bytes from the buffer
+/// whose address is at vaddr 0xC000D1A8 [OFW-4.93 lv1 a:0x44DF64-0x44DFC8].
+/// The init stores the address of a 1536-byte buffer there
+/// [OFW-4.93 lv1 a:0x44CFC0-0x44CFF8]. The TOC slots r2 - 29456 and
+/// r2 - 29464 hold these vaddrs [OFW-4.93 lv1 a:0x47D968-0x47D974].
+///
+/// CellGov's boot is the first GameOS boot after lv1 starts, and the
+/// count is 0 at that boot:
+/// - The init calls the system controller setup and then stores the count
+///   [OFW-4.93 lv1 a:0x44B164-0x44B170]. The setup clears the 256 bytes
+///   of the block at vaddr 0xC000D35B. It fills them only when bit 0 of
+///   the word at vaddr 0xC000D2D8 is set
+///   [OFW-4.93 lv1 a:0x453E40-0x453E64]. The capture gives that word as
+///   4, so byte 5 of the block is 0.
+/// - The init sets the count to byte 5; see
+///   [`SYSTEM_MANAGER_INIT_STORED_MAX`].
+/// - Only the handler of a request of service id 0x0A sets another count
+///   [OFW-4.93 lv1 a:0x44D448-0x44D470]. The kernel sends that request
+///   from `sys_sm_shutdown` [OFW-4.93 lv2_kernel a:0x800000000000aae8].
+///   No row answers it, so no request in CellGov's boot sets the count.
+/// - The reply takes each byte that it writes from the count
+///   [OFW-4.93 lv1 a:0x44DFA4-0x44DFAC], so a later reply also counts 0.
+///
+/// The capture gives the count that the console's kernel kept as 1536.
+/// That count is above the init's largest, so it came from a
+/// `sys_sm_shutdown` call of an earlier GameOS boot.
+pub const GAME_OS_SYSTEM_MANAGER_REPLIES: &[GameOsSystemManagerReply] = &[
+    GameOsSystemManagerReply {
         firmware: "4.93",
         handler: 9,
         selector: 2,
         reply_service: 0x0B,
         payload: &[2, 1, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 7],
-    }];
+        trailing: &[],
+    },
+    GameOsSystemManagerReply {
+        firmware: "4.93",
+        handler: 9,
+        selector: 1,
+        reply_service: 0x0A,
+        payload: &[1, 0, 0, 0, 0, 0, 0, 0],
+        trailing: &[],
+    },
+];
 
 /// The reply to a request of service id `service` whose payload byte at
 /// [`SYSTEM_MANAGER_SELECTOR_OFFSET`] is `selector`, at the firmware
@@ -1773,3 +1864,11 @@ mod system_manager_reply_tests;
 #[cfg(test)]
 #[path = "tests/uart_system_manager_reply_console_tests.rs"]
 mod system_manager_reply_console_tests;
+
+#[cfg(test)]
+#[path = "tests/uart_system_manager_stored_reply_tests.rs"]
+mod system_manager_stored_reply_tests;
+
+#[cfg(test)]
+#[path = "tests/uart_system_manager_stored_reply_console_tests.rs"]
+mod system_manager_stored_reply_console_tests;

@@ -31,16 +31,16 @@ const fn header(payload: u32, service: u16) -> [u8; 16] {
     ]
 }
 
-/// The 24 bytes of the 4.93 kernel's second write to the port in
-/// CellGov's boot: the header of service id 9 with 8 payload bytes, then
-/// the payload bytes 1 and 1 and six 0 bytes. The kernel's function
-/// stores the first two payload bytes
-/// [OFW-4.93 lv2_kernel a:0x80000000002646ec]
-/// [OFW-4.93 lv2_kernel a:0x8000000000264714], and the boot gives it 1
-/// for its second call [OFW-4.93 lv2_kernel a:0x8000000000265528].
+/// The 24 bytes of a request of service id 9 in the 4.93 kernel's shape,
+/// with payload byte 1 = 3: the header with 8 payload bytes, then the
+/// payload bytes 1 and 3 and six 0 bytes. The kernel's function stores
+/// the first two payload bytes [OFW-4.93 lv2_kernel a:0x80000000002646ec]
+/// [OFW-4.93 lv2_kernel a:0x8000000000264714]. lv1's handler takes a case
+/// of its own for 3 [OFW-4.93 lv1 a:0x44DEB4-0x44DEB8], and no source
+/// gives its reply.
 fn kernel_request() -> Vec<u8> {
     let mut bytes = header(8, GAME_OS_FIRST_SYSTEM_MANAGER_SERVICE).to_vec();
-    bytes.extend_from_slice(&[1, 1, 0, 0, 0, 0, 0, 0]);
+    bytes.extend_from_slice(&[1, 3, 0, 0, 0, 0, 0, 0]);
     bytes
 }
 
@@ -130,14 +130,14 @@ fn refused_for(service: u16) -> HypercallDisposition {
 }
 
 #[test]
-fn the_kernel_s_second_request_of_service_9_in_one_write_is_the_refusal_that_names_service_9() {
+fn a_request_of_service_9_with_payload_byte_1_3_in_one_write_is_the_refusal_that_names_service_9() {
     assert_eq!(first_write(&kernel_request()), refused_for(9));
 }
 
 #[test]
 fn the_refusal_names_the_whole_service_id_halfword() {
     let mut bytes = header(8, 0x0109).to_vec();
-    bytes.extend_from_slice(&[1, 1, 0, 0, 0, 0, 0, 0]);
+    bytes.extend_from_slice(&[1, 3, 0, 0, 0, 0, 0, 0]);
     assert_eq!(first_write(&bytes), refused_for(0x0109));
 }
 

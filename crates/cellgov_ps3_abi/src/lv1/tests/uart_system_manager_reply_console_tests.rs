@@ -4,22 +4,28 @@
 use super::*;
 
 /// The kernel's r2 [OFW-4.93 lv2_kernel a:0x8000000000003000].
-const KERNEL_TOC: u64 = 0x8000_0000_0034_fbb0;
+pub(super) const KERNEL_TOC: u64 = 0x8000_0000_0034_fbb0;
 
 /// The TOC slot r2 + 3864 that holds the object's address
 /// [OFW-4.93 lv2_kernel a:0x8000000000350ac8].
-const MANAGER_SLOT: u64 = KERNEL_TOC + 3864;
+pub(super) const MANAGER_SLOT: u64 = KERNEL_TOC + 3864;
 
 /// The object's address in the image's TOC slot.
-const MANAGER: u64 = 0x8000_0000_0047_4c38;
+pub(super) const MANAGER: u64 = 0x8000_0000_0047_4c38;
 
-/// The capture's rows as (field, address, value). Both reads of each
-/// doubleword must agree.
+/// The rows of `reply.tsv`.
 fn capture() -> Vec<(String, u64, u64)> {
+    capture_rows("reply.tsv")
+}
+
+/// The rows of the capture file `file` as (field, address, value). Both
+/// reads of each doubleword must agree.
+pub(super) fn capture_rows(file: &str) -> Vec<(String, u64, u64)> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join(SYSTEM_MANAGER_REPLY_CAPTURE)
-        .join("peek/cech20-cex-493/reply.tsv");
+        .join("peek/cech20-cex-493")
+        .join(file);
     let name = path.display().to_string();
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
     let mut lines = text.lines();
@@ -47,7 +53,7 @@ fn capture() -> Vec<(String, u64, u64)> {
 }
 
 /// The value of `field` in `rows`. The row's address must be `address`.
-fn word(rows: &[(String, u64, u64)], field: &str, address: u64) -> u64 {
+pub(super) fn word(rows: &[(String, u64, u64)], field: &str, address: u64) -> u64 {
     let (_, at, value) = rows
         .iter()
         .find(|(name, ..)| name == field)

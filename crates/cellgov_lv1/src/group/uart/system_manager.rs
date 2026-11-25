@@ -17,8 +17,7 @@
 use cellgov_ps3_abi::lv1::uart::{
     game_os_system_manager_reply, system_manager_header_payload_bytes,
     system_manager_header_service, system_manager_header_tag, system_manager_payload_read,
-    system_manager_reply_header, GameOsVirtualUartPort, SYSTEM_MANAGER_HEADER_BYTES,
-    SYSTEM_MANAGER_SELECTOR_OFFSET,
+    GameOsVirtualUartPort, SYSTEM_MANAGER_HEADER_BYTES, SYSTEM_MANAGER_SELECTOR_OFFSET,
 };
 
 use super::receive::ReceivedBytes;
@@ -193,9 +192,9 @@ fn completing_write(
     after_status_step(request, input, firmware, row, answer, count)
 }
 
-/// The header and the payload that the system manager writes to its port
-/// for the request `complete` with the header `header`, or `None` when no
-/// source gives the reply.
+/// The header, the payload and the trailing bytes that the system manager
+/// writes to its port for the request `complete` with the header
+/// `header`, or `None` when no source gives the reply.
 ///
 /// The handler reads the payload byte at [`SYSTEM_MANAGER_SELECTOR_OFFSET`]
 /// from the bytes that the receive function read. So the value is `None`
@@ -217,14 +216,8 @@ fn reply_bytes(
         .prefix
         .get(HEADER + SYSTEM_MANAGER_SELECTOR_OFFSET)?;
     let service = system_manager_header_service(header);
-    let reply = game_os_system_manager_reply(firmware, service, selector)?;
-    let count = u32::try_from(reply.payload.len()).ok()?;
-    let head = system_manager_reply_header(
-        reply.reply_service,
-        count,
-        system_manager_header_tag(header),
-    );
-    Some([&head[..], reply.payload].concat())
+    game_os_system_manager_reply(firmware, service, selector)?
+        .written_bytes(system_manager_header_tag(header))
 }
 
 #[cfg(test)]
@@ -234,3 +227,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/system_manager_reply_tests.rs"]
 mod reply_tests;
+
+#[cfg(test)]
+#[path = "tests/system_manager_stored_reply_tests.rs"]
+mod stored_reply_tests;

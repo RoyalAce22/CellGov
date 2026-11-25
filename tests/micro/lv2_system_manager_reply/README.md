@@ -14,8 +14,13 @@ reads them. The test `uart_system_manager_reply_console_tests` holds
 `cellgov_ps3_abi::lv1::uart::GAME_OS_SYSTEM_MANAGER_REPLIES` to this
 capture.
 
+A second read gives the bytes that the kernel kept from lv1's reply of
+service id 0x0A. That reply answers the kernel's request of service id
+9 with payload byte 1 = 1. See "The stored bytes" below.
+
 No probe runs, so this directory has no manifest and no runner frame.
-The file under `peek/cech20-cex-493/` holds the words the reads returned.
+The files under `peek/cech20-cex-493/` hold the words the reads
+returned.
 
 ## Method
 
@@ -108,10 +113,13 @@ GameOS partition.
 | File | Rows | Holds |
 |---|---|---|
 | `reply.tsv` | 5 | for each word: its address, its field, its width in bytes, the number of reads, whether they agree, and its value |
+| `stored.tsv` | 7 | the same columns, for the fields of the 0x0A reply |
 
 The fields are `toc` (the TOC word), `manager` (the TOC slot r2 + 3864
 of the object), and `reply2032`, `reply2040` and `reply2048` (the
-doublewords at those offsets of the object).
+doublewords at those offsets of the object). In `stored.tsv`,
+`stored488` to `stored512` are the first four doublewords at +488 of
+the object, and `count2024` is the doubleword at +2024.
 
 ## The live reply
 
@@ -125,3 +133,79 @@ doublewords at those offsets of the object).
 
 So the reply's 16 payload bytes are
 `02 01 00 00 00 00 00 04 00 00 00 00 00 00 00 07`.
+
+## The stored bytes
+
+On 2026-11-14, the same command read the words of `stored.tsv` with the
+same method: two reads of each page, which agree, and no write, poke or
+hypercall. The same read gave the three words of `reply.tsv` again, and
+they agree with that file.
+
+### Where the kernel keeps them
+
+1. Entry 7 of the receive loop's table, for service id 0x0A, takes the
+   case at 0x8000000000264d9c
+   [OFW-4.93 lv2_kernel a:0x8000000000264d9c-0x8000000000264da4].
+2. That case copies min(the halfword at payload byte 2, 1536) bytes from
+   payload byte 8 to +488 of the object. It stores that count as a
+   doubleword at +2024, and posts event bit 2
+   [OFW-4.93 lv2_kernel a:0x8000000000261ac0-0x8000000000261b20].
+3. No other kernel instruction stores to +2024. The getter at
+   [OFW-4.93 lv2_kernel a:0x8000000000261d50] waits for event bit 2,
+   and then copies the bytes out
+   [OFW-4.93 lv2_kernel a:0x8000000000261da8-0x8000000000261dd4].
+
+### Where lv1 gets them
+
+lv1's handler of service id 9 replies to payload byte 1 = 1 with service
+id 0x0A [OFW-4.93 lv1 a:0x44DF2C-0x44DF60]:
+- payload byte 0 is 1, byte 1 is 0, and bytes 4 to 7 are 0;
+- bytes 2 and 3 are the low halfword of the count at the system
+  manager's vaddr 0xC000D1A0;
+- the header counts 8 + the count.
+
+It then writes the count's bytes from the 1536-byte buffer whose address
+is at vaddr 0xC000D1A8 [OFW-4.93 lv1 a:0x44CFC0-0x44CFF8], and takes each
+write from the count [OFW-4.93 lv1 a:0x44DF64-0x44DFC8].
+So the count is 0 after one reply.
+
+The count has these writers:
+- The system manager's init stores 128, and calls
+  [OFW-4.93 lv1 a:0x4527B0] [OFW-4.93 lv1 a:0x44CFC0-0x44D000]. That
+  function sets the count to byte 5 of the block at vaddr 0xC000D35B
+  when byte 5 is not above 128, and to 0 otherwise
+  [OFW-4.93 lv1 a:0x4527B0-0x452818]. So init gives at most 128.
+- The handler of a request of service id 0x0A sets the count to the
+  request's halfword at payload byte 2, at most 1536
+  [OFW-4.93 lv1 a:0x44D448-0x44D470]. Entry 10 of the handler table
+  holds its descriptor [OFW-4.93 lv1 a:0x46FDB0-0x46FDB4]
+  [OFW-4.93 lv1 a:0x4776A0-0x4776A4].
+
+The kernel sends that request in one place: `sys_sm_shutdown`, with the
+caller's parameter of at most 1536 bytes
+[OFW-4.93 lv2_kernel a:0x800000000000aa04-0x800000000000aae8]
+[OFW-4.93 lv2_kernel a:0x8000000000264798-0x8000000000264878]. So the
+bytes pass from one GameOS boot to the next while lv1 runs.
+
+### The live bytes
+
+- `count2024` is 0x600: the kernel kept 1536 bytes.
+- The first 32 of them are 0.
+
+Init gives at most 128. So these bytes came from a request of service id
+0x0A: a `sys_sm_shutdown` call of an earlier GameOS boot with a
+parameter of 1536 bytes or more.
+
+At the first GameOS boot after lv1 starts, no such request came first.
+At that boot, the count is byte 5 of the block. The system controller
+setup clears the block's 256 bytes. It fills them from the system
+controller only when bit 0 of the word at vaddr 0xC000D2D8 is set
+[OFW-4.93 lv1 a:0x453E40-0x453E64]. That word is 4 (see `reply2048`
+above). The init runs the setup before it stores the count
+[OFW-4.93 lv1 a:0x44B164-0x44B170]. The other writers of byte 5 are
+these:
+- a function that clears it [OFW-4.93 lv1 a:0x4523DC-0x4523E4];
+- [OFW-4.93 lv1 a:0x45281C-0x452850], which only the handler of service
+  id 0x0A calls [OFW-4.93 lv1 a:0x44D490].
+
+So byte 5 is 0, and the first boot's reply counts 0 bytes.
