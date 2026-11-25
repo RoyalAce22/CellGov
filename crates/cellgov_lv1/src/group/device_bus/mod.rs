@@ -12,7 +12,8 @@
 //! - `allocate_device_dma_region` and `map_device_dma_region` for device
 //!   0 of bus 1;
 //! - `map_device_mmio_region` for devices 0 and 1 of bus 1, and for
-//!   device 2 of bus 1 that the partition does not hold open.
+//!   device 2 of bus 1 that the partition does not hold open;
+//! - `unmap_device_mmio_region` for devices 0, 1 and 2 of bus 1.
 //!
 //! [`DeviceBusState`] holds the state of the group.
 
@@ -20,6 +21,7 @@ mod close;
 mod dma_map;
 mod dma_region;
 mod mmio_map;
+mod mmio_unmap;
 mod open;
 mod registration;
 

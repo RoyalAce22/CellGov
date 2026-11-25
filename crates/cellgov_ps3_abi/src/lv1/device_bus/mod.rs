@@ -11,12 +11,13 @@ mod dma_region;
 mod game_os_mmio;
 mod mmio_map;
 mod mmio_region;
+mod mmio_unmap;
 mod open;
 mod storage_bus;
 
 pub use self::{
-    close::*, dma_map::*, dma_region::*, game_os_mmio::*, mmio_map::*, mmio_region::*, open::*,
-    storage_bus::*,
+    close::*, dma_map::*, dma_region::*, game_os_mmio::*, mmio_map::*, mmio_region::*,
+    mmio_unmap::*, open::*, storage_bus::*,
 };
 
 #[cfg(test)]
@@ -94,3 +95,7 @@ mod mmio_lists_console_tests;
 #[cfg(test)]
 #[path = "tests/mmio_device_2_console_tests.rs"]
 mod mmio_device_2_console_tests;
+
+#[cfg(test)]
+#[path = "tests/mmio_unmap_tests.rs"]
+mod mmio_unmap_tests;

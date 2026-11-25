@@ -11,6 +11,7 @@ use super::close;
 use super::dma_map::{self, DmaMapping};
 use super::dma_region::{self, DmaRegion};
 use super::mmio_map::{self, MmioMapping};
+use super::mmio_unmap;
 use super::open::{self, OpenDevice, StorageBusOpen, StorageDeviceOpen};
 use crate::group::state::StateChange;
 use crate::group::table::Group;
@@ -24,6 +25,7 @@ pub(crate) const GROUP: Group = Group {
         dma_region::HYPERCALLS,
         dma_map::HYPERCALLS,
         mmio_map::HYPERCALLS,
+        mmio_unmap::HYPERCALLS,
     ],
     lanes: &[176..=191],
     hashed_surfaces: &[
@@ -288,6 +290,9 @@ impl DeviceBusState {
             DeviceBusChange::MmioRegionMapped(mapping) => {
                 self.mmio_mappings.insert(mapping);
             }
+            DeviceBusChange::MmioRegionUnmapped(mapping) => {
+                self.mmio_mappings.remove(&mapping);
+            }
             DeviceBusChange::Closed(device) => {
                 self.open.remove(&device);
                 self.mmio_mappings
@@ -402,6 +407,8 @@ pub enum DeviceBusChange {
     StorageDevicePortConnected(StorageDevicePort),
     /// lv1 made this MMIO mapping for the partition.
     MmioRegionMapped(MmioMapping),
+    /// lv1 removed this MMIO mapping of the partition.
+    MmioRegionUnmapped(MmioMapping),
     /// The call closed this device. The change removes these values of
     /// the device:
     /// - each DMA mapping, which lv1 removed;
