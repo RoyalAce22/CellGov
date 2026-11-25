@@ -21,8 +21,8 @@ const CONTROLLER_CLASS: u64 = 0x8000_0000_0036_3760;
 
 /// The doublewords of every file of the capture, by address.
 ///
-/// The column `address` holds each address and the last column the
-/// doubleword. Both reads of each doubleword must agree.
+/// The column `address` holds each address, and the last column holds
+/// the doubleword. Both reads of each doubleword must agree.
 fn words() -> BTreeMap<u64, u64> {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")

@@ -2,15 +2,15 @@
 //! CellGov does not model, such as a device's MMIO registers.
 //!
 //! A span holds no bytes. A load, a store, a fetch and the commit
-//! pipeline find no region there, as at an address no storage holds, so
+//! pipeline find no region there, as at an address no storage holds. So
 //! a span never reads as zeros and a write there never lands. Only
 //! [`GuestMemory::is_unmodelled`] tells the two cases apart. An execution
 //! unit asks it to stop at the access as an unmodelled stop, where an
-//! address no storage holds takes the processor's own fault.
-//!
-//! A sourced word or a register word of a span answers some accesses
-//! there instead; see [`GuestMemory::declare_sourced_word`] and
-//! [`GuestMemory::declare_registers`].
+//! address no storage holds takes the processor's own fault. A sourced
+//! word or a register word of a span answers some accesses there instead
+//! ([`GuestMemory::declare_sourced_word`],
+//! [`GuestMemory::declare_registers`]). The memory refuses a word that is
+//! both a sourced word and a register word.
 //!
 //! A span is not guest state: only a loader declares one, so the content
 //! hash leaves the spans out.

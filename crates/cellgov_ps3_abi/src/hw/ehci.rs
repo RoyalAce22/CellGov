@@ -161,9 +161,9 @@ pub struct EhciRegisterRead {
 /// 5. It polls HCRESET until it is 0
 ///    [OFW-4.93 lv2_kernel a:0x8000000000242348-0x8000000000242380].
 ///
-/// The table holds the first load of each poll only. The read of USBCMD
-/// that stores HCRESET keeps Run/Stop, so that load gets its word only
-/// while Run/Stop is known.
+/// The table holds the first load of each poll only. The load of USBCMD
+/// before the HCRESET store keeps Run/Stop, so that load gets its word
+/// only while Run/Stop is known.
 pub const EHCI_RESET_READERS: &[EhciRegisterRead] = &[
     EhciRegisterRead {
         firmware: "4.93",

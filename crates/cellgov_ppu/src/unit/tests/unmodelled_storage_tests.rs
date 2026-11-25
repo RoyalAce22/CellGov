@@ -1,5 +1,5 @@
 //! A translated access to an unmodelled span of the memory stops there
-//! with its addresses, and an access to a real address no storage holds
+//! with its addresses. An access to a real address no storage holds
 //! keeps the checkstop and the machine check.
 
 use crate::exec::PpuFault;
@@ -137,7 +137,7 @@ fn stop(r: &ExecutionStepResult) -> (Option<FaultKind>, Option<u64>, Option<u64>
     )
 }
 
-/// The write intents outside the page table.
+/// The start addresses of the write intents outside the page table.
 fn stores(effects: &[Effect]) -> Vec<u64> {
     effects
         .iter()

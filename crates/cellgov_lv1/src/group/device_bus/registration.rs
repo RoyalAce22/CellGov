@@ -72,6 +72,11 @@ pub(crate) const GROUP: Group = Group {
             source: Some(MMIO_PAGE_SHIFT_SOURCE),
             stamp: Stamp::Version(35),
         },
+        HashedSurface {
+            name: "the devices whose DMA regions a close freed",
+            source: Some(FREED_POOL_SOURCE),
+            stamp: Stamp::Version(36),
+        },
     ],
 };
 
@@ -112,6 +117,10 @@ pub(crate) const MMIO_MAPPING_SOURCE: u8 = 183;
 /// for each mapping, with the key of [`MMIO_MAPPING_SOURCE`].
 pub(crate) const MMIO_PAGE_SHIFT_SOURCE: u8 = 184;
 
+/// The lane source of the devices whose DMA regions a close freed: one
+/// object for each device, keyed by its index in bus and device order.
+pub(crate) const FREED_POOL_SOURCE: u8 = 185;
+
 /// The event receive port that lv1 connected to the partition's slot of
 /// one storage device.
 ///
@@ -143,11 +152,13 @@ impl LaneValue for StorageDevicePort {
 /// - the event receive port that lv1 connected to the storage bus;
 /// - each storage device open that the partition holds;
 /// - the event receive port that lv1 connected to each storage device;
-/// - each mapping that lv1 made in an MMIO region for the partition.
+/// - each mapping that lv1 made in an MMIO region for the partition;
+/// - each device whose DMA regions a close freed.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeviceBusState {
     open: BTreeSet<OpenDevice>,
     regions: BTreeSet<DmaRegion>,
+    freed_pools: BTreeSet<OpenDevice>,
     mappings: BTreeSet<DmaMapping>,
     storage_bus: Option<StorageBusOpen>,
     storage_bus_port: Option<u64>,
@@ -228,6 +239,17 @@ impl DeviceBusState {
             .filter(move |region| region.bus == device.bus && region.device == device.device)
     }
 
+    /// Each device whose DMA regions a close freed, in bus and device
+    /// order.
+    pub fn freed_pools(&self) -> impl Iterator<Item = OpenDevice> + '_ {
+        self.freed_pools.iter().copied()
+    }
+
+    /// Whether a close freed a DMA region of `device`.
+    pub fn pool_freed(&self, device: OpenDevice) -> bool {
+        self.freed_pools.contains(&device)
+    }
+
     /// Each DMA mapping, in bus, device and bus address order.
     pub fn dma_mappings(&self) -> impl Iterator<Item = DmaMapping> + '_ {
         self.mappings.iter().copied()
@@ -272,8 +294,12 @@ impl DeviceBusState {
                     .retain(|mapping| mapping.bus != device.bus || mapping.device != device.device);
                 self.mappings
                     .retain(|mapping| mapping.bus != device.bus || mapping.device != device.device);
+                let held = self.regions.len();
                 self.regions
                     .retain(|region| region.bus != device.bus || region.device != device.device);
+                if self.regions.len() != held {
+                    self.freed_pools.insert(device);
+                }
                 self.release_storage_slot(device);
             }
         }
@@ -314,9 +340,14 @@ impl DeviceBusState {
             .fold(open, |sum, (index, region)| {
                 sum.wrapping_add(lanes::value_term(DMA_REGION_SOURCE, index, &region))
             });
+        let freed = (0u64..)
+            .zip(self.freed_pools())
+            .fold(regions, |sum, (index, device)| {
+                sum.wrapping_add(lanes::value_term(FREED_POOL_SOURCE, index, &device))
+            });
         let mappings = (0u64..)
             .zip(self.dma_mappings())
-            .fold(regions, |sum, (index, mapping)| {
+            .fold(freed, |sum, (index, mapping)| {
                 sum.wrapping_add(lanes::value_term(DMA_MAPPING_SOURCE, index, &mapping))
             });
         let storage_bus = self.storage_bus.map_or(mappings, |open| {
@@ -378,6 +409,9 @@ pub enum DeviceBusChange {
     /// - each MMIO mapping, which lv1 removed;
     /// - for a device of the storage bus, or the storage bus itself, the
     ///   partition's open and the port of its slot.
+    ///
+    /// When the change removes a DMA region, it records the device as a
+    /// device whose DMA regions a close freed.
     Closed(OpenDevice),
 }
 
@@ -426,3 +460,7 @@ mod mmio_page_shift_hash_tests;
 #[cfg(test)]
 #[path = "tests/storage_close_state_tests.rs"]
 mod storage_close_state_tests;
+
+#[cfg(test)]
+#[path = "tests/freed_pool_hash_tests.rs"]
+mod freed_pool_hash_tests;

@@ -30,7 +30,6 @@ const SPAN_LEN: u64 = 0x1000;
 const PTE_LOW: u64 = 0b10 | 0x20;
 /// The offset of the sourced word in the span.
 const OFFSET: u64 = 0x10;
-/// The sourced word.
 const WORD: u32 = 0x0000_0010;
 
 const TRANSLATED: u64 = MSR_SF | MSR_IR | MSR_DR | MSR_ME;

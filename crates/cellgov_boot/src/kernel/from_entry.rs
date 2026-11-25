@@ -217,7 +217,8 @@ pub enum KernelRunError {
     /// The ELF does not map at its link address.
     #[error(transparent)]
     Map(#[from] KernelMapError),
-    /// The real-mode address space refused the region or a segment.
+    /// The real-mode address space refused a region, a segment or a
+    /// declaration of device MMIO.
     #[error("real-mode kernel address space: {source}")]
     RealMode {
         /// The address space's own account of the refusal.
@@ -299,6 +300,8 @@ pub enum KernelRunError {
 ///
 /// Returns a [`KernelRunError`] in these cases:
 /// - the ELF does not map into the real-mode address space;
+/// - the real-mode address space refuses a device MMIO span or word of
+///   `firmware`;
 /// - no partition comes from the repository rows of `firmware`.
 pub fn run_kernel_from_entry(
     elf: &[u8],

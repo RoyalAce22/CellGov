@@ -3,31 +3,22 @@
 //!
 //! A loader declares the words of one device as a register file, with the
 //! rule that applies a store to them. A word holds a value and the bits of
-//! the value that are known. Each bit outside the known bits reads as 0.
+//! the value that are known. A load gets the word only for a declared
+//! reader, and only while the bits that the reader keeps are known. Every
+//! other load stops at the span. The words are guest state, so the content
+//! hash covers them.
 //!
-//! A load of a word gets the word only for an instruction that the loader
-//! declares as a reader of it, and only while the bits that the reader
-//! keeps are known. Every other load stops at the span.
-//!
-//! A store of a whole aligned word commits through the commit pipeline.
-//! The memory gives the rule the stored value and the bits of it that the
-//! storing code sets itself ([`RegisterStore::own`]). The rule changes the
-//! words or refuses the store. A refused store stops at the span.
-//!
-//! A reader can name the store of its code that writes the loaded word
-//! back ([`RegisterPassBack`]). Only that store can pass an unknown bit
-//! back. The commit pipeline does not know which instruction made a
-//! store, so the unit that runs the store accepts it only when the
-//! commit gives the rule the bits that this store owns
-//! ([`GuestMemory::register_store_accepted`]).
-//!
-//! A loader can also declare the store instructions that write a word
-//! ([`GuestMemory::declare_register_writer`]). The unit then accepts a
-//! store to that word only from a declared writer.
-//!
-//! The words are guest state, so the content hash covers them.
+//! A store of a whole aligned word commits through the commit pipeline,
+//! and the rule changes the words or refuses the store. Only the staging
+//! drain applies the store, after it validates the batch.
+//! [`GuestMemory::apply_commit`] refuses a register word, so a host write
+//! cannot change a device's state. The commit pipeline does not know
+//! which instruction made a store. So the unit that runs the store asks
+//! [`GuestMemory::register_store_accepted`] first, and stops at the span
+//! when the answer is `false`.
 
 use super::{GuestMemory, MemError};
+use crate::range::ByteRange;
 
 /// The state of one register word.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,7 +47,7 @@ impl RegisterWord {
 pub struct RegisterStore {
     /// The stored word.
     pub value: u32,
-    /// The bits of the stored word that the storing code sets itself.
+    /// The bits of the stored word that the code of the store sets itself.
     ///
     /// A bit is the code's own when one of these holds:
     /// - the bit is known;
@@ -76,14 +67,15 @@ pub struct RegisterPassBack {
     pub bits: u32,
 }
 
-/// The rule of a register file: it applies `store` to the word at
-/// `index` of `words`, in the order of the declaration. It returns
-/// `false` when the device refuses the store.
+/// The rule of a register file, which applies a store to its words.
 ///
-/// The memory gives the rule a copy of the words and keeps the copy only
-/// when the rule returns `true`. The commit pipeline calls the rule once
-/// to validate a store and again to apply it, so the result must depend
-/// only on the arguments.
+/// The rule applies `store` to the word at `index` of `words`, which holds
+/// the words in the order of the declaration. It returns `false` when the
+/// device refuses the store. The memory gives the rule a copy of the words
+/// and keeps the copy only when the rule returns `true`.
+///
+/// The commit pipeline calls the rule once to validate a store and again
+/// to apply it, so the result must depend only on the arguments.
 pub type RegisterRule = fn(words: &mut [RegisterWord], index: usize, store: RegisterStore) -> bool;
 
 /// The words of one device that one rule changes.
@@ -119,7 +111,7 @@ impl RegisterFile {
         }
     }
 
-    /// The words after `value` is stored to the word at `index`, or `None`
+    /// The words after a store of `value` to the word at `index`, or `None`
     /// when the rule refuses the store.
     fn after_store(&self, index: usize, value: u32) -> Option<Vec<RegisterWord>> {
         let mut words = self.words.clone();
@@ -156,29 +148,40 @@ impl GuestMemory {
     ///
     /// # Errors
     ///
-    /// Returns [`MemError::RegisterRefused`] for the first word at which
-    /// one of these holds, and declares nothing:
-    /// - its address is not a multiple of 4;
-    /// - one unmodelled span does not hold all 4 bytes of it;
-    /// - the memory holds a register word at its address already;
-    /// - its value has a bit outside its known bits.
+    /// Declares nothing on an error. For the first word that the memory
+    /// refuses, returns the first of these that holds:
+    /// - [`MemError::RegisterWordUnheld`] when its address is not a
+    ///   multiple of 4, or when one unmodelled span does not hold all 4
+    ///   bytes of it;
+    /// - [`MemError::RegisterWordRepeated`] when an earlier entry of
+    ///   `words` has its address, or when the memory holds a register word
+    ///   at its address already;
+    /// - [`MemError::RegisterWordSourced`] when the memory holds a sourced
+    ///   word at its address;
+    /// - [`MemError::RegisterValueOutsideKnown`] when its value has a bit
+    ///   outside its known bits.
     pub fn declare_registers(
         &mut self,
         words: &[(u64, RegisterWord)],
         rule: RegisterRule,
     ) -> Result<(), MemError> {
         for (i, &(real, word)) in words.iter().enumerate() {
-            let repeated = words[..i].iter().any(|&(r, _)| r == real);
             let held = real.is_multiple_of(4)
                 && self.unmodelled_spans.iter().any(|&(lo, hi)| {
                     lo <= real && real.checked_add(4).is_some_and(|end| end <= hi)
                 });
-            if !held
-                || repeated
-                || self.register_at(real).is_some()
-                || word.value & !word.known != 0
-            {
-                return Err(MemError::RegisterRefused { real });
+            if !held {
+                return Err(MemError::RegisterWordUnheld { real });
+            }
+            let repeated = words[..i].iter().any(|&(r, _)| r == real);
+            if repeated || self.register_at(real).is_some() {
+                return Err(MemError::RegisterWordRepeated { real });
+            }
+            if self.holds_sourced_word(real) {
+                return Err(MemError::RegisterWordSourced { real });
+            }
+            if word.value & !word.known != 0 {
+                return Err(MemError::RegisterValueOutsideKnown { real });
             }
         }
         let states: Vec<RegisterWord> = words.iter().map(|&(_, w)| w).collect();
@@ -205,9 +208,11 @@ impl GuestMemory {
     ///
     /// # Errors
     ///
-    /// Returns [`MemError::RegisterRefused`], and declares nothing, when
-    /// the memory holds no register word at `real`, or holds `reader` as
-    /// a reader of it already.
+    /// Declares nothing on an error. Returns one of these:
+    /// - [`MemError::NoRegisterWord`] when the memory holds no register
+    ///   word at `real`;
+    /// - [`MemError::RegisterReaderRepeated`] when `reader` is a reader of
+    ///   the word already.
     pub fn declare_register_reader(
         &mut self,
         real: u64,
@@ -215,14 +220,15 @@ impl GuestMemory {
         kept: u32,
         pass_back: Option<RegisterPassBack>,
     ) -> Result<(), MemError> {
-        let refused = MemError::RegisterRefused { real };
-        let (file, index) = self.register_at(real).ok_or(refused)?;
+        let (file, index) = self
+            .register_at(real)
+            .ok_or(MemError::NoRegisterWord { real })?;
         let key = |r: &RegisterReader| (r.real, r.reader);
         let at = match self
             .register_readers
             .binary_search_by_key(&(real, reader), key)
         {
-            Ok(_) => return Err(refused),
+            Ok(_) => return Err(MemError::RegisterReaderRepeated { real, reader }),
             Err(at) => at,
         };
         // A bit the reader needs known never reads as a 0 it did not know.
@@ -251,15 +257,17 @@ impl GuestMemory {
     ///
     /// # Errors
     ///
-    /// Returns [`MemError::RegisterRefused`], and declares nothing, when
-    /// the memory holds no register word at `real`, or holds `store` as a
-    /// writer of it already.
+    /// Declares nothing on an error. Returns one of these:
+    /// - [`MemError::NoRegisterWord`] when the memory holds no register
+    ///   word at `real`;
+    /// - [`MemError::RegisterWriterRepeated`] when `store` is a writer of
+    ///   the word already.
     pub fn declare_register_writer(&mut self, real: u64, store: u64) -> Result<(), MemError> {
-        let refused = MemError::RegisterRefused { real };
-        self.register_at(real).ok_or(refused)?;
+        self.register_at(real)
+            .ok_or(MemError::NoRegisterWord { real })?;
         let writer = RegisterWriter { real, store };
         match self.register_writers.binary_search(&writer) {
-            Ok(_) => Err(refused),
+            Ok(_) => Err(MemError::RegisterWriterRepeated { real, store }),
             Err(at) => {
                 self.register_writers.insert(at, writer);
                 Ok(())
@@ -310,8 +318,10 @@ impl GuestMemory {
     /// The register word that holds the byte at `real` for the load of the
     /// instruction at `reader`: the word's real address and its bytes.
     ///
-    /// Returns `None` when the memory holds no such word, `reader` is not
-    /// a reader of it, or a bit that the reader keeps is not known.
+    /// Returns `None` when one of these holds:
+    /// - the memory holds no register word at `real`;
+    /// - `reader` is not a reader of the word;
+    /// - a bit that the reader keeps is not known.
     pub fn register_read(&self, real: u64, reader: u64) -> Option<(u64, &[u8])> {
         let word_real = real & !3;
         let (file, index) = self.register_at(word_real)?;
@@ -334,14 +344,16 @@ impl GuestMemory {
     /// Whether the device accepts a store of `value` to the register word
     /// at `real` by the instruction at the effective address `store`.
     ///
-    /// The commit gives the rule a 0 in an unknown bit as passed back when
-    /// any reader's store passes that bit back. So the store is refused
-    /// unless the bits that the commit takes as passed back are the bits
-    /// that this instruction passes back. Then the rule judges at the
-    /// commit the bits that this instruction owns.
+    /// The answer is `true` when all of these hold:
+    /// - `store` passes back each unknown bit that is 0 in `value` and that
+    ///   the store of any reader passes back;
+    /// - the word has no declared writer, or `store` is one
+    ///   ([`Self::declare_register_writer`]);
+    /// - the rule accepts the store.
     ///
-    /// A word with a declared writer refuses a store from any other
-    /// instruction ([`Self::declare_register_writer`]).
+    /// The commit gives the rule each such bit as passed back, whichever
+    /// instruction made the store. The first condition makes the rule judge
+    /// the bits that `store` itself owns.
     pub fn register_store_accepted(&self, real: u64, value: u32, store: u64) -> bool {
         self.register_at(real).is_some_and(|(file, index)| {
             let file = &self.register_files[file];
@@ -359,9 +371,8 @@ impl GuestMemory {
         length == 4 && self.register_at(addr).is_some()
     }
 
-    /// Validate a store of `bytes` to the register word at `addr` without
-    /// changing it. Returns `None` when the range is not one register
-    /// word.
+    /// Validate a store of `bytes` to the register word at `addr`. Returns
+    /// `None` when the range is not one register word.
     pub(crate) fn validate_register_store(
         &self,
         addr: u64,
@@ -378,14 +389,26 @@ impl GuestMemory {
         )
     }
 
+    /// Apply one write of a staging batch that [`Self::validate_commit`]
+    /// accepted. A store to a register word goes through the device's
+    /// rule, and any other write goes to [`Self::apply_commit`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::validate_commit`].
+    pub(crate) fn apply_staged(&mut self, range: ByteRange, bytes: &[u8]) -> Result<(), MemError> {
+        if range.length() == 4 && !self.register_files.is_empty() {
+            if let Some(applied) = self.apply_register_store(range.start().raw(), bytes) {
+                return applied;
+            }
+        }
+        self.apply_commit(range, bytes)
+    }
+
     /// Apply a store of `bytes` to the register word at `addr`. Returns
     /// `None`, and changes nothing, when the range is not one register
     /// word.
-    pub(crate) fn apply_register_store(
-        &mut self,
-        addr: u64,
-        bytes: &[u8],
-    ) -> Option<Result<(), MemError>> {
+    fn apply_register_store(&mut self, addr: u64, bytes: &[u8]) -> Option<Result<(), MemError>> {
         let (file, index) = self.register_at(addr).filter(|_| bytes.len() == 4)?;
         let value = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
         let Some(words) = self.register_files[file].after_store(index, value) else {

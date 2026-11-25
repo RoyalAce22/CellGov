@@ -10,7 +10,6 @@ use cellgov_ps3_abi::lv1::call::{CLOSE_DEVICE, OPEN_DEVICE};
 use cellgov_ps3_abi::lv1::device_bus::GAME_OS_MMIO_MAPPINGS;
 use cellgov_time::GuestTicks;
 
-/// Device 1 of bus 1.
 const DEVICE_1: OpenDevice = OpenDevice { bus: 1, device: 1 };
 
 /// The region counter value that the kernel's first map takes in
@@ -59,8 +58,8 @@ fn kernel_map() -> HypercallRequest {
     )
 }
 
-/// The r3, the r4 and the changes of `disposition`, after the changes
-/// are applied to `groups`.
+/// Applies the changes of `disposition` to `groups`, then returns its r3,
+/// its r4 and its changes.
 fn apply(
     groups: &mut GroupStates,
     disposition: HypercallDisposition,

@@ -257,8 +257,9 @@ impl PpuExecutionUnit {
     /// The step truncates `effects` and the buffered stores to their
     /// lengths at the start of the attempt. It then refills the cache
     /// when the cache holds no translation of `ea`. A rerun finds
-    /// `regions` rebuilt from the new translations. `pc` is the address
-    /// of `insn`.
+    /// `regions` rebuilt from the new translations, with the view of a
+    /// word that answers the access ([`Self::unbacked_step`]). `pc` is the
+    /// address of `insn`.
     #[inline]
     fn translation_miss<'m>(
         &mut self,

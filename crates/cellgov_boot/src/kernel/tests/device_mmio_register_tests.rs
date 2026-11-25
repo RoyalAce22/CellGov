@@ -1,4 +1,4 @@
-//! The register words that a kernel run declares in the MMIO spans of
+//! The sourced words that a kernel run declares in the MMIO spans of
 //! the system bus devices.
 
 use cellgov_mem::GuestMemory;

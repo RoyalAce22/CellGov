@@ -14,7 +14,8 @@
 //! [`Runtime::host_write`] gives them the pipeline's four
 //! guest-visible steps:
 //!
-//! - the same write validation,
+//! - the same write validation, with one difference: a host write to a
+//!   register word gets `MemError::Unmapped`, and no device rule runs,
 //! - the same reservation clear sweep,
 //! - the same drop of predecoded code over the written bytes,
 //! - a trace record.
@@ -212,6 +213,10 @@ impl Runtime {
 #[cfg(test)]
 #[path = "tests/host_write_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/host_write_register_tests.rs"]
+mod register_tests;
 
 #[cfg(test)]
 #[path = "tests/place_bytes_tests.rs"]

@@ -1,8 +1,11 @@
 //! Committed globally visible memory.
 //!
-//! Mutation entry point is [`GuestMemory::apply_commit`], invoked by the
-//! commit pipeline in `cellgov_core` after it validates a batch of
-//! `SharedWriteIntent` effects. Execution units must not call it directly.
+//! The commit pipeline in `cellgov_core` changes this memory through
+//! [`StagingMemory::drain_into_observed`](crate::StagingMemory::drain_into_observed).
+//! The drain checks each write of a batch with `validate_commit`, then
+//! applies it with `apply_staged`. [`GuestMemory::apply_commit`] writes
+//! region bytes and refuses a register word. Execution units must not
+//! call either directly.
 
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
@@ -534,27 +537,116 @@ pub enum MemError {
         /// Reserved region's label.
         region: &'static str,
     },
-    /// A sourced word is not an aligned word of one unmodelled span, or
-    /// it repeats a word and reader that the memory holds.
-    #[error("no unmodelled word for a source at real 0x{real:x} for the reader 0x{reader:x}")]
-    SourcedWordRefused {
+    /// A sourced word at an address that is not an aligned word of one
+    /// unmodelled span; see [`GuestMemory::declare_sourced_word`].
+    #[error(
+        "no aligned word of one unmodelled span at real 0x{real:016x} \
+         for a source for the reader 0x{reader:016x}"
+    )]
+    SourcedWordUnheld {
         /// The real address of the word.
         real: u64,
         /// The effective address of the instruction that reads it.
         reader: u64,
     },
-    /// A register word or reader declaration names no aligned word that
-    /// it can hold.
-    #[error("no register word for a declaration at real 0x{real:x}")]
-    RegisterRefused {
+    /// A second sourced word for one word and reader; see
+    /// [`GuestMemory::declare_sourced_word`].
+    #[error(
+        "the sourced word at real 0x{real:016x} for the reader 0x{reader:016x} is declared twice"
+    )]
+    SourcedWordRepeated {
+        /// The real address of the word.
+        real: u64,
+        /// The effective address of the instruction that reads it.
+        reader: u64,
+    },
+    /// A sourced word at the address of a register word; see
+    /// [`GuestMemory::declare_sourced_word`].
+    #[error(
+        "the word at real 0x{real:016x} for a source for the reader 0x{reader:016x} \
+         is a register word already"
+    )]
+    SourcedWordRegistered {
+        /// The real address of the word.
+        real: u64,
+        /// The effective address of the instruction that reads it.
+        reader: u64,
+    },
+    /// A register word at an address that is not an aligned word of one
+    /// unmodelled span; see [`GuestMemory::declare_registers`].
+    #[error("no aligned word of one unmodelled span at real 0x{real:016x} for a register word")]
+    RegisterWordUnheld {
         /// The real address of the word.
         real: u64,
     },
-    /// The device refuses a store to a register word, or a batch stores
-    /// to more than one register word.
-    #[error("the device refuses a store to the register word at real 0x{real:x}")]
+    /// A second declaration of one register word; see
+    /// [`GuestMemory::declare_registers`].
+    #[error("the register word at real 0x{real:016x} is declared twice")]
+    RegisterWordRepeated {
+        /// The real address of the word.
+        real: u64,
+    },
+    /// A register word at the address of a sourced word; see
+    /// [`GuestMemory::declare_registers`].
+    #[error("the word at real 0x{real:016x} for a register word is a sourced word already")]
+    RegisterWordSourced {
+        /// The real address of the word.
+        real: u64,
+    },
+    /// A register word whose value has a bit outside its known bits; see
+    /// [`GuestMemory::declare_registers`].
+    #[error("the register word at real 0x{real:016x} has a value bit outside its known bits")]
+    RegisterValueOutsideKnown {
+        /// The real address of the word.
+        real: u64,
+    },
+    /// A reader or writer declaration at an address that holds no register
+    /// word; see [`GuestMemory::declare_register_reader`] and
+    /// [`GuestMemory::declare_register_writer`].
+    #[error("no register word at real 0x{real:016x} for a reader or a writer")]
+    NoRegisterWord {
+        /// The real address that the declaration names.
+        real: u64,
+    },
+    /// A second declaration of one reader of a register word; see
+    /// [`GuestMemory::declare_register_reader`].
+    #[error(
+        "the instruction at 0x{reader:016x} is declared twice as a reader \
+         of the register word at real 0x{real:016x}"
+    )]
+    RegisterReaderRepeated {
+        /// The real address of the word.
+        real: u64,
+        /// The effective address of the instruction that reads it.
+        reader: u64,
+    },
+    /// A second declaration of one writer of a register word; see
+    /// [`GuestMemory::declare_register_writer`].
+    #[error(
+        "the store instruction at 0x{store:016x} is declared twice as a writer \
+         of the register word at real 0x{real:016x}"
+    )]
+    RegisterWriterRepeated {
+        /// The real address of the word.
+        real: u64,
+        /// The effective address of the store instruction.
+        store: u64,
+    },
+    /// A store to a register word that the device refuses.
+    #[error("the device refuses a store to the register word at real 0x{real:016x}")]
     RegisterStoreRefused {
         /// The real address of the word.
+        real: u64,
+    },
+    /// A store to a register word in a batch that holds an earlier store
+    /// to a register word. The commit judges each register store against
+    /// the words before the batch, so it cannot judge the second one.
+    #[error(
+        "the store to the register word at real 0x{real:016x} is the second \
+         register store of its batch"
+    )]
+    SecondRegisterStore {
+        /// The real address of the word that the second store reaches.
         real: u64,
     },
 }
@@ -623,9 +715,10 @@ impl GuestMemory {
     ///
     /// # Errors
     ///
-    /// Returns [`MemError::OverlappingRegions`] if the new range overlaps any
-    /// existing region or unmodelled span, or [`MemError::RegionOverflow`]
-    /// if it runs past the end of the address space.
+    /// - [`MemError::OverlappingRegions`] when the new range overlaps a
+    ///   region or an unmodelled span.
+    /// - [`MemError::RegionOverflow`] when the new range runs past the end
+    ///   of the address space.
     pub fn install_region(
         &mut self,
         base: u64,
@@ -943,18 +1036,18 @@ impl GuestMemory {
         self.resolve_read(range)
     }
 
-    /// Commit-pipeline entry point. Errors leave both memory and the
-    /// cached hash untouched.
+    /// Write `bytes` to the regions over `range`. An error leaves the
+    /// memory and the cached hash unchanged.
+    ///
+    /// A register word holds no bytes, so this function refuses a write
+    /// to one as an unmapped write. Only
+    /// [`StagingMemory::drain_into_observed`](crate::StagingMemory::drain_into_observed)
+    /// applies a store to a register word, after it validates the batch.
     ///
     /// # Errors
     ///
-    /// As [`Self::validate_commit`].
+    /// As [`Self::validate_write`].
     pub fn apply_commit(&mut self, range: ByteRange, bytes: &[u8]) -> Result<(), MemError> {
-        if range.length() == 4 && !self.register_files.is_empty() {
-            if let Some(applied) = self.apply_register_store(range.start().raw(), bytes) {
-                return applied;
-            }
-        }
         let span = self.write_span(range, bytes.len())?;
         let mut at = range.start().raw();
         let mut taken = 0usize;
@@ -979,9 +1072,9 @@ impl GuestMemory {
         Ok(())
     }
 
-    /// Validate that a `byte_len`-byte write at `range` would succeed
-    /// via `apply_commit`, without mutating. `apply_commit` runs the same
-    /// check first, then writes the regions the check found.
+    /// Validate that the regions take a `byte_len`-byte write at `range`.
+    /// `apply_commit` runs the same check first, then writes the regions
+    /// the check found.
     ///
     /// The range may run across regions that sit end to end, as a store
     /// runs across adjacent pages.
@@ -997,19 +1090,15 @@ impl GuestMemory {
         self.write_span(range, byte_len).map(|_| ())
     }
 
-    /// Validate that a write of `bytes` at `range` would succeed via
-    /// `apply_commit`, without mutating.
-    ///
-    /// A write of one register word is valid when its device accepts the
-    /// store. Every other write is valid as [`Self::validate_write`]
-    /// gives it.
+    /// Validate that [`Self::apply_staged`] accepts a write of `bytes` at
+    /// `range`.
     ///
     /// # Errors
     ///
     /// - [`MemError::RegisterStoreRefused`] when the device refuses the
     ///   store to a register word.
     /// - Each error of [`Self::validate_write`] for any other write.
-    pub fn validate_commit(&self, range: ByteRange, bytes: &[u8]) -> Result<(), MemError> {
+    pub(crate) fn validate_commit(&self, range: ByteRange, bytes: &[u8]) -> Result<(), MemError> {
         if range.length() == 4 && !self.register_files.is_empty() {
             if let Some(valid) = self.validate_register_store(range.start().raw(), bytes) {
                 return valid;
@@ -1243,6 +1332,22 @@ mod register_tests;
 #[cfg(test)]
 #[path = "tests/register_writer_tests.rs"]
 mod register_writer_tests;
+
+#[cfg(test)]
+#[path = "tests/register_commit_path_tests.rs"]
+mod register_commit_path_tests;
+
+#[cfg(test)]
+#[path = "tests/register_store_refusal_tests.rs"]
+mod register_store_refusal_tests;
+
+#[cfg(test)]
+#[path = "tests/declaration_refusal_tests.rs"]
+mod declaration_refusal_tests;
+
+#[cfg(test)]
+#[path = "tests/declaration_overlap_tests.rs"]
+mod declaration_overlap_tests;
 
 #[cfg(test)]
 #[path = "tests/fetch_tests.rs"]

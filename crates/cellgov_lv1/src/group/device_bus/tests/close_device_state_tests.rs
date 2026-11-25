@@ -1,8 +1,10 @@
 use super::*;
+use crate::answer::HypercallRefusal;
 use crate::group::device_bus::{DmaMapping, DmaRegion, StorageBusOpen};
 use crate::group::network::NetworkState;
 use crate::{answered_numbers, Hypervisor};
 use cellgov_event::UnitId;
+use cellgov_mem::lanes;
 use cellgov_ps3_abi::lv1::call::{
     ALLOCATE_DEVICE_DMA_REGION, CONNECT_INTERRUPT_EVENT_RECEIVE_PORT, CONSTRUCT_EVENT_RECEIVE_PORT,
     MAP_DEVICE_DMA_REGION, NET_SET_INTERRUPT_MASK, NET_SET_INTERRUPT_STATUS_INDICATOR, OPEN_DEVICE,
@@ -74,8 +76,14 @@ fn state_with(changes: &[DeviceBusChange]) -> DeviceBusState {
     state
 }
 
+/// The close calls the device's method at +112 with the region's address
+/// [OFW-4.93 lv1 a:0x2276C8-0x2276E4]. That path returns the range through
+/// a method [OFW-4.93 lv1 a:0x22AC18-0x22AC3C] that passes it to a
+/// function on a global table that CellGov does not hold
+/// [OFW-4.93 lv1 a:0x22A5B4-0x22A62C]. So the state records the device's
+/// pool as freed.
 #[test]
-fn a_close_removes_the_device_and_its_regions_and_mappings_and_keeps_the_rest() {
+fn a_close_removes_the_device_and_its_regions_and_mappings_records_its_pool_and_keeps_the_rest() {
     let others = [
         DeviceBusChange::Opened(DEVICE_1),
         DeviceBusChange::DmaRegionAllocated(DEVICE_1_REGION),
@@ -90,8 +98,16 @@ fn a_close_removes_the_device_and_its_regions_and_mappings_and_keeps_the_rest() 
     state.apply(DeviceBusChange::DmaRegionMapped(MAPPING));
     assert_ne!(state.sync_term(), kept.sync_term());
     state.apply(DeviceBusChange::Closed(NETWORK_DEVICE));
-    assert_eq!(state, kept);
-    assert_eq!(state.sync_term(), kept.sync_term());
+    assert_ne!(state, kept);
+    assert_eq!(state.freed_pools().collect::<Vec<_>>(), [NETWORK_DEVICE]);
+    assert_eq!(
+        state.sync_term(),
+        kept.sync_term()
+            .wrapping_add(lanes::value_term(185, 0, &NETWORK_DEVICE))
+    );
+    assert_eq!(state.open_devices().collect::<Vec<_>>(), [DEVICE_1]);
+    assert_eq!(state.storage_bus_open(), kept.storage_bus_open());
+    assert_eq!(state.storage_bus_port(), kept.storage_bus_port());
     assert_eq!(state.dma_regions().collect::<Vec<_>>(), [DEVICE_1_REGION]);
     assert_eq!(state.dma_mappings().collect::<Vec<_>>(), [DEVICE_1_MAPPING]);
     assert!(state.is_open(DEVICE_1));
@@ -166,9 +182,9 @@ fn dispatch_ok(hv: &mut Hypervisor, number: u64, registers: &[u64]) -> Hypercall
     disposition
 }
 
-/// Opens the network device and gives it each value that the close
-/// clears: the port, the indicator, the mask, the region and the mapping.
-fn set_up_network_device(hv: &mut Hypervisor, port: u64) {
+/// Opens the network device and gives it the port, the indicator and the
+/// mask.
+fn open_network_device(hv: &mut Hypervisor, port: u64) {
     dispatch_ok(hv, OPEN_DEVICE, &[1, 0, 0]);
     dispatch_ok(hv, CONNECT_INTERRUPT_EVENT_RECEIVE_PORT, &[1, 0, port, 0]);
     dispatch_ok(
@@ -177,6 +193,12 @@ fn set_up_network_device(hv: &mut Hypervisor, port: u64) {
         &[1, 0, KERNEL_INDICATOR, 0],
     );
     dispatch_ok(hv, NET_SET_INTERRUPT_MASK, &[1, 0, KERNEL_MASK, 0]);
+}
+
+/// Opens the network device and gives it each value that the close
+/// clears: the port, the indicator, the mask, the region and the mapping.
+fn set_up_network_device(hv: &mut Hypervisor, port: u64) {
+    open_network_device(hv, port);
     let allocate = dispatch_ok(hv, ALLOCATE_DEVICE_DMA_REGION, &[1, 0, REGION.size, 20, 0]);
     let HypercallDisposition::Answered(allocate) = allocate else {
         unreachable!("dispatch_ok returns an answer");
@@ -219,9 +241,13 @@ fn construct_port(hv: &mut Hypervisor) -> u64 {
 /// zero-extended [OFW-4.93 lv1 a:0x236534-0x236538]
 /// [OFW-4.93 lv1 a:0x237520-0x23752C]; the teardown stores 0 in the mask
 /// and 3 in the state word [OFW-4.93 lv1 a:0x23E048-0x23E060]
-/// [OFW-4.93 lv1 a:0x23E0F8-0x23E108].
+/// [OFW-4.93 lv1 a:0x23E0F8-0x23E108]. The close frees the region through
+/// a method [OFW-4.93 lv1 a:0x22AC18-0x22AC3C] that passes the range to a
+/// function on a global table that CellGov does not hold
+/// [OFW-4.93 lv1 a:0x22A5B4-0x22A62C]. So the reopen's allocate is an
+/// unmodelled input.
 #[test]
-fn the_hypervisor_close_tears_the_network_device_down_and_a_reopen_works_again() {
+fn the_hypervisor_close_tears_the_network_device_down_and_a_reopen_sets_it_up_without_a_region() {
     assert!(answered_numbers().contains(&CLOSE_DEVICE));
     let mut hv = Hypervisor::new();
     hv.set_firmware("4.93");
@@ -236,7 +262,11 @@ fn the_hypervisor_close_tears_the_network_device_down_and_a_reopen_works_again()
         unreachable!("dispatch_ok returns an answer");
     };
     assert_eq!(closed.outputs(), Some([0; 7]));
-    assert_eq!(*hv.groups().device_bus(), DeviceBusState::default());
+    let devices = hv.groups().device_bus();
+    assert_eq!(devices.open_devices().count(), 0);
+    assert_eq!(devices.dma_regions().count(), 0);
+    assert_eq!(devices.dma_mappings().count(), 0);
+    assert_eq!(devices.freed_pools().collect::<Vec<_>>(), [NETWORK_DEVICE]);
     let mut torn_down = NetworkState::default();
     torn_down.apply(NetworkChange::TornDown);
     assert_eq!(*hv.groups().network(), torn_down);
@@ -252,11 +282,20 @@ fn the_hypervisor_close_tears_the_network_device_down_and_a_reopen_works_again()
     );
     assert_eq!(hv, after_close);
 
-    set_up_network_device(&mut hv, port);
+    open_network_device(&mut hv, port);
+    let request = call(ALLOCATE_DEVICE_DMA_REGION, &[1, 0, REGION.size, 20, 0]);
+    let allocate = hv.dispatch(&request);
+    let HypercallDisposition::Refused(HypercallRefusal::UnmodelledInput {
+        number, unit, pc, ..
+    }) = &allocate
+    else {
+        panic!("{allocate:?}");
+    };
     assert_eq!(
-        hv.groups().device_bus().dma_regions().collect::<Vec<_>>(),
-        [REGION]
+        (number, unit, pc),
+        (&ALLOCATE_DEVICE_DMA_REGION, &request.unit, &request.pc)
     );
+    assert_eq!(hv.groups().device_bus().dma_regions().count(), 0);
     assert_eq!(
         hv.groups().network().status_indicator(),
         Some(KERNEL_INDICATOR)

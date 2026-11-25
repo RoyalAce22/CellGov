@@ -3,8 +3,8 @@ use crate::lv1::interrupt::IRQ_STATE_BITMAP_HANDLERS;
 use crate::lv1::irq_plug::IRQ_PLUG_HANDLERS;
 use crate::lv1::ppe::game_os_logical_ppe_id;
 
-/// While this holds, no firmware reaches the refusal of these handlers
-/// for a firmware whose logical PPE id no source gives.
+/// While this holds, none of the three handlers reaches its refusal of a
+/// firmware whose logical PPE id no source gives.
 #[test]
 fn every_firmware_with_a_mask_bitmap_or_plug_handler_row_has_a_logical_ppe_id() {
     let tables: [(&str, Vec<&str>); 3] = [

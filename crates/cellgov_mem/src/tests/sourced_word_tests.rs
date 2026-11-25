@@ -4,7 +4,6 @@
 use super::*;
 use crate::{PageSize, Region};
 
-/// A 16 KB region at 0 and a 64 KB span at 0x24003810000.
 const SPAN: (u64, u64) = (0x240_0381_0000, 0x1_0000);
 
 const READER: u64 = 0x8000_0000_0024_590C;
@@ -69,7 +68,7 @@ fn a_misaligned_word_a_word_outside_one_span_and_a_repeat_are_refused() {
     let mut mem = memory();
     let (base, len) = SPAN;
     let refused = |real| {
-        Err(MemError::SourcedWordRefused {
+        Err(MemError::SourcedWordUnheld {
             real,
             reader: READER,
         })
@@ -88,7 +87,13 @@ fn a_misaligned_word_a_word_outside_one_span_and_a_repeat_are_refused() {
     );
     assert_eq!(mem.declare_sourced_word(0, 1, READER), refused(0));
     mem.declare_sourced_word(base, 1, READER).unwrap();
-    assert_eq!(mem.declare_sourced_word(base, 2, READER), refused(base));
+    assert_eq!(
+        mem.declare_sourced_word(base, 2, READER),
+        Err(MemError::SourcedWordRepeated {
+            real: base,
+            reader: READER,
+        })
+    );
     assert_eq!(
         mem.sourced_word(base, READER),
         Some((base, &[0u8, 0, 0, 1][..]))

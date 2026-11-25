@@ -1,21 +1,17 @@
-//! The MMIO regions of the system bus devices in a kernel run's real
-//! address space, and the stop of an access that reaches one.
+//! The MMIO regions of the system bus devices, and the stop of an access
+//! to one.
 //!
 //! The console has storage at each region's real address: the device's
-//! registers. CellGov does not model them, so the run declares each
-//! region an unmodelled span. A span holds no bytes, so it never reads as
-//! zeros, and a store there never lands. An access there stops the run
-//! with the device that holds the address.
-//!
-//! Some words of a span answer some accesses:
+//! registers. CellGov models few of them, so the run declares each region
+//! an unmodelled span. A span holds no bytes, so it never reads as zeros,
+//! and a store there never lands. An access there stops the run with the
+//! device that holds the address, unless one of these words answers it:
 //! - A source gives some register words for the loads of one kernel
 //!   instruction each ([`DEVICE_REGISTER_READS`]). The run declares each
 //!   such word a sourced word of its span, so that instruction's load
 //!   gets the word.
 //! - The run models some operational registers and the PS3 setup
 //!   registers of each EHCI controller as register words ([`ehci`]).
-//!
-//! Every other access there still stops.
 
 use cellgov_effects::FaultKind;
 use cellgov_exec::ExecutionStepResult;
@@ -47,8 +43,7 @@ pub struct DeviceMmioAccess {
     /// The address of the instruction that made the access, when the
     /// unit named it.
     pub pc: Option<u64>,
-    /// The MMIO region that holds the access: its bus, device, slot,
-    /// bus address and size.
+    /// The MMIO region that holds the access.
     pub region: MmioRegion,
     /// The bus address of the first byte that the access reaches.
     pub bus_address: u64,
@@ -83,7 +78,7 @@ fn regions_of(firmware: &str) -> impl Iterator<Item = (u64, &'static MmioRegion)
 /// - the refusal of [`GuestMemory::declare_sourced_word`] when a word is
 ///   not an aligned word of one span, or repeats a word and reader. A
 ///   word of a region that lv1 does not give the device is in no span;
-/// - the refusal of a register word or reader declaration.
+/// - the refusal of a register file, reader or writer declaration.
 pub(super) fn declare_device_mmio(mem: &mut GuestMemory, firmware: &str) -> Result<(), MemError> {
     for (real, region) in regions_of(firmware) {
         mem.declare_unmodelled(real, region.size)?;

@@ -1,7 +1,9 @@
 //! The PS3 setup registers of a 4.93 kernel run: the stores that follow
 //! the controller reset, and the reset that returns them to unknown.
 
-use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, MemError, RegisterWord};
+use cellgov_mem::{
+    ByteRange, GuestAddr, GuestMemory, MemError, RegisterWord, StagedWrite, StagingMemory,
+};
 use cellgov_ps3_abi::hw::ehci::{EHCI_CONTROLLERS, INSNREG01, INSNREG03, USBCMD};
 use cellgov_ps3_abi::lv1::device_bus::MMIO_REAL_BASE;
 
@@ -33,13 +35,15 @@ fn registers() -> [u64; 3] {
     [base + USBCMD, base + INSNREG01, base + INSNREG03]
 }
 
-/// Commits a store of `value` to the register at `real`, as the commit
-/// pipeline does.
+/// Commits a store of `value` to the register at `real` through the
+/// staging drain, as the commit pipeline does.
 fn store(mem: &mut GuestMemory, real: u64, value: u32) -> Result<(), MemError> {
     let range = ByteRange::new(GuestAddr::new(real), 4).unwrap();
-    let bytes = value.to_be_bytes();
-    mem.validate_commit(range, &bytes)?;
-    mem.apply_commit(range, &bytes)
+    let mut staging = StagingMemory::new();
+    staging.stage(StagedWrite::new(range, &value.to_be_bytes()));
+    let drained = staging.drain_into(mem).map(|_| ());
+    staging.clear();
+    drained
 }
 
 /// Runs the kernel's halt and reset with stores of constant words: a

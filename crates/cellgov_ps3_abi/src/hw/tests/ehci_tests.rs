@@ -3,9 +3,10 @@ use crate::hw::device_register::DEVICE_REGISTER_READS;
 use crate::lv1::device_bus::mmio_region;
 use crate::lv1::repository::{field, first_field, NODES};
 
-/// The first value of the bus node of lpar 1 whose last three key words
-/// are `n`, at `firmware`, or `None` when the repository table holds no
-/// such node.
+/// The first value of the bus node of lpar 1 at `firmware` whose last
+/// three key words are `n`.
+///
+/// It gives `None` when the repository table holds no such node.
 fn bus_value(firmware: &str, bus: u64, n: [u64; 3]) -> Option<u64> {
     NODES
         .iter()

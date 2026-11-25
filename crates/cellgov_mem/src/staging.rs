@@ -135,20 +135,21 @@ impl StagingMemory {
     }
 
     /// Validate every pending write against `target` via
-    /// [`GuestMemory::validate_commit`] -- the predicate `apply_commit`
-    /// itself uses -- and return on the first failure. Mutates neither
+    /// [`GuestMemory::validate_commit`] -- the predicate of the apply that
+    /// the drain runs -- and return on the first failure. Mutates neither
     /// the staging buffer nor `target`.
     ///
-    /// A device accepts a register store against the words before the
-    /// batch. So a batch with a second store to a register word fails at
-    /// that store.
+    /// A device judges a register store against the words before the
+    /// batch. So the check cannot judge a second register store in one
+    /// batch, and refuses the batch at that store with
+    /// [`MemError::SecondRegisterStore`].
     fn validate_pending(&self, target: &GuestMemory) -> Result<(), MemError> {
         let mut register_store = false;
         for w in &self.pending {
             let (addr, len) = (w.range.start().raw(), w.range.length());
             if target.is_register(addr, len) {
                 if register_store {
-                    return Err(MemError::RegisterStoreRefused { real: addr });
+                    return Err(MemError::SecondRegisterStore { real: addr });
                 }
                 register_store = true;
             }
@@ -173,8 +174,8 @@ impl StagingMemory {
     ///
     /// # Errors
     ///
-    /// Returns any [`MemError`] that [`GuestMemory::apply_commit`] would
-    /// produce on the first offending write.
+    /// Returns the [`MemError`] that validation returns for the first
+    /// write that it refuses.
     pub fn drain_into(&mut self, target: &mut GuestMemory) -> Result<usize, MemError> {
         self.drain_into_observed(target, |_, _| {})
     }
@@ -196,8 +197,8 @@ impl StagingMemory {
         self.validate_pending(target)?;
         let count = self.pending.len();
         for w in self.pending.drain(..) {
-            target.apply_commit(w.range, w.bytes.as_slice()).expect(
-                "validate_pending called validate_commit; apply_commit calls the same predicate, \
+            target.apply_staged(w.range, w.bytes.as_slice()).expect(
+                "validate_pending called validate_commit; apply_staged calls the same predicate, \
                  so this Err path is structurally unreachable",
             );
             observe(w.range, w.bytes.as_slice());

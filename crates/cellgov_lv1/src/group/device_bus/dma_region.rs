@@ -102,6 +102,37 @@ const OTHER_HELD: UnmodelledError = UnmodelledError::new(
      pool state",
 );
 
+/// A call for a device after a close freed one of its regions.
+///
+/// lv1's free calls the device's method at +112 with the region's address
+/// [OFW-4.93 lv1 a:0x2276C8-0x2276E4]. That method reaches the pool's
+/// release [OFW-4.93 lv1 a:0x22D918-0x22D924]
+/// [OFW-4.93 lv1 a:0x22CEE0-0x22CEE4]. The release passes the address to
+/// the free function of the object that the pool's word at +160 selects
+/// [OFW-4.93 lv1 a:0x22CA78-0x22CB08]. When a block of the object holds
+/// no other entry, that function returns the block's range through the
+/// method at +32 of the object [OFW-4.93 lv1 a:0x22AC18-0x22AC3C]. That
+/// method passes each part of the range to a function that works on a
+/// global table [OFW-4.93 lv1 a:0x22A5B4-0x22A62C]
+/// [OFW-4.93 lv1 a:0x2D890C-0x2D8990].
+///
+/// The next search that finds no gap takes a new range from that table
+/// [OFW-4.93 lv1 a:0x22B0B8-0x22B154] [OFW-4.93 lv1 a:0x2D9E1C-0x2D9E38].
+/// CellGov does not hold the table, and no read shows how lv1 picks the
+/// range. So no source shows the address after the close.
+///
+/// The refusal holds for the closed device alone. lv1's init gives the
+/// word at +160 the value 2 for device 0, 8 for device 1 and 9 for
+/// device 2 [OFW-4.93 lv1 a:0x3A9924-0x3A9938]
+/// [OFW-4.93 lv1 a:0x3A9A4C-0x3A9A5C] [OFW-4.93 lv1 a:0x3A9AA0-0x3A9AB0].
+/// Each value selects an allocator that lv1 makes for that value alone
+/// [OFW-4.93 lv1 a:0x22CBD8-0x22CC04]. So a free for one device
+/// leaves the allocators of the other devices.
+const FREED_POOL: UnmodelledError = UnmodelledError::new(
+    "an allocate_device_dma_region for a device after a close freed one of its regions, whose \
+     address depends on the pool state that lv1's free leaves",
+);
+
 /// A call for device 1 or 2 after the partition holds all of its slots.
 const SLOTS_TAKEN: UnmodelledError = UnmodelledError::new(
     "an allocate_device_dma_region for device 1 or 2 of bus 1 after the partition holds all six \
@@ -135,8 +166,9 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// - lv1's init leaves +120 of the device at a value other than -1, as
 ///   the captures show.
 /// - The partition's regions of the device get the captured addresses in
-///   the captured order. For device 0, lv1's own region of the device is
-///   in the pool before the kernel's call.
+///   the captured order while no close freed a region of the device. For
+///   device 0, lv1's own region of the device is in the pool before the
+///   kernel's call.
 /// - lv1's allocation of its 80-byte region object succeeds.
 /// - For device 1 or 2, each region of the partition holds one slot, and
 ///   lv1 holds none.
@@ -145,6 +177,7 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// - no lv1 image read shows the handler for `firmware`;
 /// - r3 is bus 2, 3 or 4;
 /// - r4 names a device of bus 1 other than devices 0, 1 and 2;
+/// - a close freed a region of the device;
 /// - for device 1 or 2, the partition holds all six slots;
 /// - the partition holds regions of the device other than its first
 ///   captured regions;
@@ -191,6 +224,9 @@ pub(crate) fn allocate_region(
     }
     if let Some(r3) = dma_region_shape_r3(size, page_shift) {
         return lv1_answer(r3);
+    }
+    if state.pool_freed(open_device) {
+        return FREED_POOL.refusal(request);
     }
     let held: Vec<DmaRegion> = state.regions_of(open_device).collect();
     if slot_device && held.len() >= DMA_SLOT_COUNT {
@@ -263,3 +299,11 @@ mod rows_tests;
 #[cfg(test)]
 #[path = "tests/dma_region_device_2_tests.rs"]
 mod device_2_tests;
+
+#[cfg(test)]
+#[path = "tests/dma_region_reopen_tests.rs"]
+mod reopen_tests;
+
+#[cfg(test)]
+#[path = "tests/console_freed_pool_tests.rs"]
+mod console_freed_pool_tests;

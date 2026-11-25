@@ -1,7 +1,9 @@
 //! The EHCI operational registers of a 4.93 kernel run: the kernel's
 //! reset order and the stores that the model refuses.
 
-use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, MemError, RegisterWord};
+use cellgov_mem::{
+    ByteRange, GuestAddr, GuestMemory, MemError, RegisterWord, StagedWrite, StagingMemory,
+};
 use cellgov_ps3_abi::hw::ehci::{
     EHCI_CONTROLLERS, USBCMD, USBCMD_PARK_BITS, USBCMD_RESET_VALUE, USBINTR, USBSTS,
     USBSTS_RESET_VALUE,
@@ -44,13 +46,15 @@ fn registers() -> [u64; 3] {
     [base + USBCMD, base + USBSTS, base + USBINTR]
 }
 
-/// Commits a store of `value` to the register at `real`, as the commit
-/// pipeline does.
+/// Commits a store of `value` to the register at `real` through the
+/// staging drain, as the commit pipeline does.
 fn store(mem: &mut GuestMemory, real: u64, value: u32) -> Result<(), MemError> {
     let range = ByteRange::new(GuestAddr::new(real), 4).unwrap();
-    let bytes = value.to_be_bytes();
-    mem.validate_commit(range, &bytes)?;
-    mem.apply_commit(range, &bytes)
+    let mut staging = StagingMemory::new();
+    staging.stage(StagedWrite::new(range, &value.to_be_bytes()));
+    let drained = staging.drain_into(mem).map(|_| ());
+    staging.clear();
+    drained
 }
 
 fn read(mem: &GuestMemory, real: u64, reader: u64) -> Option<u32> {

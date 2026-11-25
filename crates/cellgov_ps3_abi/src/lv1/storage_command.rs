@@ -5,7 +5,7 @@
 //! The facts come from the 4.93 `lv1.self`, decrypted offline and read
 //! with `cellgov dev disasm`, and from the console captures
 //! [`super::storage_registration::REGISTRATION_CAPTURE`] and
-//! [`super::device_bus::storage_bus::STORAGE_DEVICE_OPEN_CAPTURE`]. The
+//! [`super::device_bus::STORAGE_DEVICE_OPEN_CAPTURE`]. The
 //! repository holds no byte of lv1, only these facts. The path of a
 //! command:
 //! 1. The handler, at [OFW-4.93 lv1 a:0x3094E4] in the live table,
@@ -27,7 +27,7 @@
 //!
 //! # The device of type 5
 //!
-//! The capture [`super::device_bus::storage_bus::STORAGE_DEVICE_OPEN_CAPTURE`]
+//! The capture [`super::device_bus::STORAGE_DEVICE_OPEN_CAPTURE`]
 //! reads the method table 0x35E370 at +0 of device 2's object. In that
 //! table:
 //! - slot 6 holds the descriptor 0x338778
@@ -131,14 +131,14 @@
 //!    [OFW-4.93 lv1 a:0x25F984-0x25F98C].
 //! 6. It sends the query to the controller [OFW-4.93 lv1 a:0x25F990].
 //!    One path of the send stores to the controller's registers through
-//!    cache-inhibited real addresses [OFW-4.93 lv1 a:0x26A0DC-0x26A108].
+//!    caching-inhibited real addresses [OFW-4.93 lv1 a:0x26A0DC-0x26A108].
 //!
 //! The controller's reply calls the reply function, which completes the
 //! request under the tag at +5744 with the reply's status
 //! [OFW-4.93 lv1 a:0x273080-0x2730A0]. The completion function sends the
 //! event on the port of the partition's open slot; see
 //! [`super::storage`]. The reply's status and the three words come from
-//! the controller. No read of lv1 gives them.
+//! the controller. No lv1 image read gives them.
 //!
 //! The 4.93 kernel's call [OFW-4.93 lv2_kernel a:0x80000000000ab390]
 //! passes these inputs
@@ -207,8 +207,8 @@ pub const SEND_COMMAND_NOT_READY_STATUS: i64 = LV1_WRONG_STATE;
 /// each tag at +2680 [OFW-4.93 lv1 a:0x25398C-0x2539CC].
 pub const SEND_COMMAND_TAGS: u8 = 16;
 
-/// The status of a command while each tag of the device is held, or
-/// while each slot of its command ring is used: `LV1_BUSY` (-9)
+/// The status of a command while requests hold each tag of the device,
+/// or while commands fill each slot of its command ring: `LV1_BUSY` (-9)
 /// [OFW-4.93 lv1 a:0x2539C8] [OFW-4.93 lv1 a:0x272DA8].
 pub const SEND_COMMAND_TAGS_FULL_STATUS: i64 = LV1_BUSY;
 
@@ -235,7 +235,7 @@ pub const SEND_COMMAND_BAD_REQUEST_STATUS: i64 = LV1_ILLEGAL_PARAMETER_VALUE;
 /// `LV1_DENIED_BY_POLICY` (-4) [OFW-4.93 lv1 a:0x272FB4].
 pub const SEND_COMMAND_DENIED_STATUS: i64 = LV1_DENIED_BY_POLICY;
 
-/// The command id of the controller query: 0x1A, the table entry
+/// The command id of the controller query, from its case-table entry
 /// [OFW-4.93 lv1 a:0x272220].
 pub const CONTROLLER_QUERY_COMMAND: u32 = 0x1A;
 

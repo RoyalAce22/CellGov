@@ -412,8 +412,8 @@ impl PpuFault {
     /// Fills the fault fields of `diag` for this fault at `pc`: the EA
     /// of the fault, the refused access and the interrupt registers.
     ///
-    /// A CellGov stop fills only the EA and the real address of an
-    /// access to unmodelled storage.
+    /// An access to unmodelled storage fills only the EA and the real
+    /// address. Every other CellGov stop fills none.
     pub fn annotate(&self, pc: u64, diag: &mut LocalDiagnostics) {
         if let Self::UnmodelledStorage { ea, ra } = *self {
             diag.faulting_ea = Some(ea);

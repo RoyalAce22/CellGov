@@ -185,6 +185,22 @@
 //! - index 3 selects +56, device 1 [OFW-4.93 lv1 a:0x22B838-0x22B844];
 //! - index 4 selects +64, device 2 [OFW-4.93 lv1 a:0x3A9AC4].
 //!
+//! The search and the free take their address allocator at
+//! +192 + 8 x k of the backend, where k is the word at +160 of the pool
+//! [OFW-4.93 lv1 a:0x22CA78-0x22CB08] [OFW-4.93 lv1 a:0x22CF80-0x22CFF0].
+//! The pool's constructor stores at +160 the word that its caller gives
+//! [OFW-4.93 lv1 a:0x3A9750-0x3A9780] [OFW-4.93 lv1 a:0x22DDE4], and
+//! lv1's init gives a different word to each device:
+//! - index 0 gets 2 [OFW-4.93 lv1 a:0x3A9924-0x3A9938];
+//! - index 3 gets 8 [OFW-4.93 lv1 a:0x3A9A4C-0x3A9A5C];
+//! - index 4 gets 9 [OFW-4.93 lv1 a:0x3A9AA0-0x3A9AB0].
+//!
+//! The backend's init clears each allocator entry
+//! [OFW-4.93 lv1 a:0x22B738-0x22B754], and the first use of a clear entry
+//! stores a newly allocated allocator in it
+//! [OFW-4.93 lv1 a:0x22CBD8-0x22CC04]. So each of the three devices has an
+//! allocator of its own.
+//!
 //! So lv1 gives each device its bus addresses from the device's own
 //! space, and an address of one device says nothing of another device.
 //!

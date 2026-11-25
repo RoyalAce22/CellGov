@@ -1,6 +1,6 @@
 //! A register word of an unmodelled span answers its reader's load while
-//! the bits the reader keeps are known, takes a whole-word store that its
-//! device accepts, and ends the batch after either access.
+//! the bits the reader keeps are known. It takes a whole-word store that
+//! its device accepts. The batch ends after either access.
 
 use crate::fault_codes::FAULT_UNMODELLED_STORAGE;
 use crate::instruction::{FusedPair, PpuInstruction};
@@ -46,7 +46,7 @@ const STB: u32 = (38 << 26) | (4 << 21) | (5 << 16);
 /// `li r6,1`.
 const LI: u32 = (14 << 26) | (6 << 21) | 1;
 
-/// The device's rule: a store with bit 0 set is refused, and any other
+/// The device's rule: it refuses a store with bit 0 set, and any other
 /// store becomes the known word.
 fn refuse_bit_0(words: &mut [RegisterWord], index: usize, store: RegisterStore) -> bool {
     if store.value & 1 != 0 {

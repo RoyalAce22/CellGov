@@ -8,7 +8,6 @@ fn range(addr: u64, len: u64) -> ByteRange {
     ByteRange::new(GuestAddr::new(addr), len).unwrap()
 }
 
-/// A 16 KB region at 0 and a 64 KB span at 0x24003810000.
 const SPAN: (u64, u64) = (0x240_0381_0000, 0x1_0000);
 
 fn memory() -> GuestMemory {

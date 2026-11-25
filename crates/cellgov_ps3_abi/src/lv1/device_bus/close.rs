@@ -123,6 +123,45 @@
 //!   region from the list at +96 and destroys it
 //!   [OFW-4.93 lv1 a:0x2276C8-0x227768].
 //!
+//! The release calls the device's method at +112 with the address at +48
+//! of the region [OFW-4.93 lv1 a:0x2276C8-0x2276E4]. That method passes the
+//! backend at +136 and the pool index at +128 to the pool's release
+//! [OFW-4.93 lv1 a:0x22D918-0x22D924] [OFW-4.93 lv1 a:0x22CEE0-0x22CEE4].
+//! The pool's release takes the object of the backend that the word at
+//! +160 of the pool selects, and passes the address to that object's free
+//! function [OFW-4.93 lv1 a:0x22CA78-0x22CB08]. The allocate's search
+//! takes the object that the same word selects
+//! [OFW-4.93 lv1 a:0x22CF80-0x22CFF0].
+//!
+//! The free function holds a lock word that every pool shares
+//! [OFW-4.93 lv1 a:0x22AA4C-0x22AA60] and does these steps:
+//! 1. It finds the block of the object that holds the address, and the
+//!    block's entry for the address [OFW-4.93 lv1 a:0x22AA6C-0x22AB24].
+//! 2. It unlinks that entry and destroys it
+//!    [OFW-4.93 lv1 a:0x22AB28-0x22AB70] [OFW-4.93 lv1 a:0x22AB8C-0x22ABB8].
+//! 3. When the block holds another entry, it returns 0
+//!    [OFW-4.93 lv1 a:0x22AB74-0x22AB88].
+//! 4. Otherwise it unlinks the block and destroys it
+//!    [OFW-4.93 lv1 a:0x22ABBC-0x22AC14] [OFW-4.93 lv1 a:0x22AC68-0x22AC98].
+//!    It then returns the block's range
+//!    through the method at +32 of the object
+//!    [OFW-4.93 lv1 a:0x22AC18-0x22AC3C].
+//!
+//! That method reads no field of the object. It calls a function for each
+//! part of the range [OFW-4.93 lv1 a:0x22A5B4-0x22A62C], and that function
+//! works on a global table [OFW-4.93 lv1 a:0x2D890C-0x2D8990].
+//!
+//! The allocate's search takes the first gap that fits in a block of the
+//! object. It starts the scan of each block at the end of the block's
+//! first entry [OFW-4.93 lv1 a:0x22AD1C-0x22AE34]. When no block has a gap
+//! that fits, the search makes a block from a new range
+//! [OFW-4.93 lv1 a:0x22B0B8-0x22B154]. The new range comes from a function
+//! that reads the same global table [OFW-4.93 lv1 a:0x2DA250-0x2DA2A4]
+//! [OFW-4.93 lv1 a:0x2D9D20-0x2D9D4C] [OFW-4.93 lv1 a:0x2D9E1C-0x2D9E38].
+//! CellGov does not hold that table, and no image read shows how the
+//! function picks the range. So no source shows the address of a region
+//! after a close frees the last entry of a block.
+//!
 //! The entry at +120 gave each mapping of the partition its I/O address
 //! when `map_device_dma_region` made the mapping. It used the same bus
 //! address and the same device word at +160 then. The mapping function stores

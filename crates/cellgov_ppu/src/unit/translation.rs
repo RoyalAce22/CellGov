@@ -276,7 +276,8 @@ impl PpuExecutionUnit {
     ///
     /// The batch ends ahead of the access when a buffered store reaches a
     /// byte that the search of the next page writes
-    /// ([`RefillStop::AfterStores`]). Otherwise the access stops:
+    /// ([`RefillStop::AfterStores`]). Otherwise the first case below that
+    /// applies gives the result:
     ///
     /// - An access the PPE refuses before it performs it: that interrupt.
     ///   An access the PPE never performs reaches no storage. The
@@ -349,9 +350,7 @@ impl PpuExecutionUnit {
         )))
     }
 
-    /// The view of the sourced word of `mem` that answers `insn`'s load
-    /// of the real address `ra`, through the translation `t`, or `None`
-    /// when no sourced word answers it.
+    /// The view through `t` of the sourced word that answers the load at `ra`.
     ///
     /// A word answers only when all of these hold:
     /// - the access is a load;
@@ -383,20 +382,18 @@ impl PpuExecutionUnit {
         })
     }
 
-    /// The view of the register word of `mem` that answers `insn`'s
-    /// access to the real address `ra`, through the translation `t`, or
-    /// `None` when no register word answers it.
+    /// The view through `t` of the register word that answers the access at `ra`.
     ///
-    /// `insn` must be no fused pair, so `pc` is the address of the
-    /// instruction that makes the access. Then:
+    /// A fused pair gets no view. For any other `insn`, `pc` is the
+    /// address of the instruction that makes the access, and:
     /// - a load gets the view when the word answers the reader `pc`
     ///   ([`GuestMemory::register_read`]);
     /// - a store gets a view that takes it when the store is one whole
     ///   aligned word that the device accepts
     ///   ([`Self::register_store_accepted`]). When the entry of `t` has
-    ///   C = 0, the view refuses the store as [`CHANGE_UNSET`], as
-    ///   [`push_views`] gives a piece of storage. So the store writes C
-    ///   and runs again.
+    ///   C = 0, the view refuses the store as [`CHANGE_UNSET`], the same
+    ///   refusal that [`push_views`] gives a piece of storage. So the
+    ///   store writes C and runs again.
     fn register_view<'m>(
         &self,
         insn: &PpuInstruction,
@@ -422,7 +419,7 @@ impl PpuExecutionUnit {
             provisional: None,
             // [CBE-Handbook p:90 s:4.2.6.8] A store's table lookup sets C from 0 to 1 unless the access takes a storage exception.
             // The probe below ignores the C refusal, so it judges the store
-            // the run performs after C is written.
+            // the run performs after the store writes C.
             write_refused_by: if store {
                 (!t.changed).then_some(CHANGE_UNSET)
             } else {
@@ -437,13 +434,14 @@ impl PpuExecutionUnit {
         Some(view)
     }
 
-    /// Whether `insn`, run against `views` and the writable view `view` of
-    /// a register word, makes one store of the whole word that the device
-    /// accepts from the instruction at `pc`.
+    /// Whether `insn` at `pc` makes one whole-word store that the device accepts.
     ///
-    /// The run is a probe: the unit keeps nothing of it. A conditional
-    /// store, a partial store and a store of more than the word do not
-    /// count.
+    /// The unit runs `insn` as a probe against `views` and the writable
+    /// view `view` of a register word, and keeps nothing of the run.
+    /// These stores do not count:
+    /// - a conditional store;
+    /// - a partial store;
+    /// - a store of more than the word.
     fn register_store_accepted(
         &self,
         insn: &PpuInstruction,
@@ -1359,8 +1357,8 @@ impl PpuExecutionUnit {
         }
         // A fetch from a real address no storage holds checkstops: only a
         // caching-inhibited load takes the machine check. A fetch from an
-        // unmodelled span stops there. A region that holds no code keeps
-        // its no-execute refusal.
+        // unmodelled span takes the unmodelled stop. A region that holds
+        // no code keeps its no-execute refusal.
         let ((start, last), (base, bytes)) = fetch_window(mem, ra).map_err(|f| match f {
             PpuFault::Interrupt(PpuInterrupt::InstructionStorage {
                 no_execute: false, ..

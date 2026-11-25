@@ -109,8 +109,8 @@ pub(crate) fn run(
     Ok(())
 }
 
-/// One clause that names the device, the region and the addresses of an
-/// access to a device's MMIO, and where the access was made.
+/// One clause that names the device, the region, the addresses and the
+/// instruction of an access to a device's MMIO.
 fn device_mmio_text(access: &DeviceMmioAccess) -> String {
     let region = &access.region;
     let at = match access.pc {

@@ -1,13 +1,12 @@
-//! Register words: which loads they answer, which bits of a store are the
-//! storing code's own, and how a store commits.
+//! Register words: which loads they answer, which bits of a store the code
+//! owns, and how a store commits.
 
 use super::*;
 use crate::{GuestAddr, PageSize, Region, StagedWrite, StagingMemory};
 
-/// A 16 KB region at 0 and a 64 KB span at 0x24003810000.
 const SPAN: (u64, u64) = (0x240_0381_0000, 0x1_0000);
 
-/// The two words of the test file.
+/// The two words of the test register file.
 const WORD: u64 = SPAN.0 + 0x10;
 const NEXT: u64 = SPAN.0 + 0x14;
 
@@ -49,6 +48,16 @@ fn range(addr: u64) -> ByteRange {
     ByteRange::new(GuestAddr::new(addr), 4).unwrap()
 }
 
+/// Commits a store of `bytes` to the word at `addr` through the staging
+/// drain.
+fn commit(mem: &mut GuestMemory, addr: u64, bytes: &[u8; 4]) -> Result<(), MemError> {
+    let mut staging = StagingMemory::new();
+    staging.stage(StagedWrite::new(range(addr), bytes));
+    let drained = staging.drain_into(mem).map(|_| ());
+    staging.clear();
+    drained
+}
+
 #[test]
 fn a_reader_gets_the_word_only_while_the_bits_it_keeps_are_known() {
     let mut mem = memory();
@@ -84,7 +93,7 @@ fn a_stored_zero_is_the_code_own_unless_a_reader_passes_it_back_unknown() {
             .unwrap();
         mem.declare_register_reader(WORD, READER, kept, back(passes))
             .unwrap();
-        mem.apply_commit(range(WORD), &value.to_be_bytes()).unwrap();
+        commit(&mut mem, WORD, &value.to_be_bytes()).unwrap();
         assert_eq!(
             mem.register_word(WORD),
             Some(RegisterWord::known(own)),
@@ -104,7 +113,7 @@ fn a_known_bit_of_a_store_is_the_code_own_even_when_a_reader_passes_it() {
         .unwrap();
     mem.declare_register_reader(WORD, READER, 0, back(u32::MAX))
         .unwrap();
-    mem.apply_commit(range(WORD), &[0; 4]).unwrap();
+    commit(&mut mem, WORD, &[0; 4]).unwrap();
     assert_eq!(mem.register_word(WORD), Some(RegisterWord::known(0xF)));
 }
 
@@ -115,7 +124,7 @@ fn a_stored_zero_passes_back_only_from_the_store_its_reader_names() {
         .unwrap();
     mem.declare_register_reader(WORD, READER, 0, back(!1))
         .unwrap();
-    // (storing instruction, stored value, accepted)
+    // (store instruction, stored value, accepted)
     let cases: &[(u64, u32, bool)] = &[
         (STORE, 0, true),
         (STORE + 4, 0, false),
@@ -148,7 +157,7 @@ fn a_refused_store_fails_validation_and_changes_no_word() {
     assert!(!mem.register_store_accepted(WORD, 1, STORE));
     assert!(mem.register_store_accepted(WORD, 2, STORE));
     assert_eq!(mem.validate_commit(range(WORD), &[0, 0, 0, 1]), refused);
-    assert_eq!(mem.apply_commit(range(WORD), &[0, 0, 0, 1]), refused);
+    assert_eq!(commit(&mut mem, WORD, &[0, 0, 0, 1]), refused);
     assert_eq!(mem.register_word(WORD), Some(RegisterWord::UNKNOWN));
     assert_eq!(mem.content_hash(), hash);
 }
@@ -184,7 +193,7 @@ fn a_batch_with_two_register_stores_commits_neither() {
     staging.stage(StagedWrite::new(range(NEXT), &[0, 0, 0, 4]));
     assert_eq!(
         staging.drain_into(&mut mem),
-        Err(MemError::RegisterStoreRefused { real: NEXT })
+        Err(MemError::SecondRegisterStore { real: NEXT })
     );
     staging.clear();
     assert_eq!(mem.register_word(WORD), Some(RegisterWord::UNKNOWN));
@@ -254,6 +263,11 @@ fn a_write_that_is_not_one_whole_register_word_fails_alike_at_validation_and_com
             "{start:x}+{length}: {validated:?}"
         );
         assert_eq!(
+            mem.apply_staged(write, &bytes),
+            validated,
+            "{start:x}+{length}"
+        );
+        assert_eq!(
             mem.apply_commit(write, &bytes),
             validated,
             "{start:x}+{length}"
@@ -272,7 +286,7 @@ fn a_reset_for_reuse_returns_each_word_to_its_declared_state() {
     };
     mem.declare_registers(&[(WORD, declared)], refuse_bit_0)
         .unwrap();
-    mem.apply_commit(range(WORD), &[0, 0, 0, 2]).unwrap();
+    commit(&mut mem, WORD, &[0, 0, 0, 2]).unwrap();
     assert_eq!(mem.register_word(WORD), Some(RegisterWord::known(2)));
     mem.reset_for_reuse();
     assert_eq!(mem.register_word(WORD), Some(declared));
@@ -282,42 +296,49 @@ fn a_reset_for_reuse_returns_each_word_to_its_declared_state() {
 #[test]
 fn the_memory_refuses_each_declaration_that_names_no_word_it_can_hold() {
     let mut mem = memory();
-    let refused = |real| Err(MemError::RegisterRefused { real });
+    let unheld = |real| Err(MemError::RegisterWordUnheld { real });
+    let repeated = |real| Err(MemError::RegisterWordRepeated { real });
     let unknown = RegisterWord::UNKNOWN;
     let rule: RegisterRule = refuse_bit_0;
     assert_eq!(
         mem.declare_registers(&[(WORD + 2, unknown)], rule),
-        refused(WORD + 2)
+        unheld(WORD + 2)
     );
     assert_eq!(
         mem.declare_registers(&[(0x100, unknown)], rule),
-        refused(0x100)
+        unheld(0x100)
     );
     let end = SPAN.0 + SPAN.1;
-    assert_eq!(mem.declare_registers(&[(end, unknown)], rule), refused(end));
+    assert_eq!(mem.declare_registers(&[(end, unknown)], rule), unheld(end));
     assert_eq!(
         mem.declare_registers(&[(SPAN.0, unknown), (end - 4, unknown)], rule),
         Ok(())
     );
     let loose = RegisterWord { value: 2, known: 1 };
-    assert_eq!(mem.declare_registers(&[(WORD, loose)], rule), refused(WORD));
+    assert_eq!(
+        mem.declare_registers(&[(WORD, loose)], rule),
+        Err(MemError::RegisterValueOutsideKnown { real: WORD })
+    );
     assert_eq!(
         mem.declare_registers(&[(WORD, unknown), (WORD, unknown)], rule),
-        refused(WORD)
+        repeated(WORD)
     );
     assert_eq!(mem.register_word(WORD), None);
     mem.declare_registers(&[(WORD, unknown)], rule).unwrap();
     assert_eq!(
         mem.declare_registers(&[(WORD, unknown)], rule),
-        refused(WORD)
+        repeated(WORD)
     );
     assert_eq!(
         mem.declare_register_reader(NEXT, READER, 0, None),
-        refused(NEXT)
+        Err(MemError::NoRegisterWord { real: NEXT })
     );
     mem.declare_register_reader(WORD, READER, 0, None).unwrap();
     assert_eq!(
         mem.declare_register_reader(WORD, READER, 0, None),
-        refused(WORD)
+        Err(MemError::RegisterReaderRepeated {
+            real: WORD,
+            reader: READER
+        })
     );
 }

@@ -32,8 +32,8 @@ fn request(device: u64, port: u64) -> HypercallRequest {
     }
 }
 
-/// The storage bus open with [`HELD_PORT`] connected to its slot, or to
-/// the slot of storage device 0 that is open too.
+/// The storage bus open, with [`HELD_PORT`] connected to the slot of
+/// `device`. For a storage device, the state also holds its open.
 fn connected(device: u64) -> DeviceBusState {
     let mut devices = DeviceBusState::default();
     devices.apply(DeviceBusChange::StorageBusOpened(StorageBusOpen { r5: 0 }));
@@ -105,7 +105,7 @@ fn a_storage_device_connect_after_the_close_change_gets_wrong_state_where_it_got
 
 /// [OFW-4.93 lv1 a:0x255520-0x255548] gives -9 while the slot's handle
 /// holds a port. After the close, the partition holds no slot of the
-/// storage bus [OFW-4.93 lv1 a:0x25477C-0x2547FC] and gets -11
+/// storage bus [OFW-4.93 lv1 a:0x25477C-0x2547FC], and the call gets -11
 /// [OFW-4.93 lv1 a:0x236534-0x236538].
 #[test]
 fn a_storage_bus_connect_after_the_close_change_gets_wrong_state_where_it_got_busy() {

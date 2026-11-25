@@ -49,7 +49,7 @@ pub(crate) const GROUP: Group = Group {
         HashedSurface {
             name: "the device commands that lv1 holds for the partition",
             source: Some(DEVICE_COMMAND_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(36),
         },
     ],
 };
@@ -95,7 +95,7 @@ pub struct DeviceCommand {
 }
 
 impl DeviceCommand {
-    /// The command's object key: 16 times its device id plus its tag.
+    /// The command's lane object under [`DEVICE_COMMAND_SOURCE`].
     pub(crate) fn key(&self) -> u64 {
         self.device
             .wrapping_mul(16)

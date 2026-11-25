@@ -162,9 +162,9 @@ fn tagged_answer(status: i64, tag: u8) -> HypercallDisposition {
 ///    does not hold, gets [`SEND_COMMAND_NO_DEVICE_STATUS`];
 /// 2. a device that the partition did not open gets
 ///    [`SEND_COMMAND_NOT_READY_STATUS`];
-/// 3. a call while each tag of the device is held gets
-///    [`SEND_COMMAND_TAGS_FULL_STATUS`]. A data buffer that the request
-///    function's check could refuse is then a refusal;
+/// 3. a call while requests hold each tag of the device gets
+///    [`SEND_COMMAND_TAGS_FULL_STATUS`]. The call is then a refusal when
+///    the request function's check could refuse its data buffer;
 /// 4. a command id that lv1 does not accept, or a command buffer that
 ///    the translation refuses, gets [`SEND_COMMAND_BAD_REQUEST_STATUS`],
 ///    with the lowest free tag of the device in r4.

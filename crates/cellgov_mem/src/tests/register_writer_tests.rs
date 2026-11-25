@@ -4,10 +4,9 @@
 use super::*;
 use crate::{PageSize, Region};
 
-/// A 16 KB region at 0 and a 64 KB span at 0x24003810000.
 const SPAN: (u64, u64) = (0x240_0381_0000, 0x1_0000);
 
-/// The two words of the test file.
+/// The two words of the test register file.
 const WORD: u64 = SPAN.0 + 0x94;
 const NEXT: u64 = SPAN.0 + 0x9C;
 
@@ -35,7 +34,7 @@ fn keep_value(words: &mut [RegisterWord], index: usize, store: RegisterStore) ->
 fn a_word_with_a_writer_takes_a_store_only_from_that_writer() {
     let mut mem = declared();
     mem.declare_register_writer(WORD, WRITER).unwrap();
-    // (word, storing instruction, accepted)
+    // (word, store instruction, accepted)
     let cases: &[(u64, u64, bool)] = &[
         (WORD, WRITER, true),
         (WORD, WRITER + 4, false),
@@ -59,7 +58,7 @@ fn a_writer_of_one_word_is_no_writer_of_another() {
     mem.declare_register_writer(NEXT, WRITER + 8).unwrap();
     mem.declare_register_writer(WORD, WRITER + 4).unwrap();
     mem.declare_register_writer(WORD, WRITER).unwrap();
-    // (word, storing instruction, accepted)
+    // (word, store instruction, accepted)
     let cases: &[(u64, u64, bool)] = &[
         (WORD, WRITER, true),
         (WORD, WRITER + 4, true),
@@ -82,13 +81,28 @@ fn a_writer_declaration_needs_a_word_and_a_new_store() {
     let mut mem = declared();
     mem.declare_register_writer(WORD, WRITER).unwrap();
     mem.declare_register_writer(WORD, WRITER + 4).unwrap();
-    // (word, store)
-    let cases: &[(u64, u64)] = &[(WORD, WRITER), (WORD + 4, WRITER), (SPAN.0, WRITER)];
+    // (word, store instruction, refusal)
+    let cases: &[(u64, u64, MemError)] = &[
+        (
+            WORD,
+            WRITER,
+            MemError::RegisterWriterRepeated {
+                real: WORD,
+                store: WRITER,
+            },
+        ),
+        (
+            WORD + 4,
+            WRITER,
+            MemError::NoRegisterWord { real: WORD + 4 },
+        ),
+        (SPAN.0, WRITER, MemError::NoRegisterWord { real: SPAN.0 }),
+    ];
     assert_eq!(cases.len(), 3);
-    for &(real, store) in cases {
+    for &(real, store, refusal) in cases {
         assert_eq!(
             mem.declare_register_writer(real, store),
-            Err(MemError::RegisterRefused { real }),
+            Err(refusal),
             "{real:x} {store:x}"
         );
     }

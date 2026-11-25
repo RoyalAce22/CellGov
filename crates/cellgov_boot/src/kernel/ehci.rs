@@ -7,39 +7,34 @@
 //! - the PS3 setup registers `insnreg01` and `insnreg03`.
 //!
 //! No source gives their state when the kernel starts, so each word
-//! starts with no known bit. The rule accepts only these stores:
+//! starts with no known bit. The rule accepts only these stores, and a
+//! refused store stops the run:
 //! - a store of 0 to USBINTR, which disables every interrupt;
 //! - a store to USBCMD that clears Run/Stop: the controller halts at the
 //!   store, so USBSTS gets HCHalted = 1;
 //! - a store to USBCMD that sets HCRESET while HCHalted is 1: the reset
 //!   ends at the store. It sets USBCMD, USBSTS and USBINTR to their
 //!   initial values, and the setup registers to unknown values;
-//! - a store to a setup register of the word that [`EHCI_SETUP_STORES`]
-//!   gives for it. The setup register then holds that word. The run
-//!   declares the store instruction of the table as the one writer of
-//!   the register.
-//!
-//! A store to USBCMD may also hold bits that the code stores back
-//! unchanged. Those bits keep their state. Only the store that a reader
-//! names as the store of its loaded word passes a bit back; each 0 of
-//! any other store is the code's own. Every other store is refused,
-//! and so stops: a set Run/Stop, a USBSTS store, an interrupt enable, a
-//! change to a USBCMD bit that the rule does not model, and a setup
-//! register store with no source. No reader of a setup register is
-//! declared, so each load of one stops too.
-//!
-//! [EHCI p:20 s:2.3.1] The controller halts within 16 micro-frames after Run/Stop clears.
-//! The model has no schedule, so no transaction is in flight, and it
-//! halts at once. The specification gives the reset no minimum time, so
-//! HCRESET reads 0 at the first load after the store.
+//! - a store to a setup register of the word that a row of
+//!   [`EHCI_SETUP_STORES`] at the controller's firmware gives for it.
+//!   The setup register then holds that word. The run declares the store
+//!   instruction of each such row as a writer of the register. It
+//!   declares no reader of a setup register, so each load of one stops
+//!   the run.
 
-use cellgov_mem::{GuestMemory, MemError, RegisterPassBack, RegisterStore, RegisterWord};
+use cellgov_mem::{
+    GuestMemory, MemError, RegisterPassBack, RegisterRule, RegisterStore, RegisterWord,
+};
 use cellgov_ps3_abi::hw::ehci::{
-    EHCI_CONTROLLERS, EHCI_RESET_READERS, EHCI_SETUP_STORES, INSNREG01, INSNREG03, USBCMD,
-    USBCMD_HCRESET, USBCMD_PARK_BITS, USBCMD_RESET_VALUE, USBCMD_RS, USBINTR, USBINTR_RESET_VALUE,
-    USBSTS, USBSTS_HCHALTED, USBSTS_RESET_VALUE,
+    EhciSetupStore, EHCI_CONTROLLERS, EHCI_RESET_READERS, EHCI_SETUP_STORES, INSNREG01, INSNREG03,
+    USBCMD, USBCMD_HCRESET, USBCMD_PARK_BITS, USBCMD_RESET_VALUE, USBCMD_RS, USBINTR,
+    USBINTR_RESET_VALUE, USBSTS, USBSTS_HCHALTED, USBSTS_RESET_VALUE,
 };
 use cellgov_ps3_abi::lv1::device_bus::MMIO_REAL_BASE;
+
+#[cfg(test)]
+#[path = "tests/ehci_firmware_rule_tests.rs"]
+mod firmware_rule_tests;
 
 /// The index of each register in a controller's register file.
 const CMD: usize = 0;
@@ -55,24 +50,33 @@ const WORDS: usize = 5;
 /// the order of the indexes.
 const REGISTERS: [u64; WORDS] = [USBCMD, USBSTS, USBINTR, INSNREG01, INSNREG03];
 
+/// The rule of each controller of [`EHCI_CONTROLLERS`], in the order of
+/// the table. The array has the length of the table, so a new controller
+/// row does not compile without its own rule.
+const RULES: [RegisterRule; EHCI_CONTROLLERS.len()] = [store_operational::<0>];
+
 /// Declares the registers of each EHCI controller at `firmware` as a
-/// register file of `mem`. It also declares these:
+/// register file of `mem`, with the rule of that controller. It also
+/// declares these:
 /// - the readers of [`EHCI_RESET_READERS`];
-/// - the store instruction of each row of [`EHCI_SETUP_STORES`], as the
-///   writer of its setup register.
+/// - the store instruction of each row of [`EHCI_SETUP_STORES`] at
+///   `firmware`, as a writer of its setup register.
 ///
 /// # Errors
 ///
 /// Returns the refusal of [`GuestMemory::declare_registers`],
 /// [`GuestMemory::declare_register_reader`] or
-/// [`GuestMemory::declare_register_writer`]. A register outside the
-/// controller's unmodelled span is refused.
+/// [`GuestMemory::declare_register_writer`]. The memory refuses a
+/// register outside the controller's unmodelled span.
 pub(super) fn declare_ehci(mem: &mut GuestMemory, firmware: &str) -> Result<(), MemError> {
-    let controllers = EHCI_CONTROLLERS.iter().filter(|c| c.firmware == firmware);
-    for controller in controllers {
+    let controllers = EHCI_CONTROLLERS
+        .iter()
+        .zip(RULES)
+        .filter(|(c, _)| c.firmware == firmware);
+    for (controller, rule) in controllers {
         let base = MMIO_REAL_BASE + controller.region + controller.operational;
         let words = REGISTERS.map(|offset| (base + offset, RegisterWord::UNKNOWN));
-        mem.declare_registers(&words, store_operational)?;
+        mem.declare_registers(&words, rule)?;
         let reads = EHCI_RESET_READERS.iter().filter(|r| r.firmware == firmware);
         for read in reads {
             let real = base + read.register;
@@ -90,29 +94,55 @@ pub(super) fn declare_ehci(mem: &mut GuestMemory, firmware: &str) -> Result<(), 
     Ok(())
 }
 
-/// The rule of a controller's register file. The file holds the words
-/// of [`REGISTERS`]; the rule refuses every store to a file of another
-/// length.
-fn store_operational(words: &mut [RegisterWord], index: usize, store: RegisterStore) -> bool {
+/// The rule of the register file of the controller at index `C` of
+/// [`EHCI_CONTROLLERS`]. A setup register takes only the words of the
+/// [`EHCI_SETUP_STORES`] rows at that controller's firmware.
+fn store_operational<const C: usize>(
+    words: &mut [RegisterWord],
+    index: usize,
+    store: RegisterStore,
+) -> bool {
+    let firmware = const { EHCI_CONTROLLERS[C].firmware };
+    apply_store(firmware, EHCI_SETUP_STORES, words, index, store)
+}
+
+/// Applies `store` to the word at `index` of a controller at `firmware`,
+/// whose setup registers take only the words of the `setup` rows at
+/// `firmware`. The file holds the words of [`REGISTERS`]; the rule
+/// refuses every store to a file of another length.
+fn apply_store(
+    firmware: &str,
+    setup: &[EhciSetupStore],
+    words: &mut [RegisterWord],
+    index: usize,
+    store: RegisterStore,
+) -> bool {
     let Ok(words) = <&mut [RegisterWord; WORDS]>::try_from(words) else {
         return false;
     };
     match index {
         CMD => store_usbcmd(words, store),
         INTR => store_usbintr(words, store),
-        INSN01 | INSN03 => store_setup(words, index, store),
+        INSN01 | INSN03 => store_setup(firmware, setup, words, index, store),
         _ => false,
     }
 }
 
-/// A store to a setup register: only a word that a row of
-/// [`EHCI_SETUP_STORES`] stores to that register, set by the code
-/// itself. No source gives what the word does to the controller, so the
+/// A store to a setup register: only a word that a `setup` row at
+/// `firmware` stores to that register, set by the code itself. A
+/// firmware with no such row has no setup word, so the rule refuses each
+/// store. No source gives what the word does to the controller, so the
 /// rule changes no other word.
-fn store_setup(words: &mut [RegisterWord; WORDS], index: usize, store: RegisterStore) -> bool {
-    let sourced = EHCI_SETUP_STORES
-        .iter()
-        .any(|s| s.register == REGISTERS[index] && s.value == store.value);
+fn store_setup(
+    firmware: &str,
+    setup: &[EhciSetupStore],
+    words: &mut [RegisterWord; WORDS],
+    index: usize,
+    store: RegisterStore,
+) -> bool {
+    let sourced = setup.iter().any(|s| {
+        s.firmware == firmware && s.register == REGISTERS[index] && s.value == store.value
+    });
     if store.own != u32::MAX || !sourced {
         return false;
     }
@@ -133,6 +163,18 @@ fn store_usbintr(words: &mut [RegisterWord; WORDS], store: RegisterStore) -> boo
 
 /// A store to USBCMD.
 ///
+/// A store may also hold bits that the code stores back unchanged. Those
+/// bits keep their state. Only the store that a reader names as the store
+/// of its loaded word passes a bit back; each 0 of any other store is the
+/// code's own. The rule refuses a store when one of its own bits outside
+/// Run/Stop and HCRESET is one of these in USBCMD:
+/// - unknown;
+/// - of another value.
+///
+/// [EHCI p:20 s:2.3.1] The controller halts within 16 micro-frames after Run/Stop clears.
+/// The model has no schedule, so no transaction is in flight, and it
+/// halts at once. The specification gives the reset no minimum time, so
+/// HCRESET reads 0 at the first load after the store.
 /// [EHCI p:20 s:2.3.1] Software should not set HCRESET while HCHalted is 0, as the result is undefined, and a write of 0 to HCRESET does not end a reset early.
 fn store_usbcmd(words: &mut [RegisterWord; WORDS], store: RegisterStore) -> bool {
     let cmd = words[CMD];

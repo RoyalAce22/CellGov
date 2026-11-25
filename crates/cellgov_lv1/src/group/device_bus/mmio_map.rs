@@ -133,10 +133,12 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 ///   through the allocator base that the map uses
 ///   [OFW-4.93 lv1 a:0x229AC0-0x229AF0] [OFW-4.93 lv1 a:0x229E40-0x229E78].
 /// - The free reads the word at the base and finds the address in the set
-///   at the base plus 16. The code of the free and of the find stores only
-///   to the stack, to the lock of the region object and to links of the
-///   set's nodes [OFW-4.93 lv1 a:0x2CE5E4-0x2CE710]
-///   [OFW-4.93 lv1 a:0x2CE38C-0x2CE5E0].
+///   at the base plus 16. The code of the free and of the find stores to
+///   these places alone [OFW-4.93 lv1 a:0x2CE5E4-0x2CE710]
+///   [OFW-4.93 lv1 a:0x2CE38C-0x2CE5E0]:
+///   - the stack;
+///   - the lock of the region object;
+///   - links of the set's nodes.
 /// - The free calls the method at +16 of the region object's class
 ///   [OFW-4.93 lv1 a:0x2CE6AC-0x2CE6C8] [OFW-4.93 lv1 a:0x35C6D0]
 ///   [OFW-4.93 lv1 a:0x32D6D8]. That method reads the live byte at +164
