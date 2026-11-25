@@ -1077,3 +1077,7 @@ mod hypercall_loaded_step_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_call_return_tests.rs"]
 mod hypercall_call_return_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_unfollowed_write_tests.rs"]
+mod hypercall_unfollowed_write_tests;
