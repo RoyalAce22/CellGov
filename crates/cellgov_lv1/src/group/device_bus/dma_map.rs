@@ -102,11 +102,11 @@ const OUTSIDE_MEMORY: UnmodelledError = UnmodelledError::new(
      whose lv1 IOPTE path is not read",
 );
 
-/// A call for device 1 or 2 that passes lv1's checks and that no console
-/// capture shows lv1 completed.
+/// A call that passes lv1's checks and that no console capture shows lv1
+/// completed.
 const UNCAPTURED_MAP: UnmodelledError = UnmodelledError::new(
-    "a map_device_dma_region for device 1 or 2 of bus 1 that no console capture shows, whose \
-     lv1 IOPTE writes read IOMMU state that no lv1 read or console capture gives",
+    "a map_device_dma_region for device 0, 1 or 2 of bus 1 that no console capture shows, \
+     whose lv1 IOPTE writes read IOMMU state that no lv1 read or console capture gives",
 );
 
 /// The region that holds the bus address of a call.
@@ -200,12 +200,8 @@ fn in_partition_memory(
 ///   region.
 /// - The device's entry at +120 gives each region an I/O address, as the
 ///   captures of the word at +160 and the regions' bus addresses show.
-/// - lv1's IOPTE writes succeed for a range of a region of device 0 that
-///   the partition allocated, when partition memory holds the range. The
-///   console's record of the kernel's call shows this case.
-/// - lv1's IOPTE writes succeed for a call of device 1 or 2 that
-///   [`is_game_os_dma_mapping`] holds. The console's record of the
-///   kernel's calls shows each of them.
+/// - lv1's IOPTE writes succeed for a call that [`is_game_os_dma_mapping`]
+///   holds. The console's record of the kernel's calls shows each of them.
 /// - lv1's allocation of its 96-byte mapping object succeeds.
 ///
 /// The call is a refusal in these cases:
@@ -214,8 +210,7 @@ fn in_partition_memory(
 /// - r4 names a device of bus 1 other than devices 0, 1 and 2;
 /// - r6 is in lv1's own region, and the call passes the length check;
 /// - the partition memory that CellGov holds does not hold the range;
-/// - r4 is device 1 or 2, and [`is_game_os_dma_mapping`] does not hold
-///   the call.
+/// - [`is_game_os_dma_mapping`] does not hold the call.
 pub(crate) fn map_region(
     request: &HypercallRequest,
     firmware: Option<&str>,
@@ -277,17 +272,15 @@ pub(crate) fn map_region(
     if !in_partition_memory(firmware, memory, lpar_address, length) {
         return OUTSIDE_MEMORY.refusal(request);
     }
-    if device != NETWORK_DEVICE.device
-        && !is_game_os_dma_mapping(
-            firmware,
-            bus,
-            device,
-            bus_address,
-            lpar_address,
-            length,
-            flags,
-        )
-    {
+    if !is_game_os_dma_mapping(
+        firmware,
+        bus,
+        device,
+        bus_address,
+        lpar_address,
+        length,
+        flags,
+    ) {
         return UNCAPTURED_MAP.refusal(request);
     }
     let mapping = DmaMapping {
@@ -313,3 +306,11 @@ mod slot_devices_tests;
 #[cfg(test)]
 #[path = "tests/dma_map_uncaptured_tests.rs"]
 mod uncaptured_tests;
+
+#[cfg(test)]
+#[path = "tests/dma_map_envelope_tests.rs"]
+mod envelope_tests;
+
+#[cfg(test)]
+#[path = "tests/dma_map_late_boot_tests.rs"]
+mod late_boot_tests;

@@ -138,7 +138,7 @@ fn key(row: &GameOsDmaMapping) -> (u64, u64, u64, u64) {
 }
 
 #[test]
-fn each_kernel_page_of_devices_1_and_2_is_a_captured_mapping_of_its_device() {
+fn the_rows_of_devices_1_and_2_are_the_captured_mappings_of_their_devices() {
     let words = doublewords();
     let mut captured = BTreeSet::new();
     for (device, object) in devices(&words) {
@@ -146,20 +146,13 @@ fn each_kernel_page_of_devices_1_and_2_is_a_captured_mapping_of_its_device() {
             assert!(captured.insert(key(&mapping)), "{mapping:?}");
         }
     }
+    assert_eq!(captured.len(), 20);
     let rows: BTreeSet<_> = GAME_OS_DMA_MAPPINGS
         .iter()
         .filter(|row| row.firmware == "4.93" && row.device != 0)
         .map(key)
         .collect();
-    assert_eq!(rows.len(), 18);
-    assert!(rows.is_subset(&captured), "{rows:X?}");
-
-    let later: BTreeSet<_> = captured.difference(&rows).copied().collect();
-    let expected = BTreeSet::from([
-        (1, 0xC080_0000, 0x9A_0000, 0x1_0000),
-        (2, 0xD000_0000, 0x80_0000, 0x10_0000),
-    ]);
-    assert_eq!(later, expected);
+    assert_eq!(rows, captured);
 }
 
 #[test]

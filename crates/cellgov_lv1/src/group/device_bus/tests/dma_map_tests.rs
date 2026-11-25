@@ -247,12 +247,7 @@ fn a_mapping_of_another_region_does_not_make_a_call_busy() {
     let mut state = mapped();
     state.apply(DeviceBusChange::DmaRegionAllocated(OTHER_REGION));
     let call = network(0x90_0000, OTHER_REGION.address, 0x10_0000);
-    let mapping = DmaMapping {
-        bus_address: OTHER_REGION.address,
-        lpar_address: 0x90_0000,
-        ..kernel_mapping()
-    };
-    assert_eq!(map(&state, &call), mapped_answer(mapping));
+    assert_eq!(map(&state, &call), refused(&call, UNCAPTURED_MAP.what));
 }
 
 /// [OFW-4.93 lv1 a:0x22732C-0x227358] checks each value against the
@@ -285,19 +280,13 @@ fn the_page_checks_use_the_page_of_the_region_that_holds_the_bus_address() {
     let mut state = allocated();
     state.apply(DeviceBusChange::DmaRegionAllocated(small_pages));
     let call = network(0x80_1000, small_pages.address + 0x1000, 0x1000);
-    let mapping = DmaMapping {
-        bus_address: small_pages.address + 0x1000,
-        lpar_address: 0x80_1000,
-        length: 0x1000,
-        ..kernel_mapping()
-    };
-    assert_eq!(map(&state, &call), mapped_answer(mapping));
+    assert_eq!(map(&state, &call), refused(&call, UNCAPTURED_MAP.what));
 }
 
 /// [OFW-4.93 lv1 a:0x2257E8-0x22583C] tests each mapping of the region by
 /// its offset in the region.
 #[test]
-fn a_call_that_starts_where_a_held_mapping_ends_maps() {
+fn a_call_that_starts_where_a_held_mapping_ends_passes_the_range_check() {
     let small_pages = DmaRegion {
         page_shift: 12,
         ..OTHER_REGION
@@ -311,13 +300,7 @@ fn a_call_that_starts_where_a_held_mapping_ends_maps() {
         ..kernel_mapping()
     }));
     let call = network(0x80_1000, small_pages.address + 0x1000, 0x1000);
-    let mapping = DmaMapping {
-        bus_address: small_pages.address + 0x1000,
-        lpar_address: 0x80_1000,
-        length: 0x1000,
-        ..kernel_mapping()
-    };
-    assert_eq!(map(&state, &call), mapped_answer(mapping));
+    assert_eq!(map(&state, &call), refused(&call, UNCAPTURED_MAP.what));
 }
 
 #[test]
@@ -366,10 +349,13 @@ fn a_call_in_lv1s_own_region_past_the_length_check_is_a_refusal() {
 }
 
 #[test]
-fn memory_past_the_real_mode_region_is_a_refusal_unless_a_region_holds_it() {
+fn memory_past_the_real_mode_region_gets_the_memory_refusal_unless_a_region_holds_it() {
     let rm_size = real_mode_size("4.93").expect("the 4.93 real mode size");
     let last = network(rm_size - 0x10_0000, 0xC000_0000, 0x10_0000);
-    assert_eq!(r3_of(&map(&allocated(), &last)), Some(0));
+    assert_eq!(
+        map(&allocated(), &last),
+        refused(&last, UNCAPTURED_MAP.what)
+    );
     let past = network(rm_size, 0xC000_0000, 0x10_0000);
     assert_eq!(
         map(&allocated(), &past),
@@ -392,13 +378,13 @@ fn memory_past_the_real_mode_region_is_a_refusal_unless_a_region_holds_it() {
     });
     let first = network(base, 0xC000_0000, 0x10_0000);
     assert_eq!(
-        r3_of(&map_region(&first, Some("4.93"), &allocated(), &memory)),
-        Some(0)
+        map_region(&first, Some("4.93"), &allocated(), &memory),
+        refused(&first, UNCAPTURED_MAP.what)
     );
     let held = network(base + 0x10_0000, 0xC000_0000, 0x10_0000);
     assert_eq!(
-        r3_of(&map_region(&held, Some("4.93"), &allocated(), &memory)),
-        Some(0)
+        map_region(&held, Some("4.93"), &allocated(), &memory),
+        refused(&held, UNCAPTURED_MAP.what)
     );
     let below = network(base - 0x10_0000, 0xC000_0000, 0x10_0000);
     assert_eq!(

@@ -110,14 +110,14 @@ fn mapped_answer(mapping: DmaMapping) -> HypercallDisposition {
 #[test]
 fn each_kernel_page_of_devices_1_and_2_maps_in_the_order_of_the_calls() {
     let pages = slot_device_pages();
-    assert_eq!(pages.len(), 18);
+    assert_eq!(pages.len(), 20);
     let mut state = slot_devices_allocated();
     for page in pages {
         assert_eq!(map(&state, page), mapped_answer(page), "{page:X?}");
         state.apply(DeviceBusChange::DmaRegionMapped(page));
     }
-    assert_eq!(state.mappings_of(device(1)).count(), 9);
-    assert_eq!(state.mappings_of(device(2)).count(), 9);
+    assert_eq!(state.mappings_of(device(1)).count(), 10);
+    assert_eq!(state.mappings_of(device(2)).count(), 10);
 }
 
 #[test]

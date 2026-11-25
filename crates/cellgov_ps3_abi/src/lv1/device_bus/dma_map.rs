@@ -74,7 +74,8 @@
 //!    [OFW-4.93 lv1 a:0x32D360-0x32D364]. That entry writes the IOPTE of
 //!    each page with an lv1 function [OFW-4.93 lv1 a:0x2D7E9C], and
 //!    returns -17 when one write fails [OFW-4.93 lv1 a:0x227124-0x2271E4].
-//!    The writes read lv1's IOMMU state, which CellGov does not model.
+//!    The section on the IOPTE writes gives the state that the writes
+//!    read.
 //! 3. It makes the mapping with the mapping function
 //!    [OFW-4.93 lv1 a:0x225E18] [OFW-4.93 lv1 a:0x227C9C]. That function
 //!    repeats the range check [OFW-4.93 lv1 a:0x225F7C-0x226048], so only
@@ -124,11 +125,58 @@
 //! capture holds the mapping of each of the kernel's calls, so lv1's
 //! writes succeeded for them.
 //!
+//! # The IOPTE writes
+//!
+//! Device 0's entry at +136 calls the IOPTE write function
+//! [OFW-4.93 lv1 a:0x2D7E9C] once for each page
+//! [OFW-4.93 lv1 a:0x227174-0x2271AC]. The call gives these inputs:
+//! - the IOMMU number 0 and the mode 0 [OFW-4.93 lv1 a:0x227188-0x22718C];
+//! - the I/O address and the logical partition address of the page;
+//! - the device's doubleword at +120 as the I/O id
+//!   [OFW-4.93 lv1 a:0x227C58];
+//! - the caller's flags.
+//!
+//! The write function does these steps. Steps 3 and 4 test only the
+//! inputs, and each other step reads lv1's IOMMU state:
+//! 1. It compares the IOMMU number with a word that the TOC slot at
+//!    r2 - 8480 points to [OFW-4.93 lv1 a:0x2D7E9C-0x2D7EE8].
+//! 2. It compares the I/O address with 1 shifted left by the word at +16
+//!    of the IOMMU object [OFW-4.93 lv1 a:0x2D7EEC-0x2D7F0C].
+//! 3. It refuses an I/O id above 0x7FF [OFW-4.93 lv1 a:0x2D7F10-0x2D7F14].
+//! 4. It repeats the check of [`DMA_MAP_FLAGS_MASK`]
+//!    [OFW-4.93 lv1 a:0x2D7F18-0x2D7F28].
+//! 5. Bits 28 and up of the I/O address select a segment. A function
+//!    tests the segment, and the IOMMU object's tables at +88, +96 and
+//!    +100 give the segment's entry [OFW-4.93 lv1 a:0x2D80C0-0x2D818C].
+//! 6. It compares the entry's doubleword at +56 with the doubleword at
+//!    r13 - 26600 [OFW-4.93 lv1 a:0x2D7F68-0x2D7F74]
+//!    [OFW-4.93 lv1 a:0x2D8190-0x2D8198].
+//! 7. It calls the entry's write function [OFW-4.93 lv1 a:0x2D819C-0x2D81AC].
+//!    That function checks the logical partition address against the
+//!    entry's page, and the offset in the segment against the entry's
+//!    bound [OFW-4.93 lv1 a:0x2D62A0-0x2D62C4].
+//! 8. When flag bit 0 or 1 is set, the entry's write function gives the
+//!    logical partition address to a lookup that no image read shows
+//!    [OFW-4.93 lv1 a:0x2D62C8-0x2D62D4] [OFW-4.93 lv1 a:0x2D6564-0x2D656C].
+//!
+//! A failed step gives a status other than 0
+//! [OFW-4.93 lv1 a:0x2D822C-0x2D82EC], and the entry at +136 then
+//! returns -17. CellGov holds none of this state, and no console capture
+//! gives it. So the model answers success only for a call that
+//! [`is_game_os_dma_mapping`] holds.
+//!
 //! # The 4.93 kernel's call of `map_device_dma_region`
 //!
-//! The kernel's caller gives its wrapper 0 as the flags word
-//! [OFW-4.93 lv2_kernel a:0x80000000000954a4-0x80000000000954d4]. So the
-//! wrapper sets the IOPTE flags to 0xE000000000000000
+//! The kernel sends the call only from its wrapper
+//! [OFW-4.93 lv2_kernel a:0x800000000007d4fc]. The wrapper has these two
+//! callers, and each gives it 0 as the flags word in r9:
+//! - [OFW-4.93 lv2_kernel a:0x80000000000954a4-0x80000000000954d4];
+//! - [OFW-4.93 lv2_kernel a:0x80000000000aa4b0-0x80000000000aa4cc].
+//!
+//! No other branch of the image goes to the wrapper, and no code loads its
+//! function descriptor
+//! [OFW-4.93 lv2_kernel a:0x800000000030fce8-0x800000000030fcfc]. So the
+//! wrapper sets the IOPTE flags to 0xE000000000000000 for each call
 //! [OFW-4.93 lv2_kernel a:0x800000000007d50c-0x800000000007d5bc]. For
 //! each page of its buffer, the wrapper sends the call with these inputs
 //! [OFW-4.93 lv2_kernel a:0x800000000007d678-0x800000000007d6b4]:
@@ -402,6 +450,11 @@ pub struct GameOsDmaMapping {
 ///   0xC0080000 of each device, then two pages in the region at
 ///   0xC0000000 of each device. The capture [`DMA_MAPPINGS_CAPTURE`] finds
 ///   each of them in its region's list, with the same fields.
+/// - The one mapping of device 1's region at 0xC0800000 and the one
+///   mapping of device 2's region at 0xD0000000. The capture
+///   [`DMA_MAPPINGS_CAPTURE`] finds each of them in its region's list.
+///   CellGov's boot of the 4.93 kernel stops before these two calls, so
+///   no record gives the order of the two.
 ///
 /// The mapping function keeps each region's list sorted by the offset at
 /// +16, highest first [OFW-4.93 lv1 a:0x225EB8-0x225F10]
@@ -438,6 +491,15 @@ pub const GAME_OS_DMA_MAPPINGS: &[GameOsDmaMapping] = &[
     kernel_page(1, 0xC001_0000, 0x93_0000),
     kernel_page(2, 0xC000_0000, 0x92_0000),
     kernel_page(2, 0xC001_0000, 0x93_0000),
+    kernel_page(1, 0xC080_0000, 0x9A_0000),
+    GameOsDmaMapping {
+        firmware: "4.93",
+        bus: 1,
+        device: 2,
+        bus_address: 0xD000_0000,
+        lpar_address: 0x80_0000,
+        length: 0x10_0000,
+    },
 ];
 
 /// The length of each page that the 4.93 kernel maps for devices 1 and 2.
@@ -458,9 +520,13 @@ const fn kernel_page(device: u64, bus_address: u64, lpar_address: u64) -> GameOs
 /// The IOPTE flags of each call that [`GAME_OS_DMA_MAPPINGS`] holds.
 ///
 /// The kernel's wrapper builds them from a flags word of 0
-/// [OFW-4.93 lv2_kernel a:0x800000000007d50c-0x800000000007d5bc], and
-/// CellGov's boot of the 4.93 kernel sends each of the rows' calls with
-/// them.
+/// [OFW-4.93 lv2_kernel a:0x800000000007d50c-0x800000000007d5bc]. Each
+/// caller of the wrapper gives it that word
+/// [OFW-4.93 lv2_kernel a:0x80000000000954d0-0x80000000000954d4]
+/// [OFW-4.93 lv2_kernel a:0x80000000000aa4c8-0x80000000000aa4cc]. So the
+/// 4.93 kernel sends each of its calls with these flags. CellGov's boot
+/// of the 4.93 kernel sends each row's call with them, up to the two
+/// last rows, which the boot does not reach.
 pub const GAME_OS_DMA_MAP_FLAGS: u64 = 0xE000_0000_0000_0000;
 
 /// Whether the call at `firmware` with these inputs is a row of
@@ -468,7 +534,8 @@ pub const GAME_OS_DMA_MAP_FLAGS: u64 = 0xE000_0000_0000_0000;
 ///
 /// A console capture holds the mapping that lv1 made for each row. The
 /// IOPTE writes of any other call read lv1's IOMMU state, which no image
-/// read or console capture gives.
+/// read or console capture gives. The section on the IOPTE writes in
+/// this module lists that state.
 pub fn is_game_os_dma_mapping(
     firmware: &str,
     bus: u64,
