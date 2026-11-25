@@ -130,6 +130,9 @@ pub(crate) struct Core {
     /// The cycle the last store completes, for a younger `mfvscr`. Stores
     /// complete in order.
     store_done: u64,
+    /// The first and the last doubleword the last store wrote, as their
+    /// addresses divided by 8.
+    store_dwords: (u64, u64),
     /// The cycle the last `mfvscr` or `mffs` result is ready. A younger
     /// floating-point store sends its data no earlier.
     status_read: u64,
@@ -385,6 +388,7 @@ impl PpeTiming {
                 fp_store_read: 0,
                 vsu_done: 0,
                 store_done: 0,
+                store_dwords: (0, 0),
                 status_read: 0,
                 vscr_read: 0,
                 fpscr_partner: None,
@@ -824,10 +828,7 @@ impl PpeTiming {
             c.fp_store_data = c.fp_store_data.max(sent + k::PPU_FP_STORE_DATA_CYCLES);
             c.fp_store_done = c.fp_store_done.max(sent + k::PPU_FP_STORE_COMPLETE_CYCLES);
         }
-        if matches!(op.kind, Kind::Store { .. }) {
-            c.store_done =
-                (last + store_wait(op)).max(c.store_done + k::PPU_MFVSCR_STORE_GAP_CYCLES);
-        }
+        note_store_done(c, op, t, last);
         c.fpscr_partner = None;
         if op.is_fpscr_read() {
             c.status_read = exec + k::PPU_MFFS_LATENCY_CYCLES;
@@ -1210,6 +1211,26 @@ fn store_wait(op: &Op) -> u64 {
     } else {
         k::PPU_MFVSCR_STORE_WAIT_CYCLES
     }
+}
+
+/// Records the cycle the store `op`, issued from `t` to `last`, completes
+/// for a younger `mfvscr`.
+#[inline]
+fn note_store_done(c: &mut Core, op: &Op, t: u64, last: u64) {
+    let Kind::Store { ea, len, .. } = op.kind else {
+        return;
+    };
+    let dwords = (ea >> 3, ea.wrapping_add(u64::from(len.max(1)) - 1) >> 3);
+    let pending = c.store_done > t;
+    let same = dwords.0 <= c.store_dwords.1 && c.store_dwords.0 <= dwords.1;
+    let queued = match (pending, same) {
+        (false, _) => 0,
+        (true, false) => k::PPU_MFVSCR_QUEUED_STORE_CYCLES,
+        (true, true) => k::PPU_MFVSCR_QUEUED_STORE_CYCLES + k::PPU_MFVSCR_SAME_DOUBLEWORD_CYCLES,
+    };
+    c.store_done =
+        (last + store_wait(op) + queued).max(c.store_done + k::PPU_MFVSCR_STORE_GAP_CYCLES);
+    c.store_dwords = dwords;
 }
 
 /// The cycles a multiply holds the FXU, or `None` for any other

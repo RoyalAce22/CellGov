@@ -978,10 +978,27 @@ pub const PPU_MFVSCR_FP_STORE_WAIT_CYCLES: u64 = 32;
 
 /// The fewest cycles between two stores completing, for a younger
 /// `mfvscr`. Stores complete in order.
+pub const PPU_MFVSCR_STORE_GAP_CYCLES: u64 = 1;
+
+/// The extra cycles a store takes to complete, for a younger `mfvscr`,
+/// when it issues before the older store completes.
 ///
-/// In the `ppu_issue_store_drain_distance` capture an `mfvscr`, 16 `li`
-/// and two `std` take 52.39 cycles an iteration, 4.39 more than with one.
-pub const PPU_MFVSCR_STORE_GAP_CYCLES: u64 = 4;
+/// In the `ppu_issue_mfvscr_stores` capture an `mfvscr`, 16 `li` and 1,
+/// 2, 3, 4, 5, 6 or 8 `std` to other doublewords take 48.00, 52.00,
+/// 53.00, 54.26, 55.00, 56.00 and 58.00 cycles an iteration. The stores
+/// issue one a cycle, and the last one completes 15 cycles after it
+/// issues, against 12 for a store alone
+/// ([`PPU_MFVSCR_STORE_WAIT_CYCLES`]).
+pub const PPU_MFVSCR_QUEUED_STORE_CYCLES: u64 = 3;
+
+/// The cycles a store takes to complete, for a younger `mfvscr`, in
+/// addition to [`PPU_MFVSCR_QUEUED_STORE_CYCLES`], when it writes a
+/// doubleword the older store wrote.
+///
+/// In the `ppu_issue_mfvscr_stores` capture an `mfvscr`, 16 `li` and two
+/// `std` to one doubleword take 56.14 cycles an iteration, and two `stw`
+/// to one doubleword 56.06. Two `std` to two doublewords take 52.00.
+pub const PPU_MFVSCR_SAME_DOUBLEWORD_CYCLES: u64 = 4;
 
 /// The cycles an `mtvscr` holds its unit, so the next `mtvscr` waits
 /// that long.

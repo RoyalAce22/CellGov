@@ -160,7 +160,12 @@ fn each_held_loop_lies_within_the_band() {
 /// the first two loops, within the band of the model's 69 and 47. Loop 10
 /// has the words of loop 3 of the `ppu_issue_store_drain_distance` probe
 /// at a different address. That loop takes 67.00 cycles an iteration, and
-/// the model holds it.
+/// the model holds it. In the `ppu_issue_mfvscr_place` capture the same
+/// words take 67.00 to 68.29 at 0, 32, 64 and 96 bytes past a 128-byte
+/// boundary, so the loop's place in its line does not explain its 72.24
+/// cycles in this capture. Loops 11 and 12 run 48 `li`. The model also
+/// gives fewer cycles than the console for the 48-`li` loops of the
+/// `ppu_issue_mfvscr_place` capture.
 const DIFFERENT: [usize; 5] = [8, 9, 10, 11, 12];
 
 /// The test fails when the model comes within the band of the console.

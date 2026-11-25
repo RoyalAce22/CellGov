@@ -45,6 +45,8 @@ mod console_ppu_issue_mffs_stfd;
 mod console_ppu_issue_mffs_younger;
 mod console_ppu_issue_mftb;
 mod console_ppu_issue_mfvscr_lsu_waw;
+mod console_ppu_issue_mfvscr_place;
+mod console_ppu_issue_mfvscr_stores;
 mod console_ppu_issue_mfvscr_younger;
 mod console_ppu_issue_mfxer;
 mod console_ppu_issue_miss;
