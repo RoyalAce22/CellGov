@@ -144,6 +144,7 @@ fn boot_stopped_by(stop: KernelRunStop) -> KernelRun {
         console: Vec::new(),
         thread0: None,
         thread1: None,
+        hypercall_sites: Default::default(),
     }
 }
 

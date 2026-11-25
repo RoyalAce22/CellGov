@@ -47,6 +47,7 @@ fn a_census_cut_off_by_its_cap_carries_both_threads_positions() {
         console: Vec::new(),
         thread0: Some(spinning_kernel()),
         thread1: Some(unstepped.clone()),
+        hypercall_sites: Default::default(),
     };
     let Err(RepositoryCensusError::StepCap { threads, .. }) = census_rows(PUP_355, 100, &boot)
     else {

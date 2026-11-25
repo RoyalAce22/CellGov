@@ -4,7 +4,7 @@
 //! The run gives the evidence a hypervisor table is built from: the
 //! repository reads the kernel makes, in order, and where it stops.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 
 use cellgov_core::{Runtime, RuntimeMode, StepError};
 use cellgov_effects::FaultKind;
@@ -111,6 +111,10 @@ pub struct KernelRun {
     /// Where hardware thread 1 is when the run stops, as for
     /// [`Self::thread0`].
     pub thread1: Option<KernelPosition>,
+    /// Each distinct hypercall site of each hardware thread, by thread
+    /// number. A run keeps each pair of pc and number once, and keeps
+    /// the call that a refusal stops.
+    pub hypercall_sites: [BTreeSet<KernelHypercallSite>; 2],
 }
 
 /// One hardware thread's unit when a run from its entry stops.
@@ -149,14 +153,35 @@ pub struct KernelHypercall {
     pub step: usize,
 }
 
+/// One hypercall number that a hardware thread gave at one `sc`.
+///
+/// The order is by pc, then by number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct KernelHypercallSite {
+    /// The address of the `sc`, as the unit's pc gives it.
+    pub pc: u64,
+    /// The hypercall number from r11.
+    pub number: u64,
+}
+
 /// What a run records about one hardware thread's unit as it steps.
 #[derive(Debug, Default)]
 struct KernelTrail {
     last_hypercall: Option<KernelHypercall>,
+    hypercall_sites: BTreeSet<KernelHypercallSite>,
     recent_pcs: VecDeque<u64>,
 }
 
 impl KernelTrail {
+    /// Keeps `call` as the last hypercall and as one of the sites.
+    fn push_hypercall(&mut self, call: KernelHypercall) {
+        self.hypercall_sites.insert(KernelHypercallSite {
+            pc: call.pc,
+            number: call.number,
+        });
+        self.last_hypercall = Some(call);
+    }
+
     /// Keeps `pc` as the newest step-end pc and drops the oldest one past
     /// [`RECENT_PCS`].
     fn push_pc(&mut self, pc: u64) {
@@ -284,6 +309,9 @@ pub fn run_kernel_from_entry(
     ]);
     let mut trails = [KernelTrail::default(), KernelTrail::default()];
     let stop = drive(&mut rt, threads, &mut trails);
+    let hypercall_sites = trails
+        .each_mut()
+        .map(|t| std::mem::take(&mut t.hypercall_sites));
     let [trail0, trail1] = trails;
     Ok(KernelRun {
         steps: rt.steps_taken(),
@@ -292,6 +320,7 @@ pub fn run_kernel_from_entry(
         console: rt.hypervisor().console_text().to_vec(),
         thread0: position(&rt, threads.0[0], trail0),
         thread1: position(&rt, threads.0[1], trail1),
+        hypercall_sites,
     })
 }
 
@@ -386,9 +415,9 @@ fn drive(rt: &mut Runtime, threads: Threads, trails: &mut [KernelTrail; 2]) -> K
             Err(error) => return step_refusal(rt, error),
         };
         let thread = threads.thread_of(step.unit);
-        if let Some(trail) = thread.and_then(|t| trails.get_mut(usize::from(t))) {
-            trail.last_hypercall =
-                hypercall_of(&step.result, rt.steps_taken()).or(trail.last_hypercall);
+        let trail = thread.and_then(|t| trails.get_mut(usize::from(t)));
+        if let (Some(trail), Some(call)) = (trail, hypercall_of(&step.result, rt.steps_taken())) {
+            trail.push_hypercall(call);
         }
         let pc = step.result.local_diagnostics.pc;
         let fault = step

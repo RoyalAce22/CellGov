@@ -37,6 +37,9 @@ mod external;
 #[path = "from_entry_mediated_tests.rs"]
 mod mediated;
 
+#[path = "from_entry_sites_tests.rs"]
+mod sites;
+
 /// A firmware for which CellGov serves the repository values of the
 /// psdevwiki dump.
 const FW: &str = "1.50";

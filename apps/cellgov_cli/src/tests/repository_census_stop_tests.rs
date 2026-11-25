@@ -100,6 +100,7 @@ fn a_pause_that_no_wake_ends_is_a_census_end_that_keeps_its_reads() {
         console: Vec::new(),
         thread0: Some(parked_at(0x100)),
         thread1: Some(parked_at(0x200)),
+        hypercall_sites: Default::default(),
     };
     assert_eq!(
         census_rows("00", 10, &boot).expect("a pause is where CellGov stops the boot"),

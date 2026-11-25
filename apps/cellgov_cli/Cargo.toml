@@ -114,6 +114,10 @@ name = "repository_census_firmware"
 required-features = ["installed-firmware-tests"]
 
 [[test]]
+name = "hypercall_census_run_firmware"
+required-features = ["installed-firmware-tests"]
+
+[[test]]
 name = "ps3autotests"
 required-features = ["ps3autotests"]
 
