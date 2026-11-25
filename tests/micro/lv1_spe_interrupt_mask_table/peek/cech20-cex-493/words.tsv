@@ -1,0 +1,11 @@
+address	role	reads	agree	value
+0x0000000000329a98	class_mask_0	2	yes	0xfffffffefffffff7
+0x0000000000329aa0	class_mask_1	2	yes	0xffffffffffffffff
+0x0000000000329aa8	class_mask_2	2	yes	0xffffffffffffffff
+0x000000000034aa78	mask_entry_descriptor	2	yes	0x00000000002fa23c
+0x00000000003519d8	mask_method_descriptor	2	yes	0x00000000003198f4
+0x0000000000358ca0	toc_slot_class_masks	2	yes	0x0000000000329a98
+0x0000000000358dd8	toc_slot_spe_class	2	yes	0x0000000000329a90
+0x0000000000358e30	toc_slot_mask_entry	2	yes	0x000000000034aa78
+0x0000000000359ee0	toc_slot_interrupt_object_class	2	yes	0x0000000000363cf8
+0x0000000000363d28	interrupt_object_class_entry_48	2	yes	0x00000000003519d8
