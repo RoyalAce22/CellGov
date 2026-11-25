@@ -18,4 +18,4 @@ pub(crate) use classify::classify;
 #[cfg(test)]
 pub(super) use model::XER;
 pub(super) use model::{is_fpr, is_vr};
-pub(crate) use model::{unit, Barrier, Kind, LoadClass, Op, Target, NO_REG, REGS};
+pub(crate) use model::{unit, Barrier, Kind, LoadClass, Op, Tail, Target, NO_REG, REGS};

@@ -19,6 +19,11 @@ use super::ppu_unit::PpuExecutionUnit;
 use crate::exec::{ExecuteVerdict, PpuFault, PpuInterrupt};
 use crate::instruction::PpuInstruction;
 use crate::mmu::{translate_entry, Access, EntryHit, Translation};
+use crate::timing::Tail;
+
+#[cfg(test)]
+#[path = "tests/page_cross_line_tests.rs"]
+mod page_cross_line_tests;
 
 /// The region label a view gives when it refuses a store to a read-only
 /// page.
@@ -834,23 +839,50 @@ impl PpuExecutionUnit {
     ///
     /// The timing model's caches tag lines by real address, so a line
     /// reached through two aliases is one line, and the L2 picks its set
-    /// from the real line. An address no cached translation holds keeps
-    /// its effective address. Such an access misses, and the batch
-    /// classifies its instruction again after the refill. Only a touch of
-    /// a page the batch has not translated stays effective.
+    /// from the real line. An access whose bytes leave the translation of
+    /// its first byte gets a tail at the real address of the next block.
+    ///
+    /// An address no cached translation holds keeps its effective address.
+    /// Such an access misses, and the batch classifies its instruction
+    /// again after the refill. Only a touch of a page the batch has not
+    /// translated stays effective.
     ///
     /// [CBE-Handbook p:135 s:6.1] The L1 data cache has an effective-addressed index and real-addressed tags.
     pub(super) fn real_op_addresses(&self, ops: &mut [crate::timing::Op]) {
         for op in ops {
-            op.map_storage(|ea, store| {
-                let access = if store { Access::Store } else { Access::Load };
-                self.translations
-                    .lookup(access, ea)
-                    .or_else(|| self.translations.lookup(Access::Load, ea))
-                    .and_then(|t| t.real(ea))
-                    .unwrap_or(ea)
-            });
+            op.map_storage(|ea, len, store| self.real_operand(ea, len, store));
         }
+    }
+
+    /// The real address of the `len` bytes at `ea`, and their tail.
+    ///
+    /// The tail is `None` when one translation holds every byte, or when
+    /// the real address of the next block follows the first block's. An
+    /// access whose first byte no translation holds has no tail.
+    fn real_operand(&self, ea: u64, len: u8, store: bool) -> (u64, Option<Tail>) {
+        let access = if store { Access::Store } else { Access::Load };
+        let held = |at: u64| {
+            self.translations
+                .lookup(access, at)
+                .or_else(|| self.translations.lookup(Access::Load, at))
+        };
+        let Some(first) = held(ea) else {
+            return (ea, None);
+        };
+        let ra = first.ra + (ea - first.ea);
+        // The bytes from `ea` to the end of the first block. The block can
+        // end at 2^64, so the next block's address wraps to 0.
+        let room = first.len - (ea - first.ea);
+        if u64::from(len) <= room {
+            return (ra, None);
+        }
+        let next = ea.wrapping_add(room);
+        let next_ra = held(next).map_or(next, |t| t.ra + (next - t.ea));
+        let tail = (next_ra != ra.wrapping_add(room)).then_some(Tail {
+            at: room as u8,
+            ra: next_ra,
+        });
+        (ra, tail)
     }
 
     /// The real address of the byte at `ea` on the side of `access`, or

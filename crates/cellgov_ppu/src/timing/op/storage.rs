@@ -19,7 +19,12 @@ pub(super) fn ea_x(state: &PpuState, ra: u8, rb: u8) -> u64 {
 }
 
 pub(super) fn load(units: u8, ea: u64, len: u8, class: LoadClass) -> Op {
-    Op::on(units).kind(Kind::Load { ea, len, class })
+    Op::on(units).kind(Kind::Load {
+        ea,
+        len,
+        class,
+        tail: None,
+    })
 }
 
 pub(super) fn store(units: u8, ea: u64, len: u8) -> Op {
@@ -27,6 +32,7 @@ pub(super) fn store(units: u8, ea: u64, len: u8) -> Op {
         ea,
         len,
         conditional: false,
+        tail: None,
     })
 }
 

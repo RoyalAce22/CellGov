@@ -1,0 +1,21 @@
+[test]
+name = "ppu_issue_page_cross_alias"
+
+# A hardware probe: one 1 MiB shared segment mapped at X and at
+# Y = X + 1 MiB, and an ld or std whose bytes cross from X's last page
+# into Y's first page, timed after a flush of the line that page's real
+# address reaches through X, through Y, or of another line. The console
+# capture is the answer; ppu/main.c's header lists the cases and the
+# payload layout.
+
+[observe]
+# 26 big-endian u32 words (104 bytes), as ppu/main.c lists: the failed
+# step and its code, REPS, ITER, X, Y, the smallest and the largest time
+# base ticks a run of each of the seven cases, four teardown return
+# codes, whether each load chase ended where it began, and the end mark.
+memory_regions = [
+  { name = "result", addr = 0, size = 104 },
+]
+
+[expect]
+outcome = "completed"

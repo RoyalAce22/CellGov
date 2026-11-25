@@ -14,7 +14,10 @@ mod op;
 mod pipeline;
 mod predictor;
 
-pub(crate) use op::{classify, Op};
+pub(crate) use op::{classify, Op, Tail};
+
+#[cfg(test)]
+pub(crate) use op::Kind;
 pub(crate) use pipeline::{Core, PpeTiming};
 
 #[cfg(test)]

@@ -86,6 +86,18 @@ pub(crate) enum Barrier {
     Isync,
 }
 
+/// The bytes of a load or store that lie on the next page, when that
+/// page's real address does not follow the real address of the first
+/// page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Tail {
+    /// The offset of the first byte on the next page. It is less than the
+    /// access's length and more than zero.
+    pub(crate) at: u8,
+    /// The real address of the first byte on the next page.
+    pub(crate) ra: u64,
+}
+
 /// What an instruction does beyond reading and writing registers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Kind {
@@ -93,11 +105,23 @@ pub(crate) enum Kind {
     Plain,
     /// Holds its units for this many cycles after it issues.
     Unpipelined(u16),
-    /// Reads `len` bytes at `ea`.
-    Load { ea: u64, len: u8, class: LoadClass },
-    /// Writes `len` bytes at `ea`. A conditional store's CR field waits
-    /// for the line's ownership.
-    Store { ea: u64, len: u8, conditional: bool },
+    /// Reads `len` bytes at `ea`. When `tail` is `Some`, the bytes from
+    /// its offset on are at its real address.
+    Load {
+        ea: u64,
+        len: u8,
+        class: LoadClass,
+        tail: Option<Tail>,
+    },
+    /// Writes `len` bytes at `ea`. When `tail` is `Some`, the bytes from
+    /// its offset on are at its real address. A conditional store's CR
+    /// field waits for the line's ownership.
+    Store {
+        ea: u64,
+        len: u8,
+        conditional: bool,
+        tail: Option<Tail>,
+    },
     /// Zeroes the line at `ea` in the L2 and drops it from the L1.
     ZeroLine { ea: u64 },
     /// Reloads the line at `ea` into the L2 and the L1.
@@ -182,15 +206,19 @@ impl Op {
         }
     }
 
-    /// Replaces each storage address the op reads or writes with `to` of
-    /// it; `to` also takes whether the access stores.
-    pub(crate) fn map_storage(&mut self, to: impl Fn(u64, bool) -> u64) {
+    /// Replaces each storage address the op reads or writes, and the tail
+    /// of a load or store, with what `to` gives.
+    ///
+    /// `to` takes the address, the access's length and whether the access
+    /// stores. A cache-line operation has a length of 1 and keeps no tail.
+    pub(crate) fn map_storage(&mut self, to: impl Fn(u64, u8, bool) -> (u64, Option<Tail>)) {
         match &mut self.kind {
-            Kind::Load { ea, .. }
-            | Kind::Touch { ea }
-            | Kind::Flush { ea }
-            | Kind::StoreBack { ea } => *ea = to(*ea, false),
-            Kind::Store { ea, .. } | Kind::ZeroLine { ea } => *ea = to(*ea, true),
+            Kind::Load { ea, len, tail, .. } => (*ea, *tail) = to(*ea, *len, false),
+            Kind::Store { ea, len, tail, .. } => (*ea, *tail) = to(*ea, *len, true),
+            Kind::Touch { ea } | Kind::Flush { ea } | Kind::StoreBack { ea } => {
+                *ea = to(*ea, 1, false).0;
+            }
+            Kind::ZeroLine { ea } => *ea = to(*ea, 1, true).0,
             _ => {}
         }
     }

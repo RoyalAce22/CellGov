@@ -7,6 +7,7 @@
 //! [CBE-Handbook p:139 s:6.1.5] the L2 is inclusive of the L1 data
 //! cache, write-back, and allocates on a store miss.
 
+use super::op::Tail;
 use cellgov_ps3_abi::hw::ppu_issue as k;
 
 /// Where a load found its line. A later variant is farther from the core.
@@ -259,13 +260,23 @@ impl Caches {
         ea / k::PPU_CACHE_LINE_BYTES
     }
 
-    /// The first and the last line that `len` bytes at `ea` cover.
+    /// The line of the first byte and the line of the last byte of the
+    /// `len` bytes at `ea`.
     ///
-    /// An access of no bytes covers the line at `ea`. In the
-    /// `ppu_issue_line_cross_waits` capture, an `lswx` with a byte count
-    /// of 0 brings the line at its address into the L1.
-    fn lines(ea: u64, len: u8) -> (u64, u64) {
-        let last = ea.saturating_add(u64::from(len.max(1)) - 1);
+    /// When `tail` is `Some`, the last byte is the tail's last byte, at its
+    /// own real address. An access of no bytes covers the line at `ea`. In
+    /// the `ppu_issue_line_cross_waits` capture, an `lswx` with a byte
+    /// count of 0 brings the line at its address into the L1.
+    ///
+    /// [CBE-Handbook p:135 s:6.1] The L1 data cache has real-addressed tags.
+    ///
+    /// [CBE-Handbook p:140 s:6.1.5.1] The L2 has a real-address index and real-address tags.
+    fn lines(ea: u64, len: u8, tail: Option<Tail>) -> (u64, u64) {
+        let (from, n) = match tail {
+            Some(t) => (t.ra, len.saturating_sub(t.at)),
+            None => (ea, len),
+        };
+        let last = from.saturating_add(u64::from(n.max(1)) - 1);
         (Self::line(ea), Self::line(last))
     }
 
@@ -277,15 +288,16 @@ impl Caches {
         }
     }
 
-    /// A load of `len` bytes at `ea`, and the level of the farthest line
-    /// it reads. `skip_l1` misses the L1 and leaves it as it was.
+    /// A load of `len` bytes at `ea` with tail `tail`, and the level of
+    /// the farthest line it reads. `skip_l1` misses the L1 and leaves it
+    /// as it was.
     ///
     /// In the `ppu_issue_line_cross` capture, an `ld` or `lmw` whose bytes
     /// reach a flushed line waits for that line from memory. With the
     /// second line in the L1, an `lmw` across two lines costs what it
     /// costs on one line.
-    pub(crate) fn load(&mut self, ea: u64, len: u8, skip_l1: bool) -> Level {
-        let (first, last) = Self::lines(ea, len);
+    pub(crate) fn load(&mut self, ea: u64, len: u8, tail: Option<Tail>, skip_l1: bool) -> Level {
+        let (first, last) = Self::lines(ea, len, tail);
         let level = self.load_line(first, skip_l1);
         if last == first {
             level
@@ -313,10 +325,11 @@ impl Caches {
         level
     }
 
-    /// A store of `len` bytes at `ea`: the L1 keeps its copy of each line
-    /// current, and the L2 allocates each line it misses.
-    pub(crate) fn store(&mut self, ea: u64, len: u8) {
-        let (first, last) = Self::lines(ea, len);
+    /// A store of `len` bytes at `ea` with tail `tail`: the L1 keeps its
+    /// copy of each line current, and the L2 allocates each line it
+    /// misses.
+    pub(crate) fn store(&mut self, ea: u64, len: u8, tail: Option<Tail>) {
+        let (first, last) = Self::lines(ea, len, tail);
         self.store_line(first);
         if last != first {
             self.store_line(last);
@@ -370,27 +383,28 @@ impl Caches {
         self.touched.record(t, line, arrival);
     }
 
-    /// The latest cycle a touched line of the `len` bytes at `ea` arrives.
+    /// The latest cycle a touched line of the `len` bytes at `ea` with
+    /// tail `tail` arrives.
     ///
     /// The result is 0 when no touch of those lines is on its way at
     /// cycle `t`. A result at or before `t` means the lines are present.
-    pub(crate) fn arrival(&self, t: u64, ea: u64, len: u8) -> u64 {
-        let (first, last) = Self::lines(ea, len);
+    pub(crate) fn arrival(&self, t: u64, ea: u64, len: u8, tail: Option<Tail>) -> u64 {
+        let (first, last) = Self::lines(ea, len, tail);
         self.touched
             .after(t, first)
             .max(self.touched.after(t, last))
     }
 
     /// The latest cycle a flush or store-back finishes with a line of the
-    /// `len` bytes at `ea`.
+    /// `len` bytes at `ea` with tail `tail`.
     ///
     /// The result is 0 when no flush or store-back of those lines is under
     /// way at cycle `t`. A result at or before `t` means the lines are free.
     ///
     /// [CBE-Handbook p:147 s:6.1.6.5] `dcbf` and `dcbst` can complete
     /// before the operation they cause completes.
-    pub(crate) fn busy(&self, t: u64, ea: u64, len: u8) -> u64 {
-        let (first, last) = Self::lines(ea, len);
+    pub(crate) fn busy(&self, t: u64, ea: u64, len: u8, tail: Option<Tail>) -> u64 {
+        let (first, last) = Self::lines(ea, len, tail);
         self.busy.after(t, first).max(self.busy.after(t, last))
     }
 

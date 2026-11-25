@@ -1,0 +1,22 @@
+[test]
+name = "ppu_issue_page_cross_store"
+
+# A hardware probe: one 1 MiB shared segment mapped at X and at
+# Y = X + 1 MiB, and what a store to a flushed line costs before a sync
+# completes: an std whose bytes cross from X's last page into Y's first
+# page, and a plain stw, after a flush of the line the store reaches or
+# of another line, with and without a load of the flushed line after.
+# The console capture is the answer; ppu/main.c's header lists the cases
+# and the payload layout.
+
+[observe]
+# 24 big-endian u32 words (96 bytes), as ppu/main.c lists: the failed
+# step and its code, REPS, ITER, X, Y, the smallest and the largest time
+# base ticks a run of each of the six cases, four teardown return codes,
+# whether the storage held its words after the runs, and the end mark.
+memory_regions = [
+  { name = "result", addr = 0, size = 96 },
+]
+
+[expect]
+outcome = "completed"

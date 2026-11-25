@@ -1,0 +1,20 @@
+[test]
+name = "ppu_issue_page_cross_waits"
+
+# A hardware probe: one 1 MiB shared segment mapped at X and at
+# Y = X + 1 MiB, and an ld whose bytes cross from X's last page into
+# Y's first page, issued while a flush or a touch of that page's real
+# line through X is still in flight. The console capture is the answer;
+# ppu/main.c's header lists the cases and the payload layout.
+
+[observe]
+# 20 big-endian u32 words (80 bytes), as ppu/main.c lists: the failed
+# step and its code, REPS, ITER, X, Y, the smallest and the largest time
+# base ticks a run of each of the four cases, four teardown return codes,
+# whether each chase ended where it began, and the end mark.
+memory_regions = [
+  { name = "result", addr = 0, size = 80 },
+]
+
+[expect]
+outcome = "completed"
