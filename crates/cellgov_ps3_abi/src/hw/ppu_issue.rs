@@ -735,27 +735,18 @@ pub const PPU_FP_RECORD_EXTRA_CYCLES: u64 = 20;
 /// vector-scalar operations complete.
 pub const PPU_MFFS_LATENCY_CYCLES: u64 = 31;
 
-/// The cycles from the cycle a floating-point store sends its data to the
-/// cycle a younger `mffs` can read the FPSCR.
-///
-/// [CBE-Handbook p:722 s:A.1.2] `mffs` is stalled at VQ8 until older
-/// vector-scalar operations complete.
-///
-/// In the `ppu_issue_store_drain_distance` capture, 16 or 32 `li`, an
-/// `stfd` and an `mffs` take 42.00 cycles an iteration. The `stfd` sends
-/// its data once the older `mffs` result is ready, and the next `mffs`
-/// waits these cycles past it. The model gives 40 and 43.
-pub const PPU_MFFS_FP_STORE_WAIT_CYCLES: u64 = 9;
-
 /// The cycles from the cycle a vector-scalar op other than a load or
-/// store runs to the cycle it completes for a younger `mffs`.
+/// store, or a floating-point store's data, runs to the cycle it completes
+/// for a younger `mffs`.
 ///
 /// [CBE-Handbook p:722 s:A.1.2] `mffs` is stalled at VQ8 until older
 /// vector-scalar operations complete.
 ///
 /// In the `ppu_issue_mffs_gap` capture an `mffs`, 16 `li` and an `fadd`
 /// take 44.00 cycles an iteration, and 16 `li`, an `fadd` and an `mffs`
-/// take 42.00: the `mffs` waits past the `fadd` result.
+/// take 42.00: the `mffs` waits past the `fadd` result. In the
+/// `ppu_issue_mffs_stfd` and `ppu_issue_mffs_far` captures an `stfd` in
+/// place of the `fadd` takes the same cycles an iteration.
 pub const PPU_MFFS_VSU_COMPLETE_CYCLES: u64 = 28;
 
 /// The cycles from the cycle an `mffs` runs to the earliest cycle a
@@ -772,7 +763,8 @@ pub const PPU_MFFS_VSU_COMPLETE_CYCLES: u64 = 28;
 pub const PPU_MFFS_ODD_TARGET_VSU_CYCLES: u64 = 12;
 
 /// The cycles from the cycle an `mffs` runs to the earliest cycle any
-/// younger vector-scalar op other than a load or store runs at.
+/// younger vector-scalar op other than a load or store, or a younger
+/// floating-point store's data, runs at.
 ///
 /// The `ppu_issue_mffs_gap` and `ppu_issue_mffs_odd_target` captures time
 /// an `mffs` and an `fadd` or a `vaddubm` two or three instructions after

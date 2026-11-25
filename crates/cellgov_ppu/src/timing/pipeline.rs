@@ -138,14 +138,14 @@ pub(crate) struct Core {
     vscr_read: u64,
     /// The address of the instruction right after the last op, when that
     /// op is an `mffs` at an even word, so that the two share a pair. A VSU
-    /// op other than a load or store at that address runs no earlier than
-    /// the `mffs` result.
+    /// op at that address runs no earlier than the `mffs` result
+    /// ([`fpscr_floor`]).
     fpscr_partner: Option<u64>,
-    /// The earliest cycle a VSU op other than a load or store runs at, when
-    /// a taken branch lands on it at an odd word. The last `mffs` sets it.
+    /// The earliest cycle a VSU op runs at, when a taken branch lands on it
+    /// at an odd word ([`fpscr_floor`]). The last `mffs` sets it.
     odd_target_floor: u64,
-    /// The earliest cycle a VSU op other than a load or store runs at,
-    /// set by the last `mffs`.
+    /// The earliest cycle a VSU op runs at, set by the last `mffs`
+    /// ([`fpscr_floor`]).
     fpscr_queue_floor: u64,
     /// The earliest cycle an instruction younger than the last `mfvscr`
     /// issues at.
@@ -681,23 +681,8 @@ impl PpeTiming {
         // [CBE-Handbook p:756 s:A.6.2] the LSU part of a VXU or FPU load or
         // store leaves at issue, beside the VSU issue queue, so the wait
         // leaves it out; `retire` delays a floating-point store's data.
-        //
-        // After an `mffs`, a younger VSU op also runs no earlier than:
-        // - `fpscr_queue_floor`;
-        // - `odd_target_floor`, when a taken branch lands on it at an odd
-        //   word.
-        //
-        // The `ppu_issue_mffs_odd_target` capture times an `mffs`, one or
-        // eight `li`, a `b` and an `fadd`. With the `fadd` at an odd word an
-        // iteration takes 40.00 cycles. At an even word it takes 32.00 or
-        // 37.00.
         let exec = if uses_vsu(op) && !matches!(op.kind, Kind::Load { .. } | Kind::Store { .. }) {
-            let partner = c.fpscr_partner == Some(pc);
-            let odd_target = opens && !pc.is_multiple_of(8);
-            exec.max(c.vscr_read)
-                .max(c.fpscr_queue_floor)
-                .max(if partner { c.status_read } else { 0 })
-                .max(if odd_target { c.odd_target_floor } else { 0 })
+            exec.max(c.vscr_read).max(fpscr_floor(c, pc, opens))
         } else {
             exec
         };
@@ -815,20 +800,27 @@ impl PpeTiming {
         // FPU as well as the LSU.
         // A drain that uses the VSU, other than an `mffs`, waits for its data
         // to reach the store queue, as the `ppu_issue_vscr_mem` captures show
-        // (`PPU_FP_STORE_DATA_CYCLES`). An `mffs` waits for the data as the
-        // `ppu_issue_store_drain_distance` capture shows
-        // (`PPU_MFFS_FP_STORE_WAIT_CYCLES`). Any other drain waits for the
-        // store to complete, as the `ppu_issue_fp_store_drain` capture shows
-        // (`PPU_FP_STORE_COMPLETE_CYCLES`).
+        // (`PPU_FP_STORE_DATA_CYCLES`). A drain that does not use the VSU
+        // waits for the store to complete, as the `ppu_issue_fp_store_drain`
+        // capture shows (`PPU_FP_STORE_COMPLETE_CYCLES`).
         //
         // The store sends its data no earlier than an older `mfvscr`'s or
         // `mffs`'s result is ready. In the `ppu_issue_fp_store_drain` and
         // `ppu_issue_fp_store_vscr` captures a loop of a floating-point
         // store and an `mfvscr` takes 53.00 cycles an iteration, 13 more
         // than with an `std`.
+        //
+        // For a younger `mffs`, the store's data is a vector-scalar op like
+        // any other. It takes the floors of the last `mffs` (`fpscr_floor`)
+        // and completes `PPU_MFFS_VSU_COMPLETE_CYCLES` after it runs. In the
+        // `ppu_issue_mffs_stfd` and `ppu_issue_mffs_far` captures, a loop
+        // with an `stfd` takes the cycles an iteration of the same loop with
+        // an `fadd`. This holds at every distance from an `mffs` and at
+        // either word.
         if matches!(op.kind, Kind::Store { .. }) && op.reads().any(|(r, _)| is_fpr(r)) {
             let sent = exec.max(c.status_read);
-            c.fp_store_read = c.fp_store_read.max(sent + k::PPU_MFFS_FP_STORE_WAIT_CYCLES);
+            let data = exec.max(fpscr_floor(c, pc, opens));
+            c.fp_store_read = c.fp_store_read.max(data + k::PPU_MFFS_VSU_COMPLETE_CYCLES);
             c.fp_store_data = c.fp_store_data.max(sent + k::PPU_FP_STORE_DATA_CYCLES);
             c.fp_store_done = c.fp_store_done.max(sent + k::PPU_FP_STORE_COMPLETE_CYCLES);
         }
@@ -1161,6 +1153,27 @@ fn vsu_ready(c: &Core) -> Option<u64> {
         .chain(units)
         .chain(std::iter::once(c.vsu_done))
         .max()
+}
+
+/// The earliest cycle the last `mffs` lets a younger vector-scalar op at
+/// `pc` run at. `opens` says the op opens a fetch block.
+///
+/// Callers apply the floor to a VSU op other than a load or store, and to
+/// a floating-point store's data. Such an op runs no earlier than:
+/// - `fpscr_queue_floor`;
+/// - the `mffs` result, when the op shares the `mffs`'s pair;
+/// - `odd_target_floor`, when a taken branch lands on the op at an odd
+///   word.
+///
+/// The `ppu_issue_mffs_odd_target` capture times an `mffs`, one or eight
+/// `li`, a `b` and an `fadd`. With the `fadd` at an odd word an iteration
+/// takes 40.00 cycles. At an even word it takes 32.00 or 37.00.
+fn fpscr_floor(c: &Core, pc: u64, opens: bool) -> u64 {
+    let partner = c.fpscr_partner == Some(pc);
+    let odd_target = opens && !pc.is_multiple_of(8);
+    c.fpscr_queue_floor
+        .max(if partner { c.status_read } else { 0 })
+        .max(if odd_target { c.odd_target_floor } else { 0 })
 }
 
 /// The cycle the vector-scalar op `op`, run at `exec`, completes for a
