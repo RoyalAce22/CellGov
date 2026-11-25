@@ -4,13 +4,16 @@
 //! The service writes its reply fields over the request bytes, so each
 //! other byte of the reply is the request byte at the same offset; see
 //! [`cellgov_ps3_abi::lv1::uart`]. CellGov builds the reply only for a
-//! request that [`cellgov_ps3_abi::lv1::uart::GAME_OS_DISPATCHER_REPLIES`]
-//! gives.
+//! request of one of these tables:
+//! - [`cellgov_ps3_abi::lv1::uart::GAME_OS_DISPATCHER_REPLIES`], with the
+//!   status and the data bytes of its row;
+//! - [`cellgov_ps3_abi::lv1::uart::GAME_OS_RANDOM_DISPATCHER_REQUESTS`],
+//!   with the status of its row and [`SYNTHETIC_RANDOM_DATA`].
 
 use cellgov_ps3_abi::lv1::uart::{
     dispatcher_header_reply_bytes, dispatcher_header_request_bytes, dispatcher_header_service,
     dispatcher_header_tag, dispatcher_reply_header, game_os_dispatcher_reply,
-    game_os_random_dispatcher_request, DISPATCHER_HEADER_BYTES, DISPATCHER_REPLY_DATA_BYTES,
+    game_os_random_dispatcher_request, DISPATCHER_HEADER_BYTES, DISPATCHER_RANDOM_DATA_BYTES,
     DISPATCHER_REPLY_DATA_OFFSET, DISPATCHER_REPLY_STATUS_OFFSET, GAME_OS_FIRST_DISPATCHER_SERVICE,
 };
 
@@ -35,11 +38,43 @@ pub(super) const REQUEST_PART: &str = "a reply of this service, which the dispat
 /// the reply that a source gives.
 pub(super) const SIZE_PART: &str = "a reply with these request and reply sizes";
 
-/// The part of the reply to a request of
+/// The random data bytes that CellGov gives in each reply to a request of
 /// [`cellgov_ps3_abi::lv1::uart::GAME_OS_RANDOM_DISPATCHER_REQUESTS`].
-/// The two sources of the bytes are in [`cellgov_ps3_abi::lv1::uart`].
-pub(super) const RANDOM_PART: &str = "its random data bytes, which lv1 draws from an isolated SPU \
-                                      module or from a generator that it seeds from the time base";
+///
+/// The value is synthetic: the 24 ASCII bytes of the label
+/// `CellGov synthetic random`. It is never a draw of lv1, and no
+/// operator can change it. ADR 0022 point 3 gives the rule for
+/// hypervisor entropy.
+pub(super) const SYNTHETIC_RANDOM_DATA: [u8; DISPATCHER_RANDOM_DATA_BYTES] =
+    *b"CellGov synthetic random";
+
+/// The counts, the status word and the data bytes of a reply that
+/// CellGov builds.
+struct ServedReply {
+    /// The count of request bytes and the count of reply bytes.
+    bytes: u32,
+    /// The status word at [`DISPATCHER_REPLY_STATUS_OFFSET`].
+    status: u32,
+    /// The data bytes at [`DISPATCHER_REPLY_DATA_OFFSET`].
+    data: &'static [u8],
+}
+
+/// The reply that CellGov builds for request `request` of service
+/// `service` at `firmware`, or `None` when no table gives the request.
+fn served_reply(firmware: &str, service: u32, request: u64) -> Option<ServedReply> {
+    if let Some(random) = game_os_random_dispatcher_request(firmware, service, request) {
+        return Some(ServedReply {
+            bytes: random.bytes,
+            status: random.status,
+            data: &SYNTHETIC_RANDOM_DATA,
+        });
+    }
+    game_os_dispatcher_reply(firmware, service, request).map(|reply| ServedReply {
+        bytes: reply.bytes,
+        status: reply.status,
+        data: &reply.data,
+    })
+}
 
 /// The refusal of a complete request whose bytes the hypervisor did not
 /// keep.
@@ -116,10 +151,8 @@ impl NoReply {
 ///   does not hold each request byte that the reply echoes;
 /// - `pending` and `last` do not complete the request;
 /// - `last` holds bytes past the end of the request;
-/// - an lv1 image read shows the data of the reply to be random bytes,
-///   or the header's counts are not the counts of that request;
-/// - no source gives the reply of the header's service and the request
-///   id at `firmware`;
+/// - no table gives the header's service and the request id at
+///   `firmware`;
 /// - the header's counts are not the counts of that reply.
 pub(super) fn dispatcher_reply(
     firmware: &str,
@@ -155,19 +188,8 @@ pub(super) fn dispatcher_reply(
         })
     };
     let reply_bytes = dispatcher_header_reply_bytes(&header);
-    let random = id.and_then(|id| game_os_random_dispatcher_request(firmware, service, id));
-    if let Some(random) = random {
-        // The row gives the random data only for the counts that it
-        // gives; other counts get the refusal of their sizes.
-        let counts_match = request_bytes == random.bytes as usize && reply_bytes == random.bytes;
-        return Err(unsourced(if counts_match {
-            RANDOM_PART
-        } else {
-            SIZE_PART
-        }));
-    }
     let reply = id
-        .and_then(|id| game_os_dispatcher_reply(firmware, service, id))
+        .and_then(|id| served_reply(firmware, service, id))
         .ok_or_else(|| {
             unsourced(if service == GAME_OS_FIRST_DISPATCHER_SERVICE {
                 SERVICE_REQUEST_PART
@@ -180,14 +202,13 @@ pub(super) fn dispatcher_reply(
     }
     let mut body = bytes[HEADER..].to_vec();
     let status = DISPATCHER_REPLY_STATUS_OFFSET..DISPATCHER_REPLY_STATUS_OFFSET + 4;
-    let data =
-        DISPATCHER_REPLY_DATA_OFFSET..DISPATCHER_REPLY_DATA_OFFSET + DISPATCHER_REPLY_DATA_BYTES;
+    let data = DISPATCHER_REPLY_DATA_OFFSET..DISPATCHER_REPLY_DATA_OFFSET + reply.data.len();
     body.get_mut(status)
         .ok_or_else(|| unsourced(SIZE_PART))?
         .copy_from_slice(&reply.status.to_be_bytes());
     body.get_mut(data)
         .ok_or_else(|| unsourced(SIZE_PART))?
-        .copy_from_slice(&reply.data);
+        .copy_from_slice(reply.data);
     let tag = dispatcher_header_tag(&header);
     Ok([&dispatcher_reply_header(tag, reply_bytes)[..], &body].concat())
 }
@@ -199,3 +220,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/reply_unsourced_tests.rs"]
 mod unsourced_tests;
+
+#[cfg(test)]
+#[path = "tests/reply_random_tests.rs"]
+mod random_tests;

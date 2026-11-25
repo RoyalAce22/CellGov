@@ -11,6 +11,7 @@ fn request_0x5003_of_service_0x5000_has_random_reply_data_at_4_93_with_0x40_byte
             service: 0x5000,
             request: 0x5003,
             bytes: 0x40,
+            status: 0,
         }
     );
 }

@@ -720,6 +720,14 @@
 //!   [OFW-4.93 lv1 a:0x51DA00-0x51DA84] [OFW-4.93 lv1 a:0x53F6A8-0x53F6F4].
 //!
 //! So no image read gives the 24 bytes.
+//!
+//! The status 0 is the path that gives the kernel its seed:
+//! - The worker writes the 24 bytes only on a path where it returns 0
+//!   [OFW-4.93 lv1 a:0x50B51C] [OFW-4.93 lv1 a:0x50B534-0x50B558].
+//! - The kernel's request function returns the status word that it keeps
+//!   [OFW-4.93 lv2_kernel a:0x80000000002283b8-0x80000000002283ec].
+//! - The caller keeps the seed only when that status is 0
+//!   [OFW-4.93 lv2_kernel a:0x8000000000228470-0x800000000022847c].
 
 use crate::hw::ppu_mmu::SMALL_PAGE_LOG2;
 
@@ -1566,6 +1574,9 @@ pub struct GameOsRandomDispatcherRequest {
     /// The count of request bytes and the count of reply bytes that the
     /// request header gives.
     pub bytes: u32,
+    /// The status word at [`DISPATCHER_REPLY_STATUS_OFFSET`] of a reply in
+    /// which lv1 writes the random data bytes.
+    pub status: u32,
 }
 
 /// Each request whose reply data an lv1 image read shows to be random;
@@ -1574,13 +1585,17 @@ pub struct GameOsRandomDispatcherRequest {
 /// The 4.93 kernel's class gives 0x40 as both counts
 /// [OFW-4.93 lv2_kernel a:0x8000000000228178]. It sets the request id
 /// 0x5003 and the service id 0x5000
-/// [OFW-4.93 lv2_kernel a:0x8000000000227fb0-0x8000000000227fc0].
+/// [OFW-4.93 lv2_kernel a:0x8000000000227fb0-0x8000000000227fc0]. The
+/// lv1 worker returns 0 when it writes the random data bytes, and the
+/// handler stores that value as the status
+/// [OFW-4.93 lv1 a:0x50B534-0x50B558] [OFW-4.93 lv1 a:0x508D7C-0x508D84].
 pub const GAME_OS_RANDOM_DISPATCHER_REQUESTS: &[GameOsRandomDispatcherRequest] =
     &[GameOsRandomDispatcherRequest {
         firmware: "4.93",
         service: 0x5000,
         request: 0x5003,
         bytes: 0x40,
+        status: 0,
     }];
 
 /// The request `request` of service `service` at the firmware version

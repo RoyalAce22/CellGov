@@ -43,22 +43,6 @@ fn write(pc: u64) -> HypercallRequest {
 }
 
 #[test]
-fn the_kernel_s_request_0x5003_of_service_0x5000_has_no_source_for_its_random_data_bytes() {
-    assert_eq!(
-        dispatcher_reply(
-            "4.93",
-            &PendingRequest::empty(PORT).with(&RANDOM_HEADER),
-            &random_body()
-        ),
-        Err(NoReply::Unsourced(Unsourced {
-            service: 0x5000,
-            request: Some(0x5003),
-            part: RANDOM_PART,
-        }))
-    );
-}
-
-#[test]
 fn request_0x5003_at_a_firmware_with_no_image_read_gets_the_refusal_for_its_service() {
     assert_eq!(
         dispatcher_reply(
@@ -78,15 +62,15 @@ fn request_0x5003_at_a_firmware_with_no_image_read_gets_the_refusal_for_its_serv
 fn the_refusal_names_hypercall_163_the_service_id_the_request_id_and_the_part() {
     let unsourced = NoReply::Unsourced(Unsourced {
         service: 0x5000,
-        request: Some(0x5003),
-        part: RANDOM_PART,
+        request: Some(0x5002),
+        part: REQUEST_PART,
     });
     let refusal = HypercallRefusal::DispatcherRequest {
         unit: UnitId::new(0),
         pc: KERNEL_SC,
         service: 0x5000,
-        request: Some(0x5003),
-        part: RANDOM_PART,
+        request: Some(0x5002),
+        part: REQUEST_PART,
     };
     assert_eq!(
         unsourced.refusal(&write(KERNEL_SC)),
@@ -96,9 +80,9 @@ fn the_refusal_names_hypercall_163_the_service_id_the_request_id_and_the_part() 
     assert_eq!(
         refusal.to_string(),
         "hypercall 163 from UnitId(0) at pc 0x8000000000016fd8: CellGov does not model the reply \
-         to request 0x5003 of service 0x5000 on the dispatcher manager's port: no source gives its \
-         random data bytes, which lv1 draws from an isolated SPU module or from a generator that it \
-         seeds from the time base"
+         to request 0x5002 of service 0x5000 on the dispatcher manager's port: no source gives a \
+         reply of this service, which the dispatcher manager relays from the service or gives from \
+         its own state"
     );
 }
 
