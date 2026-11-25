@@ -36,7 +36,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
         storage_write(
             request,
             input.firmware,
-            &WriteState {
+            &NotifyState {
                 requests: input.groups.storage(),
                 devices: input.groups.device_bus(),
                 regions: input.groups.memory().regions(),
@@ -52,8 +52,8 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
     },
 }];
 
-/// The state that the hypervisor holds for a storage write.
-pub(crate) struct WriteState<'a> {
+/// The state that the hypervisor holds for a notification write or read.
+pub(crate) struct NotifyState<'a> {
     /// The notification requests that lv1 holds for the partition.
     pub requests: &'a StorageState,
     /// The storage bus open and its connected port.
@@ -104,7 +104,7 @@ pub(super) fn lv1_answer(status: i64) -> HypercallDisposition {
 
 /// Where CellGov finds the bytes of a notification buffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BufferPlace {
+pub(super) enum BufferPlace {
     /// The real address of CellGov's storage of the bytes.
     Real(u64),
     /// lv1's translation refuses the bytes with this status.
@@ -131,7 +131,11 @@ enum BufferPlace {
 ///   the `real_mode_size` bytes from address 0;
 /// - [`BufferPlace::Unheld`] for each other buffer, and for each buffer
 ///   outside every allocated region when `real_mode_size` is `None`.
-fn buffer_real(regions: &MemoryState, real_mode_size: Option<u64>, address: u64) -> BufferPlace {
+pub(super) fn buffer_real(
+    regions: &MemoryState,
+    real_mode_size: Option<u64>,
+    address: u64,
+) -> BufferPlace {
     let Some(end) = address.checked_add(NOTIFY_BUFFER_BYTES) else {
         return BufferPlace::Unheld;
     };
@@ -156,6 +160,17 @@ fn buffer_real(regions: &MemoryState, real_mode_size: Option<u64>, address: u64)
         .storage_real(index)
         .and_then(|real| real.checked_add(address - region.lpar_address))
         .map_or(BufferPlace::Unheld, BufferPlace::Real)
+}
+
+/// The lowest tag that neither partition 1 nor a request of `requests`
+/// holds, or `None` when every tag is held.
+///
+/// The request function gives a new request this tag
+/// [OFW-4.93 lv1 a:0x2539DC-0x253A04]. Partition 1 holds the tags
+/// [`OTHER_PARTITION_NOTIFY_TAGS`].
+pub(super) fn free_tag(requests: &StorageState) -> Option<u8> {
+    let held = OTHER_PARTITION_NOTIFY_TAGS | requests.held_tags();
+    (0..NOTIFY_REQUEST_TAGS).find(|&tag| held & (1 << tag) == 0)
 }
 
 /// The doublewords at +0 and at [`NOTIFY_EVENT_MASK_OFFSET`] of the
@@ -217,7 +232,7 @@ fn read_buffer(memory: &GuestMemory, address: u64) -> Option<(u64, u64)> {
 pub(crate) fn storage_write(
     request: &HypercallRequest,
     firmware: Option<&str>,
-    state: &WriteState<'_>,
+    state: &NotifyState<'_>,
 ) -> HypercallDisposition {
     if firmware.and_then(storage_write_handler).is_none() {
         return UNREAD_FIRMWARE.refusal(request);
@@ -250,8 +265,7 @@ pub(crate) fn storage_write(
     if command != NOTIFY_WRITE_COMMAND {
         return lv1_answer(NOTIFY_WRITE_BAD_REQUEST_STATUS);
     }
-    let held = OTHER_PARTITION_NOTIFY_TAGS | state.requests.held_tags();
-    let Some(tag) = (0..NOTIFY_REQUEST_TAGS).find(|&tag| held & (1 << tag) == 0) else {
+    let Some(tag) = free_tag(state.requests) else {
         let mut answer =
             HypercallAnswer::lv1_status(zero_extended(NOTIFY_REQUESTS_FULL_STATUS), []);
         answer.push_change(StorageChange::NotifyEventMaskSet(mask));

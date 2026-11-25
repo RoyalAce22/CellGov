@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use cellgov_lv1::RepositoryRead;
 use cellgov_ps3_abi::lv1::repository::{AbsentNode, RepositoryKey, RepositoryNode, SecondValue};
+use cellgov_ps3_abi::lv1::storage_registration::{registration, REGISTRATION_CAPTURE};
 
 use cellgov_lv2_archive::{self as archive, ArchiveError, PupRow, Table, NONE};
 
@@ -169,18 +170,40 @@ pub fn repository_read_rows_of(
     Ok(rows.into_values().collect())
 }
 
-/// One row per node of `nodes`, with the firmware it names, ascending by
-/// key and then by firmware.
+/// The source class of a node that lv1's storage registration writes: the
+/// registration's console capture gives its values.
+const REGISTRATION_SOURCE: &str = "console";
+
+/// The two values of the node `key` that lv1's storage registrations
+/// write at the firmware `fw`, or `None` when they write no such node.
+///
+/// The values are the ones after lv1 registered each device of the
+/// captured bus table, the state that the registration capture shows.
+/// The answer is `None` at a firmware whose registration no source gives.
+fn registered_values(fw: &str, key: &RepositoryKey) -> Option<(u64, u64)> {
+    let registration = registration(fw)?;
+    registration.node(registration.devices.iter().map(|device| device.id), key)
+}
+
+/// One row per node of `nodes`, and one row per node that a storage
+/// registration writes and a read answered. The rows are ascending by key
+/// and then by firmware.
 ///
 /// The hypervisor answers a key of `absent` with lv1's no-node status, so
 /// an answered read of that key needs no row of `nodes`.
+///
+/// The hypervisor answers a key that neither `nodes` nor `absent` lists
+/// only after lv1's storage registration wrote it. So a read of that key
+/// can be answered only when the registration of the read's firmware
+/// writes the key, and the row takes the registration's values. A refused
+/// read of that key is a read before the registration.
 ///
 /// # Errors
 ///
 /// Returns the first [`RepositoryTableError`]:
 /// - a read row that names a PUP `pups` does not hold;
-/// - a read whose state disagrees with `nodes` and `absent` at the read's
-///   firmware;
+/// - a read whose state disagrees with `nodes`, `absent` and the storage
+///   registration at the read's firmware;
 /// - a refused read of a node whose second value no source observes;
 /// - an absent key that names a firmware whose read rows do not name it;
 /// - a node that names a firmware whose read rows do not name it.
@@ -195,6 +218,7 @@ pub fn repository_rows(
         .map(|row| (row.pup_sha256.as_str(), row.fw.as_str()))
         .collect();
     let mut read_at: BTreeSet<(RepositoryKey, &str)> = BTreeSet::new();
+    let mut registered: BTreeMap<(RepositoryKey, (u64, u64)), BTreeSet<&str>> = BTreeMap::new();
     for read in reads {
         let fw = fw_of.get(read.pup_sha256.as_str()).ok_or_else(|| {
             RepositoryTableError::UnknownPup {
@@ -222,12 +246,21 @@ pub fn repository_rows(
         let shown_absent = absent
             .iter()
             .any(|absent| absent.key == read.key && absent.firmware.contains(fw));
-        if read.answered != (served.is_some() || shown_absent) {
+        let listed = served.is_some() || shown_absent;
+        let written = if listed {
+            None
+        } else {
+            registered_values(fw, &read.key)
+        };
+        if is_stale(listed, read.answered, written) {
             return Err(RepositoryTableError::StaleRead {
                 pup_sha256: read.pup_sha256.clone(),
                 key: read.key,
                 answered: read.answered,
             });
+        }
+        if let (true, Some(values)) = (read.answered, written) {
+            registered.entry((read.key, values)).or_default().insert(fw);
         }
         read_at.insert((read.key, fw));
     }
@@ -270,8 +303,39 @@ pub fn repository_rows(
             section: node.source.section(),
         });
     }
+    rows.extend(registration_rows(registered));
     rows.sort_by(|a, b| (a.key, &a.fw).cmp(&(b.key, &b.fw)));
     Ok(rows)
+}
+
+/// Whether a read's answer disagrees with the state of its key. A key
+/// that `nodes` or `absent` lists is always answered. A key that neither
+/// lists is answered only when the storage registration wrote it.
+fn is_stale(listed: bool, answered: bool, written: Option<(u64, u64)>) -> bool {
+    if listed {
+        !answered
+    } else {
+        answered && written.is_none()
+    }
+}
+
+/// One row for each node and value pair that a storage registration
+/// wrote, with the firmware whose answered reads gave it.
+fn registration_rows(
+    registered: BTreeMap<(RepositoryKey, (u64, u64)), BTreeSet<&str>>,
+) -> impl Iterator<Item = RepositoryRow> + '_ {
+    registered
+        .into_iter()
+        .map(|((key, (v1, v2)), firmware)| RepositoryRow {
+            key,
+            node: key.path(),
+            v1,
+            v2: Some(v2),
+            fw: firmware.into_iter().map(str::to_string).collect(),
+            source: REGISTRATION_SOURCE,
+            citation: REGISTRATION_CAPTURE,
+            section: None,
+        })
 }
 
 fn hex(value: u64) -> String {
@@ -385,3 +449,7 @@ mod unobserved_tests;
 #[cfg(test)]
 #[path = "tests/repository_absent_tests.rs"]
 mod absent_tests;
+
+#[cfg(test)]
+#[path = "tests/repository_registration_tests.rs"]
+mod registration_tests;

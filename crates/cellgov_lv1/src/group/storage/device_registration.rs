@@ -4,9 +4,9 @@
 //! The facts are in [`cellgov_ps3_abi::lv1::storage_registration`]. lv1
 //! registers a device before it reports the device to the game OS through
 //! the notification device. [`register_device`] gives the change of a
-//! registration; no hypercall answer pushes it yet. After that change,
-//! [`registered_node`] answers the repository reads of the nodes that the
-//! registration wrote.
+//! registration, which the answer to a notification read carries. After
+//! that change, [`registered_node`] answers the repository reads of the
+//! nodes that the registration wrote.
 
 use cellgov_ps3_abi::lv1::repository::RepositoryKey;
 use cellgov_ps3_abi::lv1::storage_registration::registration;
@@ -32,10 +32,6 @@ const UNKNOWN_DEVICE: UnmodelledError = UnmodelledError::new(
 /// - no source gives the registration's values for `firmware`;
 /// - `firmware` is `None`;
 /// - the bus table of the source holds no device of id `device`.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the answer to the notification read will call it")
-)]
 pub(crate) fn register_device(
     firmware: Option<&str>,
     device: u64,
