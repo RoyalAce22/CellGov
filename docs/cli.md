@@ -1284,7 +1284,7 @@ Usage: cellgov ps3 [OPTIONS] <COMMAND>
 Read the console's identity and check it against the claimed profile.
 
 ```console
-$ cellgov ps3 status --host 10.77.0.2 --profile cech20-cex-493 --model CECH-2001A --cfw EvilNAT --debugger none
+$ cellgov ps3 status --host 192.0.2.2 --profile cech20-cex-493 --model CECH-2001A --cfw EvilNAT --debugger none
 ```
 
 ```
@@ -1304,8 +1304,9 @@ Usage: cellgov ps3 status [OPTIONS]
 Exit codes particular to this command:
   50  refused before changing the console: a lease, a stale result, a profile
       the console fails, an occupied game directory, an existing capture, a
-      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number
-  51  the console did not answer as the protocol requires
+      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number,
+      a wait in the console queue that ran out, a peek of a range the crash ledger lists
+  51  the console did not answer as the protocol requires, or is down
   52  the test left no result within the manifest's budget
   53  the fetched bytes are not one whole CGOV frame
   54  the capture succeeded, but cleanup left something on the console
@@ -1339,8 +1340,9 @@ Usage: cellgov ps3 deploy [OPTIONS] --manifest <FILE>
 Exit codes particular to this command:
   50  refused before changing the console: a lease, a stale result, a profile
       the console fails, an occupied game directory, an existing capture, a
-      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number
-  51  the console did not answer as the protocol requires
+      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number,
+      a wait in the console queue that ran out, a peek of a range the crash ledger lists
+  51  the console did not answer as the protocol requires, or is down
   52  the test left no result within the manifest's budget
   53  the fetched bytes are not one whole CGOV frame
   54  the capture succeeded, but cleanup left something on the console
@@ -1374,8 +1376,9 @@ Usage: cellgov ps3 run [OPTIONS] --manifest <FILE>
 Exit codes particular to this command:
   50  refused before changing the console: a lease, a stale result, a profile
       the console fails, an occupied game directory, an existing capture, a
-      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number
-  51  the console did not answer as the protocol requires
+      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number,
+      a wait in the console queue that ran out, a peek of a range the crash ledger lists
+  51  the console did not answer as the protocol requires, or is down
   52  the test left no result within the manifest's budget
   53  the fetched bytes are not one whole CGOV frame
   54  the capture succeeded, but cleanup left something on the console
@@ -1409,8 +1412,9 @@ Usage: cellgov ps3 fetch [OPTIONS] --manifest <FILE> --out <FILE>
 Exit codes particular to this command:
   50  refused before changing the console: a lease, a stale result, a profile
       the console fails, an occupied game directory, an existing capture, a
-      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number
-  51  the console did not answer as the protocol requires
+      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number,
+      a wait in the console queue that ran out, a peek of a range the crash ledger lists
+  51  the console did not answer as the protocol requires, or is down
   52  the test left no result within the manifest's budget
   53  the fetched bytes are not one whole CGOV frame
   54  the capture succeeded, but cleanup left something on the console
@@ -1442,8 +1446,9 @@ Usage: cellgov ps3 cleanup [OPTIONS] --manifest <FILE>
 Exit codes particular to this command:
   50  refused before changing the console: a lease, a stale result, a profile
       the console fails, an occupied game directory, an existing capture, a
-      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number
-  51  the console did not answer as the protocol requires
+      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number,
+      a wait in the console queue that ran out, a peek of a range the crash ledger lists
+  51  the console did not answer as the protocol requires, or is down
   52  the test left no result within the manifest's budget
   53  the fetched bytes are not one whole CGOV frame
   54  the capture succeeded, but cleanup left something on the console
@@ -1483,8 +1488,9 @@ Usage: cellgov ps3 capture [OPTIONS] --manifest <FILE> --harness-revision <SHA>
 Exit codes particular to this command:
   50  refused before changing the console: a lease, a stale result, a profile
       the console fails, an occupied game directory, an existing capture, a
-      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number
-  51  the console did not answer as the protocol requires
+      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number,
+      a wait in the console queue that ran out, a peek of a range the crash ledger lists
+  51  the console did not answer as the protocol requires, or is down
   52  the test left no result within the manifest's budget
   53  the fetched bytes are not one whole CGOV frame
   54  the capture succeeded, but cleanup left something on the console
@@ -1514,8 +1520,9 @@ Usage: cellgov ps3 convert [OPTIONS] --frame <FILE> --manifest <FILE>
 Exit codes particular to this command:
   50  refused before changing the console: a lease, a stale result, a profile
       the console fails, an occupied game directory, an existing capture, a
-      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number
-  51  the console did not answer as the protocol requires
+      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number,
+      a wait in the console queue that ran out, a peek of a range the crash ledger lists
+  51  the console did not answer as the protocol requires, or is down
   52  the test left no result within the manifest's budget
   53  the fetched bytes are not one whole CGOV frame
   54  the capture succeeded, but cleanup left something on the console
@@ -1526,7 +1533,7 @@ Exit codes particular to this command:
 Remove a stale lease on a console.
 
 ```console
-$ cellgov ps3 unlock --host 10.77.0.2
+$ cellgov ps3 unlock --host 192.0.2.2
 ```
 
 ```
@@ -1541,8 +1548,42 @@ Usage: cellgov ps3 unlock [OPTIONS]
 Exit codes particular to this command:
   50  refused before changing the console: a lease, a stale result, a profile
       the console fails, an occupied game directory, an existing capture, a
-      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number
-  51  the console did not answer as the protocol requires
+      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number,
+      a wait in the console queue that ran out, a peek of a range the crash ledger lists
+  51  the console did not answer as the protocol requires, or is down
+  52  the test left no result within the manifest's budget
+  53  the fetched bytes are not one whole CGOV frame
+  54  the capture succeeded, but cleanup left something on the console
+```
+
+#### `cellgov ps3 peek`
+
+Read words of console memory through webMAN's peek pages, as TSV.
+
+```console
+$ cellgov ps3 peek --space lv1 --width 1 --address 0x374000 --out gate.tsv
+```
+
+```
+Usage: cellgov ps3 peek [OPTIONS] --space <SPACE> --width <N> --address <ADDR[,ADDR...]>
+```
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--host` | `HOST` | The console (default: CELLGOV_PS3_HOST). |
+| `--space` | `SPACE` | The memory to read: lv1 (the hypervisor) or lv2 (the kernel). Required. |
+| `--width` | `N` | The bytes of each word: 1, 2, 4 or 8. Required. |
+| `--address` | `ADDR[,ADDR...]` | Each word's address, 0x hex, separated by commas. Required. |
+| `--reads` | `N` | The reads of each page (default: 2). |
+| `--out` | `FILE` | Where to write the TSV (default: stdout). |
+
+```
+Exit codes particular to this command:
+  50  refused before changing the console: a lease, a stale result, a profile
+      the console fails, an occupied game directory, an existing capture, a
+      hot console, a full /dev_hdd0, a probe whose PPU code holds a UART or gamepad call number,
+      a wait in the console queue that ran out, a peek of a range the crash ledger lists
+  51  the console did not answer as the protocol requires, or is down
   52  the test left no result within the manifest's budget
   53  the fetched bytes are not one whole CGOV frame
   54  the capture succeeded, but cleanup left something on the console
