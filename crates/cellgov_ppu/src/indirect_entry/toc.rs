@@ -55,10 +55,16 @@ impl FunctionToc {
         }
     }
 
-    /// The constants that r2 can hold on a word with this TOC, when the
-    /// paths to the word leave `path` in r2.
+    /// The constants that r2 can hold on a word with this TOC.
     ///
-    /// `every` holds each TOC that a descriptor gives.
+    /// `path` holds the constants of r2 that the scan keeps on the paths
+    /// to the word: on one straight-line path, or on the paths that join
+    /// at a branch target. `None` says that the scan keeps no constant of
+    /// r2 there. On a word that a function reaches, r2 can also hold the
+    /// function's TOC. So the result adds to `path` the TOC of
+    /// [`Self::Toc`], or each TOC of `every` for [`Self::Every`].
+    /// [`Self::Outside`] gives `path`. `every` holds each TOC that a
+    /// descriptor gives.
     pub(super) fn in_r2(self, path: Option<Value>, every: &Value) -> Option<Value> {
         let tocs = match self {
             Self::Outside => return path,

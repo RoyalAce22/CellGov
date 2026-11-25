@@ -60,6 +60,16 @@ its `li r11` and `sc` in another way. These ways are the ELF entry, an
 interrupt vector, and an indirect branch to an address that the kernel
 names. Both tables hold derived facts only, never kernel bytes.
 
+A resolved site states one fact: on each path that the census models
+from an entry it records, r11 holds the site's number at the `sc`.
+When the census cannot prove that, it leaves the site unresolved. That
+loss is correct behaviour, so a number can appear in a kernel only at
+unresolved sites. A resolved site with another number on a modelled
+path is a defect, and so is a missed entry or a dropped lost mark. The
+census does not state that a resolved site is reachable, or anything
+about code outside the scanned segments. What a kernel run observes
+never resolves a site.
+
 `cellgov dev hypercall-census` writes one kernel's rows of both tables.
 `{{hypercall_regenerate}}` runs it over every `kernel.tsv` kernel in the
 installed firmware and rewrites both; without that flag the same test

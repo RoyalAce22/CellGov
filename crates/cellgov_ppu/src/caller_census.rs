@@ -1,5 +1,40 @@
 //! Finds LV2 syscall and LV1 hypercall sites in a PPU ELF, and groups
 //! one module's syscall sites the way the caller tables record them.
+//!
+//! A hypercall site that resolves to N states one fact. On each path
+//! that the scan models from an entry it records to the `sc`, r11 holds
+//! N at the `sc`. The fact rests on these assumptions:
+//! - the indirect-entry bound holds each word that control can enter
+//!   other than by a fall-through or a direct branch. The word after a
+//!   branch that links is an exception. The walk ends at that word,
+//!   because the routine that the branch calls can change r11;
+//! - the scan reads the effect of each word as the executor does,
+//!   invalid forms included;
+//! - an `sc` service can change any GPR and returns to the next word.
+//!   The scan also keeps CTR and LR across an `sc`, and lv1 breaks this
+//!   assumption. Its return from each hypercall in its table puts the
+//!   handler in CTR [OFW-4.93 lv1 a:0x0F80] and an address in its own
+//!   code in LR [OFW-4.93 lv1 a:0x1050]. So a path through an earlier
+//!   `sc` can bring a CTR or LR that the scan does not hold;
+//! - an interrupt enters only at its vector, and its handler returns
+//!   with the CTR, LR and GPRs that the interrupt found.
+//!
+//! When the scan cannot prove the fact, the site stays unresolved, and
+//! a number can appear in a kernel only at unresolved sites. That loss
+//! is correct behaviour. These are defects:
+//! - a resolved site that a modelled path reaches with r11 unset or
+//!   other than N;
+//! - a word outside the bound that control can enter other than by a
+//!   fall-through or a direct branch, when the word does not follow a
+//!   branch that links;
+//! - a flow that drops a constant of CTR, LR or a GPR without its lost
+//!   mark.
+//!
+//! The scan does not state that a resolved site is reachable. It states
+//! nothing about paths that no recorded entry reaches, or about code
+//! outside the scanned segments. No test runs a kernel to check the
+//! fact. What a run observes never resolves a site, because a run takes
+//! only some of the paths.
 
 use std::collections::{BTreeMap, BTreeSet};
 

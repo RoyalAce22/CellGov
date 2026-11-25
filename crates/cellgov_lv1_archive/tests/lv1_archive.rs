@@ -433,6 +433,23 @@ fn committed_tables_load_and_reference_each_other() {
     lv2_archive::check_references(&tables).unwrap_or_else(|e| panic!("{e}"));
 }
 
+/// The committed hypercall site tables keep these rules:
+/// - the unresolved table names each kernel of the kernel table, and
+///   each site row names one of those kernels;
+/// - each site row holds one or more sites, and the sites of each row
+///   ascend;
+/// - for each number that the hypervisor answers, each kernel holds a
+///   resolved site of the number or an unresolved site, and one or more
+///   kernels hold a resolved site of the number. The check names a
+///   kernel that holds neither;
+/// - the site of the `sc` block that the body cites resolves to 12 and
+///   is not unresolved.
+///
+/// A resolved site states that r11 holds the site's number at the `sc`
+/// on each path that the census models from a recorded entry. When the
+/// census cannot prove that, it leaves the site unresolved, and that
+/// loss is correct behaviour. An unresolved site carries no number, so a
+/// kernel can hold the calls of a number only at unresolved sites.
 #[test]
 fn hypercall_site_rows_are_well_formed() {
     assert_eq!(HYPERCALL_SITE.gate, HYPERCALL_GATE);
