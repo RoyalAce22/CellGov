@@ -6,17 +6,17 @@ use cellgov_ps3_abi::hw::ppc_isa::{PPC_BLR, PPC_SC_1};
 
 /// A word outside the interrupt vectors, where control does not run in
 /// real mode.
-const OUTSIDE: u64 = KERNEL + 0x5000;
+pub(super) const OUTSIDE: u64 = KERNEL + 0x5000;
 
 /// An ELF entry that no segment holds.
-const NO_ENTRY: u64 = KERNEL + 0x7000;
+pub(super) const NO_ENTRY: u64 = KERNEL + 0x7000;
 
 /// The kernel address of a path that loads 75 and branches to address 0.
-const LOADER: u64 = KERNEL + 0x6000;
+pub(super) const LOADER: u64 = KERNEL + 0x6000;
 
 /// `lis r3,-32768; rldicr r3,r3,32,31; ori r3,r3,low`: the kernel
 /// address `KERNEL | low` in r3.
-fn build(low: u16) -> [u32; 3] {
+pub(super) fn build(low: u16) -> [u32; 3] {
     [
         word(PpuInstruction::Addis {
             rt: 3,
@@ -38,7 +38,7 @@ fn build(low: u16) -> [u32; 3] {
     ]
 }
 
-fn bctr() -> u32 {
+pub(super) fn bctr() -> u32 {
     word(PpuInstruction::Bcctr {
         bo: 0b10100,
         bi: 0,
@@ -58,7 +58,7 @@ fn ctr_stub(low: u16, between: &[u32]) -> Segment {
 
 /// The ordinals of the window and of the quiet window, with `more` as
 /// more segments.
-fn sites(more: Vec<Segment>) -> Vec<(u64, Option<u16>)> {
+pub(super) fn sites(more: Vec<Segment>) -> Vec<(u64, Option<u16>)> {
     let mut segments = more;
     segments.push(window(&[]));
     segments.push(quiet());

@@ -796,3 +796,7 @@ mod hypercall_rfid_real_mode_low_bits_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_jump_table_low_bits_tests.rs"]
 mod hypercall_jump_table_low_bits_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_ctr_copy_tests.rs"]
+mod hypercall_ctr_copy_tests;

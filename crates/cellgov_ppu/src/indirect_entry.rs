@@ -36,7 +36,9 @@
 //!   the scan records.
 //!
 //! The CTR paths go across direct branches as well as fall-throughs, so
-//! a branch to a later word brings its CTR to that word.
+//! a branch to a later word brings its CTR to that word. They also
+//! follow a copy of CTR in a GPR, so an `mfctr` and an `mtctr` of the
+//! copy keep what CTR held.
 //!
 //! A second scan finds where an `rfid`, `mtmsr` or `mtmsrd` can put
 //! control into real mode. It forgets each constant at a word that
@@ -1025,61 +1027,23 @@ impl Constants {
     /// The GPR that `decoded` writes and the constant it writes there,
     /// for a word that builds a constant.
     ///
-    /// [PPC-Book1 p:51 s:3.3.8] `addi` and `addis` add EXTS(SI) or EXTS(SI || 0x0000) to RA, or to 0 when RA is 0.
-    /// [PPC-Book1 p:66 s:3.3.11] `ori` and `oris` OR RS with UI or UI || 0x0000 and place the result into RA.
-    /// [PPC-Book1 p:72 s:3.3.12.1] `rldicl` and `rldicr` rotate RS left by SH and AND it with MASK(MB, 63) or MASK(0, ME).
     /// [PPC-Book1 p:82 s:3.3.13] `mflr`, a form of `mfspr`, copies LR into RT.
     fn written(&self, decoded: PpuInstruction) -> Option<(u8, Option<Value>)> {
-        Some(match decoded {
-            PpuInstruction::Addi { rt, ra, imm } => (
-                rt,
-                self.stepped_base(ra, |value| value.wrapping_add_signed(i64::from(imm))),
-            ),
-            PpuInstruction::Addis { rt, ra, imm } => (
-                rt,
-                self.stepped_base(ra, |value| value.wrapping_add_signed(i64::from(imm) << 16)),
-            ),
-            PpuInstruction::Ori { ra, rs, imm } => {
-                (ra, self.stepped_gpr(rs, |value| value | u64::from(imm)))
-            }
-            PpuInstruction::Oris { ra, rs, imm } => (
-                ra,
-                self.stepped_gpr(rs, |value| value | u64::from(imm) << 16),
-            ),
-            PpuInstruction::Rldicl { ra, rs, sh, mb, .. } => (
-                ra,
-                self.stepped_gpr(rs, |value| {
-                    value.rotate_left(u32::from(sh)) & (u64::MAX >> mb)
-                }),
-            ),
-            PpuInstruction::Rldicr { ra, rs, sh, me, .. } => (
-                ra,
-                self.stepped_gpr(rs, |value| {
-                    value.rotate_left(u32::from(sh)) & (u64::MAX << (63 - me))
-                }),
-            ),
-            PpuInstruction::Or { ra, rs, rb, .. } if rs == rb => (ra, self.gpr(rs).cloned()),
-            PpuInstruction::Mflr { rt } => (rt, self.lr.as_ref().map(|lr| lr.value.clone())),
-            _ => return None,
-        })
+        if let PpuInstruction::Mflr { rt } = decoded {
+            return Some((rt, self.lr.as_ref().map(|lr| lr.value.clone())));
+        }
+        let GprStep { rt, source, step } = GprStep::of(decoded)?;
+        let value = match source {
+            Some(gpr) => self
+                .gpr(gpr)
+                .map(|value| value.map(|value| step.apply(value))),
+            None => Some(Value::One(step.apply(0))),
+        };
+        Some((rt, value))
     }
 
     fn gpr(&self, gpr: u8) -> Option<&Value> {
         self.gprs.get(usize::from(gpr))?.as_ref()
-    }
-
-    /// `step` of each constant in `gpr`.
-    fn stepped_gpr(&self, gpr: u8, step: impl Fn(u64) -> u64) -> Option<Value> {
-        self.gpr(gpr).map(|value| value.map(step))
-    }
-
-    /// `step` of each constant in `ra`, or of 0 when `ra` is 0.
-    fn stepped_base(&self, ra: u8, step: impl Fn(u64) -> u64) -> Option<Value> {
-        if ra == 0 {
-            Some(Value::One(step(0)))
-        } else {
-            self.stepped_gpr(ra, step)
-        }
     }
 
     /// The constants in `gpr`, which the word at `address` copies into LR.
@@ -1110,6 +1074,77 @@ impl Constants {
                 value: Value::One(value),
                 by: address,
             });
+        }
+    }
+}
+
+/// A word that the scan follows a constant through: it writes `rt`
+/// from one source GPR, or from 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GprStep {
+    rt: u8,
+    /// The source GPR, or `None` when the word steps 0.
+    source: Option<u8>,
+    step: Step,
+}
+
+/// What a [`GprStep`] does to the value of its source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Step {
+    /// Adds the value.
+    Add(i64),
+    /// ORs the value in.
+    Or(u64),
+    /// Rotates left by `sh` bits, then ANDs with `mask`.
+    RotateAnd { sh: u32, mask: u64 },
+}
+
+impl GprStep {
+    /// The step of `decoded`, or `None` for a word that the scan does not
+    /// follow a constant through.
+    ///
+    /// [PPC-Book1 p:51 s:3.3.8] `addi` and `addis` add EXTS(SI) or EXTS(SI || 0x0000) to RA, or to 0 when RA is 0.
+    /// [PPC-Book1 p:66 s:3.3.11] `ori` and `oris` OR RS with UI or UI || 0x0000 and place the result into RA.
+    /// [PPC-Book1 p:67 s:3.3.11] `or` ORs RS with RB and places the result into RA.
+    /// [PPC-Book1 p:72 s:3.3.12.1] `rldicl` and `rldicr` rotate RS left by SH and AND it with MASK(MB, 63) or MASK(0, ME).
+    fn of(decoded: PpuInstruction) -> Option<Self> {
+        let base = |ra: u8| (ra != 0).then_some(ra);
+        let (rt, source, step) = match decoded {
+            PpuInstruction::Addi { rt, ra, imm } => (rt, base(ra), Step::Add(i64::from(imm))),
+            PpuInstruction::Addis { rt, ra, imm } => {
+                (rt, base(ra), Step::Add(i64::from(imm) << 16))
+            }
+            PpuInstruction::Ori { ra, rs, imm } => (ra, Some(rs), Step::Or(u64::from(imm))),
+            PpuInstruction::Oris { ra, rs, imm } => (ra, Some(rs), Step::Or(u64::from(imm) << 16)),
+            PpuInstruction::Rldicl { ra, rs, sh, mb, .. } => (
+                ra,
+                Some(rs),
+                Step::RotateAnd {
+                    sh: u32::from(sh),
+                    mask: u64::MAX >> mb,
+                },
+            ),
+            PpuInstruction::Rldicr { ra, rs, sh, me, .. } => (
+                ra,
+                Some(rs),
+                Step::RotateAnd {
+                    sh: u32::from(sh),
+                    mask: u64::MAX << (63 - me),
+                },
+            ),
+            PpuInstruction::Or { ra, rs, rb, .. } if rs == rb => (ra, Some(rs), Step::Or(0)),
+            _ => return None,
+        };
+        Some(Self { rt, source, step })
+    }
+}
+
+impl Step {
+    fn apply(self, value: u64) -> u64 {
+        match self {
+            Self::Add(add) => value.wrapping_add_signed(add),
+            Self::Or(or) => value | or,
+            Self::RotateAnd { sh, mask } => value.rotate_left(sh) & mask,
         }
     }
 }
@@ -1156,6 +1191,39 @@ impl Ctr {
         }
     }
 
+    /// A copy of CTR after a word applies `step` to each of its constants.
+    ///
+    /// A step that changes a constant leaves a value that the scan cannot
+    /// prove, because a loop can run the step more than once.
+    fn stepped(&self, step: Step) -> Self {
+        let unchanged = self
+            .known
+            .values()
+            .all(|value| value.map(|constant| step.apply(constant)) == *value);
+        if unchanged {
+            self.clone()
+        } else {
+            self.unproved()
+        }
+    }
+
+    /// CTR after the word at `by` copies this copy of CTR back into CTR.
+    ///
+    /// The word at `by` is then the word that wrote each constant.
+    fn rewritten(&self, by: u64) -> Self {
+        let known = self
+            .known
+            .values()
+            .cloned()
+            .reduce(|one, two| one.union(&two));
+        Self {
+            known: known
+                .map(|value| BTreeMap::from([(by, value)]))
+                .unwrap_or_default(),
+            lost: self.lost,
+        }
+    }
+
     /// Joins `other` into `self`, and returns whether `self` changed.
     fn join(&mut self, other: &Self) -> bool {
         let mut changed = other.lost && !self.lost;
@@ -1177,6 +1245,85 @@ impl Ctr {
     }
 }
 
+/// What the paths to one word bring in CTR and in the GPRs that hold a
+/// copy of CTR.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct CtrState {
+    ctr: Ctr,
+    /// What the paths bring in each GPR that holds a copy of CTR, by GPR
+    /// number. A GPR that is not here holds no copy that the state
+    /// records.
+    copies: BTreeMap<u8, Ctr>,
+}
+
+impl CtrState {
+    /// Joins `other` into `self`, and returns whether `self` changed.
+    fn join(&mut self, other: &Self) -> bool {
+        let mut changed = self.ctr.join(&other.ctr);
+        for (&gpr, copy) in &other.copies {
+            changed |= self.copies.entry(gpr).or_default().join(copy);
+        }
+        changed
+    }
+
+    /// The copies after the word `decoded`.
+    ///
+    /// These words copy CTR or a copy into a GPR:
+    /// - `mfctr`, which copies CTR;
+    /// - a word that the scan follows a constant through, from a GPR
+    ///   that holds a copy.
+    ///
+    /// Each other word that surely writes a GPR removes its copy.
+    ///
+    /// [PPC-Book1 p:82 s:3.3.13] `mfctr`, a form of `mfspr`, copies CTR into RT.
+    fn copies_after(&self, decoded: &PpuInstruction) -> BTreeMap<u8, Ctr> {
+        let copied = match *decoded {
+            PpuInstruction::Mfctr { rt } => Some((rt, self.ctr.clone())),
+            _ => GprStep::of(*decoded).and_then(|step| {
+                let copy = self.copies.get(&step.source?)?;
+                Some((step.rt, copy.stepped(step.step)))
+            }),
+        };
+        let written = surely_written_gprs(decoded);
+        let mut copies = self.copies.clone();
+        copies.retain(|&gpr, _| written >> gpr & 1 == 0);
+        if let Some((gpr, copy)) = copied.filter(|(_, copy)| *copy != Ctr::default()) {
+            copies.insert(gpr, copy);
+        }
+        copies
+    }
+}
+
+/// The GPRs that the word `decoded` writes on each run, as a mask with
+/// bit `n` set for GPR `n`.
+///
+/// The mask holds no GPR for these words, which [`written_gprs`] takes to
+/// write GPRs that they can leave unchanged:
+/// - `sc`, whose handler can return each GPR unchanged;
+/// - `lswx`, which loads no byte and leaves RT undefined when its byte
+///   count in XER is 0;
+/// - a divide, which leaves RT undefined when its divisor is 0 or its
+///   quotient overflows;
+/// - an illegal word, whose error handler need not emulate it;
+/// - a fused pair, which decode does not produce.
+///
+/// [PPC-Book1 p:48 s:3.3.6] `lswx` loads the number of bytes that XER\[57:63\] gives, and with a count of 0 the contents of RT are undefined.
+/// [PPC-Book1 p:58] For `divd` and `divw`, a divisor of 0 or a quotient that overflows leaves the contents of RT undefined.
+/// [PPC-Book1 p:59] For `divdu` and `divwu`, a divisor of 0 leaves the contents of RT undefined.
+fn surely_written_gprs(decoded: &PpuInstruction) -> u32 {
+    match decoded {
+        PpuInstruction::Sc { .. }
+        | PpuInstruction::Lswx { .. }
+        | PpuInstruction::Divw { .. }
+        | PpuInstruction::Divwu { .. }
+        | PpuInstruction::Divd { .. }
+        | PpuInstruction::Divdu { .. }
+        | PpuInstruction::PpeIllegal { .. }
+        | PpuInstruction::Fused(_) => 0,
+        _ => written_gprs(decoded),
+    }
+}
+
 /// What the paths to each word of the code bring in CTR.
 ///
 /// A path goes from a word to these words:
@@ -1192,6 +1339,12 @@ impl Ctr {
 /// the CTR before the `sc`, so the flow takes the handler to return
 /// with CTR unchanged.
 ///
+/// The flow also follows each copy of CTR in a GPR on the same paths. An
+/// `mtctr` of a GPR that holds a copy puts the copy back into CTR, so a
+/// CTR that the scan cannot prove stays so through the copy. A call
+/// keeps each copy, because its routine can return the GPR unchanged.
+/// The flow does not follow a copy into the routine that a call runs.
+///
 /// The flow joins the CTR of each path to a word, and goes on until no
 /// word changes. Each state only grows, from finite sets of constants,
 /// so the flow ends.
@@ -1202,9 +1355,9 @@ struct CtrFlow<'a> {
     /// The constants that each `mtctr` copies, as
     /// [`Bound::code_constants`] keeps them.
     writes: &'a BTreeMap<(usize, u64), Value>,
-    /// What the paths to each word bring in CTR, in one vector for each
-    /// code segment.
-    at: Vec<Vec<Ctr>>,
+    /// What the paths to each word bring in CTR and in its copies, in one
+    /// vector for each code segment.
+    at: Vec<Vec<CtrState>>,
 }
 
 impl<'a> CtrFlow<'a> {
@@ -1216,7 +1369,7 @@ impl<'a> CtrFlow<'a> {
             at: code
                 .segments()
                 .iter()
-                .map(|segment| vec![Ctr::default(); segment.words.len()])
+                .map(|segment| vec![CtrState::default(); segment.words.len()])
                 .collect(),
         }
     }
@@ -1257,30 +1410,68 @@ impl<'a> CtrFlow<'a> {
         }
     }
 
-    /// The CTR that the word `raw` at `address` passes to the next word,
-    /// and the target of a direct branch with the CTR that the branch
+    /// The state that the word `raw` at `address` passes to the next word,
+    /// and the target of a direct branch with the state that the branch
     /// passes there.
     ///
     /// `position` holds the index of the segment and of the word there. A
-    /// word that does not decode passes no CTR, as the straight-line scan
-    /// forgets each constant there.
-    ///
-    /// [PPC-Book1 p:81 s:3.3.13] `mtlr` and `mtctr`, forms of `mtspr`, copy RS into LR or CTR.
+    /// word that does not decode passes no state, as the straight-line
+    /// scan forgets each constant there. A call passes no copy to its
+    /// target.
     fn steps(
         &self,
         position: (usize, usize),
         address: u64,
         raw: u32,
-    ) -> (Option<Ctr>, Option<(u64, Ctr)>) {
+    ) -> (Option<CtrState>, Option<(u64, CtrState)>) {
         let (index, word) = position;
-        let ctr = &self.at[index][word];
+        let state = &self.at[index][word];
         let Ok(decoded) = crate::decode::decode(raw) else {
             return (None, None);
         };
+        let (next, taken) = self.ctr_steps(index, address, raw, decoded, state);
+        let copies = state.copies_after(&decoded);
+        let with = |ctr| CtrState {
+            ctr,
+            copies: copies.clone(),
+        };
+        let taken = taken.map(|(target, ctr)| {
+            let state = if calls(address, raw) {
+                CtrState::default()
+            } else {
+                with(ctr)
+            };
+            (target, state)
+        });
+        (next.map(with), taken)
+    }
+
+    /// The CTR that the word `decoded` at `address` passes to the next
+    /// word, and the target of a direct branch with the CTR that the
+    /// branch passes there. The word is `raw`, in the segment at `index`,
+    /// and `state` is what the paths to it bring.
+    ///
+    /// An `mtctr` of a GPR that holds a copy of CTR joins the copy into
+    /// the constant that the straight-line scan gives.
+    ///
+    /// [PPC-Book1 p:81 s:3.3.13] `mtlr` and `mtctr`, forms of `mtspr`, copy RS into LR or CTR.
+    fn ctr_steps(
+        &self,
+        index: usize,
+        address: u64,
+        raw: u32,
+        decoded: PpuInstruction,
+        state: &CtrState,
+    ) -> (Option<Ctr>, Option<(u64, Ctr)>) {
+        let ctr = &state.ctr;
         match decoded {
-            PpuInstruction::Mtctr { .. } => {
+            PpuInstruction::Mtctr { rs } => {
                 let written = self.writes.get(&(index, address)).cloned();
-                let ctr = written.map_or_else(Ctr::default, |value| Ctr::written(address, value));
+                let mut ctr =
+                    written.map_or_else(Ctr::default, |value| Ctr::written(address, value));
+                if let Some(copy) = state.copies.get(&rs) {
+                    ctr.join(&copy.rewritten(address));
+                }
                 (Some(ctr), None)
             }
             PpuInstruction::B { offset, aa, link } => {
@@ -1314,11 +1505,12 @@ impl<'a> CtrFlow<'a> {
     /// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00, and `bcctr` reaches CTR0:61 || 0b00.
     fn bcctr_targets(&self, targets: &mut BTreeMap<u64, BTreeSet<u64>>) -> BTreeSet<u64> {
         let mut lost = BTreeSet::new();
-        for (segment, ctrs) in self.code.segments().iter().zip(&self.at) {
-            for ((address, raw), ctr) in segment.addressed().zip(ctrs) {
+        for (segment, states) in self.code.segments().iter().zip(&self.at) {
+            for ((address, raw), state) in segment.addressed().zip(states) {
                 if !matches!(crate::decode::decode(raw), Ok(PpuInstruction::Bcctr { .. })) {
                     continue;
                 }
+                let ctr = &state.ctr;
                 for (&by, value) in &ctr.known {
                     targets
                         .entry(by)
