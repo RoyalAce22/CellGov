@@ -1,11 +1,16 @@
 //! The network device hypercalls.
 //!
-//! The group answers `net_set_interrupt_status_indicator` for the network
-//! device, device 0 of bus 1. The state holds the indicator that the
-//! partition set. CellGov models a network device with no link, so no
-//! answer raises a device interrupt or writes the indicator.
+//! The group answers these calls for the network device, device 0 of
+//! bus 1:
+//! - `net_set_interrupt_status_indicator`, whose indicator the state
+//!   holds;
+//! - `connect_interrupt_event_receive_port`, whose port the state holds.
+//!
+//! CellGov models a network device with no link. So no answer raises a
+//! device interrupt, sends an event on the port or writes the indicator.
 
 mod indicator;
+mod interrupt_port;
 mod registration;
 
 pub(crate) use registration::GROUP;

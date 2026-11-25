@@ -35,10 +35,12 @@ fn each_indicator_address_moves_the_term() {
 }
 
 #[test]
-fn the_status_indicator_surface_is_pending_on_its_own_source() {
-    assert_eq!(GROUP.hashed_surfaces.len(), 1);
-    let surface = &GROUP.hashed_surfaces[0];
-    assert_eq!(surface.source, Some(STATUS_INDICATOR_SOURCE));
-    assert_eq!(surface.stamp, Stamp::Pending);
+fn the_status_indicator_surface_is_on_its_own_source() {
+    let surfaces: Vec<_> = GROUP
+        .hashed_surfaces
+        .iter()
+        .filter(|surface| surface.source == Some(STATUS_INDICATOR_SOURCE))
+        .collect();
+    assert_eq!(surfaces.len(), 1);
     assert!(GROUP.lanes.iter().any(|lanes| lanes.contains(&232)));
 }

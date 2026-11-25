@@ -10,3 +10,13 @@
 /// The lv1 handler [OFW-4.93 lv1 a:0x308204] reads the inputs in this
 /// form; see [`crate::lv1::network`].
 pub const NET_SET_INTERRUPT_STATUS_INDICATOR: u64 = 191;
+
+/// `connect_interrupt_event_receive_port`: four inputs and no output.
+/// - r3 is the id of a bus.
+/// - r4 is the id of a device on that bus.
+/// - r5 is the id of an event receive port.
+/// - r6 is a fourth input, which must be 0 for the network device.
+///
+/// The lv1 handler [OFW-4.93 lv1 a:0x305CF0] reads the inputs in this
+/// form; see [`crate::lv1::network`].
+pub const CONNECT_INTERRUPT_EVENT_RECEIVE_PORT: u64 = 197;

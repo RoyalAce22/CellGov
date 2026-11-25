@@ -36,7 +36,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
 }];
 
 /// The network device: device 0 of bus 1.
-const NETWORK_DEVICE: OpenDevice = OpenDevice {
+pub(super) const NETWORK_DEVICE: OpenDevice = OpenDevice {
     bus: STATUS_INDICATOR_BUS,
     device: STATUS_INDICATOR_DEVICE,
 };
