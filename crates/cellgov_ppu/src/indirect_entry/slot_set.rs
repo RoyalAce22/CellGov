@@ -42,6 +42,14 @@ impl Run {
         self.width == other.width && self.residue == other.residue
     }
 
+    /// The numbers of the slots of this width and residue whose offsets
+    /// lie in `reach`.
+    fn in_reach(&self, reach: &Range<i64>) -> Range<i64> {
+        let first = (reach.start - self.residue + STRIDE - 1).div_euclid(STRIDE);
+        let after = (reach.end - 1 - self.residue).div_euclid(STRIDE) + 1;
+        first..after
+    }
+
     /// The numbers of the slots of this run whose first byte lies in
     /// `low..=high`.
     fn numbers(&self, low: i64, high: i64) -> Range<i64> {
@@ -133,6 +141,57 @@ impl SlotSet {
             Self::from_runs([self.runs(), other.runs()].concat())
         };
         true
+    }
+
+    /// The set that holds each slot of `self` and of `other`, with each
+    /// width and residue that grows widened.
+    ///
+    /// A width and residue that `self` does not hold takes the slots of
+    /// `other` unchanged. A width and residue that `self` holds and that
+    /// grows becomes one run:
+    /// - from its lowest slot of the two sets to its highest;
+    /// - with each end that moves outward taken to the end of `reach`.
+    ///
+    /// So each width and residue grows at most four times while its slots
+    /// lie in `reach`. Each slot past the end of `reach` can add one more
+    /// growth.
+    pub(super) fn widened(&self, other: &Self, reach: &Range<i64>) -> Self {
+        let mut joined = self.clone();
+        if !joined.join(other) {
+            return joined;
+        }
+        let mut runs = Vec::with_capacity(joined.runs().len());
+        for class in joined.runs().chunk_by(|one, two| one.same_class(two)) {
+            let held: Vec<Run> = self
+                .runs()
+                .iter()
+                .filter(|run| run.same_class(&class[0]))
+                .copied()
+                .collect();
+            let (Some(low), Some(high)) = (held.first(), held.last()) else {
+                runs.extend_from_slice(class);
+                continue;
+            };
+            if held == class {
+                runs.extend_from_slice(class);
+                continue;
+            }
+            let mut start = class[0].start;
+            let mut end = class[class.len() - 1].end;
+            let numbers = low.in_reach(reach);
+            if start < low.start {
+                start = start.min(numbers.start);
+            }
+            if end > high.end {
+                end = end.max(numbers.end);
+            }
+            runs.push(Run {
+                start,
+                end,
+                ..class[0]
+            });
+        }
+        Self::from_runs(runs)
     }
 
     pub(super) fn insert(&mut self, slot: Slot) {

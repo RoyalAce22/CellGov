@@ -690,7 +690,8 @@ impl StackAccess {
 ///   or the slot unchanged;
 /// - a copy of a CTR that the scan cannot prove, in each GPR and slot
 ///   that holds a copy at a `bclr`, because its routine can make that
-///   copy.
+///   copy. The slots can also include other slots of the same width
+///   and residue, as [`CtrFlow::run`] gives.
 ///
 /// The flow joins the CTR of each path to a word, and continues until no
 /// word changes. Each state only grows, from finite sets of constants,
@@ -741,7 +742,8 @@ impl<'a> CtrFlow<'a> {
         }
     }
 
-    /// Steps from each word until no word changes.
+    /// Steps from each word until no word changes, and returns the number
+    /// of words that it stepped.
     ///
     /// The flow joins what each `bclr` brings into one state. When that
     /// state changes, the flow joins it into the word after each link to
@@ -749,10 +751,20 @@ impl<'a> CtrFlow<'a> {
     ///
     /// The flow also keeps the GPRs and the stack slots that hold a copy
     /// at a `bclr`. When that set grows, the flow joins
-    /// [`CtrState::lost_copies`] of it into the word after each call. The
-    /// set has at most 32 GPRs and the slots in [`SLOT_REACH`], so it
-    /// grows a finite number of times.
-    pub(super) fn run(&mut self) {
+    /// [`CtrState::lost_copies`] of it into the word after each call.
+    ///
+    /// A move of r1 between the word after a call and a `bclr` brings the
+    /// injected slots back at new offsets, one move at a time. So the flow
+    /// keeps the slots as [`SlotSet::widened`] gives them. The set grows at
+    /// most 32 times for the GPRs, and at most four times for each width
+    /// and residue of a slot in [`SLOT_REACH`]. An `lmw` or an `stmw` near
+    /// the top of the displacements can put a slot past the end of
+    /// [`SLOT_REACH`], and each such slot can add one more growth. The
+    /// displacement and the 32 GPRs bound those slots, so the set grows a
+    /// finite number of times.
+    ///
+    /// [PPC-Book1 p:46 s:3.3.5] `lmw` and `stmw` move consecutive words from EA up, with EA = (RA|0) + EXTS(D).
+    pub(super) fn run(&mut self) -> usize {
         let code = self.code;
         let real_positions = |address: u64| {
             code.real_aliases(address)
@@ -768,7 +780,9 @@ impl<'a> CtrFlow<'a> {
         let mut returned_slots = SlotSet::default();
         let mut injected = SlotSet::default();
         let mut work = Worklist::new(code, self.reach);
+        let mut stepped = 0;
         while let Some((index, word)) = work.pop() {
+            stepped += 1;
             let segment = &code.segments()[index];
             let address = segment.vaddr + (word as u64) * 4;
             let raw = segment.words[word];
@@ -791,7 +805,7 @@ impl<'a> CtrFlow<'a> {
             let new_slot = !slots.is_subset(&returned_slots);
             if gprs & !returned_gprs != 0 || new_slot {
                 returned_gprs |= gprs;
-                returned_slots.join(&slots);
+                returned_slots = returned_slots.widened(&slots, &SLOT_REACH);
                 let copies = CtrState::lost_copies(returned_gprs, &returned_slots);
                 for &position in &call_returns {
                     self.inject(position, &copies, &injected, &mut work);
@@ -804,6 +818,7 @@ impl<'a> CtrFlow<'a> {
                 }
             }
         }
+        stepped
     }
 
     /// Joins `copies`, the lost copies that the returns bring, into the
@@ -1135,3 +1150,7 @@ mod inject_tests;
 #[cfg(test)]
 #[path = "../tests/indirect_entry_ctr_flow_ranged_tests.rs"]
 mod ranged_tests;
+
+#[cfg(test)]
+#[path = "../tests/indirect_entry_ctr_flow_widen_tests.rs"]
+mod widen_tests;
