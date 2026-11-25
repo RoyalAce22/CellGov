@@ -1831,6 +1831,29 @@ Usage: cellgov dev lv2-census [OPTIONS] --fw <VERSION> --pup-sha256 <SHA256> <EL
 | `--output-dir` | `DIR` | Write the archive rows to this directory. Default `docs/lv2`. |
 | `--replace-version` | -- | Replace all rows for this firmware with rows from the selected PUP. |
 
+#### `cellgov dev hypercall-census`
+
+Emit the LV1 hypercall site rows of one LV2 kernel.
+
+```console
+$ cellgov dev hypercall-census ../cellgov-output/lv2_kernel-3.55.elf --fw 3.55 --pup-sha256 334e60a4ef5843a688c1c6aebf0951c3259429233c7a5aca5a24f0edad78a192
+$ cellgov dev hypercall-census ../cellgov-output/lv2_kernel-3.55.elf --fw 3.55 --pup-sha256 334e60a4ef5843a688c1c6aebf0951c3259429233c7a5aca5a24f0edad78a192 --output-dir ../hypercall-census
+```
+
+```
+Usage: cellgov dev hypercall-census [OPTIONS] --fw <VERSION> --pup-sha256 <SHA256> <ELF>
+```
+
+| Argument | Description |
+| --- | --- |
+| `ELF` | Decrypted kernel ELF, or a SELF the configured vault can open. Required. |
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--fw` | `VERSION` | Select the firmware version from `pup.tsv`. Required. |
+| `--pup-sha256` | `SHA256` | Use the source PUP's SHA-256 from `pup.tsv`. Required. |
+| `--output-dir` | `DIR` | Write the two hypercall site tables to this directory. Default `docs/lv2`. |
+
 #### `cellgov dev rpcs3-attribute`
 
 Answer which HLE call wrote a guest address, from a trace.

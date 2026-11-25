@@ -21,7 +21,7 @@ code does not consult them.
 
 Run the SQLite build command from this directory so its relative paths resolve.
 
-Archive schema version: **7**. `sql/schema.sql` records the
+Archive schema version: **8**. `sql/schema.sql` records the
 same value in SQLite's `user_version`, so a column change cannot pass as
 an unchanged archive.
 
@@ -149,6 +149,9 @@ the directory and this table disagree.
 | `tables/coverage.tsv` | generated | `CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator` | `committed_archive_matches_generator` |
 | `tables/firmware.tsv` | curated | written by hand | `firmware_rows_are_well_formed` |
 | `tables/gate.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
+| `tables/hypercall.tsv` | generated | `CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator` | `committed_archive_matches_generator` |
+| `tables/hypercall_site.tsv` | extracted | `CELLGOV_REGENERATE=1 cargo test -p cellgov_cli --features installed-firmware-tests --test lv2_census_firmware firmware_reextracts_byte_identical_hypercall_rows` | `hypercall_site_rows_are_well_formed` |
+| `tables/hypercall_unresolved.tsv` | extracted | `CELLGOV_REGENERATE=1 cargo test -p cellgov_cli --features installed-firmware-tests --test lv2_census_firmware firmware_reextracts_byte_identical_hypercall_rows` | `hypercall_site_rows_are_well_formed` |
 | `tables/kernel.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
 | `tables/name.tsv` | attributed | `CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive cellgov_name_rows_match_the_macro` (the `cellgov` rows) | `cellgov_name_rows_match_the_macro` |
 | `tables/presence.tsv` | generated | `CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator` | `committed_archive_matches_generator` |
@@ -300,6 +303,30 @@ The `cellgov dev caller-census` emitter writes all three tables together
 from installed, decrypted firmware modules. The loader validates shapes,
 sort order and references; `caller_rows_are_well_formed` validates the
 cross-table coverage rules.
+
+## Kernel hypercalls
+
+`tables/hypercall_site.tsv` groups each kernel's LV1 hypercall sites, an
+`sc` with LEV 1, by PUP hash and the constant the site loads into r11. A
+site is the real address of its `sc`: real mode ignores EA bits 0 and 1,
+so a kernel address loses its top bit. `tables/hypercall_unresolved.tsv`
+has one row for every scanned kernel; `sites` is `none` when every site
+resolved. Both tables hold derived facts only, never kernel bytes.
+
+`cellgov dev hypercall-census` writes one kernel's rows of both tables.
+`CELLGOV_REGENERATE=1 cargo test -p cellgov_cli --features installed-firmware-tests --test lv2_census_firmware firmware_reextracts_byte_identical_hypercall_rows` runs it over every `kernel.tsv` kernel in the
+installed firmware and rewrites both; without that flag the same test
+fails when a re-extraction differs. `hypercall_site_rows_are_well_formed` checks the
+coverage rules without reading external data.
+
+`tables/hypercall.tsv` has 119 rows, one per number a
+scanned kernel calls or CellGov's hypervisor answers. Each row joins the
+call table in `cellgov_ps3_abi::lv1::call` (the name and the input and
+output register counts), CellGov's family for the call and the work item
+that answers that family, the firmware versions whose kernel calls the
+number with its site count in the newest of them, and the state:
+`answered` (5 numbers) or `null_backend`, where the
+call stops the run.
 
 ## Handling
 
