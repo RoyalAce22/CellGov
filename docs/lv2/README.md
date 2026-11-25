@@ -21,7 +21,7 @@ code does not consult them.
 
 Run the SQLite build command from this directory so its relative paths resolve.
 
-Archive schema version: **8**. `sql/schema.sql` records the
+Archive schema version: **9**. `sql/schema.sql` records the
 same value in SQLite's `user_version`, so a column change cannot pass as
 an unchanged archive.
 
@@ -158,6 +158,8 @@ the directory and this table disagree.
 | `tables/priority.tsv` | generated | `CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator` | `committed_archive_matches_generator` |
 | `tables/pup.tsv` | curated | written by hand | `pup_rows_are_well_formed` |
 | `tables/reach.tsv` | extracted | `cargo run --release -p cellgov_cli --features decrypt -- dev caller-census --all --output-dir docs/lv2` | `caller_rows_are_well_formed` |
+| `tables/repository.tsv` | generated | `CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator` | `committed_archive_matches_generator` |
+| `tables/repository_read.tsv` | extracted | `CELLGOV_REGENERATE=1 cargo test -p cellgov_cli --features installed-firmware-tests --test repository_census_firmware` | `repository_rows_are_well_formed` |
 | `tables/route.tsv` | generated | `CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator` | `committed_archive_matches_generator` |
 | `tables/stub.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
 | `tables/subentry.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
@@ -327,6 +329,31 @@ that answers that family, the firmware versions whose kernel calls the
 number with its site count in the newest of them, and the state:
 `answered` (5 numbers) or `null_backend`, where the
 call stops the run.
+
+## Hypervisor repository
+
+`tables/repository_read.tsv` logs the repository reads, hypercall 91,
+that each logged firmware's kernel makes when it boots from its entry
+under CellGov's hypervisor: 1.50, 1.94, 3.70, 4.93. Each row is
+one key of one boot: the partition and the four raw key words, the key
+as text, the position of the boot's first read of it, and whether the
+hypervisor answered or refused it. In the text, a named word's index
+follows a `+` and a numeric word reads in hex, so `bi.pu+1` and
+`bi.pu.0x1` are two keys. A refused read stops the boot, so it is the
+boot's last; the refused nodes are `bi.rgntotal`.
+
+`cellgov dev repository-census` writes one kernel's rows.
+`CELLGOV_REGENERATE=1 cargo test -p cellgov_cli --features installed-firmware-tests --test repository_census_firmware` boots every logged firmware's stored kernel
+and rewrites the table; without that flag the same test fails when a
+re-extraction differs. `repository_rows_are_well_formed` checks the logged set, the
+text of each key, the order of each boot's reads and the source of each
+served node without reading external data.
+
+`tables/repository.tsv` has 4 rows, one per node that
+`cellgov_ps3_abi::lv1::repository::NODES` serves: its key, its two
+values, the firmware whose logged boot reads it and its source. A node
+no logged boot reads, or a logged read the table no longer agrees with,
+fails the generator.
 
 ## Handling
 
