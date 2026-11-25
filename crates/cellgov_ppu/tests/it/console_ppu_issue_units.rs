@@ -6,7 +6,7 @@
 //! `mulld`. The replay runs each chain beside one PPU unit that runs the
 //! sibling's loop.
 
-use crate::console_ppu_issue_shared::eight;
+use crate::console_ppu_issue_shared::{c_round, eight, round_seeds};
 use crate::console_ppu_issue_timing::{replay_beside, Replay, Seed, Sibling, BDNZ_8};
 use cellgov_ps3_abi::hw::ppu_issue::PPU_CYCLES_PER_TB_TICK;
 
@@ -138,8 +138,8 @@ const CHAINS_TIMED: [(&str, Replay); CHAINS] = [
 ];
 
 const SIB_DIVD: [u32; 9] = eight(0x7def_83d2);
-const SIB_FDIV: [u32; 9] = eight(0xfc00_6024);
-const SIB_FDIV_IND: [u32; 9] = [
+const SIB_FDIV: [u32; 34] = c_round(eight(0xfc00_6024));
+const SIB_FDIV_IND: [u32; 34] = c_round([
     0xfc00_6024,
     0xfd29_6024,
     0xfd4a_6024,
@@ -149,7 +149,7 @@ const SIB_FDIV_IND: [u32; 9] = [
     0xfd4a_6024,
     0xfd6b_6024,
     BDNZ_8,
-];
+]);
 const SIB_LHA: [u32; 9] = [
     0xaa3b_0000,
     0xaa5b_0002,
@@ -165,12 +165,18 @@ const SIB_FADD: [u32; 9] = eight(FADD[0]);
 const SIB_MULLD: [u32; 9] = eight(0x7def_81d2);
 
 const INT_SEEDS: &[Seed] = &[Seed::Gpr(15, 0x7fff_0000), Seed::Gpr(16, 1)];
+const ROUND_SEEDS: [Seed; 8] = round_seeds(ONE_HALF);
 const FDIV_SEEDS: &[Seed] = &[
-    Seed::Fpr(0, ONE_HALF),
+    ROUND_SEEDS[0],
+    ROUND_SEEDS[1],
+    ROUND_SEEDS[2],
+    ROUND_SEEDS[3],
+    ROUND_SEEDS[4],
+    ROUND_SEEDS[5],
+    ROUND_SEEDS[6],
+    ROUND_SEEDS[7],
     Seed::Fpr(9, ONE_HALF),
     Seed::Fpr(10, ONE_HALF),
-    Seed::Fpr(11, ONE_HALF),
-    Seed::Fpr(12, ONE),
 ];
 
 /// The probe's siblings, phases 1 to 6.
@@ -250,8 +256,14 @@ const TOLERANCE: f64 = 0.20;
 ///   36% fast. Beside `mulld` each `addi` waits about 8 cycles here and
 ///   about 6 in `ppu_issue_shared`, and each `add` about 6 in
 ///   `ppu_issue_layout`.
-/// - Interleaved `addi` and `fadd` beside `fdiv`, 22% slow.
-const RESIDUALS: [(&str, &str); 8] = [
+/// - Three chains beside dependent or independent `fdiv`, which the model
+///   times 21% to 28% fast. The sibling runs its divides in a C loop that
+///   waits for its last divide each round ([`c_round`]). Beside that
+///   sibling the console's cost of one chain moves with the probe, as the
+///   `ppu_issue_shared` residuals in `console_ppu_issue_shared` record.
+///   Here the dependent `add` chain beside dependent `fdiv` takes 132
+///   cycles an iteration, and 104 in the model.
+const RESIDUALS: [(&str, &str); 10] = [
     ("lha", "addi"),
     ("lha", "ld"),
     ("lha", "fadd then addi"),
@@ -259,7 +271,9 @@ const RESIDUALS: [(&str, &str); 8] = [
     ("mulld", "add"),
     ("mulld", "fadd independent"),
     ("mulld", "addi and fadd"),
-    ("fdiv", "addi and fadd"),
+    ("fdiv", "add"),
+    ("fdiv independent", "add"),
+    ("fdiv independent", "addi and fadd"),
 ];
 
 /// How far from the console's mean a residual may sit: just above the

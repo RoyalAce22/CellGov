@@ -3,12 +3,18 @@
 //! it, and an `mtvscr` with a `vaddubm` after it, alone and beside a
 //! sibling of dependent `fdiv`.
 //!
-//! The capture settles whether a sibling's stall delays a touched line's
-//! arrival and the fence an `mtvscr` sets. Its flush and store-back loops
-//! do not settle whether the stall delays a line's busy time.
+//! The sibling's divides stall the shared issue point back to back, and
+//! the model holds each of the loop's dispatch groups the divide window
+//! past the one before. Beside the sibling the console's runs of one loop
+//! spread several-fold. The capture therefore does not settle whether the
+//! divide window delays these:
+//!
+//! - a touched line's arrival;
+//! - the fence an `mtvscr` sets;
+//! - a line's busy time.
 
 use crate::console_ppu_issue_sibling_rate::SIBLINGS;
-use crate::console_ppu_issue_stall_kinds::REPEATED;
+use crate::console_ppu_issue_stall_kinds::SPAN_BAND;
 use crate::console_ppu_issue_timing::{replay, replay_beside, Replay, Seed, Sibling};
 use cellgov_ps3_abi::hw::ppu_issue::PPU_CYCLES_PER_TB_TICK;
 
@@ -161,108 +167,59 @@ fn cellgov(phase: usize, chain: usize) -> f64 {
     cycles.unwrap_or_else(|| panic!("loop {chain} replays"))
 }
 
-/// The share of a loop's fastest console run the model may lie on either
-/// side of it. The miss and flush loops lie up to 10% from the console.
+/// The share of a loop's fastest console run alone the model may lie on
+/// either side of it. The miss and flush loops lie up to 10% from the
+/// console.
 const BAND: f64 = 0.12;
 
-/// The loop the band holds most tightly: a touch, 8 `addi` and a load of
-/// the touched line, beside the sibling.
-const TOUCH_BESIDE: (usize, usize) = (FDIV, 1);
-
-/// The share of the console's fastest run the touch loop beside the
-/// sibling may lie from it.
-const TOUCH_BAND: f64 = 0.06;
-
-/// The cells, as (phase, chain), the model times under the console.
-///
-/// Both cells are the loop of a store, a store-back of the same line and a
-/// load of it, alone and beside the sibling.
-const UNDER: [(usize, usize); 2] = [(0, 4), (FDIV, 4)];
-
-/// The cells beside the sibling whose loop the `ppu_issue_stall_kinds`
-/// capture repeats.
-///
-/// There the same loop's fastest run differs from this capture's by up to
-/// 3.3 times. A band about one capture's fastest run therefore does not
-/// hold them. `console_ppu_issue_stall_kinds` holds each within the runs
-/// both captures span.
-fn repeated() -> impl Iterator<Item = (usize, usize)> {
-    REPEATED.iter().map(|&(chain, _)| (FDIV, chain))
-}
-
-/// Each cell, with CellGov's cycles and the console's fastest run.
-fn cells() -> Vec<(usize, usize, f64, f64)> {
-    let w = console_words();
-    (0..2)
-        .flat_map(|p| (0..CHAINS).map(move |c| (p, c)))
-        .map(|(p, c)| (p, c, cellgov(p, c), console_fastest(&w, p, c)))
-        .collect()
-}
+/// The loops the model times under the console alone: the loop of a
+/// store, a store-back of the same line and a load of it.
+const UNDER: [usize; 1] = [4];
 
 #[test]
-fn each_held_loop_lies_within_the_band() {
-    let rows = cells();
-    let held: Vec<_> = rows
-        .iter()
-        .filter(|(p, c, ..)| !UNDER.contains(&(*p, *c)) && !repeated().any(|r| r == (*p, *c)))
-        .collect();
-    assert_eq!(held.len(), 2 * CHAINS - UNDER.len() - REPEATED.len());
-    for &&(p, c, cellgov, console) in &held {
+fn alone_each_held_loop_lies_within_the_band() {
+    let w = console_words();
+    let held: Vec<usize> = (0..CHAINS).filter(|c| !UNDER.contains(c)).collect();
+    assert_eq!(held.len(), CHAINS - UNDER.len());
+    for c in held {
+        let (cellgov, console) = (cellgov(0, c), console_fastest(&w, 0, c));
         assert!(
             (cellgov - console).abs() / console <= BAND,
-            "phase {p} loop {c}: CellGov {cellgov:.2} cycles an iteration, the console's \
-             fastest {console:.2}",
+            "loop {c}: CellGov {cellgov:.2} cycles an iteration, the console's fastest \
+             {console:.2}",
         );
     }
 }
 
 #[test]
-fn beside_a_stalling_sibling_a_load_waits_for_a_touched_line_the_stalls_push_back() {
-    // The 8 `addi` between the touch and the load stall beside the
-    // sibling. On the console the loop then takes 385.25 cycles an
-    // iteration, 172 more than alone. A touched line whose arrival does
-    // not move is in the cache sooner, and the model then gives 320.
-    let (p, c) = TOUCH_BESIDE;
+fn beside_the_sibling_each_loop_lies_within_its_runs() {
+    // Beside the sibling a loop's runs spread up to 7.7 times, so the test
+    // holds the model to the span of each loop's runs.
     let w = console_words();
-    let (cellgov, console) = (cellgov(p, c), console_fastest(&w, p, c));
-    assert!(
-        (cellgov - console).abs() / console <= TOUCH_BAND,
-        "CellGov {cellgov:.2} cycles an iteration, the console's fastest {console:.2}",
-    );
-}
-
-#[test]
-fn beside_a_stalling_sibling_eight_addi_after_an_mtvscr_cost_what_a_fixed_fence_leaves() {
-    // Beside the sibling an `mtvscr`, 8 `addi` and a `vaddubm` take 88.69
-    // cycles an iteration more than an `mtvscr` and a `vaddubm`. With a
-    // fence that the stalls delay, the model gives 103.89.
-    let w = console_words();
-    let console = console_fastest(&w, FDIV, 7) - console_fastest(&w, FDIV, 6);
-    let cellgov = cellgov(FDIV, 7) - cellgov(FDIV, 6);
-    assert!(
-        (cellgov - console).abs() < 5.0,
-        "the 8 addi after an mtvscr cost CellGov {cellgov:.2} cycles an iteration, the \
-         console {console:.2}",
-    );
+    for c in 0..CHAINS {
+        let at = CHAINS * FDIV + c;
+        let run = |k: usize| (w[k] * PPU_CYCLES_PER_TB_TICK) as f64 / ITERATIONS as f64;
+        let (lo, hi) = (run(2 * at), run(2 * at + 1));
+        let cellgov = cellgov(FDIV, c);
+        assert!(
+            (1.0 - SPAN_BAND) * lo <= cellgov && cellgov <= (1.0 + SPAN_BAND) * hi,
+            "loop {c}: CellGov {cellgov:.2} cycles an iteration, the console's runs {lo:.2} \
+             to {hi:.2}",
+        );
+    }
 }
 
 /// The test fails when the model comes within the band of the console.
-/// Then move the cell into the held set.
+/// Then move the loop into the held set.
 #[test]
-fn each_other_loop_is_a_known_difference() {
-    let rows = cells();
-    let find = |p: usize, c: usize| {
-        *rows
-            .iter()
-            .find(|row| (row.0, row.1) == (p, c))
-            .expect("the cell")
-    };
-    for (p, c) in UNDER {
-        let (_, _, cellgov, console) = find(p, c);
+fn alone_each_other_loop_is_a_known_difference() {
+    let w = console_words();
+    for c in UNDER {
+        let (cellgov, console) = (cellgov(0, c), console_fastest(&w, 0, c));
         assert!(
             cellgov < (1.0 - BAND) * console,
-            "phase {p} loop {c}: CellGov {cellgov:.2} cycles an iteration, the console's \
-             fastest {console:.2}",
+            "loop {c}: CellGov {cellgov:.2} cycles an iteration, the console's fastest \
+             {console:.2}",
         );
     }
 }

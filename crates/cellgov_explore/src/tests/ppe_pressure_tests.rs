@@ -24,6 +24,7 @@ const DIVIDES: PpeIssuePressure = PpeIssuePressure {
     fence_cycles: 0,
     kernel_share: 0,
     issue_interval: 0,
+    window_cycles: 0,
 };
 
 /// A footprint of a step PPE thread `unit` took.

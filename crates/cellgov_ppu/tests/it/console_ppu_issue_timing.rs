@@ -659,6 +659,16 @@ pub(crate) fn replay_beside(r: &Replay, siblings: usize, sibling: &Sibling) -> O
     replay_counted(r, siblings, sibling, iterations, false, CODE).map(|m| m.cycles)
 }
 
+/// [`replay_beside`], with the loop run twice `iterations` times.
+pub(crate) fn replay_beside_for(
+    r: &Replay,
+    siblings: usize,
+    sibling: &Sibling,
+    iterations: u64,
+) -> Option<f64> {
+    replay_counted(r, siblings, sibling, iterations, false, CODE).map(|m| m.cycles)
+}
+
 /// [`replay`] alone, with the loop's first word `offset` bytes past a
 /// 32-byte boundary.
 pub(crate) fn replay_at(r: &Replay, offset: u64) -> Option<f64> {

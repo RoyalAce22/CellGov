@@ -1,0 +1,20 @@
+[test]
+name = "ppu_issue_fdiv_window"
+
+# A hardware probe of what sets a thread's rate beside a sibling of
+# back-to-back dependent fdiv: loops of K addi and a bdnz, K from 0 to
+# 16, timed beside the sibling at a lower and at the same priority, each
+# run kept with the sibling's rounds over it. The console capture is the
+# answer; ppu/main.c's header lists the phases and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 5120 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 5120 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 120000

@@ -44,8 +44,8 @@ pub(super) fn fp63(op: Fp63Op, frt: u8, fra: u8, frb: u8, frc: u8, rc: bool) -> 
         | F::Fabs
         | F::Fnabs
         | F::Frsqrte => fp(frt, &[frb], l, rc),
-        F::Fdiv => fp_unpipelined(frt, &[fra, frb], k::PPU_FDIV_CYCLES, rc),
-        F::Fsqrt => fp_unpipelined(frt, &[frb], k::PPU_FSQRT_CYCLES, rc),
+        F::Fdiv => fp_unpipelined(frt, &[fra, frb], k::PPU_FDIV_CYCLES, rc).spacing_sibling(),
+        F::Fsqrt => fp_unpipelined(frt, &[frb], k::PPU_FSQRT_CYCLES, rc).spacing_sibling(),
         // [CBE-Handbook p:722 s:A.1.2] `fcmpu fcmpo`: latency 1.
         F::Fcmpu | F::Fcmpo => Op::on(unit::VSU1)
             .src(fpr(fra))

@@ -11,7 +11,9 @@
 //! a capture and between captures.
 
 use crate::console_ppu_issue_sibling_rate::SIBLINGS;
-use crate::console_ppu_issue_timing::{replay, replay_beside, Replay, Seed, Sibling};
+use crate::console_ppu_issue_timing::{
+    replay, replay_beside, replay_beside_for, Replay, Seed, Sibling,
+};
 use cellgov_ps3_abi::hw::ppu_issue::PPU_CYCLES_PER_TB_TICK;
 
 const KINDS: &str = "../../tests/micro/ppu_issue_stall_kinds/ps3/cech20-cex-493/observation.json";
@@ -229,7 +231,7 @@ fn on_the_console_the_same_loop_s_fastest_run_beside_the_sibling_moves_between_c
 }
 
 /// The share past the span of the console's runs the model may lie.
-const SPAN_BAND: f64 = 0.12;
+pub(crate) const SPAN_BAND: f64 = 0.12;
 
 /// The `ppu_issue_stall_pending` loops beside the sibling that a
 /// `ppu_issue_stall_kinds` loop repeats, as (pending chain, kinds chain):
@@ -258,21 +260,30 @@ fn beside_the_sibling_each_repeated_loop_lies_within_the_runs_both_captures_span
     }
 }
 
+/// The iterations a replay of a short loop times, after as many that warm
+/// it: enough for the loop to span several of the sibling's divides.
+const SHORT_LOOP_ITERATIONS: u64 = 1024;
+
 #[test]
-fn beside_the_sibling_the_model_times_a_short_loop_short_of_the_console() {
-    // The test pins an accepted gap. On the console the sibling's divides
-    // set the loop's rate: a loop of one `bdnz`, or of an `ld` and a `bdnz`,
-    // takes about a divide latency or more an iteration. The model adds a
-    // capped stall to each instruction and times these loops at a quarter
-    // of that or less.
+fn beside_the_sibling_a_short_loop_lies_within_its_runs() {
+    // On the console the sibling's divides set the loop's rate: a loop of
+    // one `bdnz`, or of an `ld` and a `bdnz`, takes about 1.4 divide
+    // periods an iteration. The model holds each dispatch group the divide
+    // window past the one before.
     let w = kinds_words();
     for c in [0, 4] {
-        let (console, _) = kinds_runs(&w, 1, c);
-        let cellgov = cellgov(1, c);
+        let (lo, hi) = kinds_runs(&w, 1, c);
+        let r = Replay {
+            loop_index: c,
+            words: looped(&body(c)),
+            seeds: SEEDS,
+        };
+        let cellgov = replay_beside_for(&r, 1, fdiv_sibling(), SHORT_LOOP_ITERATIONS)
+            .unwrap_or_else(|| panic!("loop {c} replays"));
         assert!(
-            cellgov < 0.5 * console,
-            "loop {c}: CellGov {cellgov:.2} cycles an iteration, the console's fastest \
-             {console:.2}",
+            (1.0 - SPAN_BAND) * lo <= cellgov && cellgov <= (1.0 + SPAN_BAND) * hi,
+            "loop {c}: CellGov {cellgov:.2} cycles an iteration, the console's runs {lo:.2} \
+             to {hi:.2}",
         );
     }
 }

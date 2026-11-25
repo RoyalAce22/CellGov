@@ -159,6 +159,9 @@ pub(crate) struct Op {
     /// Cycles a microcode sequence holds issue. Its write latencies
     /// count from its first microword.
     pub(crate) span: u8,
+    /// A divide whose back-to-back runs space a sibling's dispatch groups
+    /// the divide window apart: `fdiv` or `fsqrt`.
+    pub(crate) spaces_sibling: bool,
 }
 
 impl Op {
@@ -174,7 +177,22 @@ impl Op {
             kind: Kind::Plain,
             words: 0,
             span: 0,
+            spaces_sibling: false,
         }
+    }
+
+    /// Marks a divide whose back-to-back runs space a sibling's dispatch
+    /// groups.
+    ///
+    /// The `ppu_issue_fdiv_window` and `ppu_issue_divide_window_forms`
+    /// captures time the window beside back-to-back `fdiv` and `fsqrt`.
+    /// Beside back-to-back `fdivs` and `fsqrts`, the loops keep no such
+    /// window. Beside back-to-back `divd`, the runs of the second capture
+    /// keep it, but the longer runs of `ppu_issue_loop_shape` keep less.
+    /// So the model marks no fixed-point divide.
+    pub(super) fn spacing_sibling(mut self) -> Self {
+        self.spaces_sibling = true;
+        self
     }
 
     /// Reads `r` as data. A register read twice takes one slot, so

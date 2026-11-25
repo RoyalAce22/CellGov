@@ -51,6 +51,10 @@ mod mffs_record_wait_tests;
 mod kernel_share_tests;
 
 #[cfg(test)]
+#[path = "tests/divide_window_tests.rs"]
+mod divide_window_tests;
+
+#[cfg(test)]
 #[path = "tests/preempted_call_tests.rs"]
 mod preempted_call_tests;
 #[cfg(test)]
@@ -88,6 +92,8 @@ struct Scheduled {
     behind_divide: bool,
     /// [`Core::divide_carry`] after the op.
     divide_carry: u32,
+    /// The op opens a dispatch group.
+    opens_group: bool,
 }
 
 /// The older instruction of an open dispatch group.
@@ -245,6 +251,15 @@ pub(crate) struct Core {
     /// The share of this thread's recent cycles, out of [`SHARE_ONE`],
     /// spent in LV2 calls, over a window of [`KERNEL_WINDOW_CYCLES`].
     kernel_share: u32,
+    /// This thread's recent mean cycles between two of its divides that
+    /// space a sibling (`Op::spaces_sibling`), in 1/256 cycle. Each sample
+    /// weighs one in [`PRESSURE_WINDOW_INSTRUCTIONS`].
+    divide_interval: u32,
+    /// The cycle this thread's last divide that spaces a sibling issued
+    /// at: `None` before the first, and after an LV2 call or a resume.
+    last_divide: Option<u64>,
+    /// The cycle this thread's last dispatch group opened at.
+    group_open: u64,
 }
 
 // `Core::in_order_writes` holds one bit for each tracked register.
@@ -280,6 +295,11 @@ const PRESSURE_WINDOW_CYCLES: u64 = 64;
 /// of divides and the work between them, as in the `ppu_issue_viq_depth`
 /// capture's rounds of 300 to 1250 cycles.
 const STALL_WINDOW_CYCLES: u64 = 1024;
+
+/// The [`Core::stall_share`] from which a thread's divides stall the
+/// shared issue point back to back, and a sibling's dispatch groups wait
+/// [`PpeIssuePressure::window_cycles`] apart.
+const WINDOW_STALL_SHARE: u32 = SHARE_ONE * 15 / 16;
 
 /// The cycles [`Core::kernel_share`] averages over: long enough to span an
 /// LV2 call and the instructions between two calls.
@@ -480,6 +500,9 @@ impl PpeTiming {
                 syscall: None,
                 preempted: false,
                 kernel_share: 0,
+                divide_interval: 0,
+                last_divide: None,
+                group_open: 0,
             },
             tables: Box::new(Tables {
                 caches: Caches::new(),
@@ -571,6 +594,18 @@ impl PpeTiming {
             fence_cycles: whole(u64::from(c.fence_wait), cap),
             kernel_share: (c.kernel_share * 256 + SHARE_ONE / 2) / SHARE_ONE,
             issue_interval: c.interval,
+            // The window opens only when a divide that spaces a sibling
+            // issued within the last `STALL_WINDOW_CYCLES`, so other
+            // divides keep no stale interval open.
+            window_cycles: if c.stall_share >= WINDOW_STALL_SHARE
+                && c.last_divide
+                    .is_some_and(|last| c.floor.saturating_sub(last) <= STALL_WINDOW_CYCLES)
+            {
+                let (num, den) = k::PPU_SMT_DIVIDE_WINDOW_SHARE;
+                ((u64::from(c.divide_interval) * num / den + 128) >> 8) as u32
+            } else {
+                0
+            },
         }
     }
 
@@ -752,17 +787,27 @@ impl PpeTiming {
         let s = &self.shared_stall;
         let own_vscr = op.kind == Kind::VscrWrite || (fenced && c.vsu_fence > c.floor);
         let own_wait = t.saturating_sub(floor.max(fetched));
-        let stalled = sibling_stall(op, s, own_vscr, own_wait);
+        // While the sibling's divides stall the shared issue point back to
+        // back, this thread's dispatch groups wait the window apart. Its
+        // instructions then wait no sibling stall, and the divide carry
+        // holds.
+        let window = u64::from(s.window_cycles);
+        let stalled = if window == 0 {
+            sibling_stall(op, s, own_vscr, own_wait)
+        } else {
+            0
+        };
         // The fractions of a cycle the sibling's divide stalls leave carry
         // from one instruction to the next. A carried whole cycle adds to
         // the stall only below the shared stall's cap.
         let carry = c.divide_carry + s.divide_fraction;
-        let (stalled, divide, divide_carry) =
-            if carry >= 256 && stalled < k::PPU_SMT_SHARED_STALL_CYCLES {
-                (stalled + 1, u64::from(s.divide_cycles) + 1, carry - 256)
-            } else {
-                (stalled, u64::from(s.divide_cycles), carry.min(255))
-            };
+        let (stalled, divide, divide_carry) = if window != 0 {
+            (0, 0, c.divide_carry)
+        } else if carry >= 256 && stalled < k::PPU_SMT_SHARED_STALL_CYCLES {
+            (stalled + 1, u64::from(s.divide_cycles) + 1, carry - 256)
+        } else {
+            (stalled, u64::from(s.divide_cycles), carry.min(255))
+        };
         // A new dispatch group: the sibling's group issues between. The
         // sibling's stall covers the hold, and so does any wait of this
         // thread's own; only the rest of the hold is the sibling's. A stall
@@ -773,7 +818,9 @@ impl PpeTiming {
             .min(k::PPU_SMT_SHARED_STALL_CYCLES.saturating_sub(self.hold));
         let covers = stalled - past_hold;
         let held = if opens_group {
-            let opener = (c.floor + self.hold).saturating_sub(covers);
+            let opener = (c.floor + self.hold)
+                .saturating_sub(covers)
+                .max(c.group_open + window);
             let held = opener.saturating_sub(t);
             t = t.max(opener);
             held
@@ -842,6 +889,7 @@ impl PpeTiming {
             began,
             behind_divide,
             divide_carry,
+            opens_group,
         }
     }
 
@@ -888,12 +936,19 @@ impl PpeTiming {
             began,
             behind_divide,
             divide_carry,
+            opens_group,
         } = self.schedule(pc, op);
         let (fetched, opens) = self.fetch(pc);
         let outranked = u64::from(self.shared_stall.issue_interval);
         let c = &mut self.core;
         c.gate = c.gate.max(t.saturating_mul(256)).saturating_add(outranked);
         c.divide_carry = divide_carry;
+        if opens_group {
+            c.group_open = t;
+        }
+        if divides(op) && op.spaces_sibling {
+            note_divide(c, t);
+        }
         stretch_pending(c, &mut self.tables, began, stalled);
         let before = c.floor;
         if opens {
@@ -1161,6 +1216,9 @@ impl PpeTiming {
     /// returns, and fetch from there.
     fn return_from_call(&mut self, back: u64) {
         self.core.floor = self.core.floor.max(back);
+        // [`Core::stall_share`] counts no cycle of the call, so the gap
+        // across it is no interval between back-to-back divides.
+        self.core.last_divide = None;
         self.end_block(back);
     }
 
@@ -1600,13 +1658,16 @@ fn weigh_over(share: u32, w: u64, counts: bool, window: u64) -> u32 {
 ///   four independent loads after it costs most of what it costs alone
 ///   over an `addi` with the same loads. The loads' stalls outlast the
 ///   divide when its release does not move.
-/// - `ppu_issue_stall_pending`, beside an `fdiv` sibling: a touch, 8
-///   `addi` and a load of the touched line take 385.25 cycles an
-///   iteration, 172 more than alone. With an arrival that does not move,
-///   the model gives 320. An `mtvscr`, 8 `addi` and a `vaddubm` take
-///   88.69 cycles more than the same loop with no `addi` there. The model
-///   gives 89.84 with a fence that does not move, and 103.89 with one
-///   that does.
+/// - `ppu_issue_stall_pending`, beside an `fdiv` sibling, in the fastest
+///   runs: a touch, 8 `addi` and a load of the touched line take 172
+///   cycles an iteration more than alone. An `mtvscr`, 8 `addi` and a
+///   `vaddubm` take 88.69 cycles more than the same loop with no `addi`
+///   there.
+///
+/// While a sibling's divides stall the shared issue point back to back,
+/// the thread's dispatch groups wait the window apart
+/// ([`PpeIssuePressure::window_cycles`]). The thread then waits no stall,
+/// so no pending time moves.
 #[inline]
 fn stretch_pending(c: &mut Core, tables: &mut Tables, began: u64, stalled: u64) {
     if stalled == 0 {
@@ -1797,6 +1858,23 @@ fn queue_store(tables: &mut Tables, t: u64, op: &Op, ea: u64, len: u8) {
         done += k::PPU_STORE_DRAIN_CYCLES;
         leaves += k::PPU_STORE_SLOT_DRAIN_CYCLES;
     }
+}
+
+/// Add a divide that issued at cycle `t` to [`Core::divide_interval`].
+///
+/// A gap of more than [`STALL_WINDOW_CYCLES`] adds no sample. The other
+/// work in such a gap takes [`Core::stall_share`] far under
+/// [`WINDOW_STALL_SHARE`], so the two divides do not stall the shared
+/// issue point back to back.
+fn note_divide(c: &mut Core, t: u64) {
+    if let Some(last) = c.last_divide {
+        let gap = t.saturating_sub(last);
+        if gap <= STALL_WINDOW_CYCLES {
+            let n = u64::from(PRESSURE_WINDOW_INSTRUCTIONS);
+            c.divide_interval = ((u64::from(c.divide_interval) * (n - 1) + gap * 256) / n) as u32;
+        }
+    }
+    c.last_divide = Some(t);
 }
 
 /// Add an instruction to the averages [`PpeTiming::pressure`] reads.

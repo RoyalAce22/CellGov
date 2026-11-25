@@ -810,6 +810,37 @@ pub const PPU_SMT_SIBLING_HOLD_CYCLES: u64 = 2;
 /// issues alone.
 pub const PPU_SMT_SHARED_STALL_CYCLES: u64 = 13;
 
+/// The interval between two dispatch groups of a thread, as a share of a
+/// sibling's divide period, while the sibling's divides stall the shared
+/// issue point back to back.
+///
+/// The `ppu_issue_fdiv_window` capture times loops of K independent
+/// `addi` and a `bdnz` beside a lower-priority sibling. The sibling runs
+/// back-to-back dependent `fdiv` and never waits for a divide's result.
+/// Most runs of each loop take one of these intervals an iteration for
+/// each dispatch group. In divide periods, an iteration of most runs
+/// takes:
+///
+/// - two groups: 2.69;
+/// - three groups: 4.02;
+/// - four groups: 5.36;
+/// - five groups: 6.69;
+/// - seven groups: 9.36;
+/// - nine groups: 12.03.
+///
+/// A loop of one group takes 1.47. The `ppu_issue_fdiv_chain` capture
+/// puts a dependent `add` chain on the same intervals, so each dispatch
+/// group waits once. The `ppu_issue_divide_window_forms` capture gives
+/// the same periods beside back-to-back `fsqrt`.
+///
+/// The console's interval is about 4/3 of its divide period of 78 cycles.
+/// CellGov's divides run 74 cycles apart. At 5/4 of that, the model times
+/// each loop of `ppu_issue_fdiv_window` and `ppu_issue_fdiv_chain` within
+/// 11% of the console's median run.
+///
+/// [CBE-Handbook p:301 s:10.2.3.1] a stall at IS2 stalls both threads.
+pub const PPU_SMT_DIVIDE_WINDOW_SHARE: (u64, u64) = (5, 4);
+
 /// The most cycles a sibling's microcoded and other long non-divide
 /// instructions add to each of a thread's instructions, past the cycle
 /// the instruction is ready.

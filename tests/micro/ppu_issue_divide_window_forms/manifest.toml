@@ -1,0 +1,21 @@
+[test]
+name = "ppu_issue_divide_window_forms"
+
+# A hardware probe of whether a thread's rate beside a sibling of
+# back-to-back dependent divides is set the same way for each divide
+# form: loops of K addi and a bdnz, K from 0 to 8, timed beside a
+# lower-priority sibling of back-to-back fsqrt, fdivs, fsqrts or divd,
+# each run kept with the sibling's rounds over it. The console capture is
+# the answer; ppu/main.c's header lists the phases and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 5120 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 5120 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 120000

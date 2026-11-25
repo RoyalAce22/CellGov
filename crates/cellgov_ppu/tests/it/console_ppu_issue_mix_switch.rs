@@ -385,23 +385,29 @@ fn at_the_runtime_s_step_a_sibling_s_change_of_class_lags_within_the_console_s_s
     }
 }
 
+/// The largest share of the console's median run the model may sit from
+/// it, for the loop beside the steady `fdiv` sibling.
+const STEADY_FDIV_BAND: f64 = 0.20;
+
 #[test]
-fn beside_a_steady_fdiv_sibling_the_model_times_the_loop_short_of_this_console_capture() {
-    // An accepted gap. Beside the steady `fdiv` sibling the console takes
-    // about 720 cycles an iteration, and even its fastest run about 350.
-    // The model gives each `addi` the shared stall and times about 237.
-    // The `ppu_issue_shared` capture times the same loop beside the same
-    // sibling at about 195 (`console_ppu_issue_shared.rs`). The
-    // `ppu_issue_fdiv_sibling_forms` capture takes runs at both ends in
-    // every form, so the console sets no one cost here.
+fn beside_a_steady_fdiv_sibling_the_model_times_the_loop_near_this_console_capture() {
+    // Beside the steady `fdiv` sibling the console's median run takes
+    // about 800 cycles an iteration. The sibling's divides stall the shared
+    // issue point back to back, and the model holds each pair of `addi` the
+    // divide window past the one before. The `ppu_issue_shared` capture's sibling
+    // runs the same divides in a C loop, and there the same loop takes
+    // about 195.
     let w = console_words();
     let n = half_iterations(&w);
     let cellgov = replay(STEADY_FDIV, n, Budget::new(1));
     for (h, cellgov) in cellgov.iter().enumerate() {
-        let console = mean(&console_runs(&w, STEADY_FDIV, h));
+        let mut runs = console_runs(&w, STEADY_FDIV, h);
+        runs.sort_by(f64::total_cmp);
+        let console = runs[runs.len() / 2];
         assert!(
-            *cellgov < 0.5 * console,
-            "half {h}: CellGov {cellgov:.1} cycles an iteration, the console {console:.1}",
+            (cellgov - console).abs() / console <= STEADY_FDIV_BAND,
+            "half {h}: CellGov {cellgov:.1} cycles an iteration, the console's median \
+             {console:.1}",
         );
     }
 }

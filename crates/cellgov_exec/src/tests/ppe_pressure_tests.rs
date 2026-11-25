@@ -15,6 +15,7 @@ fn the_larger_of_two_pressures_takes_each_field_from_either() {
         fence_cycles: 0,
         kernel_share: 200,
         issue_interval: 700,
+        window_cycles: 0,
     };
     let b = PpeIssuePressure {
         cycles: 3,
@@ -29,6 +30,7 @@ fn the_larger_of_two_pressures_takes_each_field_from_either() {
         fence_cycles: 3,
         kernel_share: 10,
         issue_interval: 300,
+        window_cycles: 98,
     };
     let want = PpeIssuePressure {
         cycles: 3,
@@ -45,6 +47,7 @@ fn the_larger_of_two_pressures_takes_each_field_from_either() {
         fence_cycles: 3,
         kernel_share: 200,
         issue_interval: 700,
+        window_cycles: 98,
     };
     assert_eq!(a.max(b), want);
     assert_eq!(b.max(a), want);

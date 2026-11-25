@@ -67,6 +67,89 @@ pub(crate) const fn eight(word: u32) -> [u32; 9] {
     [word, word, word, word, word, word, word, word, BDNZ_8]
 }
 
+/// Where a [`c_round`] sibling keeps its sink, round count, stop flag and
+/// stack slot.
+const ROUND_DATA: u64 = 0x3000;
+
+/// One sibling round of `body`, in the code a console probe's C sibling compiles to.
+///
+/// A round runs these steps, as `ppu_issue_shared`'s image does:
+///
+/// 1. `fmr f0,f11` sets the round's start value.
+/// 2. Four passes of `body` run.
+/// 3. The C code between rounds converts the last result, then tests a
+///    stop flag and a time-base limit.
+///
+/// The conversion waits for the last divide, so the sibling's divides do
+/// not stall the shared issue point back to back.
+pub(crate) const fn c_round(body: [u32; 9]) -> [u32; 34] {
+    let mut w = [0u32; 34];
+    w[0] = 0xfc00_5890; // fmr f0,f11
+    w[1] = 0x39c0_0004; // li r14,4
+    w[2] = 0x7dc9_03a6; // mtctr r14
+    let mut i = 0;
+    while i < 9 {
+        w[3 + i] = body[i];
+        i += 1;
+    }
+    let tail = [
+        0xe80a_0000, // ld r0,0(r10)
+        0xff80_6800, // fcmpu cr7,f0,f13
+        0x4fdd_f382, // cror 4*cr7+eq,4*cr7+gt,4*cr7+eq
+        0x409e_0004, // bne cr7,+4
+        0xfc00_065e, // fctidz f0,f0
+        0xd801_ff60, // stfd f0,-160(r1)
+        0xe921_ff60, // ld r9,-160(r1)
+        0x7d29_0214, // add r9,r9,r0
+        0xf92a_0000, // std r9,0(r10)
+        0xe927_0000, // ld r9,0(r7)
+        0x3929_0001, // addi r9,r9,1
+        0xf927_0000, // std r9,0(r7)
+        0x812c_0000, // lwz r9,0(r12)
+        0x2fa9_0000, // cmpdi cr7,r9,0
+        0x409e_0004, // bne cr7,+4
+        0x7d2c_42e6, // mftbl r9
+        0x7d2b_4850, // subf r9,r11,r9
+        0x7fa9_4040, // cmpld cr7,r9,r8
+        0x409d_0004, // ble cr7,+4
+        0x3920_1800, // li r9,0x1800, the round's head
+        0x7d29_03a6, // mtctr r9
+        0x4e80_0420, // bctr
+    ];
+    let mut j = 0;
+    while j < tail.len() {
+        w[12 + j] = tail[j];
+        j += 1;
+    }
+    w
+}
+
+/// The registers a [`c_round`] sibling's code between rounds reads.
+const ROUND_SEEDS: [Seed; 6] = [
+    Seed::Gpr(1, ROUND_DATA + 0x100 + 160),
+    Seed::Gpr(7, ROUND_DATA + 0x10),
+    Seed::Gpr(8, 0x2f90_837f),
+    Seed::Gpr(10, ROUND_DATA + 0x8),
+    Seed::Gpr(12, ROUND_DATA + 0x18),
+    Seed::Fpr(13, 0),
+];
+
+/// [`ROUND_SEEDS`] and `f0`'s start `first` in `f11`, with the divisor
+/// 1.0 in `f12`.
+pub(crate) const fn round_seeds(first: u64) -> [Seed; 8] {
+    let s = ROUND_SEEDS;
+    [
+        s[0],
+        s[1],
+        s[2],
+        s[3],
+        s[4],
+        s[5],
+        Seed::Fpr(11, first),
+        Seed::Fpr(12, ONE),
+    ]
+}
+
 /// `addi r17..r20,1` in turn, as the probe lays them out.
 const ADDI_4: [u32; 4] = [0x3a31_0001, 0x3a52_0001, 0x3a73_0001, 0x3a94_0001];
 
@@ -149,8 +232,10 @@ const SIB_DIVD_IND: [u32; 9] = [
 ];
 const SIB_DIVW: [u32; 9] = eight(0x7def_83d6);
 const SIB_MULLD: [u32; 9] = eight(0x7def_81d2);
-const SIB_FDIV: [u32; 9] = eight(0xfc00_6024);
-const SIB_FSQRT: [u32; 9] = eight(0xfc00_002c);
+const SIB_FDIV: [u32; 34] = c_round(eight(0xfc00_6024));
+const SIB_FSQRT: [u32; 34] = c_round(eight(0xfc00_002c));
+const FDIV_SEEDS: [Seed; 8] = round_seeds(ONE_HALF);
+const FSQRT_SEEDS: [Seed; 8] = round_seeds(ONE);
 const SIB_LHA: [u32; 9] = [
     0xaa3d_0000,
     0xaa5d_0002,
@@ -207,14 +292,14 @@ pub(crate) const SIBLINGS: [(&str, Sibling); 8] = [
         "fdiv",
         Sibling {
             words: &SIB_FDIV,
-            seeds: &[Seed::Fpr(0, ONE_HALF), Seed::Fpr(12, ONE)],
+            seeds: &FDIV_SEEDS,
         },
     ),
     (
         "fsqrt",
         Sibling {
             words: &SIB_FSQRT,
-            seeds: &[Seed::Fpr(0, ONE)],
+            seeds: &FSQRT_SEEDS,
         },
     ),
     (
@@ -233,14 +318,17 @@ const TOLERANCE: f64 = 0.20;
 /// The cells the model times outside both the console's spread and
 /// [`TOLERANCE`], as (sibling, chain):
 ///
-/// - Independent `addi` beside `fdiv`. The model gives each `addi` 13
-///   cycles and its own one, and times the loop 22% above the console's
-///   mean. The `ppu_issue_units` capture runs the same loop beside the
-///   same sibling within 19% of the model.
+/// - Dependent `mulli` beside `fdiv`, 23% fast, and dependent `add`
+///   beside `fsqrt`, 31% fast. The sibling runs its divides in a C loop
+///   that waits for its last divide each round ([`c_round`]). Beside that
+///   sibling the console's cost of one chain moves with the probe. The
+///   dependent `add` chain beside `fdiv` takes 122 cycles an iteration
+///   here and 104 in the model. Other probes give 71 (`ppu_issue_multiply`),
+///   132 (`ppu_issue_units`) and 169 (`ppu_issue_fdiv_chain`).
 /// - Dependent `add` beside microcoded `lha`, 20% fast. Beside `lha` each
 ///   `add` waits about 14 cycles here, 9.5 in `ppu_issue_units`, 7.4 to
 ///   10.2 in `ppu_issue_layout`, and about 11 in the model.
-const RESIDUALS: [(&str, &str); 2] = [("fdiv", "addi"), ("lha", "add")];
+const RESIDUALS: [(&str, &str); 3] = [("fdiv", "mulli"), ("fsqrt", "add"), ("lha", "add")];
 
 /// How far from the console's mean a residual may sit.
 const RESIDUAL_LIMIT: f64 = 0.35;

@@ -17,7 +17,7 @@
 //! sibling on its thread, so the replay holds only the first kind of
 //! cell to the console.
 
-use crate::console_ppu_issue_shared::eight;
+use crate::console_ppu_issue_shared::{c_round, eight, round_seeds};
 use crate::console_ppu_issue_timing::{replay, replay_beside, Replay, Seed, Sibling};
 use cellgov_ps3_abi::hw::ppu_issue::PPU_CYCLES_PER_TB_TICK;
 
@@ -107,11 +107,27 @@ fn held(c: &Cell) -> bool {
 }
 
 /// The held cells the model times outside both the console's spread and
-/// [`TOLERANCE`], as (sibling, offset): the chain beside `lha` whose loop
-/// sits at +0x40 waits 7.4 and 8.7 cycles an `add` there, against 9.3 to
-/// 10.2 at every held offset beside the same loop at +0x00 and about 11
-/// in the model.
-const RESIDUALS: [(&str, usize); 2] = [("lha at +0x40", 4), ("lha at +0x40", 7)];
+/// [`TOLERANCE`], as (sibling, offset):
+///
+/// - The chain beside `lha` whose loop sits at +0x40 waits 7.4 and 8.7
+///   cycles an `add` there, against 9.3 to 10.2 at every held offset
+///   beside the same loop at +0x00 and about 11 in the model.
+/// - Every held offset beside `fdiv`, which the model times 21% to 27%
+///   fast. The sibling runs its divides in a C loop that waits for its
+///   last divide each round ([`c_round`]). Beside that sibling the
+///   console's cost of the chain moves with the probe. It takes 71 cycles
+///   an iteration in `ppu_issue_multiply`, 122 in `ppu_issue_shared`, 132
+///   to 141 here and 169 in `ppu_issue_fdiv_chain`. The model takes 104.
+const RESIDUALS: [(&str, usize); 8] = [
+    ("lha at +0x40", 4),
+    ("lha at +0x40", 7),
+    ("fdiv", 1),
+    ("fdiv", 2),
+    ("fdiv", 3),
+    ("fdiv", 4),
+    ("fdiv", 5),
+    ("fdiv", 7),
+];
 
 /// How far from the console's mean a residual may sit.
 const RESIDUAL_LIMIT: f64 = 0.45;
@@ -142,7 +158,7 @@ const SIB_LHA: [u32; 9] = [
 ];
 const SIB_MULLD: [u32; 9] = eight(0x7def_81d2);
 const SIB_DIVD: [u32; 9] = eight(0x7def_83d2);
-const SIB_FDIV: [u32; 9] = eight(0xfc00_6024);
+const SIB_FDIV: [u32; 34] = c_round(eight(0xfc00_6024));
 
 const INT_SEEDS: &[Seed] = &[Seed::Gpr(15, 0x7fff_0000), Seed::Gpr(16, 1)];
 const LHA: Sibling = Sibling {
@@ -171,10 +187,7 @@ const SIBLINGS: [(&str, Sibling); PHASES] = [
         "fdiv",
         Sibling {
             words: &SIB_FDIV,
-            seeds: &[
-                Seed::Fpr(0, 0x3ff8_0000_0000_0000),
-                Seed::Fpr(12, 0x3ff0_0000_0000_0000),
-            ],
+            seeds: &round_seeds(0x3ff8_0000_0000_0000),
         },
     ),
 ];

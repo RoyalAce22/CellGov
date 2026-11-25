@@ -112,6 +112,15 @@ pub struct PpeIssuePressure {
     /// The runtime passes zero from a sibling that does not outrank the
     /// receiving thread.
     pub issue_interval: u32,
+    /// The fewest cycles between two dispatch groups of the receiving
+    /// thread while the thread's divides stall the shared issue point back
+    /// to back; zero otherwise.
+    ///
+    /// While it is nonzero, the receiving thread waits it in place of each
+    /// stall at the shared issue point that the other fields add. This
+    /// includes [`Self::vscr_cycles`], [`Self::drain_cycles`] and the carry
+    /// of [`Self::divide_fraction`].
+    pub window_cycles: u32,
 }
 
 impl PpeIssuePressure {
@@ -129,6 +138,7 @@ impl PpeIssuePressure {
         fence_cycles: 0,
         kernel_share: 0,
         issue_interval: 0,
+        window_cycles: 0,
     };
 
     /// The larger of each field, with the divide stall taken whole.
@@ -159,6 +169,7 @@ impl PpeIssuePressure {
             fence_cycles: self.fence_cycles.max(other.fence_cycles),
             kernel_share: self.kernel_share.max(other.kernel_share),
             issue_interval: self.issue_interval.max(other.issue_interval),
+            window_cycles: self.window_cycles.max(other.window_cycles),
         }
     }
 }
