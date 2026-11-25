@@ -115,7 +115,11 @@ fn written(stored: u64) -> HypercallDisposition {
     bytes.extend_from_slice(&stored.to_be_bytes());
     let mut answer = HypercallAnswer::lv1_status(0, [0; 7]);
     answer.effects.push(Effect::SharedWriteIntent {
-        range: ByteRange::new(GuestAddr::new(entry_address(KERNEL_INDEX)), 16).expect("range"),
+        range: ByteRange::new(
+            GuestAddr::new(entry_address(PAGE_TABLE_STORAGE_BASE, KERNEL_INDEX)),
+            16,
+        )
+        .expect("range"),
         bytes: WritePayload::new(bytes),
         source: UnitId::new(1),
         source_time: GuestTicks::new(63_164),
@@ -174,7 +178,11 @@ fn shadow_page_entries_that_lv1s_translation_refuses_get_its_r3() {
 fn a_writable_shadow_page_entry_that_duplicates_another_answers_duplicate_entry() {
     let mut storage = storage();
     let other = (KERNEL_INDEX & !7) + 2;
-    let range = ByteRange::new(GuestAddr::new(entry_address(other)), 8).expect("range");
+    let range = ByteRange::new(
+        GuestAddr::new(entry_address(PAGE_TABLE_STORAGE_BASE, other)),
+        8,
+    )
+    .expect("range");
     storage
         .apply_commit(range, &KERNEL_D0.to_be_bytes())
         .expect("commit");

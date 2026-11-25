@@ -32,6 +32,8 @@ fn address_space_sync_term_lane_vector_golden() {
         lane(ADDRESS_SPACE_SOURCE, 0, 2, 18),
         lane(ADDRESS_SPACE_SOURCE, 0, 3, 2),
         lane(ADDRESS_SPACE_SOURCE, 0, 4, 0x1014_0000_0000_0000),
+        lane(PAGE_TABLE_STORAGE_SOURCE, 0, 0, 1),
+        lane(PAGE_TABLE_STORAGE_SOURCE, 0, 1, 0x1000_0000),
     ];
     let sum = lanes.into_iter().fold(0u128, u128::wrapping_add);
     assert_eq!(spaces.sync_term(), sum);

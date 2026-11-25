@@ -178,7 +178,11 @@ fn the_hypervisor_keeps_the_mapping_and_maps_its_pages_to_the_table_storage() {
     assert_eq!(
         answer.effects,
         vec![Effect::SharedWriteIntent {
-            range: ByteRange::new(GuestAddr::new(entry_address(8)), 16).expect("range"),
+            range: ByteRange::new(
+                GuestAddr::new(entry_address(PAGE_TABLE_STORAGE_BASE, 8)),
+                16
+            )
+            .expect("range"),
             bytes: WritePayload::new(bytes),
             source: UnitId::new(1),
             source_time: GuestTicks::new(9),

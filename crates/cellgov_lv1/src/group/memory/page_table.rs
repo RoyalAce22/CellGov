@@ -1,12 +1,14 @@
 //! Hypercalls 1, 95 and 122, `write_htab_entry`, `read_htab_entries` and
-//! `map_htab`, and the storage that holds the page table of the address
-//! space that the hypervisor constructs.
+//! `map_htab`, and the storage that holds the page tables of the address
+//! spaces that the hypervisor constructs.
 //!
-//! lv1 keeps a page table in its own memory, at a real address that no
-//! call gives the partition. CellGov keeps the table in guest storage at
-//! [`PAGE_TABLE_STORAGE_BASE`], so that the PPU's table search reads it
-//! through SDR1. A selection of the address space loads SDR1 with that
-//! address.
+//! lv1 keeps the page table of each address space in its own memory, at
+//! a real address that the address space records and that no call gives
+//! the partition. CellGov keeps each table in guest storage from
+//! [`PAGE_TABLE_STORAGE_BASE`], at the real address that [`placement`]
+//! gives it, so that the PPU's table search reads it through SDR1. A
+//! selection of an address space loads SDR1 with the address of its
+//! table.
 //!
 //! The answers read the entries from the storage and change them with
 //! memory writes. The PPU writes R and C into the same bytes, so a read
@@ -93,7 +95,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[
 ];
 
 /// The real address of the storage that holds the hypervisor's page
-/// table.
+/// tables.
 ///
 /// CellGov chooses the address, with these properties:
 /// - It lies above the partition's real mode region.
@@ -106,7 +108,7 @@ pub const PAGE_TABLE_STORAGE_BASE: u64 = 0x1000_0000;
 /// `construct_virtual_address_space` makes.
 pub const PAGE_TABLE_STORAGE_BYTES: u64 = htab_size(HTAB_SIZE_EXP_MAX);
 
-/// The region that holds the hypervisor's page table, for a boot that
+/// The region that holds the hypervisor's page tables, for a boot that
 /// runs the kernel under CellGov's hypervisor.
 pub fn page_table_storage() -> Region {
     Region::new(
@@ -117,15 +119,33 @@ pub fn page_table_storage() -> Region {
     )
 }
 
-pub(crate) fn holds_table(storage: &GuestMemory, space: &AddressSpace) -> bool {
-    storage.holds(PAGE_TABLE_STORAGE_BASE, htab_size(space.htab_size_exp))
+/// The real address of a new page table of 2^`htab_size_exp` bytes whose
+/// storage starts at or after `end`, or `None` when the storage has no
+/// room for it.
+///
+/// The table starts at the first multiple of its size, as SDR1 needs
+/// [PPC-Book3 p:36 s:4.5.1].
+pub(crate) fn placement(end: u64, htab_size_exp: u64) -> Option<u64> {
+    let size = htab_size(htab_size_exp);
+    let table = end.checked_next_multiple_of(size)?;
+    let storage_end = PAGE_TABLE_STORAGE_BASE + PAGE_TABLE_STORAGE_BYTES;
+    (table.checked_add(size)? <= storage_end).then_some(table)
 }
 
-/// The registers that a selection of `space` loads on the calling
-/// thread.
-pub(crate) fn load(space: &AddressSpace) -> PageTableLoad {
+/// Whether `storage` holds the page table of `space`, whose real address
+/// is `table`.
+pub(crate) fn holds_table(storage: &GuestMemory, space: &AddressSpace, table: u64) -> bool {
+    storage.holds(table, htab_size(space.htab_size_exp))
+}
+
+/// The registers that a selection of `space`, whose page table is at the
+/// real address `table`, loads on the calling thread.
+///
+/// lv1 loads SDR1 from the table address that the address space records
+/// [OFW-4.93 lv1 a:0x2C3A40-0x2C3A54].
+pub(crate) fn load(space: &AddressSpace, table: u64) -> PageTableLoad {
     PageTableLoad {
-        sdr1: select_sdr1(PAGE_TABLE_STORAGE_BASE, space.htab_size_exp),
+        sdr1: select_sdr1(table, space.htab_size_exp),
         lb: select_hid6_lb(space.page_size_count, space.page_shifts),
     }
 }
@@ -199,9 +219,10 @@ pub(crate) fn named_space<'a>(
     ))
 }
 
-/// The real address of entry `index` of the page table.
-fn entry_address(index: u64) -> u64 {
-    PAGE_TABLE_STORAGE_BASE + index * PTE_BYTES as u64
+/// The real address of entry `index` of the page table at the real
+/// address `table`.
+fn entry_address(table: u64, index: u64) -> u64 {
+    table + index * PTE_BYTES as u64
 }
 
 /// Hypercall 95: four entries of the page table from the index in r4.
@@ -240,7 +261,9 @@ pub(crate) fn read_entries(
         return lv1_answer(READ_HTAB_INDEX_R3);
     }
     let len = READ_HTAB_ENTRY_COUNT * PTE_BYTES as u64;
-    let bytes = ByteRange::new(GuestAddr::new(entry_address(index)), len)
+    let bytes = spaces
+        .table_real(space.vas_id)
+        .and_then(|table| ByteRange::new(GuestAddr::new(entry_address(table, index)), len))
         .and_then(|range| storage.read(range));
     let Some(bytes) = bytes else {
         return refuse(request, "a page table read with no storage for the table");
@@ -319,10 +342,14 @@ fn doubleword_check(doubleword0: u64, doubleword1: u64) -> Option<u64> {
     }
 }
 
-/// Doubleword 0 of each entry of the group from entry `first`, or
-/// `None` when no storage holds the group.
-fn group_doublewords0(storage: &GuestMemory, first: u64) -> Option<Vec<(u64, u64)>> {
-    let range = ByteRange::new(GuestAddr::new(entry_address(first)), PTEG_BYTES as u64)?;
+/// Doubleword 0 of each entry of the group from entry `first` of the
+/// page table at the real address `table`, or `None` when no storage
+/// holds the group.
+fn group_doublewords0(storage: &GuestMemory, table: u64, first: u64) -> Option<Vec<(u64, u64)>> {
+    let range = ByteRange::new(
+        GuestAddr::new(entry_address(table, first)),
+        PTEG_BYTES as u64,
+    )?;
     let bytes = storage.read(range)?;
     Some(
         (first..)
@@ -334,20 +361,23 @@ fn group_doublewords0(storage: &GuestMemory, first: u64) -> Option<Vec<(u64, u64
 
 /// Whether a valid `doubleword0` at entry `index` duplicates an entry of `space`'s table.
 ///
-/// The value is `None` when no storage holds the two groups. See
-/// [`duplicates`].
+/// `table` is the real address of the table, or `None` when the table
+/// has no storage. The value is `None` when no storage holds the two
+/// groups. See [`duplicates`].
 fn duplicate(
     storage: &GuestMemory,
     space: &AddressSpace,
+    table: Option<u64>,
     index: u64,
     doubleword0: u64,
 ) -> Option<bool> {
+    let table = table?;
     let own = index & !(PTES_PER_PTEG as u64 - 1);
     let other = other_group(index, space.htab_size_exp);
-    let in_own = group_doublewords0(storage, own)?
+    let in_own = group_doublewords0(storage, table, own)?
         .into_iter()
         .any(|(slot, existing)| slot != index && duplicates(existing, doubleword0, true));
-    let in_other = group_doublewords0(storage, other)?
+    let in_other = group_doublewords0(storage, table, other)?
         .into_iter()
         .any(|(_, existing)| duplicates(existing, doubleword0, false));
     Some(in_own || in_other)
@@ -379,7 +409,7 @@ struct Regions<'a> {
 /// regions and maps the page there [OFW-4.93 lv1 a:0x2D2510]
 /// [OFW-4.93 lv1 a:0x2D30C4]. CellGov models five kinds of region:
 /// - the mapping of a page table that `regions` holds, whose page lies in
-///   the page table storage at the same offset;
+///   the table's storage at the same offset;
 /// - a region of a logical SPE, as [`region_page`] answers it for
 ///   `doubleword1`;
 /// - a region that `allocate_memory` created, as
@@ -401,11 +431,14 @@ fn real_page(
 ) -> Result<u64, NoRealPage> {
     let size = 1u64 << page.shift;
     let end = page.address.checked_add(size);
+    // The inner value is `None` for a page in the mapping of a table with
+    // no storage.
     let in_mapping = regions.spaces.spaces().iter().find_map(|space| {
         let mapping = space.mapping?;
-        let table = htab_size(space.htab_size_exp);
-        let inside = page.address >= mapping && end.is_some_and(|end| end <= mapping + table);
-        inside.then(|| PAGE_TABLE_STORAGE_BASE + (page.address - mapping))
+        let size = htab_size(space.htab_size_exp);
+        let inside = page.address >= mapping && end.is_some_and(|end| end <= mapping + size);
+        let table = regions.spaces.table_real(space.vas_id);
+        inside.then(|| table.map(|table| table + (page.address - mapping)))
     });
     let spe = region_page(regions.spes, page.address, page.shift, doubleword1);
     let allocated = storage::region_page(regions.allocated, page.address, page.shift);
@@ -422,7 +455,9 @@ fn real_page(
         ));
     }
     let real = if let Some(real) = in_mapping {
-        real
+        real.ok_or(NoRealPage::Refused(
+            "a valid entry whose page lies in the mapping of a page table with no storage",
+        ))?
     } else if let Some(answer) = spe {
         spe_real(answer)?
     } else if let Some(answer) = allocated {
@@ -564,6 +599,7 @@ fn write_entry_with(
         Ok(page) => page,
         Err(r3) => return lv1_answer(r3),
     };
+    let table = regions.spaces.table_real(space.vas_id);
     let mut real = 0;
     if valid(doubleword0) {
         // named_space refuses a call with no firmware version.
@@ -572,7 +608,7 @@ fn write_entry_with(
         // [OFW-4.93 lv1 a:0x2D2F20-0x2D3038], so a duplicate answers before
         // any translation result, a CellGov refusal included.
         let translated = real_page(firmware, regions, storage, page, doubleword1);
-        match duplicate(storage, space, index, doubleword0) {
+        match duplicate(storage, space, table, index, doubleword0) {
             Some(true) => return lv1_answer(WRITE_HTAB_DUPLICATE_R3),
             Some(false) => {}
             None => return refuse(request, "a page table write with no storage for the table"),
@@ -592,7 +628,13 @@ fn write_entry_with(
     };
     let mut bytes = doubleword0.to_be_bytes().to_vec();
     bytes.extend_from_slice(&stored.to_be_bytes());
-    let Some(range) = ByteRange::new(GuestAddr::new(entry_address(index)), PTE_BYTES as u64)
+    let Some(range) = table
+        .and_then(|table| {
+            ByteRange::new(
+                GuestAddr::new(entry_address(table, index)),
+                PTE_BYTES as u64,
+            )
+        })
         .filter(|range| storage.holds(range.start().raw(), range.length()))
     else {
         return refuse(request, "a page table write with no storage for the table");
@@ -698,3 +740,7 @@ mod mmio_bounds_tests;
 #[cfg(test)]
 #[path = "tests/page_table_real_mode_size_tests.rs"]
 mod real_mode_size_tests;
+
+#[cfg(test)]
+#[path = "tests/page_table_storage_tests.rs"]
+mod storage_tests;

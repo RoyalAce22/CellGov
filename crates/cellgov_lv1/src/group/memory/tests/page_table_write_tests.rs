@@ -59,7 +59,11 @@ fn storage() -> GuestMemory {
 
 /// `storage` with doubleword 0 `d0` at entry `index`.
 fn with_entry(mut storage: GuestMemory, index: u64, d0: u64) -> GuestMemory {
-    let range = ByteRange::new(GuestAddr::new(entry_address(index)), 8).expect("range");
+    let range = ByteRange::new(
+        GuestAddr::new(entry_address(PAGE_TABLE_STORAGE_BASE, index)),
+        8,
+    )
+    .expect("range");
     storage
         .apply_commit(range, &d0.to_be_bytes())
         .expect("commit");
@@ -85,7 +89,11 @@ fn written(index: u64, d0: u64, stored: u64) -> HypercallDisposition {
     bytes.extend_from_slice(&stored.to_be_bytes());
     let mut answer = HypercallAnswer::lv1_status(0, [0; 7]);
     answer.effects.push(Effect::SharedWriteIntent {
-        range: ByteRange::new(GuestAddr::new(entry_address(index)), 16).expect("range"),
+        range: ByteRange::new(
+            GuestAddr::new(entry_address(PAGE_TABLE_STORAGE_BASE, index)),
+            16,
+        )
+        .expect("range"),
         bytes: WritePayload::new(bytes),
         source: UnitId::new(1),
         source_time: GuestTicks::new(9),

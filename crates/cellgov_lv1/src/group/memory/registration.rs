@@ -44,6 +44,11 @@ pub(crate) const GROUP: Group = Group {
             source: Some(REGION_STORAGE_SOURCE),
             stamp: Stamp::Version(28),
         },
+        HashedSurface {
+            name: "the real address of each address space's page table",
+            source: Some(PAGE_TABLE_STORAGE_SOURCE),
+            stamp: Stamp::Pending,
+        },
     ],
 };
 
@@ -65,6 +70,11 @@ pub(crate) const SELECTED_ADDRESS_SPACE_SOURCE: u8 = 80;
 /// The lane source of the real addresses of the regions' storage, one
 /// object per region that has storage, keyed by its creation index.
 pub(crate) const REGION_STORAGE_SOURCE: u8 = 128;
+
+/// The lane source of the real addresses of the page tables, one object
+/// per address space whose table has storage, keyed by its construction
+/// index.
+pub(crate) const PAGE_TABLE_STORAGE_SOURCE: u8 = 129;
 
 /// The memory group's state: the partition's memory regions and its
 /// virtual address spaces.

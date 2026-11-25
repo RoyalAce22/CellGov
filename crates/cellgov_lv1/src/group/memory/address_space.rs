@@ -2,9 +2,9 @@
 //! `select_virtual_address_space`, and the virtual address spaces the
 //! hypervisor keeps for the partition.
 //!
-//! The hypervisor keeps each address space it constructs and the vas id
-//! that the partition's PPE selected. These two hypercalls and the page
-//! table calls read them.
+//! The hypervisor keeps each address space it constructs, the real
+//! address of its page table, and the vas id that the partition's PPE
+//! selected. These two hypercalls and the page table calls read them.
 
 use cellgov_mem::lanes::{self, LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::address_space::{
@@ -17,7 +17,9 @@ use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
 use cellgov_mem::GuestMemory;
 
-use super::{page_table, ADDRESS_SPACE_SOURCE, SELECTED_ADDRESS_SPACE_SOURCE};
+use super::{
+    page_table, ADDRESS_SPACE_SOURCE, PAGE_TABLE_STORAGE_SOURCE, SELECTED_ADDRESS_SPACE_SOURCE,
+};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::request::{CallerTranslation, HypercallRequest};
@@ -107,10 +109,17 @@ pub enum AddressSpaceChange {
     },
 }
 
-/// The partition's virtual address spaces and the selected one.
+/// The partition's virtual address spaces, the real address of each
+/// page table, and the selected address space.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AddressSpaceState {
     spaces: Vec<AddressSpace>,
+    /// The real address of the page table of each address space, or
+    /// `None` for a table with no storage.
+    ///
+    /// Entry `i` belongs to `spaces[i]`. The construction index is the
+    /// key, so two spaces with one vas id keep two distinct tables.
+    tables: Vec<Option<u64>>,
     selected: Option<u64>,
 }
 
@@ -126,10 +135,46 @@ impl AddressSpaceState {
         self.selected
     }
 
+    /// The real address of the page table of the first address space with
+    /// the vas id `vas_id`, or `None` when the table has no storage.
+    pub fn table_real(&self, vas_id: u64) -> Option<u64> {
+        let index = self.spaces.iter().position(|s| s.vas_id == vas_id)?;
+        self.tables.get(index).copied().flatten()
+    }
+
+    /// Each address space with the real address of its own page table, in
+    /// construction order.
+    fn kept(&self) -> impl Iterator<Item = (&AddressSpace, Option<u64>)> {
+        self.spaces.iter().zip(self.tables.iter().copied())
+    }
+
+    /// The real address that a new page table of 2^`htab_size_exp` bytes
+    /// takes, or `None` when the page table storage has no room for it.
+    ///
+    /// The table starts after the last table that has storage; see
+    /// [`page_table::placement`].
+    pub(crate) fn next_table(&self, htab_size_exp: u64) -> Option<u64> {
+        let end = self
+            .kept()
+            .filter_map(|(s, table)| Some(table? + htab_size(s.htab_size_exp)))
+            .max()
+            .unwrap_or(page_table::PAGE_TABLE_STORAGE_BASE);
+        page_table::placement(end, htab_size_exp)
+    }
+
+    /// Keeps `space`, with its page table at [`Self::next_table`].
+    ///
+    /// The construct handler refuses a space whose table has no room, so
+    /// each space that an answer carries gets storage.
+    fn construct(&mut self, space: AddressSpace) {
+        self.tables.push(self.next_table(space.htab_size_exp));
+        self.spaces.push(space);
+    }
+
     /// Applies `change`.
     pub(crate) fn apply(&mut self, change: AddressSpaceChange) {
         match change {
-            AddressSpaceChange::Constructed(space) => self.spaces.push(space),
+            AddressSpaceChange::Constructed(space) => self.construct(space),
             AddressSpaceChange::Selected(vas_id) => self.selected = Some(vas_id),
             AddressSpaceChange::Mapped {
                 vas_id,
@@ -143,26 +188,35 @@ impl AddressSpaceState {
         }
     }
 
-    /// The sync-state terms of the address spaces and the selection.
+    /// The sync-state terms of the address spaces, their page tables and
+    /// the selection.
     ///
-    /// Each address space is one object of
-    /// the lane source `ADDRESS_SPACE_SOURCE`, keyed by its construction
-    /// index. The selected vas id is object 0 of
-    /// the lane source `SELECTED_ADDRESS_SPACE_SOURCE`. A state with no
-    /// address space and no selection adds no term.
+    /// The terms have these objects:
+    /// - each address space is one object of the lane source
+    ///   `ADDRESS_SPACE_SOURCE`, keyed by its construction index;
+    /// - the real address of each page table that has storage is one
+    ///   object of the lane source `PAGE_TABLE_STORAGE_SOURCE`, with the
+    ///   same key;
+    /// - the selected vas id is object 0 of the lane source
+    ///   `SELECTED_ADDRESS_SPACE_SOURCE`.
+    ///
+    /// A state with no address space and no selection adds no term.
     pub fn sync_term(&self) -> u128 {
         let mut sum = match self.selected {
             Some(vas_id) => lanes::value_term(SELECTED_ADDRESS_SPACE_SOURCE, 0, &vas_id),
             None => 0,
         };
-        for (index, space) in (0u64..).zip(&self.spaces) {
+        for (index, (space, table)) in (0u64..).zip(self.kept()) {
             sum = sum.wrapping_add(lanes::value_term(ADDRESS_SPACE_SOURCE, index, space));
+            if let Some(table) = table {
+                sum = sum.wrapping_add(lanes::value_term(PAGE_TABLE_STORAGE_SOURCE, index, &table));
+            }
         }
         sum
     }
 
-    /// The address space with the vas id `vas_id`, or `None` when the
-    /// hypervisor did not construct it.
+    /// The first address space with the vas id `vas_id`, or `None` when
+    /// the hypervisor did not construct it.
     pub fn space(&self, vas_id: u64) -> Option<&AddressSpace> {
         self.spaces.iter().find(|space| space.vas_id == vas_id)
     }
@@ -206,6 +260,7 @@ fn lv1_argument_check(exp: u64, count: u64, shifts: u64) -> Option<u64> {
 /// - no lv1 image read shows the handler for `firmware`;
 /// - the call passes lv1's checks with a page table size or page sizes
 ///   that the kernel's call does not pass;
+/// - the page table storage has no room for the page table;
 /// - the hypervisor already constructed an address space, so no source
 ///   gives the vas id;
 /// - no source gives the boot vas id for `firmware`.
@@ -235,6 +290,12 @@ pub(crate) fn construct(
     };
     if (count, shifts) != (KERNEL_PAGE_SIZE_COUNT, KERNEL_PAGE_SHIFTS) {
         return refuse(request, "page sizes that no kernel call is shown to pass");
+    }
+    if spaces.next_table(htab_size_exp).is_none() {
+        return refuse(
+            request,
+            "an address space construction whose page table the page table storage has no room for",
+        );
     }
     if !spaces.spaces().is_empty() {
         return refuse(
@@ -273,7 +334,8 @@ pub(crate) fn construct(
 /// - r3 is 0, which lv1 answers by selecting the partition's default
 ///   address space, and CellGov does not model that address space;
 /// - the hypervisor did not construct the address space;
-/// - `storage` does not hold the page table.
+/// - the address space's page table has no storage, or `storage` does
+///   not hold it.
 pub(crate) fn select(
     request: &HypercallRequest,
     caller: CallerTranslation,
@@ -306,15 +368,18 @@ pub(crate) fn select(
             "a selection of an address space that this hypervisor did not construct",
         );
     };
-    if !page_table::holds_table(storage, space) {
+    let Some(table) = spaces
+        .table_real(vas_id)
+        .filter(|&table| page_table::holds_table(storage, space, table))
+    else {
         return refuse(
             request,
             "a selection of an address space with no storage for its page table",
         );
-    }
+    };
     let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []);
     answer.push_change(AddressSpaceChange::Selected(vas_id));
-    answer.page_table = Some(page_table::load(space));
+    answer.page_table = Some(page_table::load(space, table));
     HypercallDisposition::Answered(answer)
 }
 
@@ -333,3 +398,11 @@ mod select_load_tests;
 #[cfg(test)]
 #[path = "tests/select_caller_tests.rs"]
 mod select_caller_tests;
+
+#[cfg(test)]
+#[path = "tests/construct_room_tests.rs"]
+mod construct_room_tests;
+
+#[cfg(test)]
+#[path = "tests/duplicate_vas_id_tests.rs"]
+mod duplicate_vas_id_tests;

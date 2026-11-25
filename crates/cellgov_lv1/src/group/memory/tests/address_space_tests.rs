@@ -183,7 +183,10 @@ fn selecting_the_constructed_address_space_answers_with_outputs_cleared() {
     );
     let mut expected = HypercallAnswer::lv1_status(0, [0; 7]);
     expected.push_change(AddressSpaceChange::Selected(CAPTURED_VAS_ID));
-    expected.page_table = Some(page_table::load(&boot_space()));
+    expected.page_table = Some(page_table::load(
+        &boot_space(),
+        page_table::PAGE_TABLE_STORAGE_BASE,
+    ));
     assert_eq!(d, HypercallDisposition::Answered(expected));
 }
 

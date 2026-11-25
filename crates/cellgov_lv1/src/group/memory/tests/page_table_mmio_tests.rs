@@ -114,7 +114,11 @@ fn the_kernels_entry_in_its_mmio_mapping_maps_the_devices_real_address() {
     bytes.extend_from_slice(&stored.to_be_bytes());
     let mut answer = HypercallAnswer::lv1_status(0, [0; 7]);
     answer.effects.push(Effect::SharedWriteIntent {
-        range: ByteRange::new(GuestAddr::new(entry_address(KERNEL_INDEX)), 16).expect("range"),
+        range: ByteRange::new(
+            GuestAddr::new(entry_address(PAGE_TABLE_STORAGE_BASE, KERNEL_INDEX)),
+            16,
+        )
+        .expect("range"),
         bytes: WritePayload::new(bytes),
         source: UnitId::new(1),
         source_time: GuestTicks::new(36_822),

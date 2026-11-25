@@ -67,7 +67,11 @@ fn storage() -> GuestMemory {
     for index in (0..12).chain(LAST_INDEX..LAST_INDEX + 4) {
         let mut bytes = doubleword0(index).to_be_bytes().to_vec();
         bytes.extend_from_slice(&doubleword1(index).to_be_bytes());
-        let range = ByteRange::new(GuestAddr::new(entry_address(index)), 16).expect("range");
+        let range = ByteRange::new(
+            GuestAddr::new(entry_address(PAGE_TABLE_STORAGE_BASE, index)),
+            16,
+        )
+        .expect("range");
         mem.apply_commit(range, &bytes).expect("commit");
     }
     mem

@@ -110,7 +110,7 @@ block-beta
 | Label                  | Real address  | Holds                                                                                                                   |
 | ---------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `lv2 real`             | `0x0000_0000` | The partition's real mode region. Each kernel segment lies at its real address: its link address with EA bits 0 and 1 cleared. |
-| `lv1 page table`       | `0x1000_0000` | The partition's hashed page table, which the PPU's table search reads. It holds the largest table that the hypervisor constructs. |
+| `lv1 page table`       | `0x1000_0000` | The hashed page tables of the address spaces that the hypervisor constructs, which the PPU's table search reads. Its size is the largest table that the hypervisor constructs. |
 | `lv1 shadow pages`     | `0x1100_0000` | The shadow pages of the logical SPEs.                                                                                   |
 | `lv1 allocated memory` | `0x1200_0000` | The pages of the regions that `allocate_memory` creates.                                                               |
 
@@ -142,10 +142,11 @@ chooses the three storage bases. Each base meets two conditions:
 CellGov's [hypervisor](hypervisor.md) fills the storage when it answers
 these hypercalls:
 
-- `construct_virtual_address_space` gives the address space whose page
-  table the page table storage holds. `write_htab_entry` writes the
-  table's entries, and `select_virtual_address_space` loads SDR1 with
-  the storage's address.
+- `construct_virtual_address_space` gives each address space its own
+  page table in the page table storage, at the first multiple of the
+  table's size past the tables before it. `write_htab_entry` writes the
+  entries of the named address space's table, and
+  `select_virtual_address_space` loads SDR1 with that table's address.
 - `construct_logical_spe` gives each logical SPE the next shadow page
   of the shadow storage ([the shadow page](hypervisor.md#the-shadow-page)).
 - `allocate_memory` places the pages of each region it creates in the
