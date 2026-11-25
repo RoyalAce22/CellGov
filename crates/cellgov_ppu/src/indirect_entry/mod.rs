@@ -86,11 +86,11 @@
 //!   paths bring more, it drops them and marks the register as one
 //!   that can hold a constant the scan dropped. The image need not
 //!   name a dropped constant. The mark moves with a copy of the
-//!   register, also a copy into or out of SRR0 or SRR1, and with a word
-//!   that steps the register as the scan follows it. A call keeps
-//!   the marks of SRR0 and SRR1, and an `sc` clears them. So the scan
-//!   does not record a dropped constant that a store and a load move,
-//!   or that a call takes into its routine;
+//!   register, also a copy into or out of SRR0, SRR1, CR or another
+//!   SPR, and with a word that computes a value from the register. A
+//!   call keeps the marks of SRR0 and SRR1, and an `sc` clears them. So
+//!   the scan does not record a dropped constant that a store and a load
+//!   move, or that a call takes into its routine;
 //! - the mark records its origins: the branch target, the register and
 //!   the number of constants that the paths brought there. When a
 //!   `bcctr`, `bclr` or `rfid` can reach a dropped constant, the scan

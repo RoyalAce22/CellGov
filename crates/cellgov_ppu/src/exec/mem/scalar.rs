@@ -180,8 +180,9 @@ pub(super) fn scalar(insn: &PpuInstruction) -> Option<Scalar> {
         PpuInstruction::Stbux { rs, ra, rb } => Store(X(ra, rb), B1, Src::Gpr(rs), Ra("stbux")),
 
         // Byte-reverse indexed loads and stores
-        // [PPC-Book1 p:50 s:3.3.4] lwbrx / lhbrx: load size N, low N bytes byte-reversed, zero-extended into RT.
-        // [PPC-Book1 p:51 s:3.3.4] ldbrx / stwbrx / sthbrx: doubleword load / word + halfword store with byte reversal.
+        // [PPC-Book1 p:44 s:3.3.4] lwbrx / lhbrx: load size N, low N bytes byte-reversed, zero-extended into RT.
+        // [PPC-Book1 p:45 s:3.3.4] stwbrx / sthbrx: word + halfword store with byte reversal.
+        // [CBE-Handbook p:733 s:A.2.1] ldbrx: doubleword load with byte reversal.
         // [CBE-Handbook p:734 s:A.2.1] sdbrx (CG name): low-64 byte-reverse store.
         PpuInstruction::Ldbrx { rt, ra, rb } => Load(X(ra, rb), B8, Dest::Reversed(rt), No),
         PpuInstruction::Lwbrx { rt, ra, rb } => Load(X(ra, rb), B4, Dest::Reversed(rt), No),

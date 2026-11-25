@@ -89,16 +89,15 @@ struct Ctr {
     /// adds no target. A step that changes it gives a value that the
     /// scan cannot prove.
     ///
-    /// Only CTR itself holds such a value. A copy of it is a GPR with no
-    /// copy that the state records.
+    /// Only CTR itself holds such a value. The state records no copy of
+    /// it.
     ///
     /// [`IndirectBound::real_named`]: super::IndirectBound::real_named
     unwritten: bool,
 }
 
 impl Ctr {
-    /// CTR where a path starts that the flow does not follow, or after
-    /// an `mtctr` of a value that no word of the scan writes.
+    /// CTR that no word of the scan writes.
     fn unwritten() -> Self {
         Self {
             unwritten: true,
@@ -133,9 +132,13 @@ impl Ctr {
 
     /// CTR after a step that keeps no constant of it.
     ///
-    /// Each value of a path becomes a value that the scan cannot prove:
-    /// a constant, a value of a class, and a CTR that no word of the scan
-    /// writes. A state that holds no path stays so.
+    /// Each of these values of a path becomes a value that the scan
+    /// cannot prove:
+    /// - a constant;
+    /// - a value of a class;
+    /// - a CTR that no word of the scan writes.
+    ///
+    /// A state that holds no path stays so.
     fn unproved(&self) -> Self {
         Self {
             lost: self.lost || self.ranged || self.unwritten || !self.known.is_empty(),
@@ -1038,8 +1041,8 @@ impl<'a> CtrFlow<'a> {
     ///
     /// `position` holds the index of the segment and of the word there. A
     /// word that does not decode passes no state, as the scan of the code
-    /// constants forgets each constant there. A call passes no copy to its
-    /// target, and a CTR that no word of the scan writes.
+    /// constants forgets each constant there. A call passes to its target
+    /// a CTR that no word of the scan writes, and no copy.
     fn steps(
         &self,
         position: (usize, usize),

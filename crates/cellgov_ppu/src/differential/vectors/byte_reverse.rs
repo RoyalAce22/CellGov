@@ -50,7 +50,7 @@ fn padded_memory(offset: usize, payload: &[u8], total_len: usize) -> MemorySnaps
 /// `ldbrx`: 8-byte big-endian-on-disk load that the executor must
 /// byte-reverse into RT.
 ///
-/// [PPC-Book1 p:51 s:3.3.4] ldbrx RT, RA, RB: MEM(EA,8) byte-reversed -> RT.
+/// [CBE-Handbook p:733 s:A.2.1] ldbrx RT, RA, RB: MEM(EA,8) byte-reversed -> RT.
 fn ldbrx_cases() -> Vec<InstructionCase> {
     let raw = xform(/*rt*/ 3, /*ra*/ 4, /*rb*/ 5, 532);
     let mut cases = Vec::new();
@@ -68,7 +68,7 @@ fn ldbrx_cases() -> Vec<InstructionCase> {
         mem.clone(),
         expected,
         mem,
-        "[PPC-Book1 p:51 s:3.3.4] little-endian 8-byte load -> RT",
+        "[CBE-Handbook p:733 s:A.2.1] little-endian 8-byte load -> RT",
     ));
 
     // Case 2: same pattern at EA = base + 8 via RB.
@@ -85,7 +85,7 @@ fn ldbrx_cases() -> Vec<InstructionCase> {
         mem2.clone(),
         expected2,
         mem2,
-        "[PPC-Book1 p:51 s:3.3.4] EA = (RA|0)+RB; little-endian 8-byte load",
+        "[CBE-Handbook p:733 s:A.2.1] EA = (RA|0)+RB; little-endian 8-byte load",
     ));
 
     // Case 3: RA=0, EA = RB. We re-encode with RA=0.
@@ -111,7 +111,7 @@ fn ldbrx_cases() -> Vec<InstructionCase> {
 
 /// `lwbrx`: 4-byte little-endian load zero-extended into RT.
 ///
-/// [PPC-Book1 p:50 s:3.3.4] lwbrx RT, RA, RB: low 32 bits byte-reversed -> `RT[32:63]`; `RT[0:31]`=0.
+/// [PPC-Book1 p:44 s:3.3.4] lwbrx RT, RA, RB: low 32 bits byte-reversed -> `RT[32:63]`; `RT[0:31]`=0.
 fn lwbrx_cases() -> Vec<InstructionCase> {
     let raw = xform(7, 8, 9, 534);
     let mut cases = Vec::new();
@@ -130,7 +130,7 @@ fn lwbrx_cases() -> Vec<InstructionCase> {
         mem.clone(),
         expected,
         mem,
-        "[PPC-Book1 p:50 s:3.3.4] little-endian 4-byte load, zero-extended into RT",
+        "[PPC-Book1 p:44 s:3.3.4] little-endian 4-byte load, zero-extended into RT",
     ));
 
     // Mid-region misalignment: EA at offset 5.
@@ -147,7 +147,7 @@ fn lwbrx_cases() -> Vec<InstructionCase> {
         mem2.clone(),
         expected2,
         mem2,
-        "[PPC-Book1 p:50 s:3.3.4] EA need not be aligned for the byte-reverse loads",
+        "[CBE-Handbook p:253 s:9.5.8] a misaligned byte-reverse load from cacheable storage takes no alignment interrupt",
     ));
 
     cases
@@ -155,7 +155,7 @@ fn lwbrx_cases() -> Vec<InstructionCase> {
 
 /// `lhbrx`: 2-byte little-endian load zero-extended.
 ///
-/// [PPC-Book1 p:50 s:3.3.4] lhbrx RT, RA, RB: low 16 bits byte-reversed -> `RT[48:63]`; `RT[0:47]`=0.
+/// [PPC-Book1 p:44 s:3.3.4] lhbrx RT, RA, RB: low 16 bits byte-reversed -> `RT[48:63]`; `RT[0:47]`=0.
 fn lhbrx_cases() -> Vec<InstructionCase> {
     let raw = xform(2, 4, 5, 790);
     let mut cases = Vec::new();
@@ -173,7 +173,7 @@ fn lhbrx_cases() -> Vec<InstructionCase> {
         mem.clone(),
         expected,
         mem,
-        "[PPC-Book1 p:50 s:3.3.4] little-endian 2-byte load, zero-extended into RT",
+        "[PPC-Book1 p:44 s:3.3.4] little-endian 2-byte load, zero-extended into RT",
     ));
 
     cases
@@ -208,7 +208,7 @@ fn sdbrx_cases() -> Vec<InstructionCase> {
 
 /// `stwbrx`: 4-byte little-endian store from low 32 of RS.
 ///
-/// [PPC-Book1 p:51 s:3.3.4] stwbrx: `RS[32:63]` byte-reversed -> MEM(EA,4).
+/// [PPC-Book1 p:45 s:3.3.4] stwbrx: `RS[32:63]` byte-reversed -> MEM(EA,4).
 fn stwbrx_cases() -> Vec<InstructionCase> {
     let raw = xform(9, 10, 11, 662);
     let mut cases = Vec::new();
@@ -226,7 +226,7 @@ fn stwbrx_cases() -> Vec<InstructionCase> {
         expected_state: initial,
         expected_memory: expected_mem,
         source: OracleSource::Spec {
-            rationale: "[PPC-Book1 p:51 s:3.3.4] stwbrx low-32 little-endian store",
+            rationale: "[PPC-Book1 p:45 s:3.3.4] stwbrx low-32 little-endian store",
         },
     });
 
@@ -235,7 +235,7 @@ fn stwbrx_cases() -> Vec<InstructionCase> {
 
 /// `sthbrx`: 2-byte little-endian store from low 16 of RS.
 ///
-/// [PPC-Book1 p:51 s:3.3.4] sthbrx: `RS[48:63]` byte-reversed -> MEM(EA,2).
+/// [PPC-Book1 p:45 s:3.3.4] sthbrx: `RS[48:63]` byte-reversed -> MEM(EA,2).
 fn sthbrx_cases() -> Vec<InstructionCase> {
     let raw = xform(12, 13, 14, 918);
     let mut cases = Vec::new();
@@ -253,7 +253,7 @@ fn sthbrx_cases() -> Vec<InstructionCase> {
         expected_state: initial,
         expected_memory: expected_mem,
         source: OracleSource::Spec {
-            rationale: "[PPC-Book1 p:51 s:3.3.4] sthbrx low-16 little-endian store",
+            rationale: "[PPC-Book1 p:45 s:3.3.4] sthbrx low-16 little-endian store",
         },
     });
 

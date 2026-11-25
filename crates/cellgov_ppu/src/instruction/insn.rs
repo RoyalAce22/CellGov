@@ -946,19 +946,19 @@ pub enum PpuInstruction {
     },
 
     // -- Byte-reverse indexed loads and stores --
-    /// [PPC-Book1 p:51 s:3.3.4 Byte-Reverse Instructions] ldbrx X-form: little-endian 8-byte load to RT.
+    /// [CBE-Handbook p:733 s:A.2.1 New PowerPC Instructions] ldbrx X-form: little-endian 8-byte load to RT.
     Ldbrx {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// [PPC-Book1 p:50 s:3.3.4 Byte-Reverse Instructions] lwbrx X-form: little-endian 4-byte load, zero-extended to RT.
+    /// [PPC-Book1 p:44 s:3.3.4 Fixed-Point Load and Store with Byte Reversal Instructions] lwbrx X-form: little-endian 4-byte load, zero-extended to RT.
     Lwbrx {
         rt: u8,
         ra: u8,
         rb: u8,
     },
-    /// [PPC-Book1 p:50 s:3.3.4 Byte-Reverse Instructions] lhbrx X-form: little-endian 2-byte load, zero-extended to RT.
+    /// [PPC-Book1 p:44 s:3.3.4 Fixed-Point Load and Store with Byte Reversal Instructions] lhbrx X-form: little-endian 2-byte load, zero-extended to RT.
     Lhbrx {
         rt: u8,
         ra: u8,
@@ -974,13 +974,13 @@ pub enum PpuInstruction {
         ra: u8,
         rb: u8,
     },
-    /// [PPC-Book1 p:51 s:3.3.4 Byte-Reverse Instructions] stwbrx X-form: little-endian 4-byte store from RS low 32.
+    /// [PPC-Book1 p:45 s:3.3.4 Fixed-Point Load and Store with Byte Reversal Instructions] stwbrx X-form: little-endian 4-byte store from RS low 32.
     Stwbrx {
         rs: u8,
         ra: u8,
         rb: u8,
     },
-    /// [PPC-Book1 p:51 s:3.3.4 Byte-Reverse Instructions] sthbrx X-form: little-endian 2-byte store from RS low 16.
+    /// [PPC-Book1 p:45 s:3.3.4 Fixed-Point Load and Store with Byte Reversal Instructions] sthbrx X-form: little-endian 2-byte store from RS low 16.
     Sthbrx {
         rs: u8,
         ra: u8,

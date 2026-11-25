@@ -138,7 +138,7 @@ fn a_bctr_of_a_lost_gpr_moved_through_the_msr_or_an_slb_entry_leaves_every_site_
     }
 }
 
-/// The lost r3 goes into SPRG0, and the `mfspr` reads SRR0, which holds
+/// The lost r3 goes into SPRG0, and the `mfspr` reads SRR0. SRR0 holds
 /// no value that the loop marks, so r4 takes no mark from SPRG0.
 ///
 /// [PPC-Book1 p:81 s:3.3.13] `mtspr` copies RS into the SPR that its SPR field names.

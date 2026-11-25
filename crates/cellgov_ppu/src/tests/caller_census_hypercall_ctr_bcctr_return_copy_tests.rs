@@ -11,8 +11,9 @@ const ROUTINE: u64 = KERNEL + 0x7000;
 
 const UNRESOLVED: [(u64, Option<u16>); 2] = [(SC, None), (QUIET_SC, None)];
 
-/// The first window stays unresolved because the routine's 0x3005 names
-/// the real address of its `nop`. The second window keeps its number.
+/// The routine's CTR of 0x3004 names the real address of the first
+/// window's `nop`, so that window stays unresolved. The second window
+/// keeps its number.
 const SECOND_RESOLVED: [(u64, Option<u16>); 2] = [(SC, None), (QUIET_SC, Some(77))];
 
 /// `lis r3,0; ori r3,r3,0x3005; mtctr r3; bdnz $+4`, then `body`, then

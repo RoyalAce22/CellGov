@@ -33,11 +33,10 @@ fn bctr() -> u32 {
     })
 }
 
-/// Gives `check` the CTR flow over `words` at [`BASE`] after its run,
-/// with no constant, lost value or ranged value at any `mtctr`, and the
-/// `bcctr` addresses that it finds lost.
+/// Gives `check` the CTR flow over `words` at [`BASE`] and its lost `bcctr` addresses.
 ///
-/// The flow steps every word. A start enters each address of `starts`.
+/// No `mtctr` has a constant, a lost value or a ranged value. The flow
+/// steps every word, and a start enters each address of `starts`.
 fn run(words: Vec<u32>, starts: &[u64], check: impl FnOnce(&CtrFlow<'_>, &BTreeSet<u64>)) {
     let code = Code::new(vec![CodeSegment { vaddr: BASE, words }]);
     let (constants, lost, ranged) = (BTreeMap::new(), BTreeSet::new(), BTreeSet::new());
@@ -62,8 +61,9 @@ fn a_decrement_keeps_a_state_with_no_path_and_loses_a_ctr_that_no_word_writes() 
 }
 
 /// The `bdnz` falls through with CTR at 0 in either flow. Its taken path
-/// decrements the CTR at word 0: no path when no start enters word 0, and
-/// a CTR that no word writes when a start enters it.
+/// decrements the CTR at word 0, which is:
+/// - no path when no start enters word 0;
+/// - a CTR that no word writes when a start enters word 0.
 ///
 /// [PPC-Book1 p:20 s:2.4.1] BO 1a00t decrements CTR, then branches if CTR M:63 is not 0, with M = 0 in 64-bit mode and M = 32 in 32-bit mode.
 #[test]
@@ -83,9 +83,6 @@ fn a_bctr_after_a_bdnz_is_lost_only_when_a_start_enters_the_bdnz() {
     });
 }
 
-/// An `mtctr` of r3, which holds no constant and no copy, copies a value
-/// that no word of the scan writes, with or without a start.
-///
 /// [PPC-Book1 p:81 s:3.3.13] `mtlr` and `mtctr`, forms of `mtspr`, copy RS into LR or CTR.
 #[test]
 fn an_mtctr_of_a_gpr_with_no_constant_and_no_copy_makes_the_bctr_after_a_bdnz_lost() {
@@ -99,7 +96,7 @@ fn an_mtctr_of_a_gpr_with_no_constant_and_no_copy_makes_the_bctr_after_a_bdnz_lo
 }
 
 /// The flow steps the `bdnz` at word 0 with no path first. A start then
-/// enters word 2, whose `b` goes back to word 0, so the CTR that no word
+/// enters word 2, whose `b` branches to word 0. The CTR that no word
 /// writes reaches the `bdnz` only after that step, and the decrement
 /// makes the `bctr` lost.
 ///

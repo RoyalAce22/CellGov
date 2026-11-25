@@ -1,11 +1,14 @@
 //! The census's `lswi` and `stswi` slots held to the
 //! `ppu_string_word_slots` capture from the reference console.
 //!
-//! The probe starts each case with 0x8000000000008000 in r0, the CTR
-//! that `after_a_load_of_part_of_a_copy` builds with `low` 0x8000, runs
-//! the case's words over a buffer, and records r0. The census runs the
-//! same words through r1. The `bctr` must enter the address in the
-//! console's r0, and no other address.
+//! For each case, the probe:
+//! - starts with 0x8000000000008000 in r0, the CTR that
+//!   `after_a_load_of_part_of_a_copy` builds with `low` 0x8000;
+//! - runs the case's words over a buffer;
+//! - records r0.
+//!
+//! The census runs the same words through r1. The `bctr` must enter the
+//! address in the console's r0, and no other address.
 
 use super::hypercall_ctr_decrement_tests::QUIET_SC;
 use super::hypercall_ctr_stack_copy_tests::after_a_load_of_part_of_a_copy;
@@ -55,8 +58,10 @@ fn lswi(rt: u8, nb: u8) -> u32 {
     word(PpuInstruction::Lswi { rt, ra: 1, nb })
 }
 
-/// The `bctr` after `between` enters the address in `r0`, the console's
-/// r0, and leaves the `sc` at the other of 0 and 0x8000 resolved.
+/// Asserts that the `bctr` after `between` enters `r0`, the console's r0.
+///
+/// The `sc` at the other of 0 and 0x8000 stays resolved, so the `bctr`
+/// does not enter it.
 fn enters_only(r0: u64, between: &[u32]) {
     let target = u16::try_from(r0).unwrap_or_else(|_| panic!("console r0 {r0:#x}"));
     let other = target ^ 0x8000;
@@ -96,9 +101,8 @@ fn a_string_load_that_wraps_to_r0_or_loads_32_bytes_loads_r0_as_the_console_does
     enters_only(w[13], &[std(0, 24), lswi(25, 0)]);
 }
 
-/// The console's r0 after `lswi r0,r1,2` holds the two bytes at the left
-/// of its low word, so it is neither 0 nor 0x8000, and the census enters
-/// neither.
+/// The console's r0 after `lswi r0,r1,2` holds two bytes at the left of
+/// its low word. It is neither 0 nor 0x8000, so the census enters neither.
 ///
 /// [PPC-Book1 p:48 s:3.3.6] `lswi` loads n bytes from EA = (RA|0) into the low-order words of RT onward, left to right, with GPR 0 after GPR 31, and sets the high-order word and the unfilled bytes to 0.
 #[test]

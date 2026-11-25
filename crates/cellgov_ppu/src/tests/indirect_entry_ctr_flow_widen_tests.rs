@@ -5,8 +5,7 @@ use crate::instruction::encode::encode;
 
 const BASE: u64 = 0x8000_0000_0020_0000;
 
-/// The number of routines that count a loop with a lost CTR, call the
-/// routine at word 0, then free their frame.
+/// The number of worker routines in [`code`].
 const WORKERS: usize = 24;
 
 /// The word of the first worker.
@@ -77,8 +76,8 @@ fn frame(index: usize) -> i16 {
 /// - one reader for each displacement `D` of [`READS`]: `bl` to word 0,
 ///   `lbz r6,D(r1)`, `mtctr r6`, `bctr`.
 ///
-/// Each `mtctr r9` is a loop count with a lost CTR. Each return of a
-/// worker brings the returned slots deeper by its frame size.
+/// Each return of a worker moves the returned slots deeper by its frame
+/// size.
 fn code() -> Code {
     let mut words = vec![
         stdu_r1(-320),

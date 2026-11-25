@@ -180,12 +180,12 @@ pub fn decode(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
             let (rt, ra, imm) = d_form(raw);
             Ok(PpuInstruction::Lhau { rt, ra, imm })
         }
-        // [PPC-Book1 p:54 s:3.3] lmw D-form: load multiple word, EA word-aligned.
+        // [PPC-Book1 p:46 s:3.3.5] lmw D-form: load multiple word, EA word-aligned.
         46 => {
             let (rt, ra, imm) = d_form(raw);
             Ok(PpuInstruction::Lmw { rt, ra, imm })
         }
-        // [PPC-Book1 p:54 s:3.3] stmw D-form: store multiple word, EA word-aligned.
+        // [PPC-Book1 p:46 s:3.3.5] stmw D-form: store multiple word, EA word-aligned.
         47 => {
             let (rs, ra, imm) = d_form(raw);
             Ok(PpuInstruction::Stmw { rs, ra, imm })
@@ -790,9 +790,9 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         183 => return Ok(PpuInstruction::Stwux { rs: rt, ra, rb }),
         247 => return Ok(PpuInstruction::Stbux { rs: rt, ra, rb }),
 
-        // [PPC-Book1 p:55 s:3.3.5] Load / store string. Immediate-count
-        // forms (lswi / stswi) store NB in the X-form RB slot; an NB
-        // of 0 encodes a 32-byte transfer.
+        // [PPC-Book1 p:48 s:3.3.6] Load string: lswi carries NB in the
+        // X-form RB slot, and an NB of 0 encodes a 32-byte transfer.
+        // [PPC-Book1 p:49 s:3.3.6] Store string: stswi carries NB the same way.
         597 => return Ok(PpuInstruction::Lswi { rt, ra, nb: rb }),
         725 => return Ok(PpuInstruction::Stswi { rs: rt, ra, nb: rb }),
         533 => return Ok(PpuInstruction::Lswx { rt, ra, rb }),
@@ -858,8 +858,9 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
         231 => return Ok(PpuInstruction::Stvx { vs: rt, ra, rb }),
 
         // Byte-reverse indexed loads and stores.
-        // [PPC-Book1 p:50 s:3.3.4] lwbrx X-form (XO=534), lhbrx (XO=790).
-        // [PPC-Book1 p:51 s:3.3.4] ldbrx X-form (XO=532), stwbrx (XO=662), sthbrx (XO=918).
+        // [PPC-Book1 p:44 s:3.3.4] lwbrx X-form (XO=534), lhbrx (XO=790).
+        // [PPC-Book1 p:45 s:3.3.4] stwbrx X-form (XO=662), sthbrx (XO=918).
+        // [CBE-Handbook p:733 s:A.2.1] ldbrx X-form (XO=532).
         // [CBE-Handbook p:734 s:A.2.1] sdbrx (XO=660; CG-canonical spelling).
         532 => return Ok(PpuInstruction::Ldbrx { rt, ra, rb }),
         534 => return Ok(PpuInstruction::Lwbrx { rt, ra, rb }),

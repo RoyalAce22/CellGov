@@ -88,9 +88,8 @@ impl Value {
 /// one path, or on the paths that join at a word.
 ///
 /// A register that can also hold a constant that the scan dropped is
-/// lost. Its mark holds the origins of the dropped constants.
-///
-/// A word that the scan does not follow can compute a GPR from a lost
+/// lost. Its mark holds the origins of the dropped constants. A word
+/// that the scan does not follow can compute a GPR from a lost
 /// GPR, or move a lost GPR through CR or an SPR. That GPR is lost too,
 /// and its mark can hold any value that a word computed from a dropped
 /// constant.

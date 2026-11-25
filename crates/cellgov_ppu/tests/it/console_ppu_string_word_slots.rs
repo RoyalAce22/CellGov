@@ -1,11 +1,16 @@
-//! CellGov's `lswi` and `stswi` against the `ppu_string_word_slots`
-//! console capture: the byte order in each register, a short last
-//! register, the wrap from r31 to r0, the zeroed high-order word of each
-//! `lswi` target, and a byte count of 0.
+//! CellGov's `lswi` and `stswi` held to the `ppu_string_word_slots`
+//! console capture.
+//!
+//! The cases cover:
+//! - the byte order in each register;
+//! - a short last register;
+//! - the wrap from r31 to r0;
+//! - the zeroed high-order word of each `lswi` target;
+//! - an NB of 0, which moves 32 bytes.
 //!
 //! Each case starts with 0x8000000000008000 in r0 and the buffer address
-//! in r7, with byte i of the 64-byte buffer at 0xC0 + i. The words are
-//! the ones the probe's ELF holds.
+//! in r7. Byte i of the 64-byte buffer holds 0xC0 + i. The words are the
+//! ones the probe's ELF holds.
 
 use cellgov_ppu::differential::{execute_state_in, PpuStateSnapshot};
 

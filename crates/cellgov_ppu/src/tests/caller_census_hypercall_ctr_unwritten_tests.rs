@@ -149,8 +149,8 @@ fn a_real_mode_bctr_after_a_bdnz_of_the_ctr_at_an_indirect_target_leaves_every_s
     assert_eq!(sites(segments), LOST);
 }
 
-/// A copy of a loaded CTR is a GPR with no copy that the flow records,
-/// so the `mtctr` of it copies a value that no word of the scan writes.
+/// The flow records no copy in r5 for a loaded CTR, so the `mtctr r5`
+/// copies a value that no word of the scan writes.
 ///
 /// [PPC-Book1 p:82 s:3.3.13] `mfctr`, a form of `mfspr`, copies CTR into RT.
 /// [PPC-Book1 p:81 s:3.3.13] `mtlr` and `mtctr`, forms of `mtspr`, copy RS into LR or CTR.

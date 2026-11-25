@@ -135,7 +135,7 @@ pub(crate) fn execute(
             }
             ExecuteVerdict::Continue
         }
-        // [PPC-Book1 p:54 s:3.3] stmw D-form: for r=RS..31, MEM(EA,4) = low32(GPR[r]); EA += 4.
+        // [PPC-Book1 p:46 s:3.3.5] stmw D-form: for r=RS..31, MEM(EA,4) = low32(GPR[r]); EA += 4.
         // A misaligned EA takes the alignment interrupt, as for lmw.
         // Capacity is pre-checked so a mid-instruction BufferFull
         // cannot leave a partially-committed multi-store; retry
@@ -155,12 +155,14 @@ pub(crate) fn execute(
             store_prechecked(store_buf, region_views, 32 - first, words, "stmw word")
         }
 
-        // [PPC-Book1 p:55 s:3.3.5] String moves transfer N bytes
-        // packed four-per-register, MSB-first into the low 32 bits
-        // of each successive GPR (high 32 bits zeroed); the register
-        // sequence wraps at r31 -> r0. lswi / stswi use NB from the
-        // encoding (0 means 32); lswx / stswx use the byte count
-        // from XER[57:63] (0 is a no-op for stswx; lswx loads one byte).
+        // [PPC-Book1 p:48 s:3.3.6] A load string moves N bytes, four to
+        // each GPR, left to right into the low 32 bits of successive
+        // GPRs. It zeroes the high 32 bits. The register sequence wraps
+        // at r31 -> r0. lswi takes N from NB (0 means 32), and lswx
+        // takes N from XER[57:63].
+        // [PPC-Book1 p:49 s:3.3.6] A store string moves N bytes from the
+        // low 32 bits of each GPR the same way, and stswi and stswx take
+        // N as the loads do. A count of 0 stores nothing.
         // [PPC-Book1 p:48 s:3.3.6] A load string with RA in the range of registers it loads, RA=0 included, is invalid; for lswx so is RB in the range, or RT=RA or RT=RB.
         // [CBE-Handbook p:254 s:9.5.9] The PPE takes the illegal-instruction interrupt for a load string invalid form.
         // The reference console ends the process on lswi with RA in the

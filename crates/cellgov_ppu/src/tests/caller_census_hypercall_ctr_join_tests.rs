@@ -89,8 +89,8 @@ fn a_real_mode_bctr_after_a_loop_that_keeps_ctr_reaches_the_built_address() {
 
 /// The CTR of the loop is a value that the code loads. Each pass loads
 /// a word and compares it into CR0, so the `blt` can leave the loop
-/// after any pass, with CTR at that value less the passes that the loop
-/// ran, which the scan cannot prove.
+/// after any pass. CTR is then the loaded value less the passes that
+/// the loop ran, which the scan cannot prove.
 ///
 /// [PPC-Book1 p:37 s:3.3.2] `lwz` loads the word at EA into RT 32:63 and sets RT 0:31 to 0.
 /// [PPC-Book1 p:60 s:3.3.9] `cmpi` with L = 0 compares RA 32:63 with SI as signed integers and places the result into CR field BF.
