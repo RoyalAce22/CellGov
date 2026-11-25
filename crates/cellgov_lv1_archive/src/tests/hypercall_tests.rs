@@ -36,7 +36,7 @@ fn each_family_takes_its_numbers_and_its_owning_work_item() {
     assert_eq!(family(57), "logical_spe");
     assert_eq!(family(1), "memory");
     assert_eq!(family(12), "interrupt");
-    assert_eq!(family(62), "undocumented");
+    assert_eq!(family(114), "undocumented");
     assert_eq!(family(9), "other");
     assert_eq!(family(145), "other", "add_lpm_event_bookmark");
     assert_eq!(family(154), "other", "set_lpm_debug_bus_control");
@@ -55,7 +55,7 @@ fn each_family_takes_its_numbers_and_its_owning_work_item() {
     assert_eq!(leaf(12), "interrupt_delivery");
     assert_eq!(leaf(69), "dispatch");
     assert_eq!(leaf(67), "logical_spe");
-    for unowned in [62, 9, 5, 170] {
+    for unowned in [114, 9, 5, 170] {
         assert_eq!(leaf(unowned), "boot");
     }
 }

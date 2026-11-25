@@ -4,10 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use cellgov_ps3_abi::lv1::call::{
-    self, AliasSource, LOGICAL_CONSOLE_CONSTRUCT, LOGICAL_CONSOLE_DESTRUCT, LOGICAL_CONSOLE_FLUSH,
-    LOGICAL_CONSOLE_SEND,
-};
+use cellgov_ps3_abi::lv1::call::{self, AliasSource};
 use cellgov_ps3_abi::lv1::table::{self as lv1_table, TableEntry};
 
 use cellgov_lv2_archive::{self as archive, ArchiveError, ExtractionError, PupRow, Table, NONE};
@@ -204,36 +201,30 @@ pub struct HypercallRow {
 
 /// The family and owning work item of hypercall `number`.
 ///
-/// The family is CellGov's grouping, read from the name `lv1call.h`
-/// gives the number. The headers name 105 to 107 and 109 only
-/// `undocumented_function_N`; `cellgov_ps3_abi` names them the logical
-/// console calls, so they form the console family.
+/// The family is CellGov's grouping, read from the name that
+/// [`hypercall_name`] gives the number.
 pub fn hypercall_family(number: u64) -> (&'static str, &'static str) {
-    if [
-        LOGICAL_CONSOLE_CONSTRUCT,
-        LOGICAL_CONSOLE_DESTRUCT,
-        LOGICAL_CONSOLE_SEND,
-        LOGICAL_CONSOLE_FLUSH,
-    ]
-    .contains(&number)
-    {
-        return ("console", "dispatch");
+    match hypercall_name(number) {
+        Some(name) => name_family(name.text),
+        None => ("unnamed", "boot"),
     }
-    let Some(row) = call::lookup(number) else {
-        return ("unnamed", "boot");
-    };
-    let name = row.name;
+}
+
+/// The family and owning work item of a call named `name`.
+fn name_family(name: &str) -> (&'static str, &'static str) {
     let words: Vec<&str> = name.split('_').collect();
     let has = |part: &str| name.contains(part);
     if name.starts_with("undocumented_function") {
         ("undocumented", "boot")
+    } else if has("logical_console") {
+        ("console", "dispatch")
     } else if words.contains(&"lpm") {
         // The performance monitor's calls name events and buses of
         // their own; none of them is an interrupt or a device call.
         ("other", "boot")
     } else if has("repository") {
         ("repository", "repository")
-    } else if words.contains(&"spe") || words.contains(&"spes") {
+    } else if ["spe", "spes", "spu"].iter().any(|w| words.contains(w)) {
         ("logical_spe", "logical_spe")
     } else if [
         "htab",
@@ -493,3 +484,7 @@ mod census_lag_tests;
 #[cfg(test)]
 #[path = "tests/hypercall_name_tests.rs"]
 mod name_tests;
+
+#[cfg(test)]
+#[path = "tests/hypercall_family_tests.rs"]
+mod family_tests;

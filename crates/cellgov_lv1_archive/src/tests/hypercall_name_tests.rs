@@ -159,7 +159,7 @@ fn a_census_row_renders_its_name_and_the_source_of_the_name() {
     let text = hypercall_tsv(&rows).expect("the row fits the schema");
     assert_eq!(
         text.lines().nth(1),
-        Some("62\tset_slb_for_logical_spu\tpsdevwiki\t5\t0\tundocumented\tboot\tnone\t0\thandler\tanswered")
+        Some("62\tset_slb_for_logical_spu\tpsdevwiki\t5\t0\tlogical_spe\tlogical_spe\tnone\t0\thandler\tanswered")
     );
     let table = parse(&HYPERCALL, &text).expect("the rendered table parses");
     assert_eq!(census_answered(&table), Ok(answered));

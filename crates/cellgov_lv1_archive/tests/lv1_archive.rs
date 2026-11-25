@@ -177,6 +177,15 @@ fn readme(
                         .collect::<Vec<_>>(),
                 ),
             ),
+            (
+                "hypercall_console",
+                prose_list(
+                    &(0..=255u64)
+                        .filter(|number| archive::hypercall_family(*number).0 == "console")
+                        .map(|number| number.to_string())
+                        .collect::<Vec<_>>(),
+                ),
+            ),
             ("hypercall_gate", HYPERCALL_GATE.to_string()),
             ("hypercall_regenerate", HYPERCALL_REGENERATE.to_string()),
             ("repository_nodes", repository.len().to_string()),
