@@ -65,7 +65,7 @@ pub use group::device_bus::{
     DeviceBusChange, DeviceBusState, DmaMapping, DmaRegion, MmioMapping, OpenDevice,
     StorageBusOpen, StorageDeviceOpen, StorageDevicePort,
 };
-pub use group::gpu::{GpuChange, GpuState};
+pub use group::gpu::{GpuChange, GpuOpen, GpuState};
 pub use group::interrupt::bitmap::{
     IrqStateBitmapKey, IrqStateBitmapRegistration, IrqStateBitmapState, StatusShadowWrite,
     SHADOW_DOUBLEWORDS,
