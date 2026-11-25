@@ -58,10 +58,12 @@ Every table names exactly one.
 
 ## Kernel hypercalls
 
-`tables/hypercall_site.tsv` groups each kernel's LV1 hypercall sites, an
-`sc` with LEV 1, by PUP hash and the constant the site loads into r11. A
-site is the real address of its `sc`: real mode ignores EA bits 0 and 1,
-so a kernel address loses its top bit. `tables/hypercall_unresolved.tsv`
+`tables/hypercall_site.tsv` groups each kernel's LV1 hypercall sites by
+PUP hash and by the constant that every path to the site loads into r11.
+A site is a word that is exactly `sc 1`, 0x44000022. A data word that
+decodes as `sc 1` but has a nonzero reserved field is not a site. The
+table records the real address of each site: real mode ignores EA bits 0
+and 1, so a kernel address loses its top bit. `tables/hypercall_unresolved.tsv`
 has one row for every scanned kernel; `sites` is `none` when every site
 resolved. Both tables hold derived facts only, never kernel bytes.
 
@@ -71,7 +73,7 @@ installed firmware and rewrites both; without that flag the same test
 fails when a re-extraction differs. `hypercall_site_rows_are_well_formed` checks the
 coverage rules without reading external data.
 
-`tables/hypercall.tsv` has 120 rows, one per number a
+`tables/hypercall.tsv` has 124 rows, one per number a
 scanned kernel calls or CellGov's hypervisor answers. Each row joins the
 call table in `cellgov_ps3_abi::lv1::call` (the name and the input and
 output register counts), CellGov's family for the call and the work item
@@ -82,10 +84,16 @@ live 4.93 hypercall table, and the state.
 `lv1_493` is `handler`, `invalid` or `past_table`. It comes from
 `cellgov_ps3_abi::lv1::table`, which holds the console capture
 `tests/micro/lv1_hypercall_table`. The state is `answered`
-(16 numbers) or `null_backend`: no handler answers
+(17 numbers) or `null_backend`: no handler answers
 the number. At 4.93 the null backend answers lv1's invalid-entry status
-for an `invalid` number (16 numbers) and stops the run
+for an `invalid` number (17 numbers) and stops the run
 for a `handler` number. At every other firmware it stops the run.
+
+The state comes from the handler each hypercall group of `cellgov_lv1`
+registers. A change that registers a handler need not regenerate this
+table, so a newly answered number can still read `null_backend` until
+the next regeneration. `committed_archive_matches_generator` allows that lag. It refuses a number
+that the table calls `answered` when no handler answers it.
 
 ## Hypervisor repository
 
