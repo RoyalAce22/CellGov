@@ -1087,6 +1087,14 @@ mod hypercall_call_return_tests;
 mod hypercall_unfollowed_write_tests;
 
 #[cfg(test)]
+#[path = "tests/caller_census_hypercall_flag_lost_tests.rs"]
+mod hypercall_flag_lost_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_flag_cell_tests.rs"]
+mod hypercall_flag_cell_tests;
+
+#[cfg(test)]
 #[path = "tests/caller_census_hypercall_ctr_bcctr_return_copy_tests.rs"]
 mod hypercall_ctr_bcctr_return_copy_tests;
 

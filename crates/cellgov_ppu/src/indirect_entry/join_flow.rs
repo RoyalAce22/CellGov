@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use super::cells::CellMarks;
 use super::constants::{ends_path, Constants, Value};
 use super::ctr_flow::{calls, links_to_next_word, positions};
 use super::lost::{join_origins, LostGprs, Origins, Steps};
@@ -60,10 +61,10 @@ struct Brought {
     /// constant that the flow dropped. The flow brings no SRR0 or SRR1
     /// constant to a join word.
     srrs_lost: [Option<Origins>; 2],
-    /// The origins of a lost value that a path moved into CR or into an
-    /// SPR that the scan does not follow, as [`Constants::moved_lost`]
-    /// holds them.
-    moved_lost: Option<Origins>,
+    /// The origins of a lost value that a path put into a cell of CR,
+    /// XER or an SPR that the scan does not follow, as
+    /// [`Constants::cells`] holds them.
+    cells: CellMarks,
     /// The GPRs that a path brings with a value for which the scan keeps
     /// no constant and no lost mark, as [`Constants::unheld`] holds them.
     unheld: u32,
@@ -86,7 +87,7 @@ impl Brought {
         constants.lr_copies = self.lr_copies;
         constants.lr_stepped = self.lr_stepped;
         [constants.srr0_lost, constants.srr1_lost] = self.srrs_lost.clone();
-        constants.moved_lost.clone_from(&self.moved_lost);
+        constants.cells.clone_from(&self.cells);
         constants.unheld = self.unheld;
         constants.lr_unheld = self.lr_unheld;
         constants
@@ -173,7 +174,7 @@ impl Brought {
         }
         changed |= join_origins(&mut self.srrs_lost[0], path.srr0_lost.as_ref());
         changed |= join_origins(&mut self.srrs_lost[1], path.srr1_lost.as_ref());
-        changed |= join_origins(&mut self.moved_lost, path.moved_lost.as_ref());
+        changed |= self.cells.join(&path.cells);
         changed
     }
 

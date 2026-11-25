@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use cellgov_ps3_abi::hw::ppc_isa::PPC_BO_BIT2;
 
+use super::cells::{cell_writes, read_cells, Cells};
 use super::constants::{ctr_flow_spr_move, never_falls_through, GprStep, SprMove, Step, Value};
 use super::reach::Reach;
 use super::slot_set::{Slot, SlotSet};
@@ -465,15 +466,14 @@ struct CtrState {
     slots: SlotCopies,
     /// The copy of CTR in LR.
     lr: Ctr,
-    /// Whether CR or an SPR of [`ctr_flow_spr_move`] can hold a part of a
-    /// copy.
+    /// The cells of CR, XER and the SPRs of [`ctr_flow_spr_move`] that can
+    /// hold a part of a copy.
     ///
-    /// The flow keeps one cell for all of these registers, so a move out
-    /// of any of them takes it. A move can take only a part of the value,
-    /// so a move out gives a copy that the scan cannot prove. The cell
-    /// keeps no constant, so a copy with constants that the scan knows
-    /// also sets it.
-    moved: bool,
+    /// A move out of a register takes the cells that it reads. A move can
+    /// take only a part of the value, so a move out gives a copy that the
+    /// scan cannot prove. A cell keeps no constant, so a copy with
+    /// constants that the scan knows also sets it.
+    moved: Cells,
 }
 
 impl CtrState {
@@ -501,8 +501,8 @@ impl CtrState {
         let ctr = self.ctr.join(&other.ctr);
         let copies = self.copies.join(&other.copies);
         let lr = self.lr.join(&other.lr);
-        let moved = other.moved && !self.moved;
-        self.moved |= other.moved;
+        let moved = !other.moved.without(self.moved).is_empty();
+        self.moved = self.moved.union(other.moved);
         self.slots.join(&other.slots) || ctr || copies || lr || moved
     }
 
@@ -514,7 +514,7 @@ impl CtrState {
     /// - `mflr`, which copies the copy in LR;
     /// - a word that the scan follows a constant through, from a GPR
     ///   that holds a copy;
-    /// - a move out of CR or an SPR, as [`Self::moved_out`] gives;
+    /// - a move out of CR, XER or an SPR, as [`Self::moved_out`] gives;
     /// - a load at a constant offset from r1, from the slots that hold a
     ///   copy there.
     ///
@@ -525,7 +525,7 @@ impl CtrState {
     /// [`SlotCopies::store`] gives. A word that moves r1 by a constant
     /// moves each slot, and each other word that surely writes r1 removes
     /// each slot. [`Self::lr_after`] gives LR, and [`Self::moved_after`]
-    /// gives the cell.
+    /// gives the cells.
     ///
     /// [PPC-Book1 p:82 s:3.3.13] `mflr` and `mfctr`, forms of `mfspr`, copy LR or CTR into RT.
     fn after(&self, decoded: &PpuInstruction) -> Self {
@@ -575,8 +575,9 @@ impl CtrState {
         }
     }
 
-    /// The copy that `decoded` gives a GPR when it moves the cell out of CR
-    /// or an SPR of [`ctr_flow_spr_move`], or `None` for any other word.
+    /// The copy that `decoded` gives a GPR when it moves a cell that holds
+    /// a copy out of CR, XER or an SPR of [`ctr_flow_spr_move`], or `None`
+    /// for any other word.
     ///
     /// The copy is one that the scan cannot prove. A word that computes a
     /// GPR from a copy gives no copy, so it drops a copy that the scan
@@ -584,7 +585,9 @@ impl CtrState {
     /// injection would put it after every call of the kernel.
     fn moved_out(&self, decoded: &PpuInstruction) -> Option<(u8, Ctr)> {
         match ctr_flow_spr_move(decoded) {
-            Some(SprMove::OutOf(rt)) if self.moved => Some((rt, Ctr::lost())),
+            Some(SprMove::OutOf(rt)) if self.moved.meets(read_cells(decoded)) => {
+                Some((rt, Ctr::lost()))
+            }
             _ => None,
         }
     }
@@ -608,23 +611,26 @@ impl CtrState {
         }
     }
 
-    /// Whether the cell holds a copy after the word `decoded`.
+    /// The cells that hold a copy after the word `decoded`.
     ///
-    /// A move into CR or an SPR of [`ctr_flow_spr_move`] from a GPR that
-    /// holds a copy sets the cell. No word clears it.
+    /// Each write of [`cell_writes`] sets its cells when it reads a GPR
+    /// that holds a copy, or a cell that holds one. A write of each bit
+    /// of a cell from no copy clears the cell.
     ///
-    /// A copy with constants that the scan knows also sets the cell. The
+    /// A copy with constants that the scan knows also sets a cell. The
     /// image need not name such a constant, for example a part of CTR
     /// that a load takes back from the stack, so the bound does not hold
     /// it as an entry.
     ///
     /// [PPC-Book1 p:81 s:3.3.13] `mtspr` copies RS into the SPR that its SPR field names.
-    fn moved_after(&self, decoded: &PpuInstruction) -> bool {
-        self.moved
-            || matches!(
-                ctr_flow_spr_move(decoded),
-                Some(SprMove::Into(sources)) if self.copies.mask() & sources != 0
-            )
+    fn moved_after(&self, decoded: &PpuInstruction) -> Cells {
+        let copies = self.copies.mask();
+        cell_writes(decoded, ctr_flow_spr_move(decoded))
+            .iter()
+            .fold(self.moved, |moved, write| {
+                let set = write.gprs & copies != 0 || self.moved.meets(write.from);
+                moved.written(write, set)
+            })
     }
 
     /// Writes into `slots` each slot that the store `access` writes, or
@@ -661,8 +667,8 @@ struct Returned {
     slots: SlotSet,
     /// Whether LR holds a copy.
     lr: bool,
-    /// Whether the cell of [`CtrState::moved`] holds a copy.
-    moved: bool,
+    /// The cells of [`CtrState::moved`] that hold a copy.
+    moved: Cells,
 }
 
 impl Returned {
@@ -675,12 +681,12 @@ impl Returned {
         let grew = gprs & !self.gprs != 0
             || !slots.is_subset(&self.slots)
             || (lr && !self.lr)
-            || (brought.moved && !self.moved);
+            || !brought.moved.without(self.moved).is_empty();
         if grew {
             self.gprs |= gprs;
             self.slots = self.slots.widened(&slots, &SLOT_REACH);
             self.lr |= lr;
-            self.moved |= brought.moved;
+            self.moved = self.moved.union(brought.moved);
         }
         grew
     }
@@ -931,8 +937,8 @@ impl StackAccess {
 /// [`CtrState::after`] gives:
 /// - a stack slot at a constant offset from r1;
 /// - LR, from an `mtlr` into a `bclr` or an `mflr`;
-/// - one cell for CR and the SPRs of [`ctr_flow_spr_move`], which keeps
-///   each copy as one that the scan cannot prove.
+/// - the cells of CR, XER and the SPRs of [`ctr_flow_spr_move`], which
+///   keep each copy as one that the scan cannot prove.
 ///
 /// The word after a call gets these copies:
 /// - each copy before the call, because its routine can return the
@@ -1022,8 +1028,8 @@ impl<'a> CtrFlow<'a> {
     /// A move of r1 between the word after a call and a return brings the
     /// injected slots back at new offsets, one move at a time. So the flow
     /// keeps the slots as [`SlotSet::widened`] gives them. The set grows at
-    /// most 32 times for the GPRs, once for LR, once for the cell, and at
-    /// most four times for each width
+    /// most 32 times for the GPRs, once for LR, once for each of the 11
+    /// cells, and at most four times for each width
     /// and residue of a slot in [`SLOT_REACH`]. An `lmw` or an `stmw` near
     /// the top of the displacements can put a slot past the end of
     /// [`SLOT_REACH`], and each such slot can add one more growth. The
@@ -1107,8 +1113,8 @@ impl<'a> CtrFlow<'a> {
             state.slots.lost = copies.slots.lost.clone();
             let gprs = state.copies.join(&copies.copies);
             let lr = state.lr.join(&copies.lr);
-            let moved = copies.moved && !state.moved;
-            state.moved |= copies.moved;
+            let moved = !copies.moved.without(state.moved).is_empty();
+            state.moved = state.moved.union(copies.moved);
             gprs || lr || moved || grew
         } else {
             state.join(copies)
@@ -1179,8 +1185,8 @@ impl<'a> CtrFlow<'a> {
     /// word that does not decode passes no state, as the scan of the code
     /// constants forgets each constant there. A call passes to its target
     /// a CTR that no word of the scan writes, and no copy in a GPR, a slot
-    /// or LR. It passes the cell of [`CtrState::moved`], because CR and
-    /// the SPRs keep their values across the branch.
+    /// or LR. It passes the cells of [`CtrState::moved`], because CR, XER
+    /// and the SPRs keep their values across the branch.
     fn steps(
         &self,
         position: (usize, usize),

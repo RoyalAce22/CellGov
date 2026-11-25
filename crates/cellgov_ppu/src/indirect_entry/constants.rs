@@ -7,6 +7,7 @@ use std::rc::Rc;
 
 use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_BIT1, MSR_IR, MSR_PR, MSR_SF, SPR_SRR0, SPR_SRR1};
 
+use super::cells::{cell_writes, computed_cells, read_cells, CellMarks, CellWrite};
 use super::lost::{join_origins, LostGprs, Origins};
 use super::real_mode::{fetch_address, MsrWord, Switch};
 use super::toc::FunctionToc;
@@ -89,10 +90,14 @@ impl Value {
 ///
 /// A register that can also hold a constant that the scan dropped is
 /// lost. Its mark holds the origins of the dropped constants. A word
-/// that the scan does not follow can compute a GPR from a lost
-/// GPR, or move a lost GPR through CR or an SPR. That GPR is lost too,
-/// and its mark can hold any value that a word computed from a dropped
-/// constant.
+/// that the scan does not follow can make a GPR lost in these ways:
+/// - it computes the GPR from a lost GPR;
+/// - it moves a lost GPR through CR or an SPR;
+/// - it computes the GPR from XER\[CA\], or moves CR or XER into the GPR,
+///   after a word set that bit or a CR field from a lost GPR.
+///
+/// The mark of such a GPR can hold any value that a word computed from a
+/// dropped constant.
 ///
 /// An LR that the scan does not know holds the return point of a call,
 /// because the bound takes each such `bclr` to return there. A routine can
@@ -148,13 +153,17 @@ pub(super) struct Constants {
     pub(super) srr0_lost: Option<Origins>,
     /// The origins of SRR1 when it is lost.
     pub(super) srr1_lost: Option<Origins>,
-    /// The origins of a lost value that a word moved into CR or into an
-    /// SPR that [`spr_move`] names.
+    /// The origins of a lost value that a word put into a cell of CR, XER
+    /// or an SPR that [`spr_move`] names.
     ///
-    /// The scan keeps one mark for all of these registers, so a move out
-    /// of any of them takes it, also through an SPR alias. The mark is
-    /// stepped, because a move can take only a part of the value.
-    pub(super) moved_lost: Option<Origins>,
+    /// These words put such a value there:
+    /// - a move of a lost GPR into one of these registers;
+    /// - a word that sets a bit of XER or a CR field from a lost GPR or
+    ///   from a cell that holds a mark.
+    ///
+    /// A move out takes the marks of the cells that it reads, and a word
+    /// that adds XER\[CA\] into its result takes the mark of that cell.
+    pub(super) cells: CellMarks,
 }
 
 impl Constants {
@@ -163,16 +172,34 @@ impl Constants {
     ///
     /// A word that does not fall through ends the path, so the step
     /// forgets every constant.
+    ///
+    /// The step takes the marks that the word writes into [`Self::cells`]
+    /// from the GPRs and the cells before the word.
     pub(super) fn step(&mut self, address: u64, raw: u32) -> Option<Value> {
         let Ok(decoded) = crate::decode::decode(raw) else {
             *self = Self::default();
             return None;
         };
         let lr_copy = self.lr_copy_write(&decoded);
+        let written = cell_writes(&decoded, spr_move(&decoded)).map(|write| {
+            let origins = self.cell_write_lost(&write);
+            (write, origins)
+        });
         let value = self.step_decoded(address, decoded);
         self.after_lr_copy_write(&decoded, lr_copy);
+        for (write, origins) in &written {
+            self.cells.write(write, origins.as_ref());
+        }
         self.forget_unheld_steps();
         value
+    }
+
+    /// The origins of the value that `write` puts into its cells: those of
+    /// its lost source GPRs, stepped, and the marks of its source cells.
+    fn cell_write_lost(&self, write: &CellWrite) -> Option<Origins> {
+        let mut origins = self.sources_lost(write.gprs);
+        join_origins(&mut origins, self.cells.read(write.from).as_ref());
+        origins
     }
 
     /// Makes the lost mark of each GPR in [`Self::unheld`], and of LR when
@@ -226,20 +253,21 @@ impl Constants {
     /// come from a lost GPR.
     ///
     /// The word gives these origins:
-    /// - a move into CR or into an SPR of [`spr_move`] joins the origins of
-    ///   its source GPRs into [`Self::moved_lost`];
-    /// - a move out of such a register gives [`Self::moved_lost`];
+    /// - a move out of a register of [`spr_move`] gives the marks of the
+    ///   cells that it reads;
     /// - each word of [`computed_from`] gives the origins of its lost
-    ///   sources, stepped.
+    ///   sources, stepped, as [`Self::computed_lost`] gives them.
     ///
-    /// A GPR that the word does not surely write keeps its own mark too.
+    /// [`Self::step`] puts the marks of a move into such a register into
+    /// [`Self::cells`]. A GPR that the word does not surely write keeps
+    /// its own mark too.
     fn step_unfollowed(&mut self, decoded: &PpuInstruction) {
         let lost = match spr_move(decoded) {
-            Some(SprMove::Into(sources)) => {
-                self.move_into_spr(sources);
-                None
-            }
-            Some(SprMove::OutOf(rt)) => self.moved_lost.clone().map(|origins| (rt, origins)),
+            Some(SprMove::Into(_)) => None,
+            Some(SprMove::OutOf(rt)) => self
+                .cells
+                .read(read_cells(decoded))
+                .map(|origins| (rt, origins)),
             None => self.computed_lost(decoded),
         };
         self.forget_written(decoded);
@@ -248,12 +276,13 @@ impl Constants {
         }
     }
 
-    /// Joins into [`Self::moved_lost`] the origins of each GPR of
-    /// `sources`, a mask with bit `n` set for GPR `n`.
+    /// The origins of each lost GPR of `sources`, a mask with bit `n` set
+    /// for GPR `n`, stepped. The result is `None` when no such GPR is lost.
     ///
-    /// A copy of an LR that the scan does not know joins a mark that names
-    /// no drop: the moved value need not be the return point.
-    fn move_into_spr(&mut self, sources: u32) {
+    /// A copy of an LR that the scan does not know gives a mark that names
+    /// no drop: a value that a word moves or computes from the copy need
+    /// not be the return point.
+    fn sources_lost(&self, sources: u32) -> Option<Origins> {
         let mut origins = None;
         for gpr in gprs_of(sources) {
             join_origins(&mut origins, self.lost(gpr));
@@ -261,13 +290,14 @@ impl Constants {
                 join_origins(&mut origins, Some(&Origins::unnamed()));
             }
         }
-        if let Some(origins) = origins {
-            join_origins(&mut self.moved_lost, Some(&origins.stepped()));
-        }
+        origins.map(|origins| origins.stepped())
     }
 
     /// The GPR that the word `decoded` of [`computed_from`] writes and its
     /// origins, when a source of the word is lost.
+    ///
+    /// A word that adds XER\[CA\] into its result also takes the mark of
+    /// that cell as a source.
     ///
     /// The origins are those of each lost source, stepped. So a mark that
     /// keeps one progression loses it, and a mark of TOCs alone becomes a
@@ -278,6 +308,10 @@ impl Constants {
         for gpr in gprs_of(sources) {
             join_origins(&mut origins, self.lost(gpr));
         }
+        join_origins(
+            &mut origins,
+            self.cells.read(computed_cells(decoded)).as_ref(),
+        );
         origins.map(|origins| (rt, origins.stepped()))
     }
 
@@ -669,8 +703,8 @@ impl Constants {
     ///
     /// The routine that a branch with `link` calls can write SRR0 and
     /// SRR1, so the step forgets their constants. The routine can also
-    /// leave them unchanged, so SRR0, SRR1 and [`Self::moved_lost`] keep
-    /// their lost marks.
+    /// leave them unchanged, so SRR0, SRR1 and [`Self::cells`] keep their
+    /// lost marks.
     ///
     /// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.
     /// [PPC-Book1 p:24 s:2.4] A branch alters only CTR and LR.
@@ -829,7 +863,7 @@ enum LrCopyWrite {
 }
 
 /// The mask with bit `gpr` set.
-fn gpr_bit(gpr: u8) -> u32 {
+pub(super) fn gpr_bit(gpr: u8) -> u32 {
     1u32.checked_shl(u32::from(gpr)).unwrap_or(0)
 }
 
@@ -874,7 +908,7 @@ pub(super) enum SprMove {
 /// [PPC-Book1 p:81 s:3.3.13] `mtspr` copies RS into the SPR that its SPR field names.
 /// [PPC-Book1 p:82 s:3.3.13] `mfspr` places the SPR into RT.
 /// [PPC-Book3 p:16 s:3.3.3] Problem-state software may read SPRG3 through a second SPR number.
-fn spr_move(decoded: &PpuInstruction) -> Option<SprMove> {
+pub(super) fn spr_move(decoded: &PpuInstruction) -> Option<SprMove> {
     use PpuInstruction as I;
     Some(match *decoded {
         I::Mtcrf { rs, .. }
@@ -957,7 +991,7 @@ fn privileged_spr_move(raw: u32, follows_srrs: bool) -> Option<SprMove> {
 /// [PPC-Book1 p:65 s:3.3.11] A logical instruction places its result into RA.
 /// [PPC-Book1 p:71 s:3.3.12] A rotate or shift instruction returns its result to a GPR, RA.
 /// [PPC-Book1 p:76 s:3.3.12.1] `rldimi` inserts the rotated RS into RA under the mask, so the result also holds bits of RA.
-fn computed_from(decoded: &PpuInstruction) -> Option<(u8, u32)> {
+pub(super) fn computed_from(decoded: &PpuInstruction) -> Option<(u8, u32)> {
     use PpuInstruction as I;
     let base = |ra: u8| if ra == 0 { 0 } else { gpr_bit(ra) };
     Some(match *decoded {

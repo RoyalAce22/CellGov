@@ -79,10 +79,12 @@
 //!
 //! [`CtrFlow`] gives the paths that bring CTR to a `bcctr`, and the paths
 //! that bring a copy of CTR in LR to a `bclr`: an `mtlr` puts a copy into
-//! LR, and an `mflr` takes it back out. The flow keeps one cell for CR
-//! and the SPRs that it does not follow on their own, and a call passes
-//! that cell into its routine. A copy that comes out of the cell is one
-//! that the scan cannot prove. [`JoinFlow`]
+//! LR, and an `mflr` takes it back out. The flow keeps a cell for each CR
+//! field, for XER\[CA\], for XER\[OV\] and XER\[SO\], and one cell for the
+//! SPRs that it does not follow on their own. A call passes these cells
+//! into its routine. A word that sets a bit of XER or a CR field from a
+//! copy sets the cell of that bit or field. A copy that comes out of a
+//! cell is one that the scan cannot prove. [`JoinFlow`]
 //! gives the constants that the paths to a branch target bring in the
 //! GPRs and in LR. These limits apply to it:
 //! - it does not follow a call into its routine;
@@ -92,7 +94,9 @@
 //!   that can hold a constant the scan dropped. The image need not
 //!   name a dropped constant. The mark moves with a copy of the
 //!   register, also a copy into or out of SRR0, SRR1, CR or another
-//!   SPR, and with a word that computes a value from the register. A
+//!   SPR, and with a word that computes a value from the register. It
+//!   also moves with a bit of XER or a CR field that a word sets from the
+//!   register, into a word that reads that bit or field. A
 //!   call keeps the marks of SRR0 and SRR1, and an `sc` clears them. So
 //!   the scan does not record a dropped constant that a store and a load
 //!   move, or that a call takes into its routine;
@@ -171,6 +175,7 @@
 //! [`Reach`]: reach::Reach
 
 mod bound;
+mod cells;
 mod constants;
 mod ctr_flow;
 mod join_flow;
@@ -245,3 +250,7 @@ mod reach_tests;
 #[cfg(test)]
 #[path = "../tests/indirect_entry_byte_load_tests.rs"]
 mod byte_load_tests;
+
+#[cfg(test)]
+#[path = "../tests/indirect_entry_cells_console_tests.rs"]
+mod cells_console_tests;

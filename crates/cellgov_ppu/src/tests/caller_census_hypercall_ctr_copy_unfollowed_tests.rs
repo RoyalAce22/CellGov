@@ -131,9 +131,9 @@ fn a_bctr_of_a_gpr_with_no_ctr_copy_moved_through_sprg0_keeps_the_sites_resolved
     assert_eq!(sites(VECTOR, &words), WINDOW_RESOLVED);
 }
 
-/// r4 holds a copy of the constant 0x5000. The cell of CR and the SPRs
-/// keeps no constant, so the copy that comes back out of SPRG0 is one
-/// that the scan cannot prove.
+/// r4 holds a copy of the constant 0x5000. The cell of the SPRs keeps no
+/// constant, so the copy that comes back out of SPRG0 is one that the
+/// scan cannot prove.
 ///
 /// [PPC-Book1 p:81 s:3.3.13] `mtspr` copies RS into the SPR that its SPR field names.
 /// [PPC-Book1 p:82 s:3.3.13] `mfspr` places the SPR into RT.
