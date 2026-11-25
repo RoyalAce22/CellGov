@@ -5,14 +5,20 @@ use super::toc_tests::{build_from_toc, descriptor_bytes, DATA, TOC};
 use super::*;
 use cellgov_ps3_abi::hw::ppc_isa::PPC_NOP;
 
-/// A second TOC, which builds a different address than [`TOC`].
-const OTHER_TOC: u64 = TOC + 4;
+/// A second TOC, which builds the address one word past the one that
+/// [`TOC`] builds.
+pub(super) const OTHER_TOC: u64 = TOC + 4;
 
 /// The bound of an image with the code `words` and one descriptor for
 /// each `(first word index, TOC)` of `functions`.
 ///
 /// The code is also file bytes, so the bound reads jump tables from it.
-fn bound_of(words: &[u32], functions: &[(u64, u64)]) -> BTreeSet<u64> {
+pub(super) fn bound_of(words: &[u32], functions: &[(u64, u64)]) -> BTreeSet<u64> {
+    indirect_bound_of(words, functions).entries
+}
+
+/// The [`IndirectBound`] of the image that [`bound_of`] reads.
+pub(super) fn indirect_bound_of(words: &[u32], functions: &[(u64, u64)]) -> IndirectBound {
     let code = Code::new(vec![CodeSegment {
         vaddr: at(0),
         words: words.to_vec(),
@@ -36,7 +42,7 @@ fn bound_of(words: &[u32], functions: &[(u64, u64)]) -> BTreeSet<u64> {
 }
 
 /// `b` from word `from` to word `to`.
-fn b(from: u64, to: u64) -> u32 {
+pub(super) fn b(from: u64, to: u64) -> u32 {
     word(PpuInstruction::B {
         offset: i32::try_from(to.wrapping_sub(from) as i64 * 4).expect("the offset fits"),
         aa: false,
@@ -54,7 +60,7 @@ fn bctr() -> u32 {
 
 /// The words `addis r9,r2,..; addi r9,r9,..; mtctr r9; bctr`, which
 /// branch to word `target` when r2 holds `toc`.
-fn branch_through(target: u64, toc: u64) -> Vec<u32> {
+pub(super) fn branch_through(target: u64, toc: u64) -> Vec<u32> {
     let mut words = build_from_toc(at(target), toc).to_vec();
     words.push(word(PpuInstruction::Mtctr { rs: 9 }));
     words.push(bctr());
@@ -62,7 +68,7 @@ fn branch_through(target: u64, toc: u64) -> Vec<u32> {
 }
 
 /// `words` with `nop` after it up to `len` words.
-fn padded(mut words: Vec<u32>, len: usize) -> Vec<u32> {
+pub(super) fn padded(mut words: Vec<u32>, len: usize) -> Vec<u32> {
     words.resize(len, PPC_NOP);
     words
 }
@@ -130,22 +136,48 @@ fn a_word_that_no_function_reaches_gets_no_toc() {
 }
 
 #[test]
-fn a_word_that_functions_with_two_tocs_reach_gets_no_toc() {
+fn a_word_that_functions_with_two_tocs_reach_names_the_address_from_each_toc() {
     let mut words = vec![b(0, 3), b(1, 3), PPC_NOP];
     words.extend(branch_through(9, TOC));
     assert_eq!(
         bound_of(&padded(words, 12), &[(0, TOC), (1, OTHER_TOC)]),
-        BTreeSet::from([at(0), at(1)])
+        BTreeSet::from([at(0), at(1), at(9), at(10)])
+    );
+}
+
+/// Word 0 is a function with [`OTHER_TOC`] that branches to itself and
+/// has no indirect branch. Word 1 is a function with [`TOC`] whose taken
+/// `bc` and fall-through path both reach word 3, so word 3 runs only
+/// with [`TOC`] in r2.
+///
+/// [OFW-4.93 lv2_kernel a:0x80000000002765e4-0x8000000000276600] A call through a descriptor loads LR from its first doubleword and r2 from its second.
+#[test]
+fn a_word_that_only_a_function_with_one_toc_reaches_names_the_address_from_that_toc_only() {
+    let mut words = vec![
+        b(0, 0),
+        word(PpuInstruction::Bc {
+            bo: 0b01100,
+            bi: 0,
+            offset: 8,
+            aa: false,
+            link: false,
+        }),
+        PPC_NOP,
+    ];
+    words.extend(branch_through(10, TOC));
+    assert_eq!(
+        bound_of(&padded(words, 12), &[(0, OTHER_TOC), (1, TOC)]),
+        BTreeSet::from([at(0), at(1), at(10)])
     );
 }
 
 #[test]
-fn a_branch_to_the_first_word_of_another_function_keeps_that_functions_toc() {
+fn a_branch_to_the_first_word_of_another_function_gives_it_the_toc_of_the_branch_too() {
     let mut words = vec![b(0, 2), PPC_NOP, b(2, 4), PPC_NOP];
     words.extend(branch_through(10, TOC));
     assert_eq!(
         bound_of(&padded(words, 12), &[(0, OTHER_TOC), (2, TOC)]),
-        BTreeSet::from([at(0), at(2), at(10)])
+        BTreeSet::from([at(0), at(2), at(10), at(11)])
     );
 }
 

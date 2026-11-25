@@ -29,7 +29,9 @@ pub(super) fn bound(words: &[u32], readable: bool) -> BTreeSet<u64> {
         bytes: &bytes,
     }];
     let files: &[FileSegment<'_>] = if readable { &files } else { &[] };
-    indirect_entries(&[], files, &code).expect("every jump table ends")
+    indirect_entries(&[], files, &code)
+        .expect("every jump table ends")
+        .entries
 }
 
 fn bctr() -> u32 {
@@ -77,7 +79,7 @@ fn a_jump_table_that_runs_past_the_entry_limit_is_refused() {
             vaddr: BASE,
             bytes: &bytes,
         }];
-        indirect_entries(&[], &files, &code)
+        indirect_entries(&[], &files, &code).map(|bound| bound.entries)
     };
     assert_eq!(
         table(JUMP_TABLE_LIMIT).expect("a table of the limit ends"),

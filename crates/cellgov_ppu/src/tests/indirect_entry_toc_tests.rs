@@ -60,7 +60,9 @@ fn bound_with_data_at(words: &[u32], vaddr: u64, data: &[u8]) -> BTreeSet<u64> {
         words: words.to_vec(),
     }]);
     let files = [FileSegment { vaddr, bytes: data }];
-    indirect_entries(&[], &files, &code).expect("every jump table ends")
+    indirect_entries(&[], &files, &code)
+        .expect("every jump table ends")
+        .entries
 }
 
 /// The code `addis r9,r2,..; addi r9,r9,..; mtctr r9; bctr`, which
@@ -137,12 +139,12 @@ fn a_jump_table_based_at_an_address_built_from_the_toc_adds_its_targets() {
 }
 
 #[test]
-fn no_code_address_is_named_from_the_tocs_of_two_descriptors_that_disagree() {
+fn a_code_address_is_named_from_each_toc_of_two_descriptors_that_disagree() {
     let mut data = descriptor_bytes(at(0), TOC, 0);
     data.extend(descriptor_bytes(at(0), TOC + 4, 0));
     assert_eq!(
         bound_with_data(&branch_through_toc(), &data),
-        BTreeSet::from([at(0)])
+        BTreeSet::from([at(0), at(8), at(9)])
     );
 }
 

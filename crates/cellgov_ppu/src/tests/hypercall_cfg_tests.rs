@@ -14,7 +14,7 @@ fn only_ordinal(words: &[u32]) -> Option<u16> {
         vaddr: 0x1_0000,
         words: words.to_vec(),
     }]);
-    let sites = scan(&code, &BTreeSet::new(), &BTreeSet::new());
+    let sites = scan(&code, &IndirectBound::default(), &BTreeSet::new());
     assert_eq!(sites.len(), 1, "{sites:?}");
     sites[0].ordinal
 }

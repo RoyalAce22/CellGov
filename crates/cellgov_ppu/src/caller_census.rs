@@ -99,13 +99,29 @@ pub fn scan_syscalls(elf: &[u8]) -> Result<Vec<CallerSite>, CallerScanError> {
 /// constant into r11 with `li r11`. A path follows the direct branches
 /// and fall-throughs of all the executable segments, and a direct
 /// branch may cross segments. A branch may run in real mode when control
-/// can reach it from the ELF entry or an interrupt vector. An absolute
-/// branch that may run in real mode also reaches the word at the real
-/// address of its target. A site stays unresolved when control can enter
-/// a word between the load and `sc` in one of these other ways:
+/// can reach it from one of these:
+/// - the ELF entry or an interrupt vector;
+/// - an `rfid`, `mtmsr` or `mtmsrd` that can clear MSR\[IR\].
+///
+/// That control can cross an indirect branch whose CTR or LR the code
+/// builds as a constant. When an `rfid` can clear MSR\[IR\] at an SRR0
+/// that the scan does not know, every branch may run in real mode. An
+/// absolute branch that may run in real mode also reaches
+/// the word at the real address of its target. A site stays unresolved
+/// when control can enter a word between the load and `sc` in one of
+/// these other ways:
 /// - the ELF entry;
 /// - an interrupt vector;
-/// - an indirect branch to an address that the image names.
+/// - an indirect branch to an address that the image names, or to the
+///   constant that the code builds in its CTR or LR, with bits 62 and 63
+///   at 0;
+/// - an indirect branch that may run in real mode, to the word at the
+///   real address of the constant that the code builds in its CTR or LR;
+/// - an `rfid`, `mtmsr` or `mtmsrd` that can clear MSR\[IR\], to the word
+///   at the real address where it puts control;
+/// - an `rfid` that can clear MSR\[IR\] at an SRR0 that the scan does not
+///   know, to the word at the real address of each address that the
+///   image names.
 ///
 /// The segments may lie anywhere in the 64-bit address space, as a
 /// kernel's do.
@@ -124,8 +140,8 @@ pub fn scan_hypercalls(elf: &[u8]) -> Result<Vec<CallerSite>, CallerScanError> {
         validate_segment_extent,
     )?);
     let files = file_segments(elf, &segments)?;
-    let entries = indirect_entries(elf, &files, &code)?;
-    let mut sites = crate::hypercall_cfg::scan(&code, &entries, &real_mode_entries(elf, &code));
+    let bound = indirect_entries(elf, &files, &code)?;
+    let mut sites = crate::hypercall_cfg::scan(&code, &bound, &real_mode_entries(elf, &code));
     sites.sort_by_key(|site| site.address);
     Ok(sites)
 }
@@ -730,5 +746,37 @@ mod hypercall_entry_tests;
 mod hypercall_real_mode_tests;
 
 #[cfg(test)]
+#[path = "tests/caller_census_hypercall_real_mode_indirect_tests.rs"]
+mod hypercall_real_mode_indirect_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_real_mode_switch_tests.rs"]
+mod hypercall_real_mode_switch_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_ctr_decrement_tests.rs"]
+mod hypercall_ctr_decrement_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_ctr_call_tests.rs"]
+mod hypercall_ctr_call_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_toc_candidate_tests.rs"]
+mod hypercall_toc_candidate_tests;
+
+#[cfg(test)]
 #[path = "tests/caller_census_written_gprs_tests.rs"]
 mod written_gprs_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_real_mode_join_tests.rs"]
+mod hypercall_real_mode_join_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_ctr_join_tests.rs"]
+mod hypercall_ctr_join_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_ctr_virtual_tests.rs"]
+mod hypercall_ctr_virtual_tests;

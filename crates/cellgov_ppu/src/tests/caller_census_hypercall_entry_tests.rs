@@ -17,18 +17,27 @@ const CODE: u64 = KERNEL + 0x1_0000;
 const OTHER: u64 = KERNEL + 0x2_0000;
 
 /// One PT_LOAD segment of a test ELF, whose memory size is its file size.
-struct Segment {
+pub(super) struct Segment {
     vaddr: u64,
     flags: u32,
     bytes: Vec<u8>,
 }
 
 /// An executable segment at `vaddr` that holds `words`.
-fn code(vaddr: u64, words: &[u32]) -> Segment {
+pub(super) fn code(vaddr: u64, words: &[u32]) -> Segment {
     Segment {
         vaddr,
         flags: PF_R | PF_X,
         bytes: words.iter().flat_map(|word| word.to_be_bytes()).collect(),
+    }
+}
+
+/// A writable data segment at `vaddr` that holds `bytes`.
+pub(super) fn data_bytes(vaddr: u64, bytes: Vec<u8>) -> Segment {
+    Segment {
+        vaddr,
+        flags: PF_R | PF_W,
+        bytes,
     }
 }
 
@@ -74,7 +83,7 @@ fn elf(entry: u64, segments: &[Segment]) -> Vec<u8> {
 }
 
 /// The ordinal of each site that `scan_hypercalls` finds, by address.
-fn ordinals(entry: u64, segments: &[Segment]) -> Vec<(u64, Option<u16>)> {
+pub(super) fn ordinals(entry: u64, segments: &[Segment]) -> Vec<(u64, Option<u16>)> {
     scan_hypercalls(&elf(entry, segments))
         .expect("the ELF scans")
         .into_iter()
@@ -82,7 +91,7 @@ fn ordinals(entry: u64, segments: &[Segment]) -> Vec<(u64, Option<u16>)> {
         .collect()
 }
 
-fn word(instruction: PpuInstruction) -> u32 {
+pub(super) fn word(instruction: PpuInstruction) -> u32 {
     encode(&instruction).expect("the instruction encodes")
 }
 
