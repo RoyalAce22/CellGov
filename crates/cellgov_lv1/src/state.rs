@@ -13,7 +13,7 @@ use super::external::returns;
 use super::handlers::{answer, answers};
 use super::interprocessor::RunningThreads;
 use super::mediated::{take_entry, MediatedEntry, MediatedTake};
-use super::request::HypercallRequest;
+use super::request::{CallerTranslation, HypercallRequest};
 use super::return_path::SavedMsrs;
 use super::vector;
 use crate::group::interrupt::bitmap::IrqStateBitmapState;
@@ -102,18 +102,25 @@ impl Hypervisor {
     ///
     /// No thread gives running registers, so a call that sends a running
     /// thread an interprocessor interrupt is a refusal; see
-    /// [`Self::dispatch_signalling`].
+    /// [`Self::dispatch_signalling`]. The caller takes a page table load.
     pub fn dispatch_returning(
         &mut self,
         request: &HypercallRequest,
         storage: &GuestMemory,
         msrs: &SavedMsrs,
     ) -> HypercallDisposition {
-        self.dispatch_signalling(request, storage, msrs, &RunningThreads::default())
+        self.dispatch_signalling(
+            request,
+            CallerTranslation::Loads,
+            storage,
+            msrs,
+            &RunningThreads::default(),
+        )
     }
 
     /// The disposition of `request`, as [`Self::dispatch_returning`] gives
-    /// it, where `running` gives the registers of each running thread.
+    /// it, where `running` gives the registers of each running thread and
+    /// `caller` tells whether the caller takes a page table load.
     ///
     /// An answer also carries the external interrupt that lv1's handler
     /// raises for each running thread that the call sends an
@@ -122,11 +129,18 @@ impl Hypervisor {
     pub fn dispatch_signalling(
         &mut self,
         request: &HypercallRequest,
+        caller: CallerTranslation,
         storage: &GuestMemory,
         msrs: &SavedMsrs,
         running: &RunningThreads,
     ) -> HypercallDisposition {
-        let disposition = answer(request, self.firmware.as_deref(), &self.groups, storage);
+        let disposition = answer(
+            request,
+            caller,
+            self.firmware.as_deref(),
+            &self.groups,
+            storage,
+        );
         let disposition = match disposition {
             HypercallDisposition::Answered(answer) => {
                 let firmware = self.firmware.as_deref();

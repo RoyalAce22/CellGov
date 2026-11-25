@@ -35,9 +35,9 @@ use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{CompareFields, CompareResult, ExecutionStepResult, UnitStatus};
 use cellgov_lv1::{
-    cost, Compare, ExternalRaise, HypercallAnswer, HypercallDisposition, HypercallRefusal,
-    HypercallRequest, MediatedEntry, MediatedTake, PageTableLoad, ReturnPair, RunningThread,
-    RunningThreads, SavedMsrs, ThreadInterrupt, ThreadResume,
+    cost, CallerTranslation, Compare, ExternalRaise, HypercallAnswer, HypercallDisposition,
+    HypercallRefusal, HypercallRequest, MediatedEntry, MediatedTake, PageTableLoad, ReturnPair,
+    RunningThread, RunningThreads, SavedMsrs, ThreadInterrupt, ThreadResume,
 };
 use cellgov_ps3_abi::hw::ppu_interrupt::{SRR1_MEDIATED_EXTERNAL, VECTOR_EXTERNAL};
 use cellgov_ps3_abi::lv1::call::{LOGICAL_CONSOLE_SEND_MAX, MAX_OUTPUTS};
@@ -82,6 +82,15 @@ impl Runtime {
                 .is_some_and(|u| u.in_problem_state()),
             tick: self.time,
         };
+        let caller = if self
+            .registry
+            .get(source)
+            .is_some_and(|u| u.takes_page_table())
+        {
+            CallerTranslation::Loads
+        } else {
+            CallerTranslation::Refuses
+        };
         let space = self.spaces.space_of(source);
         let storage =
             crate::runtime::spaces::resolve_space_memory(&self.memory, &self.spaces, space);
@@ -89,7 +98,7 @@ impl Runtime {
         let running = running_threads(&self.registry, request.tick, self.time_base);
         let disposition = self
             .hypervisor
-            .dispatch_signalling(&request, storage, &msrs, &running);
+            .dispatch_signalling(&request, caller, storage, &msrs, &running);
         if self.mode != RuntimeMode::FaultDriven {
             self.trace.record(&TraceRecord::HypercallEntered {
                 unit: source,
@@ -394,11 +403,10 @@ impl Runtime {
     /// other unit with supervisor registers too.
     ///
     /// The hypervisor loads only values that name its page table storage,
-    /// which a thread with supervisor registers takes. A unit with no
-    /// supervisor registers can also reach the hypervisor through `sc`
-    /// with LEV = 1, and it refuses them. The runtime then logs an
-    /// invariant break, and the hypervisor's selection and the caller's
-    /// r3 stand. Another unit that refuses the values keeps its own.
+    /// which a thread with supervisor registers takes. It refuses the
+    /// selection of a caller that does not take the load. So a refusal
+    /// by the caller here is an invariant break, which the runtime logs.
+    /// Another unit that refuses the values keeps its own.
     ///
     /// [CBE-Handbook p:297 s:10.2] The two PPE threads run in one logical-partition context and share its virtual-memory-mapping tables.
     ///
@@ -583,3 +591,7 @@ mod hypercall_external_tests;
 #[cfg(test)]
 #[path = "tests/hypercall_signal_tests.rs"]
 mod hypercall_signal_tests;
+
+#[cfg(test)]
+#[path = "tests/hypercall_select_caller_tests.rs"]
+mod hypercall_select_caller_tests;

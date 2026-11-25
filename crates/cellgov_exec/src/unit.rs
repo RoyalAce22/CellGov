@@ -410,6 +410,13 @@ pub trait ExecutionUnit {
         false
     }
 
+    /// Whether [`Self::load_page_table`] takes values that name a page
+    /// table and no reserved page size. A unit with no translation
+    /// registers answers false.
+    fn takes_page_table(&self) -> bool {
+        false
+    }
+
     /// Raises an external exception for the thread, as the hypervisor
     /// raises it, and returns whether the thread took it.
     ///

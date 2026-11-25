@@ -106,6 +106,10 @@ pub trait RegisteredUnit: 'static {
     /// [`ExecutionUnit::load_page_table`].
     fn load_page_table(&mut self, sdr1: u64, lb: u8) -> bool;
 
+    /// Whether the thread takes a page table load. See
+    /// [`ExecutionUnit::takes_page_table`].
+    fn takes_page_table(&self) -> bool;
+
     /// Raises the thread's external exception. See
     /// [`ExecutionUnit::raise_external_exception`].
     fn raise_external_exception(&mut self) -> bool;
@@ -380,6 +384,11 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn load_page_table(&mut self, sdr1: u64, lb: u8) -> bool {
         ExecutionUnit::load_page_table(self, sdr1, lb)
+    }
+
+    #[inline]
+    fn takes_page_table(&self) -> bool {
+        ExecutionUnit::takes_page_table(self)
     }
 
     #[inline]

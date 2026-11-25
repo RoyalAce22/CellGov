@@ -159,7 +159,13 @@ fn the_dispatched_call_skips_a_shadow_page_address_that_a_mapping_in_the_group_s
         .into(),
     );
     groups.apply(MemoryChange::CounterTaken(4).into());
-    let d = crate::answer(&request(), Some("4.93"), &groups, &GuestMemory::new(0));
+    let d = crate::answer(
+        &request(),
+        crate::CallerTranslation::Loads,
+        Some("4.93"),
+        &groups,
+        &GuestMemory::new(0),
+    );
     let HypercallDisposition::Answered(answer) = d else {
         panic!("{d:?}");
     };

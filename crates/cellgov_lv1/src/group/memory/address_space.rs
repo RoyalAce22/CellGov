@@ -20,7 +20,7 @@ use cellgov_mem::GuestMemory;
 use super::{page_table, ADDRESS_SPACE_SOURCE, SELECTED_ADDRESS_SPACE_SOURCE};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
-use crate::request::HypercallRequest;
+use crate::request::{CallerTranslation, HypercallRequest};
 
 /// The hypercalls this module answers.
 pub(crate) const HYPERCALLS: &[Hypercall] = &[
@@ -39,6 +39,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[
         handler: |request, input| {
             select(
                 request,
+                input.caller,
                 input.firmware,
                 input.groups.memory().spaces(),
                 input.storage,
@@ -268,12 +269,14 @@ pub(crate) fn construct(
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
+/// - `caller` refuses the page table load;
 /// - r3 is 0, which lv1 answers by selecting the partition's default
 ///   address space, and CellGov does not model that address space;
 /// - the hypervisor did not construct the address space;
 /// - `storage` does not hold the page table.
 pub(crate) fn select(
     request: &HypercallRequest,
+    caller: CallerTranslation,
     firmware: Option<&str>,
     spaces: &AddressSpaceState,
     storage: &GuestMemory,
@@ -283,6 +286,12 @@ pub(crate) fn select(
         return refuse(
             request,
             "an address space selection at a firmware whose lv1 handler is not read",
+        );
+    }
+    if caller == CallerTranslation::Refuses {
+        return refuse(
+            request,
+            "a selection from a unit that holds no SDR1 or HID6 for the page table load",
         );
     }
     if vas_id == 0 {
@@ -320,3 +329,7 @@ mod hash_tests;
 #[cfg(test)]
 #[path = "tests/select_load_tests.rs"]
 mod select_load_tests;
+
+#[cfg(test)]
+#[path = "tests/select_caller_tests.rs"]
+mod select_caller_tests;

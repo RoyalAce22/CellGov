@@ -176,6 +176,7 @@ fn a_construction_refuses_where_no_lv1_read_gives_the_handler() {
 fn selecting_the_constructed_address_space_answers_with_outputs_cleared() {
     let d = select(
         &select_request(CAPTURED_VAS_ID),
+        CallerTranslation::Loads,
         Some("4.93"),
         &constructed(),
         &storage(),
@@ -191,6 +192,7 @@ fn selecting_an_address_space_the_hypervisor_did_not_construct_refuses() {
     for vas_id in [1, 3, u64::MAX] {
         let d = select(
             &select_request(vas_id),
+            CallerTranslation::Loads,
             Some("4.93"),
             &constructed(),
             &storage(),
@@ -202,6 +204,7 @@ fn selecting_an_address_space_the_hypervisor_did_not_construct_refuses() {
     }
     let d = select(
         &select_request(CAPTURED_VAS_ID),
+        CallerTranslation::Loads,
         Some("4.93"),
         &AddressSpaceState::default(),
         &storage(),
@@ -211,7 +214,13 @@ fn selecting_an_address_space_the_hypervisor_did_not_construct_refuses() {
 
 #[test]
 fn selecting_vas_id_zero_refuses_as_the_partition_default_address_space() {
-    let d = select(&select_request(0), Some("4.93"), &constructed(), &storage());
+    let d = select(
+        &select_request(0),
+        CallerTranslation::Loads,
+        Some("4.93"),
+        &constructed(),
+        &storage(),
+    );
     assert!(
         matches!(
             d,
@@ -229,6 +238,7 @@ fn a_selection_refuses_where_no_lv1_read_gives_the_handler() {
     for firmware in [None, Some("4.92")] {
         let d = select(
             &select_request(CAPTURED_VAS_ID),
+            CallerTranslation::Loads,
             firmware,
             &constructed(),
             &storage(),

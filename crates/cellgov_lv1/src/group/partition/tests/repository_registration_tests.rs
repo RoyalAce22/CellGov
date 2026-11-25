@@ -71,13 +71,14 @@ fn the_hypercall_91_handler_answers_a_node_that_a_registration_wrote() {
     let r = read(4, field(b"dev", 4), field(b"type", 0));
     let mut groups = crate::group::state::GroupStates::default();
     let memory = cellgov_mem::GuestMemory::new(0x1000);
+    let loads = crate::CallerTranslation::Loads;
     assert!(matches!(
-        crate::handlers::answer(&r, Some("4.93"), &groups, &memory),
+        crate::handlers::answer(&r, loads, Some("4.93"), &groups, &memory),
         HypercallDisposition::Refused(HypercallRefusal::RepositoryNode { .. })
     ));
     groups.apply(StorageChange::DeviceRegistered(4).into());
     assert_eq!(
-        crate::handlers::answer(&r, Some("4.93"), &groups, &memory),
+        crate::handlers::answer(&r, loads, Some("4.93"), &groups, &memory),
         answered(device_4_93(4).kind, 0)
     );
 }

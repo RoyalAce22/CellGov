@@ -16,6 +16,8 @@ use cellgov_ps3_abi::lv1::call::{
 use cellgov_ps3_abi::lv1::interrupt::IRQ_MASK_OFFSET;
 use cellgov_time::GuestTicks;
 
+const LOADS: crate::CallerTranslation = crate::CallerTranslation::Loads;
+
 /// The `sc` of the kernel's port call in the setup of a thread's record
 /// [OFW-4.93 lv2_kernel a:0x8000000000007d8c]. The console gave thread 1's
 /// call the port id 4 (`GAME_OS_PORT_CALLS`).
@@ -129,7 +131,7 @@ fn running(msr: u64) -> RunningThreads {
 fn send_to_running(hv: &mut Hypervisor, storage: &GuestMemory, msr: u64) -> HypercallAnswer {
     let send = call(SEND_EVENT_LOCALLY, &[PORT], Some(0));
     let msrs = SavedMsrs([Some(EE_SET_MSR); 2]);
-    answered(hv.dispatch_signalling(&send, storage, &msrs, &running(msr)))
+    answered(hv.dispatch_signalling(&send, LOADS, storage, &msrs, &running(msr)))
 }
 
 fn refused(r: &HypercallRequest, what: &'static str) -> HypercallDisposition {
@@ -231,7 +233,7 @@ fn a_send_on_a_thread_that_gives_no_running_registers_is_a_refusal_and_changes_n
     let send = call(SEND_EVENT_LOCALLY, &[PORT], Some(0));
     let msrs = SavedMsrs([Some(EE_SET_MSR); 2]);
     assert_eq!(
-        hv.dispatch_signalling(&send, &storage, &msrs, &RunningThreads::default()),
+        hv.dispatch_signalling(&send, LOADS, &storage, &msrs, &RunningThreads::default()),
         refused(
             &send,
             "an interprocessor interrupt to a thread whose unit gives no running registers"
@@ -249,7 +251,7 @@ fn a_send_on_a_running_thread_from_a_unit_with_no_thread_is_a_refusal() {
     let send = call(SEND_EVENT_LOCALLY, &[PORT], None);
     let msrs = SavedMsrs([Some(EE_SET_MSR); 2]);
     assert_eq!(
-        hv.dispatch_signalling(&send, &storage, &msrs, &running(EE_CLEAR_MSR)),
+        hv.dispatch_signalling(&send, LOADS, &storage, &msrs, &running(EE_CLEAR_MSR)),
         refused(
             &send,
             "an event on a plug of a running thread, from a unit that names no hardware thread"

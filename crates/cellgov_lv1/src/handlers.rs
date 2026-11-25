@@ -7,7 +7,7 @@ use super::answer::HypercallDisposition;
 use super::group::hypercall::HandlerInput;
 use super::group::state::GroupStates;
 use super::group::table;
-use super::request::HypercallRequest;
+use super::request::{CallerTranslation, HypercallRequest};
 use super::vector;
 
 /// The numbers a handler answers, ascending. Every other number takes
@@ -28,7 +28,8 @@ pub fn answers(number: u64) -> bool {
 ///
 /// `storage` is the caller's real address space. The page table calls
 /// read the page table there, and the bitmap and plug calls write the
-/// bitmaps there.
+/// bitmaps there. `caller` tells whether the caller takes the page table
+/// load of an address space selection.
 ///
 /// The first of these that applies answers the call:
 /// 1. lv1's vector, for a number past the table or a problem-state call;
@@ -36,6 +37,7 @@ pub fn answers(number: u64) -> bool {
 /// 3. the null backend.
 pub fn answer(
     request: &HypercallRequest,
+    caller: CallerTranslation,
     firmware: Option<&str>,
     groups: &GroupStates,
     storage: &GuestMemory,
@@ -50,6 +52,7 @@ pub fn answer(
                 firmware,
                 groups,
                 storage,
+                caller,
             },
         ),
         None => vector::null_backend(request, firmware),

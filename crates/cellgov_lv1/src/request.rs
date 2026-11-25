@@ -25,6 +25,19 @@ pub struct HypercallRequest {
     pub tick: GuestTicks,
 }
 
+/// Whether the unit that executed `sc` takes the page table load of an
+/// address space selection.
+///
+/// lv1 loads SDR1 and HID6\[LB\] on the calling thread as part of the
+/// selection, so the selection and the load succeed or fail together.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallerTranslation {
+    /// The unit holds SDR1 and HID6 and takes the load.
+    Loads,
+    /// The unit holds no supervisor registers and refuses the load.
+    Refuses,
+}
+
 impl HypercallRequest {
     /// The value of input register `reg`, one of r3 to r10.
     ///

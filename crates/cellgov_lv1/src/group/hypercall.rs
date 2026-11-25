@@ -5,7 +5,7 @@ use cellgov_time::GuestTicks;
 
 use super::state::GroupStates;
 use crate::answer::HypercallDisposition;
-use crate::request::HypercallRequest;
+use crate::request::{CallerTranslation, HypercallRequest};
 
 /// What a handler reads besides the request.
 #[derive(Debug, Clone, Copy)]
@@ -16,6 +16,8 @@ pub(crate) struct HandlerInput<'a> {
     pub(crate) groups: &'a GroupStates,
     /// The caller's real address space, which holds the page table.
     pub(crate) storage: &'a GuestMemory,
+    /// Whether the caller takes a page table load.
+    pub(crate) caller: CallerTranslation,
 }
 
 /// A handler: the disposition of a request from its input.

@@ -50,7 +50,13 @@ fn load_of(d: &HypercallDisposition) -> Option<PageTableLoad> {
 #[test]
 fn a_selection_loads_sdr1_over_the_storage_and_lb_for_64k_and_1m_pages() {
     let storage = GuestMemory::from_regions(vec![page_table_storage()]).expect("storage");
-    let d = select(&select_request(), Some("4.93"), &constructed(), &storage);
+    let d = select(
+        &select_request(),
+        CallerTranslation::Loads,
+        Some("4.93"),
+        &constructed(),
+        &storage,
+    );
     assert_eq!(
         load_of(&d),
         Some(PageTableLoad {
@@ -70,7 +76,13 @@ fn a_selection_refuses_where_no_storage_holds_the_whole_page_table() {
     );
     let short = GuestMemory::from_regions(vec![short]).expect("storage");
     for storage in [GuestMemory::new(0), short] {
-        let d = select(&select_request(), Some("4.93"), &constructed(), &storage);
+        let d = select(
+            &select_request(),
+            CallerTranslation::Loads,
+            Some("4.93"),
+            &constructed(),
+            &storage,
+        );
         assert!(
             matches!(
                 d,

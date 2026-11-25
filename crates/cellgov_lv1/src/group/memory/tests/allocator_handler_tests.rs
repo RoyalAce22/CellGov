@@ -46,7 +46,13 @@ fn call(number: u64, inputs: [u64; 4]) -> HypercallRequest {
 /// The disposition from the handler that the table registers for the
 /// request's number.
 fn dispatch(groups: &GroupStates, request: &HypercallRequest) -> HypercallDisposition {
-    crate::handlers::answer(request, Some("4.93"), groups, &GuestMemory::new(0))
+    crate::handlers::answer(
+        request,
+        crate::CallerTranslation::Loads,
+        Some("4.93"),
+        groups,
+        &GuestMemory::new(0),
+    )
 }
 
 /// An allocated region of `size` bytes at the boot value's address, and

@@ -168,6 +168,10 @@ impl ExecutionUnit for PpuExecutionUnit {
             .unwrap_or(false)
     }
 
+    fn takes_page_table(&self) -> bool {
+        self.state.supervisor().is_some()
+    }
+
     fn raise_external_exception(&mut self) -> bool {
         PpuExecutionUnit::raise_external_exception(self)
     }
@@ -218,3 +222,7 @@ impl ExecutionUnit for PpuExecutionUnit {
 #[cfg(test)]
 #[path = "tests/load_page_table_tests.rs"]
 mod load_page_table_tests;
+
+#[cfg(test)]
+#[path = "tests/takes_page_table_tests.rs"]
+mod takes_page_table_tests;

@@ -79,7 +79,13 @@ fn a_number_past_the_table_reaches_the_null_backend_where_no_image_gives_the_cou
         let r = request(256, false);
         assert_eq!(vector_disposition(&r, firmware), None, "{firmware:?}");
         assert_eq!(
-            answer(&r, firmware, &GroupStates::default(), &GuestMemory::new(0)),
+            answer(
+                &r,
+                crate::CallerTranslation::Loads,
+                firmware,
+                &GroupStates::default(),
+                &GuestMemory::new(0)
+            ),
             unmodelled(&r),
             "{firmware:?}"
         );
@@ -94,6 +100,7 @@ fn every_problem_state_call_below_256_answers_no_privilege_at_4_93() {
         assert_eq!(
             answer(
                 &r,
+                crate::CallerTranslation::Loads,
                 Some("4.93"),
                 &GroupStates::default(),
                 &GuestMemory::new(0)

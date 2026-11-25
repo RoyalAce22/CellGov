@@ -79,7 +79,13 @@ fn each_captured_node_answers_its_captured_values_after_each_table_device_regist
     assert_eq!(nodes.len(), 52 + 84 + 154);
     for (key, values) in nodes {
         assert_eq!(
-            crate::handlers::answer(&read(key), Some("4.93"), &groups, &memory),
+            crate::handlers::answer(
+                &read(key),
+                crate::CallerTranslation::Loads,
+                Some("4.93"),
+                &groups,
+                &memory
+            ),
             HypercallDisposition::Answered(HypercallAnswer::success(values)),
             "{key:x?}"
         );

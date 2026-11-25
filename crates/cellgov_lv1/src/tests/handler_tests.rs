@@ -18,7 +18,13 @@ fn request(number: u64) -> HypercallRequest {
 }
 
 fn answer(r: &HypercallRequest, firmware: Option<&str>) -> HypercallDisposition {
-    super::answer(r, firmware, &GroupStates::default(), &GuestMemory::new(0))
+    super::answer(
+        r,
+        CallerTranslation::Loads,
+        firmware,
+        &GroupStates::default(),
+        &GuestMemory::new(0),
+    )
 }
 
 #[test]
