@@ -1,0 +1,22 @@
+[test]
+name = "ppu_issue_stall_pending"
+
+# A hardware probe of whether a sibling's stalls push back a touched
+# line's arrival, a flushed or stored-back line's busy time, and the
+# fence an mtvscr sets for younger vector instructions: a miss, a touch
+# then a load, a hit, a flush then a load, a store back then a load, a
+# store then a load, and an mtvscr with a vaddubm, alone and beside a
+# sibling of dependent fdiv. The console capture is the answer;
+# ppu/main.c's header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 856 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 856 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 120000

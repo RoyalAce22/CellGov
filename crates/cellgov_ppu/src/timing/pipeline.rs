@@ -753,7 +753,7 @@ impl PpeTiming {
         let outranked = u64::from(self.shared_stall.issue_interval);
         let c = &mut self.core;
         c.gate = c.gate.max(t.saturating_mul(256)).saturating_add(outranked);
-        stretch_pending(c, &mut self.tables.stores, began, stalled);
+        stretch_pending(c, &mut self.tables, began, stalled);
         let before = c.floor;
         if opens {
             c.block_open = true;
@@ -1339,9 +1339,15 @@ fn weigh(share: u32, w: u64, counts: bool) -> u32 {
 /// A time is pending when it is later than the start of the stall:
 /// - each result and each outstanding load miss;
 /// - each unit's release;
-/// - each queued store's write into the cache.
+/// - each queued store's write into the cache;
+/// - each touched line's arrival.
 ///
-/// The cycle a slot of the store queue is free again does not move.
+/// These times do not move:
+/// - the cycle a slot of the store queue is free again;
+/// - the cycle the next touch can send its request;
+/// - the `mtvscr` fence;
+/// - the cycle a flush or store-back finishes with its line. No capture
+///   times one whose busy time outlasts the stalls after it.
 ///
 /// The console captures show the delay:
 /// - `ppu_issue_units`: a dependent `fadd` with an independent `addi`
@@ -1358,18 +1364,26 @@ fn weigh(share: u32, w: u64, counts: bool) -> u32 {
 ///   four independent loads after it costs most of what it costs alone
 ///   over an `addi` with the same loads. The loads' stalls outlast the
 ///   divide when its release does not move.
+/// - `ppu_issue_stall_pending`, beside an `fdiv` sibling: a touch, 8
+///   `addi` and a load of the touched line take 385.25 cycles an
+///   iteration, 172 more than alone. With an arrival that does not move,
+///   the model gives 320. An `mtvscr`, 8 `addi` and a `vaddubm` take
+///   88.69 cycles more than the same loop with no `addi` there. The model
+///   gives 89.84 with a fence that does not move, and 103.89 with one
+///   that does.
 #[inline]
-fn stretch_pending(c: &mut Core, stores: &mut [Queued], began: u64, stalled: u64) {
+fn stretch_pending(c: &mut Core, tables: &mut Tables, began: u64, stalled: u64) {
     if stalled == 0 {
         return;
     }
+    tables.caches.stretch_touches(began, stalled);
     let pending = c
         .ready
         .iter_mut()
         .chain(c.addr_ready.iter_mut())
         .chain(c.miss.iter_mut())
         .chain(c.unit_free.iter_mut())
-        .chain(stores.iter_mut().map(|s| &mut s.done));
+        .chain(tables.stores.iter_mut().map(|s| &mut s.done));
     for r in pending {
         if *r > began {
             *r += stalled;

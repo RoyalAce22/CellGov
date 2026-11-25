@@ -212,6 +212,16 @@ impl LineCycles {
             .unwrap_or(0)
     }
 
+    /// Delays each cycle later than `began` by `stalled`.
+    fn stretch(&mut self, began: u64, stalled: u64) {
+        for entry in &mut self.entries {
+            if entry.0 != 0 && entry.1 > began {
+                entry.1 += stalled;
+                self.until = self.until.max(entry.1);
+            }
+        }
+    }
+
     fn forget(&mut self, line: u64) {
         for entry in &mut self.entries {
             if entry.0 == line + 1 {
@@ -382,6 +392,12 @@ impl Caches {
     pub(crate) fn busy(&self, t: u64, ea: u64, len: u8) -> u64 {
         let (first, last) = Self::lines(ea, len);
         self.busy.after(t, first).max(self.busy.after(t, last))
+    }
+
+    /// Delays each touched line's arrival later than `began` by
+    /// `stalled`.
+    pub(crate) fn stretch_touches(&mut self, began: u64, stalled: u64) {
+        self.touched.stretch(began, stalled);
     }
 
     /// A `dcbf` at cycle `t`: drop the line at `ea` from the L1 and the
