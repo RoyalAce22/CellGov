@@ -39,13 +39,13 @@ fn the_device_and_the_r5_each_move_the_term() {
 }
 
 #[test]
-fn the_storage_device_open_surface_is_on_its_own_pending_source() {
+fn the_storage_device_open_surface_is_on_its_own_source() {
     let surfaces: Vec<_> = GROUP
         .hashed_surfaces
         .iter()
         .filter(|surface| surface.source == Some(STORAGE_DEVICE_OPEN_SOURCE))
         .collect();
     assert_eq!(surfaces.len(), 1);
-    assert_eq!(surfaces[0].stamp, Stamp::Pending);
+    assert_eq!(surfaces[0].stamp, Stamp::Version(34));
     assert_eq!(STORAGE_DEVICE_OPEN_SOURCE, 181);
 }

@@ -29,17 +29,17 @@ pub(crate) const GROUP: Group = Group {
         HashedSurface {
             name: "the storage devices that lv1 registered for the partition",
             source: Some(REGISTERED_DEVICE_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(34),
         },
         HashedSurface {
             name: "the number of storage devices that lv1 reported to the partition",
             source: Some(REPORTED_DEVICES_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(34),
         },
         HashedSurface {
             name: "the notification read that lv1 holds waiting for the partition",
             source: Some(WAITING_READ_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(34),
         },
     ],
 };

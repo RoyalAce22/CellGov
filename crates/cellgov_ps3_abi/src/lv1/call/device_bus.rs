@@ -18,6 +18,18 @@ pub const OPEN_DEVICE: u64 = 170;
 /// form; see [`crate::lv1::device_bus`].
 pub const CLOSE_DEVICE: u64 = 171;
 
+/// `map_device_mmio_region`: five inputs and one output.
+/// - r3 is the id of a bus.
+/// - r4 is the id of a device on that bus.
+/// - r5 is the bus address of an MMIO region of the device.
+/// - r6 is the size in bytes.
+/// - r7 is the base-2 logarithm of the page size.
+/// - The output r4 is the logical partition address of the mapping.
+///
+/// The lv1 handler [OFW-4.93 lv1 a:0x306D64] reads the inputs in this
+/// form; see [`crate::lv1::device_bus`].
+pub const MAP_DEVICE_MMIO_REGION: u64 = 172;
+
 /// `allocate_device_dma_region`: five inputs and one output.
 /// - r3 is the id of a bus.
 /// - r4 is the id of a device on that bus.

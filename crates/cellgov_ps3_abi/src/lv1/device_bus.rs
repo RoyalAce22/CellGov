@@ -683,6 +683,117 @@
 //! [OFW-4.93 lv2_kernel a:0x800000000007d6c4-0x800000000007d73c]. The
 //! capture [`DMA_MAP_CAPTURE`] gives lv1's record of the call; see
 //! [`GAME_OS_DMA_MAPPINGS`].
+//!
+//! # `map_device_mmio_region`
+//!
+//! The handler [OFW-4.93 lv1 a:0x306D64] keeps r3 to r7
+//! [OFW-4.93 lv1 a:0x306D78] [OFW-4.93 lv1 a:0x306D98-0x306DA4] and does
+//! these steps:
+//! 1. It refuses a bus id above [`OPEN_DEVICE_BUS_MAX`] with
+//!    [`MMIO_MAP_BUS_RANGE_R3`] [OFW-4.93 lv1 a:0x306E04-0x306E08]
+//!    [OFW-4.93 lv1 a:0x306ED8-0x306EE8].
+//! 2. It zeroes the return slot of r4, HSPRG0 - 0x6A38, and calls the map
+//!    function [OFW-4.93 lv1 a:0x237254] with the caller's partition, r3
+//!    to r7 and the address of that slot
+//!    [OFW-4.93 lv1 a:0x306E0C-0x306E44].
+//! 3. It returns that function's r3 [OFW-4.93 lv1 a:0x306E48]
+//!    [OFW-4.93 lv1 a:0x306EB0]. The vector's entry zeroes the other
+//!    slots [OFW-4.93 lv1 a:0x0C08], so r5 to r10 return 0.
+//!
+//! The map function writes the slot only on success
+//! [OFW-4.93 lv1 a:0x237300-0x237308], so a failure returns r4 = 0. It
+//! does these steps. The first failure is the answer:
+//! 1. The access check [OFW-4.93 lv1 a:0x2363E0]
+//!    [OFW-4.93 lv1 a:0x2372AC-0x2372B4], which
+//!    [`network`](super::network) describes. Bus 0 gets
+//!    [`MMIO_MAP_NO_BUS_R3`]. A partition that did not open the device
+//!    gets [`MMIO_MAP_NOT_OPEN_R3`]. The function zero-extends a failed
+//!    status and sets bit (mark + 31) for a mark other than 0
+//!    [OFW-4.93 lv1 a:0x237340-0x237390].
+//! 2. Device 0 of bus 1 gets [`MMIO_MAP_DEVICE_0_R3`]
+//!    [OFW-4.93 lv1 a:0x2372B8-0x2372BC] [OFW-4.93 lv1 a:0x237394-0x2373AC].
+//! 3. The device lookup [OFW-4.93 lv1 a:0x2372C0-0x2372D4]. For bus 1 it
+//!    is the lookup of the access check, so it finds the device.
+//! 4. The device's MMIO map function [OFW-4.93 lv1 a:0x228BEC], with the
+//!    device, the partition, r5, r6, r7, two outputs and a mark
+//!    [OFW-4.93 lv1 a:0x2372D8-0x2372F4]. A nonzero r3 gets the treatment
+//!    of step 1 [OFW-4.93 lv1 a:0x2372F8-0x2372FC]. On 0 the function
+//!    stores the logical partition address in the slot of r4 and returns
+//!    0 [OFW-4.93 lv1 a:0x237300-0x237308].
+//!
+//! The device's MMIO map function holds the device's lock at +16
+//! [OFW-4.93 lv1 a:0x228C48-0x228C6C] and does these steps:
+//! 1. It walks the 8 region slots at +24 of the device for the region
+//!    whose bus address at +48 is r5 [OFW-4.93 lv1 a:0x228C70-0x228CA0].
+//!    When no region has that address, the answer is
+//!    [`MMIO_MAP_NO_REGION_R3`] [OFW-4.93 lv1 a:0x228CA4-0x228CAC].
+//! 2. A size of 0 or above the region's size at +56 gets
+//!    [`MMIO_MAP_SIZE_R3`] [OFW-4.93 lv1 a:0x228D04-0x228D14]
+//!    [OFW-4.93 lv1 a:0x228DF4-0x228E00].
+//! 3. A page shift other than those of [`MMIO_MAP_PAGE_SHIFTS`] gets
+//!    [`MMIO_MAP_PAGE_SHIFT_R3`] [OFW-4.93 lv1 a:0x228D18-0x228D34]
+//!    [OFW-4.93 lv1 a:0x228DE4-0x228DF0].
+//! 4. It calls the device's entry at +128 with the bus address
+//!    [OFW-4.93 lv1 a:0x228D38-0x228D5C] [OFW-4.93 lv1 a:0x35C8F8-0x35C8FC]
+//!    [OFW-4.93 lv1 a:0x32E0F8-0x32E0FC] [OFW-4.93 lv1 a:0x22D9C0-0x22D9D0].
+//!    That entry gives the real address of the bus address, and returns
+//!    0 on each path [OFW-4.93 lv1 a:0x22BE1C-0x22BE68].
+//! 5. It calls the address function [OFW-4.93 lv1 a:0x229CA8] with the
+//!    partition, the real address, the page shift, the size, an output
+//!    and the mark [OFW-4.93 lv1 a:0x228D68-0x228D80]. A nonzero r3 of
+//!    that function is the answer [OFW-4.93 lv1 a:0x228D84-0x228D8C].
+//! 6. It makes the mapping with the mapping function of the DMA path
+//!    [OFW-4.93 lv1 a:0x225E18], with the region, the partition, the
+//!    region's bus address, the size, the logical partition address and 1
+//!    in r9 and r10 [OFW-4.93 lv1 a:0x228D90-0x228DB8].
+//! 7. It clears the mark, stores the logical partition address at +80 of
+//!    the mapping, gives that address to the caller and returns 0
+//!    [OFW-4.93 lv1 a:0x228DC8-0x228DE0] [OFW-4.93 lv1 a:0x228CB0-0x228CC4].
+//!
+//! The address function takes the logical partition address from an
+//! allocator [OFW-4.93 lv1 a:0x229E78-0x229E80], and gives it only on
+//! success [OFW-4.93 lv1 a:0x229F84-0x229F98]. The allocator's state is
+//! lv1's own, which CellGov does not model. [`GAME_OS_MMIO_MAPPINGS`]
+//! gives the address that the console's lv1 gave the 4.93 kernel's call.
+//!
+//! With r10 not 0, the mapping function skips the range check
+//! [OFW-4.93 lv1 a:0x225E18] [OFW-4.93 lv1 a:0x225E5C]. That check
+//! refuses a range outside the region
+//! [OFW-4.93 lv1 a:0x225F7C-0x225F84] [OFW-4.93 lv1 a:0x225FE4-0x225FF4]
+//! and a range that overlaps a mapping of the region
+//! [OFW-4.93 lv1 a:0x225FF8-0x226048]. So a mapping of lv1's own in the
+//! region does not stop the call. The function keeps r9
+//! in the byte at +64 of the mapping [OFW-4.93 lv1 a:0x225E9C]. When its
+//! 96-byte allocation fails [OFW-4.93 lv1 a:0x225E60-0x225E74], the map
+//! function frees the logical partition address and returns
+//! `LV1_RESOURCE_SHORTAGE` (-2) [OFW-4.93 lv1 a:0x228DC4]
+//! [OFW-4.93 lv1 a:0x228E20-0x228E34]. No input of the call selects that
+//! case.
+//!
+//! lv1's init gives device 1 of bus 1 the three regions of
+//! [`MMIO_REGIONS`] [OFW-4.93 lv1 a:0x3A9A60-0x3A9A9C]. The region
+//! function stores region i in the slot at +24 + 8 x i. It makes each
+//! region an 80-byte object with the page shift 20
+//! [OFW-4.93 lv1 a:0x227F4C-0x227FC8]. The capture [`MMIO_MAP_CAPTURE`]
+//! reads these regions in the device's slots.
+//!
+//! The close entry that devices 0, 1 and 2 of bus 1 share removes the
+//! caller's MMIO mappings [OFW-4.93 lv1 a:0x2292EC]
+//! [OFW-4.93 lv1 a:0x229680-0x229688]. For each region of the device, it
+//! frees the logical partition address of each mapping of the caller,
+//! and unlinks and destroys the mapping [OFW-4.93 lv1 a:0x229360-0x229448].
+//!
+//! # The 4.93 kernel's call of `map_device_mmio_region`
+//!
+//! The kernel's wrapper keeps the bus id, the device id and the size from
+//! r3, r4 and r6 [OFW-4.93 lv2_kernel a:0x800000000007D860-0x800000000007D868].
+//! For a flags word in r7 that sets none of the bits it tests, it sends
+//! the call with its own r3 to r6 and r7 = 12
+//! [OFW-4.93 lv2_kernel a:0x800000000007D894-0x800000000007D8CC]. When r3
+//! is 0, it keeps r4 as the logical partition address
+//! [OFW-4.93 lv2_kernel a:0x800000000007D8D0-0x800000000007D8DC]. The
+//! capture [`MMIO_MAP_CAPTURE`] gives lv1's record of the call; see
+//! [`GAME_OS_MMIO_MAPPINGS`].
 
 use std::ops::RangeInclusive;
 
@@ -1337,6 +1448,214 @@ pub const GAME_OS_DMA_MAPPINGS: &[GameOsDmaMapping] = &[GameOsDmaMapping {
 /// method and the analysis.
 pub const DMA_MAP_CAPTURE: &str = "tests/micro/lv1_device_dma_map";
 
+/// The handler of hypercall 172 in one firmware's lv1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MmioMapHandler {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The address of the `map_device_mmio_region` handler.
+    pub handler: u32,
+}
+
+/// Each firmware whose lv1 image shows the handler, ascending.
+///
+/// The address is the entry of hypercall 172 in the live 4.93 hypercall
+/// table ([`super::table::LIVE_TABLE_HANDLERS`]).
+pub const MMIO_MAP_HANDLERS: &[MmioMapHandler] = &[MmioMapHandler {
+    firmware: "4.93",
+    handler: 0x306D64,
+}];
+
+/// The handler of the firmware version `firmware`, or `None` when no lv1
+/// image read shows it.
+pub fn mmio_map_handler(firmware: &str) -> Option<&'static MmioMapHandler> {
+    MMIO_MAP_HANDLERS
+        .iter()
+        .find(|handler| handler.firmware == firmware)
+}
+
+/// The r3 of `map_device_mmio_region` for a bus id above
+/// [`OPEN_DEVICE_BUS_MAX`]: `LV1_ILLEGAL_PARAMETER_VALUE` (-17), with r3
+/// marked in the high word [OFW-4.93 lv1 a:0x306ED8-0x306EE4].
+///
+/// Bit 32 marks r3, bit 33 r4, bit 34 r5, bit 35 r6 and bit 36 r7.
+pub const MMIO_MAP_BUS_RANGE_R3: u64 = 0x0000_0001_FFFF_FFEF;
+
+/// The r3 for bus id 0: `LV1_NO_ENTRY` (-6), with r3 marked
+/// [OFW-4.93 lv1 a:0x236420-0x236428] [OFW-4.93 lv1 a:0x237340-0x237390].
+pub const MMIO_MAP_NO_BUS_R3: u64 = 0x0000_0001_FFFF_FFFA;
+
+/// The r3 when the calling partition did not open the device:
+/// `LV1_WRONG_STATE` (-11), zero-extended
+/// [OFW-4.93 lv1 a:0x236534-0x236538] [OFW-4.93 lv1 a:0x237340-0x23734C].
+pub const MMIO_MAP_NOT_OPEN_R3: u64 = zero_extended(LV1_WRONG_STATE);
+
+/// The r3 for device 0 of bus 1, which the partition holds open:
+/// `LV1_ILLEGAL_PARAMETER_VALUE` (-17), with r5 marked
+/// [OFW-4.93 lv1 a:0x237394-0x2373AC].
+pub const MMIO_MAP_DEVICE_0_R3: u64 = 0x0000_0004_FFFF_FFEF;
+
+/// The r3 when no region of the device has the bus address:
+/// `LV1_ILLEGAL_PARAMETER_VALUE` (-17), with r5 marked
+/// [OFW-4.93 lv1 a:0x228CA4-0x228CAC] [OFW-4.93 lv1 a:0x237340-0x237390].
+pub const MMIO_MAP_NO_REGION_R3: u64 = 0x0000_0004_FFFF_FFEF;
+
+/// The r3 for a size of 0 or above the region's size:
+/// `LV1_ILLEGAL_PARAMETER_VALUE` (-17), with r6 marked
+/// [OFW-4.93 lv1 a:0x228DF4-0x228E00] [OFW-4.93 lv1 a:0x237340-0x237390].
+pub const MMIO_MAP_SIZE_R3: u64 = 0x0000_0008_FFFF_FFEF;
+
+/// The r3 for a page shift outside [`MMIO_MAP_PAGE_SHIFTS`]:
+/// `LV1_ILLEGAL_PARAMETER_VALUE` (-17), with r7 marked
+/// [OFW-4.93 lv1 a:0x228DE4-0x228DF0] [OFW-4.93 lv1 a:0x237340-0x237390].
+pub const MMIO_MAP_PAGE_SHIFT_R3: u64 = 0x0000_0010_FFFF_FFEF;
+
+/// The page shifts that the device's MMIO map function accepts
+/// [OFW-4.93 lv1 a:0x228D18-0x228D34].
+pub const MMIO_MAP_PAGE_SHIFTS: [u64; 4] = [12, 16, 20, 24];
+
+/// An MMIO region that lv1's init gives a device in one firmware.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MmioRegion {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The bus id of the region's device.
+    pub bus: u64,
+    /// The device id of the region's device.
+    pub device: u64,
+    /// The index of the region's slot in the device.
+    pub slot: u64,
+    /// The bus address of the region.
+    pub address: u64,
+    /// The size of the region, in bytes.
+    pub size: u64,
+}
+
+/// Each MMIO region of device 1 of bus 1, by firmware, in slot order.
+///
+/// lv1's init gives the 4.93 regions [OFW-4.93 lv1 a:0x3A9A60-0x3A9A9C].
+/// The capture [`MMIO_MAP_CAPTURE`] reads them in slots 0 to 2 of the
+/// device, and reads the other 5 slots empty.
+pub const MMIO_REGIONS: &[MmioRegion] = &[
+    MmioRegion {
+        firmware: "4.93",
+        bus: 1,
+        device: 1,
+        slot: 0,
+        address: 0x2400,
+        size: 0x200,
+    },
+    MmioRegion {
+        firmware: "4.93",
+        bus: 1,
+        device: 1,
+        slot: 1,
+        address: 0x301_0000,
+        size: 0x1_0000,
+    },
+    MmioRegion {
+        firmware: "4.93",
+        bus: 1,
+        device: 1,
+        slot: 2,
+        address: 0x381_0000,
+        size: 0x1_0000,
+    },
+];
+
+/// Whether a source gives every MMIO region of device `device` of bus
+/// `bus` at the firmware version `firmware`.
+pub fn mmio_regions_read(firmware: &str, bus: u64, device: u64) -> bool {
+    MMIO_REGIONS
+        .iter()
+        .any(|region| region.firmware == firmware && region.bus == bus && region.device == device)
+}
+
+/// The MMIO region of device `device` of bus `bus` whose bus address is
+/// `bus_address`, or `None` when the device has no such region.
+///
+/// The device's MMIO map function compares the address for equality
+/// [OFW-4.93 lv1 a:0x228C90-0x228C98].
+pub fn mmio_region(
+    firmware: &str,
+    bus: u64,
+    device: u64,
+    bus_address: u64,
+) -> Option<&'static MmioRegion> {
+    MMIO_REGIONS.iter().find(|region| {
+        region.firmware == firmware
+            && region.bus == bus
+            && region.device == device
+            && region.address == bus_address
+    })
+}
+
+/// The MMIO mapping that the console's lv1 made for one call of the
+/// GameOS kernel's boot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameOsMmioMapping {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The bus id of the call.
+    pub bus: u64,
+    /// The device id of the call.
+    pub device: u64,
+    /// The bus address of the call.
+    pub bus_address: u64,
+    /// The size of the call, in bytes.
+    pub size: u64,
+    /// The page shift of the call.
+    pub page_shift: u64,
+    /// The logical partition address that lv1 gave the call.
+    pub lpar_address: u64,
+}
+
+/// Each MMIO mapping of a kernel's boot call, by firmware.
+///
+/// The 4.93 row is the one game OS mapping of the region in slot 1 of
+/// device 1. The
+/// capture [`MMIO_MAP_CAPTURE`] finds it in the region's list, with the
+/// partition 2 at +8, the address at +48 and +80 and the length at +56.
+/// The page shift is the one that the kernel's wrapper sends
+/// [OFW-4.93 lv2_kernel a:0x800000000007D8B0].
+pub const GAME_OS_MMIO_MAPPINGS: &[GameOsMmioMapping] = &[GameOsMmioMapping {
+    firmware: "4.93",
+    bus: 1,
+    device: 1,
+    bus_address: 0x301_0000,
+    size: 0x1_0000,
+    page_shift: 12,
+    lpar_address: 0x4000_0007_0000,
+}];
+
+/// The console's record of the call that names `bus`, `device`,
+/// `bus_address`, `size` and `page_shift`, or `None` when no capture
+/// gives one.
+pub fn game_os_mmio_mapping(
+    firmware: &str,
+    bus: u64,
+    device: u64,
+    bus_address: u64,
+    size: u64,
+    page_shift: u64,
+) -> Option<&'static GameOsMmioMapping> {
+    GAME_OS_MMIO_MAPPINGS.iter().find(|row| {
+        row.firmware == firmware
+            && row.bus == bus
+            && row.device == device
+            && row.bus_address == bus_address
+            && row.size == size
+            && row.page_shift == page_shift
+    })
+}
+
+/// The console capture of the MMIO regions of device 1 of bus 1 and the
+/// mappings that lv1 holds in its second region.
+///
+/// The path is relative to the workspace root. Its README gives the
+/// method and the analysis.
+pub const MMIO_MAP_CAPTURE: &str = "tests/micro/lv1_device_mmio_map";
+
 #[cfg(test)]
 #[path = "tests/device_bus_open_tests.rs"]
 mod tests;
@@ -1372,3 +1691,11 @@ mod dma_map_tests;
 #[cfg(test)]
 #[path = "tests/device_bus_dma_map_console_tests.rs"]
 mod dma_map_console_tests;
+
+#[cfg(test)]
+#[path = "tests/device_bus_mmio_map_tests.rs"]
+mod mmio_map_tests;
+
+#[cfg(test)]
+#[path = "tests/device_bus_mmio_map_console_tests.rs"]
+mod mmio_map_console_tests;

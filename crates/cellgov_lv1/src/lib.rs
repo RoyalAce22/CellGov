@@ -62,8 +62,8 @@ pub use answer::{
 };
 pub use cost::cost;
 pub use group::device_bus::{
-    DeviceBusChange, DeviceBusState, DmaMapping, DmaRegion, OpenDevice, StorageBusOpen,
-    StorageDeviceOpen, StorageDevicePort,
+    DeviceBusChange, DeviceBusState, DmaMapping, DmaRegion, MmioMapping, OpenDevice,
+    StorageBusOpen, StorageDeviceOpen, StorageDevicePort,
 };
 pub use group::gpu::{GpuChange, GpuState};
 pub use group::interrupt::bitmap::{

@@ -9,6 +9,7 @@ use cellgov_mem::scheme::{HashedSurface, Stamp};
 use super::close;
 use super::dma_map::{self, DmaMapping};
 use super::dma_region::{self, DmaRegion};
+use super::mmio_map::{self, MmioMapping};
 use super::open::{self, OpenDevice, StorageBusOpen, StorageDeviceOpen};
 use crate::group::state::StateChange;
 use crate::group::table::Group;
@@ -21,6 +22,7 @@ pub(crate) const GROUP: Group = Group {
         close::HYPERCALLS,
         dma_region::HYPERCALLS,
         dma_map::HYPERCALLS,
+        mmio_map::HYPERCALLS,
     ],
     lanes: &[176..=191],
     hashed_surfaces: &[
@@ -52,12 +54,17 @@ pub(crate) const GROUP: Group = Group {
         HashedSurface {
             name: "the storage devices that the partition opened",
             source: Some(STORAGE_DEVICE_OPEN_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(34),
         },
         HashedSurface {
             name: "the event receive ports that lv1 connected to the storage devices",
             source: Some(STORAGE_DEVICE_PORT_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(34),
+        },
+        HashedSurface {
+            name: "the MMIO mappings that lv1 made for the partition",
+            source: Some(MMIO_MAPPING_SOURCE),
+            stamp: Stamp::Version(34),
         },
     ],
 };
@@ -91,6 +98,10 @@ pub(crate) const STORAGE_DEVICE_OPEN_SOURCE: u8 = 181;
 /// index in device order.
 pub(crate) const STORAGE_DEVICE_PORT_SOURCE: u8 = 182;
 
+/// The lane source of the MMIO mappings: one object for each mapping,
+/// keyed by its index in bus, device and bus address order.
+pub(crate) const MMIO_MAPPING_SOURCE: u8 = 183;
+
 /// The event receive port that lv1 connected to the partition's slot of
 /// one storage device.
 ///
@@ -121,7 +132,8 @@ impl LaneValue for StorageDevicePort {
 /// - the storage bus open that the partition holds;
 /// - the event receive port that lv1 connected to the storage bus;
 /// - each storage device open that the partition holds;
-/// - the event receive port that lv1 connected to each storage device.
+/// - the event receive port that lv1 connected to each storage device;
+/// - each mapping that lv1 made in an MMIO region for the partition.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeviceBusState {
     open: BTreeSet<OpenDevice>,
@@ -131,9 +143,23 @@ pub struct DeviceBusState {
     storage_bus_port: Option<u64>,
     storage_devices: BTreeMap<u64, StorageDeviceOpen>,
     storage_device_ports: BTreeMap<u64, StorageDevicePort>,
+    mmio_mappings: BTreeSet<MmioMapping>,
 }
 
 impl DeviceBusState {
+    /// Each MMIO mapping, in bus, device and bus address order.
+    pub fn mmio_mappings(&self) -> impl Iterator<Item = MmioMapping> + '_ {
+        self.mmio_mappings.iter().copied()
+    }
+
+    /// The partition's MMIO mapping of the region at `bus_address` of
+    /// device `device` of bus `bus`, if any.
+    pub fn mmio_mapping(&self, bus: u64, device: u64, bus_address: u64) -> Option<MmioMapping> {
+        self.mmio_mappings().find(|mapping| {
+            mapping.bus == bus && mapping.device == device && mapping.bus_address == bus_address
+        })
+    }
+
     /// The port that lv1 connected to the partition's slot of storage
     /// device `device`, if any.
     pub fn storage_device_port(&self, device: u64) -> Option<StorageDevicePort> {
@@ -223,8 +249,13 @@ impl DeviceBusState {
             DeviceBusChange::StorageDevicePortConnected(port) => {
                 self.storage_device_ports.insert(port.device, port);
             }
+            DeviceBusChange::MmioRegionMapped(mapping) => {
+                self.mmio_mappings.insert(mapping);
+            }
             DeviceBusChange::Closed(device) => {
                 self.open.remove(&device);
+                self.mmio_mappings
+                    .retain(|mapping| mapping.bus != device.bus || mapping.device != device.device);
                 self.mappings
                     .retain(|mapping| mapping.bus != device.bus || mapping.device != device.device);
                 self.regions
@@ -264,10 +295,16 @@ impl DeviceBusState {
                 sum.wrapping_add(lanes::value_term(STORAGE_DEVICE_OPEN_SOURCE, index, &open))
             },
         );
-        (0u64..)
-            .zip(self.storage_device_ports())
-            .fold(storage_devices, |sum, (index, port)| {
+        let storage_device_ports = (0u64..).zip(self.storage_device_ports()).fold(
+            storage_devices,
+            |sum, (index, port)| {
                 sum.wrapping_add(lanes::value_term(STORAGE_DEVICE_PORT_SOURCE, index, &port))
+            },
+        );
+        (0u64..)
+            .zip(self.mmio_mappings())
+            .fold(storage_device_ports, |sum, (index, mapping)| {
+                sum.wrapping_add(lanes::value_term(MMIO_MAPPING_SOURCE, index, &mapping))
             })
     }
 }
@@ -291,8 +328,11 @@ pub enum DeviceBusChange {
     /// The call connected this event receive port to the partition's slot
     /// of a storage device.
     StorageDevicePortConnected(StorageDevicePort),
+    /// lv1 made this MMIO mapping for the partition.
+    MmioRegionMapped(MmioMapping),
     /// The call closed this device. lv1 removed each DMA mapping of the
-    /// device and then freed each DMA region of the device.
+    /// device, freed each DMA region of the device and removed each MMIO
+    /// mapping of the device.
     Closed(OpenDevice),
 }
 
@@ -329,3 +369,7 @@ mod storage_device_open_hash_tests;
 #[cfg(test)]
 #[path = "tests/storage_device_port_hash_tests.rs"]
 mod storage_device_port_hash_tests;
+
+#[cfg(test)]
+#[path = "tests/mmio_map_hash_tests.rs"]
+mod mmio_map_hash_tests;

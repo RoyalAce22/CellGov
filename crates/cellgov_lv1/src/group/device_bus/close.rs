@@ -76,8 +76,9 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// - for device 0, 1 or 2 of bus 1 that is open, 0, and the answer
 ///   closes the device.
 ///
-/// The close of a device removes the device's DMA mappings and frees its
-/// DMA regions. The close of device 0 also carries the teardown of the
+/// The close of a device removes the device's DMA mappings, frees its
+/// DMA regions and removes its MMIO mappings. The close of device 0 also
+/// carries the teardown of the
 /// network device, which [`NetworkChange::TornDown`] describes.
 ///
 /// The model makes these assumptions about device 0:
