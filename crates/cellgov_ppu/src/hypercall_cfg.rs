@@ -96,11 +96,18 @@ impl Code {
     /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
     /// [PPC-Book3 p:30 s:4.2.6.2] The offset real mode mechanism compares EA bits 2:63 with the RMLR limit and ORs them with the RMOR offset.
     pub(crate) fn real_aliases(&self, address: u64) -> impl Iterator<Item = u64> + '_ {
-        let real = address & !REAL_MODE_IGNORED_EA;
-        (0..4u64)
-            .map(move |bits| real | (bits << REAL_MODE_IGNORED_EA.trailing_zeros()))
-            .filter(|&alias| self.holds(alias))
+        real_forms(address).filter(|&alias| self.holds(alias))
     }
+}
+
+/// The four addresses that have the real address of `address`: `address`
+/// with each value of EA bits 0 and 1.
+///
+/// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
+/// [PPC-Book3 p:30 s:4.2.6.2] The offset real mode mechanism compares EA bits 2:63 with the RMLR limit and ORs them with the RMOR offset.
+pub(crate) fn real_forms(address: u64) -> impl Iterator<Item = u64> {
+    let real = address & !REAL_MODE_IGNORED_EA;
+    (0..4u64).map(move |bits| real | (bits << REAL_MODE_IGNORED_EA.trailing_zeros()))
 }
 
 /// What one word does to r11 on the path that falls through it.

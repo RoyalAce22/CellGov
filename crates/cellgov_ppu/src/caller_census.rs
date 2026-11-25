@@ -1033,3 +1033,11 @@ mod hypercall_rfid_lost_srr0_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_join_drop_tests.rs"]
 mod hypercall_join_drop_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_jump_table_alias_tests.rs"]
+mod hypercall_jump_table_alias_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_jump_table_entry_tests.rs"]
+mod hypercall_jump_table_entry_tests;

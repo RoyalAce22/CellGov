@@ -13,7 +13,7 @@ use super::lost::Origins;
 use super::real_mode::{real_mode_entries, Switches};
 use super::toc::{function_tocs, FunctionToc, FunctionWords};
 use crate::caller_census::{CallerScanError, JoinDrop};
-use crate::hypercall_cfg::{low_word, Code, CodeSegment};
+use crate::hypercall_cfg::{low_word, real_forms, Code, CodeSegment};
 use crate::instruction::PpuInstruction;
 
 /// Most entries the bound reads from one relative jump table. The scan
@@ -83,6 +83,65 @@ impl FileSegment<'_> {
             })
     }
 }
+
+/// The mode of the code that reads a relative jump table and branches
+/// through it: the bits of an address that the load and the `bcctr` use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Width {
+    /// 64-bit mode, which uses all 64 bits.
+    Full,
+    /// 32-bit mode, which uses only the low-order 32 bits.
+    Low,
+}
+
+impl Width {
+    /// The words of `code` that a `bcctr` in this mode can enter with
+    /// `target` in CTR: each word at the real address of the target word.
+    ///
+    /// The words hold the target word itself, which a `bcctr` with
+    /// translation enters, and each word that a `bcctr` in real mode
+    /// enters.
+    ///
+    /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
+    /// [PPC-Book1 p:20 s:2.4.1] In 32-bit mode a branch sets the high-order 32 bits of its target address to 0.
+    /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
+    fn words(self, code: &Code, target: u64) -> impl Iterator<Item = u64> + '_ {
+        let word = match self {
+            Self::Full => target & !0b11,
+            Self::Low => low_word(target),
+        };
+        code.real_aliases(word)
+    }
+
+    /// The address of the entry `index` of a relative jump table at
+    /// `start`, which is `start` plus 4 times `index`.
+    ///
+    /// In 32-bit mode the sum wraps in the low-order 32 bits, and the
+    /// high-order 32 bits stay those of `start`. For a start at the low
+    /// word of a base, these bits hold only EA bits 0 and 1.
+    ///
+    /// [PPC-Book1 p:15 s:1.12.2] Effective address arithmetic wraps from 2^64 - 1 to 0 in 64-bit mode, and from 2^32 - 1 to 0 in 32-bit mode.
+    fn entry(self, start: u64, index: u64) -> u64 {
+        let at = start.wrapping_add(index * 4);
+        match self {
+            Self::Full => at,
+            Self::Low => (start & !LOW_HALF) | (at & LOW_HALF),
+        }
+    }
+
+    /// Whether `word` is one of the entries `0..=index` of a relative
+    /// jump table at `start`, as [`Self::entry`] gives them.
+    fn in_run(self, start: u64, index: u64, word: u64) -> bool {
+        let offset = word.wrapping_sub(start);
+        match self {
+            Self::Full => offset <= index * 4,
+            Self::Low => ((word ^ start) & !LOW_HALF) == 0 && (offset & LOW_HALF) <= index * 4,
+        }
+    }
+}
+
+/// The low-order 32 bits of an address.
+const LOW_HALF: u64 = 0xFFFF_FFFF;
 
 /// The result of [`indirect_entries`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -274,10 +333,10 @@ pub(crate) fn indirect_entries(
 }
 
 /// The address of the word after each `bcctr` of `code` that does not
-/// link. A relative jump table can start there.
+/// link, in each [`Width`]. A relative jump table can start there.
 ///
 /// [PPC-Book1 p:25 s:2.4] `bcctr` branches to the address in CTR.
-fn tables_after_bcctr(code: &Code) -> impl Iterator<Item = u64> + '_ {
+fn tables_after_bcctr(code: &Code) -> impl Iterator<Item = (u64, Width)> + '_ {
     code.segments()
         .iter()
         .flat_map(CodeSegment::addressed)
@@ -288,6 +347,7 @@ fn tables_after_bcctr(code: &Code) -> impl Iterator<Item = u64> + '_ {
             )
         })
         .filter_map(|(address, _)| address.checked_add(4))
+        .flat_map(|start| [(start, Width::Full), (start, Width::Low)])
 }
 
 /// The bound as it grows, without the real-mode entries.
@@ -301,10 +361,10 @@ pub(super) struct Bound<'a> {
     real_named: BTreeSet<u64>,
     /// The [`IndirectBound::low_named`].
     low_named: BTreeSet<u64>,
-    /// The addresses that a relative jump table can start at, which the
-    /// next call to [`Self::jump_tables`] reads. A later round can add
-    /// an address again.
-    tables: BTreeSet<u64>,
+    /// The addresses that a relative jump table can start at, with the
+    /// mode that reads it, which the next call to [`Self::jump_tables`]
+    /// reads. A later round can add an address again.
+    tables: BTreeSet<(u64, Width)>,
     /// The targets of the `bclr` words, from the TOCs of the latest
     /// round.
     targets: BTreeMap<u64, BTreeSet<u64>>,
@@ -443,11 +503,18 @@ impl Bound<'_> {
     ///   address, also when no segment holds the address itself;
     /// - an indirect branch in 32-bit mode can reach the word at its
     ///   low-order 32 bits;
-    /// - a relative jump table can start at it.
+    /// - when the address is 4-aligned, a relative jump table can start
+    ///   at each address with the real address of one of these two:
+    ///   - the named address, which 64-bit code reads;
+    ///   - its low-order 32 bits, which 32-bit code reads.
+    ///
+    /// Real-mode code reads at the real address. A table start needs a
+    /// word of the file bytes.
     ///
     /// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00, and `bcctr` reaches CTR0:61 || 0b00.
     /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
     /// [PPC-Book1 p:20 s:2.4.1] In 32-bit mode a branch sets the high-order 32 bits of its target address to 0.
+    /// [PPC-Book1 p:15 s:1.12.2] In 32-bit mode the high-order 32 bits of a computed effective address are set to 0 for a data access.
     fn name(&mut self, address: u64) {
         self.enter(address);
         let code = self.code;
@@ -456,14 +523,15 @@ impl Bound<'_> {
         if code.holds(low) {
             self.low_named.insert(low);
         }
-        if address.is_multiple_of(4)
-            && self
-                .files
-                .iter()
-                .any(|file| file.read::<4>(address).is_some())
-        {
-            self.tables.insert(address);
+        if !address.is_multiple_of(4) {
+            return;
         }
+        let files = self.files;
+        let starts = [(address, Width::Full), (low, Width::Low)]
+            .into_iter()
+            .flat_map(|(read, width)| real_forms(read).map(move |start| (start, width)))
+            .filter(|&(start, _)| files.iter().any(|file| file.read::<4>(start).is_some()));
+        self.tables.extend(starts);
     }
 
     /// Does these steps for the code of `segment`:
@@ -540,36 +608,41 @@ impl Bound<'_> {
     /// Adds each target of each relative jump table that starts at an
     /// address of [`Self::tables`], and empties it.
     ///
-    /// A table starts at a named address or at the word after a `bcctr`
-    /// that does not link. Each entry is a 32-bit offset from the
-    /// table's start, and its target is the word at the start plus the
-    /// offset, with bits 62 and 63 at 0. The run of entries ends at the
-    /// first entry whose target:
-    /// - is no word of the code; or
-    /// - is in the run itself.
+    /// A table starts where [`Self::name`] states, or at the word after a
+    /// `bcctr` that does not link. Each entry is a 32-bit offset from the
+    /// table's start. Its targets are the words that [`Width::words`]
+    /// gives for the start plus the offset. The run of entries ends at
+    /// the first entry that has no target outside the run itself.
+    ///
+    /// When real-mode code reads a table, the EA bits 0 and 1 of the
+    /// start can differ from those of the base. The start plus the offset
+    /// then has the real address of the target that the code computes.
+    /// The scan reads each entry at each address with the real address of
+    /// the entry, because real-mode code reads the entry there.
     ///
     /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
+    /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
     fn jump_tables(&mut self) -> Result<(), CallerScanError> {
         let tables = std::mem::take(&mut self.tables);
-        for start in tables {
-            self.jump_table(start)?;
+        for (start, width) in tables {
+            self.jump_table(start, width)?;
         }
         Ok(())
     }
 
-    /// Adds each target of the relative jump table at `start`.
-    fn jump_table(&mut self, start: u64) -> Result<(), CallerScanError> {
+    /// Adds each target of the relative jump table at `start`, which code
+    /// in the mode `width` reads.
+    fn jump_table(&mut self, start: u64, width: Width) -> Result<(), CallerScanError> {
+        let code = self.code;
         for index in 0..=JUMP_TABLE_LIMIT {
-            let Some(at) = start.checked_add(index * 4) else {
-                return Ok(());
-            };
+            let at = width.entry(start, index);
             let targets: Vec<u64> = self
                 .files
                 .iter()
-                .filter_map(|file| file.read::<4>(at))
+                .flat_map(|file| real_forms(at).filter_map(move |form| file.read::<4>(form)))
                 .map(|bytes| start.wrapping_add_signed(i64::from(i32::from_be_bytes(bytes))))
-                .map(|target| target & !0b11)
-                .filter(|word| !(start..=at).contains(word) && self.code.holds(*word))
+                .flat_map(|target| width.words(code, target))
+                .filter(|&word| !width.in_run(start, index, word))
                 .collect();
             if targets.is_empty() {
                 return Ok(());

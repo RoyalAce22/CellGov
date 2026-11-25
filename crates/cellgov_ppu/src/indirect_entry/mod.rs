@@ -16,8 +16,11 @@
 //!   The bound names both addresses;
 //! - a constant that the code builds in a GPR on a path of fall-throughs
 //!   and direct branches;
-//! - an entry of a relative jump table: a 32-bit offset from a named
-//!   address, or from the word after a `bcctr`.
+//! - an entry of a relative jump table: a 32-bit offset from the table's
+//!   start. A table can start at the word after a `bcctr`, or where code
+//!   reads with a named address as its base. 32-bit code reads at the
+//!   low-order 32 bits of the base, and real-mode code reads at its real
+//!   address.
 //!
 //! An indirect branch ignores bits 62 and 63 of its target. So for each
 //! named address, the bound holds the word at the address with those
@@ -44,8 +47,9 @@
 //! mode can reach the word at the real address of a named address. For
 //! each doubleword and each 32-bit word of the file bytes, and for each
 //! constant that the code builds, the bound keeps that word. It keeps the
-//! word also when no segment holds the address itself. A jump table entry
-//! names only the word at the address itself.
+//! word also when no segment holds the address itself. For a jump table
+//! entry it keeps each word at the real address of the target, whatever
+//! mode the `bcctr` runs in.
 //!
 //! The scan cannot tell a code address from another value of the same
 //! size. So each 32-bit word names an address, also a count or a flag
