@@ -503,7 +503,9 @@
 //!
 //! Both vaddrs are past the 0xCE88 file bytes of the data segment. So the
 //! system manager sets them while it runs, and no image read gives their
-//! values. CellGov holds none of the three inputs of this reply.
+//! values. The 4.93 kernel keeps the reply's fields in its system manager
+//! object, and a console capture of that object gives the reply; see
+//! [`GAME_OS_SYSTEM_MANAGER_REPLIES`].
 //!
 //! ## The dispatcher manager
 //!
@@ -1599,6 +1601,115 @@ pub const fn system_manager_handler_index(service: u16) -> u8 {
 /// function's table holds its handler; see [`crate::lv1::uart`].
 pub const GAME_OS_FIRST_SYSTEM_MANAGER_SERVICE: u16 = 9;
 
+/// The header that the system manager writes to its port before a reply
+/// of the service id `service`, with `payload_bytes` payload bytes and
+/// the tag `tag`.
+///
+/// The send function gives the header builder the low byte of its service
+/// id, its tag, and its payload count plus its r7
+/// [OFW-4.93 lv1 a:0x44C4CC-0x44C510]. The builder sets these fields
+/// [OFW-4.93 lv1 a:0x44BA78-0x44BAA8]:
+/// - the version 1 at +0 and the size 16 at +1;
+/// - the count as a word at +4;
+/// - the service id as a halfword at +8;
+/// - the tag as a word at +12;
+/// - 0 in each other byte.
+///
+/// The send function then writes the header and the payload with one
+/// write [OFW-4.93 lv1 a:0x44C514-0x44C558].
+pub const fn system_manager_reply_header(
+    service: u8,
+    payload_bytes: u32,
+    tag: u32,
+) -> [u8; SYSTEM_MANAGER_HEADER_BYTES as usize] {
+    let n = payload_bytes.to_be_bytes();
+    let t = tag.to_be_bytes();
+    [
+        1, 0x10, 0, 0, n[0], n[1], n[2], n[3], 0, service, 0, 0, t[0], t[1], t[2], t[3],
+    ]
+}
+
+/// The offset of the payload byte that the handler of service id 9
+/// branches on [OFW-4.93 lv1 a:0x44DEA0].
+pub const SYSTEM_MANAGER_SELECTOR_OFFSET: usize = 1;
+
+/// The console capture of the reply fields that the 4.93 kernel kept from
+/// the system manager's reply of service id 0x0B.
+///
+/// The path is relative to the workspace root. Its README gives the
+/// method and the kernel addresses.
+pub const SYSTEM_MANAGER_REPLY_CAPTURE: &str = "tests/micro/lv2_system_manager_reply";
+
+/// The system manager's reply to one request of the GameOS kernel, at one
+/// firmware.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameOsSystemManagerReply {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The index of the request handler; see
+    /// [`system_manager_handler_index`].
+    pub handler: u8,
+    /// The payload byte at [`SYSTEM_MANAGER_SELECTOR_OFFSET`].
+    pub selector: u8,
+    /// The service id of the reply.
+    pub reply_service: u8,
+    /// The payload bytes of the reply.
+    pub payload: &'static [u8],
+}
+
+/// Each system manager reply that a source gives.
+///
+/// The handler of service id 9 replies to payload byte 1 = 2 with service
+/// id 0x0B, its tag and 16 payload bytes
+/// [OFW-4.93 lv1 a:0x44DEA8] [OFW-4.93 lv1 a:0x44DF10-0x44DF24]. Its r7
+/// is 0, so the header counts 16. The function at
+/// [OFW-4.93 lv1 a:0x44BAF4-0x44BB14] builds these payload bytes:
+/// - byte 0 is 2;
+/// - bytes 1 and 2 are bytes 2 and 3 at the system manager's vaddr
+///   0xC000D35B [OFW-4.93 lv1 a:0x45242C-0x452440];
+/// - byte 3 is 0;
+/// - bytes 4 to 7 are the word at vaddr 0xC000D2D8
+///   [OFW-4.93 lv1 a:0x44DEF4] [OFW-4.93 lv1 a:0x44DF08];
+/// - bytes 8 to 15 are the doubleword at +96 of the partition's object
+///   [OFW-4.93 lv1 a:0x44DEE0-0x44DEF0].
+///
+/// The capture [`SYSTEM_MANAGER_REPLY_CAPTURE`] gives bytes 1, 2 and 4 to
+/// 15. No image read gives each of them:
+/// - The system controller setup stores the word at 0xC000D2D8
+///   [OFW-4.93 lv1 a:0x453DE4-0x453DF8]. The word is bytes 4 to 7 of a
+///   reply of the system controller on `/dev/sc1`
+///   [OFW-4.93 lv1 a:0x4547E8-0x454810] [OFW-4.93 lv1 a:0x453C38-0x453C4C].
+/// - The partition's constructor sets +96 to 7 when a byte of system
+///   manager state is 0 [OFW-4.93 lv1 a:0x4501BC-0x4501FC].
+/// - Bytes 1 and 2 hold the byte at +24 of that object and a byte of
+///   system manager state [OFW-4.93 lv1 a:0x44F3D0-0x44F3DC]. The
+///   constructor sets +24 to 1 [OFW-4.93 lv1 a:0x4501D4].
+pub const GAME_OS_SYSTEM_MANAGER_REPLIES: &[GameOsSystemManagerReply] =
+    &[GameOsSystemManagerReply {
+        firmware: "4.93",
+        handler: 9,
+        selector: 2,
+        reply_service: 0x0B,
+        payload: &[2, 1, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 7],
+    }];
+
+/// The reply to a request of service id `service` whose payload byte at
+/// [`SYSTEM_MANAGER_SELECTOR_OFFSET`] is `selector`, at the firmware
+/// version `firmware`, or `None` when no source gives it.
+///
+/// The receive function selects the handler by
+/// [`system_manager_handler_index`].
+pub fn game_os_system_manager_reply(
+    firmware: &str,
+    service: u16,
+    selector: u8,
+) -> Option<&'static GameOsSystemManagerReply> {
+    let handler = system_manager_handler_index(service);
+    GAME_OS_SYSTEM_MANAGER_REPLIES
+        .iter()
+        .find(|row| row.firmware == firmware && row.handler == handler && row.selector == selector)
+}
+
 #[cfg(test)]
 #[path = "tests/uart_tests.rs"]
 mod tests;
@@ -1654,3 +1765,11 @@ mod shadow_tests;
 #[cfg(test)]
 #[path = "tests/uart_system_manager_tests.rs"]
 mod system_manager_tests;
+
+#[cfg(test)]
+#[path = "tests/uart_system_manager_reply_tests.rs"]
+mod system_manager_reply_tests;
+
+#[cfg(test)]
+#[path = "tests/uart_system_manager_reply_console_tests.rs"]
+mod system_manager_reply_console_tests;
