@@ -1,0 +1,20 @@
+[test]
+name = "ppu_issue_reload_return"
+
+# A hardware probe of when a touch reload evicts its victim from the L1
+# data cache, with 0 to 32 other touch reloads on their way, and of which
+# line it evicts when a hit moves the replacement tree before it returns,
+# timed with mftb around loads of the victim. The console capture is the
+# answer; ppu/main.c's header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 192 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 192 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

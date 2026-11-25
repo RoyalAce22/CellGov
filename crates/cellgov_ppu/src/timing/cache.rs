@@ -15,6 +15,9 @@ use cellgov_ps3_abi::hw::ppu_mmu::SMALL_PAGE_LOG2;
 #[path = "tests/cancelled_touch_tests.rs"]
 mod cancelled_touch_tests;
 #[cfg(test)]
+#[path = "tests/reload_drop_tests.rs"]
+mod reload_drop_tests;
+#[cfg(test)]
 #[path = "tests/reload_queue_tests.rs"]
 mod reload_queue_tests;
 #[cfg(test)]
@@ -180,6 +183,11 @@ impl<const SETS: usize, const WAYS: usize> Tags<SETS, WAYS> {
         } else {
             self.victim(set)
         };
+        self.fill_way(set, way, line)
+    }
+
+    /// Place `line` in way `way` of `set`, and return the line it evicted.
+    fn fill_way(&mut self, set: usize, way: usize, line: u64) -> Option<u64> {
         let old = self.holds(set, way).then_some(self.lines[set][way]);
         self.lines[set][way] = line;
         self.valid[set] |= 1 << way;
@@ -245,6 +253,15 @@ const PAGE_LINES: usize = (1 << SMALL_PAGE_LOG2) / k::PPU_CACHE_LINE_BYTES as us
 ///
 /// [CBE-Handbook p:137 s:6.1.3.7] The DCache tag array is updated after the reload is written to the DCache.
 ///
+/// The documents do not say whether the PPE picks the way a reload
+/// takes at the miss or at the return. A reload takes its way when it
+/// queues, and the tree then points away from that way. A hit on the
+/// line in that way before the reload returns does not keep the line.
+///
+/// In the `ppu_issue_reload_return` capture, a hit on the line that a
+/// touch reload will evict, before the reload returns, does not make a
+/// later load of the line faster.
+///
 /// In the `ppu_issue_touch_reload` capture, 8 touches visit the same 8
 /// lines of one L1 set on each pass. Their checks of the L1 come before
 /// their reloads return, so 3 of the 8 lines stay from the pass before.
@@ -253,6 +270,12 @@ const PAGE_LINES: usize = (1 << SMALL_PAGE_LOG2) / k::PPU_CACHE_LINE_BYTES as us
 struct L1 {
     tags: Tags<{ k::PPU_L1D_SETS }, { k::PPU_L1D_WAYS }>,
     /// The reloads that have not written their line, oldest first.
+    ///
+    /// [CBE-Handbook p:135 s:6.1] The L1 data cache has an 8-entry load-miss queue that the two threads share.
+    ///
+    /// The documents give no limit for touch reloads, and a touch reload
+    /// takes an entry here. The PPE's limit for the two together is not
+    /// known. CellGov uses 32, the touches that [`LINE_CYCLES`] keeps.
     reloads: [Reload; LINE_CYCLES],
     /// How many entries of `reloads` are in use.
     pending: usize,
@@ -264,12 +287,15 @@ struct Reload {
     line: Line,
     /// The cycle the reload writes its line.
     at: u64,
+    /// The way of its set that the reload writes.
+    way: usize,
 }
 
 impl Reload {
     const EMPTY: Self = Self {
         line: Line { index: 0, real: 0 },
         at: 0,
+        way: 0,
     };
 }
 
@@ -307,8 +333,8 @@ impl L1 {
     /// writes first.
     fn settle(&mut self, t: u64) {
         while let Some(i) = self.first_back(t) {
-            let line = self.take(i).line;
-            self.write(line);
+            let r = self.take(i);
+            self.write_reload(r);
         }
     }
 
@@ -348,12 +374,15 @@ impl L1 {
     }
 
     /// Queues at cycle `t` a reload of `line` that writes the line at
-    /// cycle `at`.
+    /// cycle `at`. The copy of its real line that another set holds goes
+    /// at once.
+    ///
+    /// [CBE-Handbook p:138 s:6.1.3.10] The copy at the other congruence class is invalidated, and then the data comes in from the L2.
     ///
     /// When the table of reloads is full, the reload that returns first
     /// writes its line at once.
     fn fill(&mut self, t: u64, line: Line, at: u64) {
-        self.settle(t);
+        self.drop_alias(t, line);
         self.forget(line.real);
         if at <= t {
             self.write(line);
@@ -361,21 +390,52 @@ impl L1 {
         }
         if self.pending == LINE_CYCLES {
             let first = self.first_back(u64::MAX).unwrap_or(0);
-            let early = self.take(first).line;
-            self.write(early);
+            let early = self.take(first);
+            self.write_reload(early);
         }
-        self.reloads[self.pending] = Reload { line, at };
+        let way = self.claim_way(Self::set_of(line));
+        self.reloads[self.pending] = Reload { line, at, way };
         self.pending += 1;
     }
 
-    /// Place `line` in the set of its effective line.
+    /// The way of `set` that a new line takes: a way that holds no line
+    /// and that no reload takes, or else the tree's victim. The tree then
+    /// points away from that way.
+    fn claim_way(&mut self, set: usize) -> usize {
+        let taken = self.reloads[..self.pending]
+            .iter()
+            .filter(|r| Self::set_of(r.line) == set)
+            .fold(self.tags.valid[set], |ways, r| ways | 1 << r.way);
+        let free = (!taken).trailing_zeros() as usize;
+        let way = if free < k::PPU_L1D_WAYS {
+            free
+        } else {
+            self.tags.victim(set)
+        };
+        self.tags.touch(set, way);
+        way
+    }
+
+    /// Write reload `r`'s line into the way it took.
+    ///
+    /// The L1 first drops the copy of its real line that another set holds.
+    ///
+    /// [CBE-Handbook p:138 s:6.1.3.10] A line found at the other congruence class is invalidated, and the data from the L2 is placed at the congruence class of the effective address.
+    fn write_reload(&mut self, r: Reload) {
+        self.drop_tag(r.line.real);
+        self.tags.fill_way(Self::set_of(r.line), r.way, r.line.real);
+    }
+
+    /// Place `line` in the set of its effective line at once.
     ///
     /// The L1 first drops the copy of its real line that another set holds.
     ///
     /// [CBE-Handbook p:138 s:6.1.3.10] A line found at the other congruence class is invalidated, and the data from the L2 is placed at the congruence class of the effective address.
     fn write(&mut self, line: Line) {
         self.drop_tag(line.real);
-        self.tags.fill_in(Self::set_of(line), line.real);
+        let set = Self::set_of(line);
+        let way = self.claim_way(set);
+        self.tags.fill_way(set, way, line.real);
     }
 
     /// Drop real line `real` from the set that holds it.
@@ -771,8 +831,9 @@ impl Caches {
     /// holds, and its own reload then holds that set. A touch of a line
     /// that an earlier touch still brings waits for no set and holds none.
     ///
-    /// The touch checks the L1 when it runs. Its reload writes the line
-    /// into the L1 when the line arrives, and then updates the tree.
+    /// The touch checks the L1 when it runs. Its reload takes a way of the
+    /// set at once, and writes the line into that way when the line
+    /// arrives.
     ///
     /// [CBE-Handbook p:145 s:6.1.6.2] A touch that reloads a cache line updates the replacement information of the cache.
     pub(crate) fn touch(&mut self, t: u64, ea: u64, ra: Option<u64>) {

@@ -98,3 +98,19 @@ fn a_reload_past_the_tables_size_writes_the_first_returning_line_at_once() {
     assert_eq!(victim_after(LINE_CYCLES as u64 - 1), Level::L1);
     assert_eq!(victim_after(LINE_CYCLES as u64), Level::L2);
 }
+
+/// [CBE-Handbook p:138 s:6.1.3.10] The copy at the other congruence class is invalidated, and then the data comes in from the L2.
+#[test]
+fn a_miss_through_an_alias_drops_the_other_class_copy_before_its_reload_returns() {
+    let mut caches = Caches::new();
+    caches.load_queued(0, at(LINE_A), false);
+    let alias = Operand {
+        ea: LINE_A + SET_STRIDE / 2,
+        ..at(LINE_A)
+    };
+    assert_eq!(caches.load_queued(SETTLED, alias, false).0, Level::L2);
+    assert_eq!(
+        caches.load_queued(SETTLED + 1, at(LINE_A), false).0,
+        Level::L2
+    );
+}

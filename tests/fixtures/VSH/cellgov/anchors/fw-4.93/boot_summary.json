@@ -36,7 +36,7 @@
       "class": "at-least"
     },
     "lwarx": {
-      "value": 70841,
+      "value": 70840,
       "class": "at-least"
     },
     "lwmutex_acquires": {
@@ -112,7 +112,7 @@
       "class": "at-least"
     },
     "stwcx": {
-      "value": 70840,
+      "value": 70839,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {
@@ -243,7 +243,7 @@
     },
     "635": {
       "hits": 1,
-      "first_hit": 2295765094
+      "first_hit": 2295765130
     },
     "650": {
       "hits": 1,
@@ -267,7 +267,7 @@
     },
     "867": {
       "hits": 4,
-      "first_hit": 2294977292
+      "first_hit": 2294977328
     },
     "873": {
       "hits": 3,

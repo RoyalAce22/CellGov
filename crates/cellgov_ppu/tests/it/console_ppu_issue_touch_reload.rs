@@ -132,7 +132,7 @@ pub(crate) fn assert_within(k: usize, cellgov: f64, console: f64, gap: f64) {
 }
 
 #[test]
-fn a_second_touch_after_the_l1_copy_left_brings_the_line_no_earlier_than_the_first() {
+fn a_second_touch_after_eight_touches_in_its_l1_set_brings_the_line_no_earlier_than_the_first() {
     let w = console_words();
     let (touch, retouch) = (cellgov_cycles(0), cellgov_cycles(2));
     let (console_touch, console_retouch) = (console_cycles(&w, 0), console_cycles(&w, 2));

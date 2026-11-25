@@ -66,6 +66,7 @@ mod console_ppu_issue_page_cross_alias;
 mod console_ppu_issue_priority;
 mod console_ppu_issue_quickened_forms;
 mod console_ppu_issue_range_registers;
+mod console_ppu_issue_reload_return;
 mod console_ppu_issue_sector_cross;
 mod console_ppu_issue_shared;
 mod console_ppu_issue_sibling_rate;
