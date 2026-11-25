@@ -19,7 +19,7 @@ Columns:
 | executed | 382 |
 | refused | 2 |
 | with a reference file | 394 |
-| with a console case | 370 |
+| with a console case | 372 |
 | reached by an open-result set | 36 |
 | exercised by the titles | 250 |
 | exercised with no reference file | 0 |
@@ -33,7 +33,7 @@ The census read 4 title(s), 7820066 PPU word(s).
 | `instruction:add` | executes | yes | `add.json` | 168 | - | 84604 |
 | `instruction:addc` | executes | yes | `addc.json` | 167 | - | 0 |
 | `instruction:adde` | executes | yes | `adde.json` | 260 | - | 70 |
-| `instruction:addi` | executes | yes | `addi.json` | 510 | - | 859238 |
+| `instruction:addi` | executes | yes | `addi.json` | 514 | - | 859238 |
 | `instruction:addic` | executes | yes | `addic.json` | 115 | - | 42 |
 | `instruction:addic.` | executes | yes | `addic_dot.json` | 115 | - | 213 |
 | `instruction:addis` | executes | yes | `addis.json` | 50 | - | 26811 |
@@ -43,10 +43,10 @@ The census read 4 title(s), 7820066 PPU word(s).
 | `instruction:andc` | executes | yes | `andc.json` | 32 | - | 487 |
 | `instruction:andi.` | executes | yes | `andi_dot.json` | 45 | - | 19 |
 | `instruction:andis.` | executes | yes | `andis_dot.json` | 45 | - | 0 |
-| `instruction:b` | executes | yes | `b.json` | 0 | - | 481148 |
-| `instruction:bc` | executes | yes | `bc.json` | 2 | - | 473848 |
-| `instruction:bcctr` | executes | yes | `bcctr.json` | 3 | - | 45250 |
-| `instruction:bclr` | executes | yes | `bclr.json` | 0 | - | 99068 |
+| `instruction:b` | executes | yes | `b.json` | 2 | - | 481148 |
+| `instruction:bc` | executes | yes | `bc.json` | 9 | - | 473848 |
+| `instruction:bcctr` | executes | yes | `bcctr.json` | 5 | - | 45250 |
+| `instruction:bclr` | executes | yes | `bclr.json` | 1 | - | 99068 |
 | `instruction:cmp` | executes | yes | `cmp.json` | 48 | - | 82440 |
 | `instruction:cmpi` | executes | yes | `cmpi.json` | 106 | - | 302589 |
 | `instruction:cmpl` | executes | yes | `cmpl.json` | 48 | - | 30680 |
@@ -153,7 +153,7 @@ The census read 4 title(s), 7820066 PPU word(s).
 | `instruction:mfcr` | executes | yes | `mfcr.json` | 5 | - | 1410 |
 | `instruction:mffs` | executes | yes | `mffs.json` | 18 | mffs-high-word | 5 |
 | `instruction:mfocrf` | executes | yes | `mfocrf.json` | 18 | move-undef | 1139 |
-| `instruction:mfspr` | executes | yes | `mfspr.json` | 36 | - | 60678 |
+| `instruction:mfspr` | executes | yes | `mfspr.json` | 41 | - | 60678 |
 | `instruction:mftb` | executes | yes | `mftb.json` | 2 | - | 123 |
 | `instruction:mtcrf` | executes | yes | `mtcrf.json` | 23 | - | 5 |
 | `instruction:mtfsb0` | executes | yes | `mtfsb0.json` | 38 | - | 0 |
@@ -161,7 +161,7 @@ The census read 4 title(s), 7820066 PPU word(s).
 | `instruction:mtfsf` | executes | yes | `mtfsf.json` | 55 | - | 5 |
 | `instruction:mtfsfi` | executes | yes | `mtfsfi.json` | 27 | - | 0 |
 | `instruction:mtocrf` | executes | yes | `mtocrf.json` | 25 | move-undef | 2101 |
-| `instruction:mtspr` | executes | yes | `mtspr.json` | 33 | move-undef | 130255 |
+| `instruction:mtspr` | executes | yes | `mtspr.json` | 39 | move-undef | 130255 |
 | `instruction:mulhd` | executes | yes | `mulhd.json` | 32 | - | 74 |
 | `instruction:mulhdu` | executes | yes | `mulhdu.json` | 32 | - | 74 |
 | `instruction:mulhw` | executes | yes | `mulhw.json` | 40 | muldiv-undef | 629 |
