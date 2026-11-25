@@ -9,7 +9,7 @@ const KERNEL_SHADOW_BYTES: u64 = 0x1000;
 
 /// The value of the field `field` in the capture file. Both reads of the
 /// word must agree.
-fn captured(field: &str) -> u64 {
+pub(super) fn captured(field: &str) -> u64 {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join(LOGICAL_SPE_OBJECT_CAPTURE)

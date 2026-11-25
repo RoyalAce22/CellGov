@@ -2,6 +2,7 @@
 //! decryption path.
 
 pub(crate) mod construct;
+mod irq_outlet;
 mod registration;
 pub(crate) mod shadow;
 

@@ -3,7 +3,10 @@
 //! - the handler of `construct_logical_spe` (hypercall 57) and its checks;
 //! - the areas that lv1 gives a type 1 SPE, and the regions they take;
 //! - the contents of the shadow page, and how `write_htab_entry` maps it;
-//! - the spe id of each call of the GameOS kernel's boot.
+//! - the irq outlets of a type 1 SPE, and the handler of
+//!   `get_spe_irq_outlet` (hypercall 78);
+//! - the spe id and the outlet ids of each call of the GameOS kernel's
+//!   boot.
 //!
 //! The facts come from the 4.93 `lv1.self`, decrypted offline and read
 //! with `cellgov dev disasm`. No byte of lv1 is committed; these facts
@@ -114,6 +117,51 @@
 //!
 //! The writer searches for a duplicate entry before it translates
 //! [OFW-4.93 lv1 a:0x2D2F20-0x2D3038].
+//!
+//! The type 1 worker gives the SPE one irq outlet for each interrupt
+//! class from 0 to 2 [OFW-4.93 lv1 a:0x315A38-0x315AE8]:
+//! - It allocates a 160-byte object and constructs it as an outlet
+//!   [OFW-4.93 lv1 a:0x315A84-0x315AAC].
+//! - The outlet constructor [OFW-4.93 lv1 a:0x2FF934] calls the event
+//!   receive port constructor [OFW-4.93 lv1 a:0x2FF954]. So the outlet
+//!   takes the first free id of the partition's object table; see
+//!   [`super::event_port`].
+//! - It stores the outlets of classes 0, 1 and 2 at +120, +128 and +136
+//!   of the SPE [OFW-4.93 lv1 a:0x315AEC-0x315B10].
+//!
+//! The handler of `get_spe_irq_outlet` [OFW-4.93 lv1 a:0x2FC968] gives r3,
+//! r4 and the address of a stack slot to the worker
+//! [OFW-4.93 lv1 a:0x2FC9F0-0x2FC9FC]. It then copies the slot to the
+//! return slot of r4 and returns the worker's r3
+//! [OFW-4.93 lv1 a:0x2FCA00-0x2FCA14] [OFW-4.93 lv1 a:0x2FCA78]. It copies
+//! the slot on each path, and a failing worker leaves the slot unwritten.
+//! So r4 of a failed call is a stack value that no source gives. The
+//! handler writes no return slot of r5 to r10, and the vector's entry
+//! zeroes the slots [OFW-4.93 lv1 a:0x0C08]. So r5 to r10 return 0.
+//!
+//! The worker [OFW-4.93 lv1 a:0x2FC738] does these steps in this order:
+//! 1. A class above 2 returns `LV1_ILLEGAL_PARAMETER_VALUE` (-17), marked
+//!    with bit 1 of the high word for r4
+//!    [OFW-4.93 lv1 a:0x2FC738] [OFW-4.93 lv1 a:0x2FC764]
+//!    [OFW-4.93 lv1 a:0x2FC8F8-0x2FC908].
+//! 2. It looks up r3 in the partition's object table, and checks that
+//!    the object's class word at +48 is the SPE class in the TOC slot at
+//!    r2 - 4704 [OFW-4.93 lv1 a:0x2FC768-0x2FC88C]. A failed check
+//!    returns `LV1_NO_ENTRY` (-6), marked with bit 0 for r3
+//!    [OFW-4.93 lv1 a:0x2FC890-0x2FC89C].
+//! 3. It calls the method in the TOC slot at r2 - 4696 on the SPE
+//!    [OFW-4.93 lv1 a:0x2FC90C-0x2FC964]: the function descriptor
+//!    [OFW-4.93 lv1 a:0x34AAF0] of the method [OFW-4.93 lv1 a:0x2FA588].
+//!    The call function [OFW-4.93 lv1 a:0x2F999C] takes the SPE's lock at
+//!    +216 [OFW-4.93 lv1 a:0x2F99A4-0x2F9A94]. It calls the method when
+//!    bits 36 to 38 (mask 0x0000007000000000) of the doubleword at +184
+//!    are 0 [OFW-4.93 lv1 a:0x2F9A98-0x2F9AE8], and returns the method's
+//!    r3.
+//!    The type 1 worker sets that doubleword to 0x0002000000000000
+//!    [OFW-4.93 lv1 a:0x315928-0x315948] [OFW-4.93 lv1 a:0x2FA6AC], so a
+//!    new SPE passes.
+//! 4. The method stores the id at +72 of the class's outlet in the slot,
+//!    and returns 0 [OFW-4.93 lv1 a:0x2FA588-0x2FA5A0].
 
 use crate::lv1::status::{zero_extended, LV1_ACCESS_VIOLATION};
 
@@ -184,6 +232,38 @@ pub const WRITE_HTAB_SHADOW_PAGE_SIZE_R3: u64 = 0x0000_0008_FFFF_FFFB;
 /// [`super::page_table::read_only`] for the flag.
 pub const WRITE_HTAB_SHADOW_WRITABLE_R3: u64 = zero_extended(LV1_ACCESS_VIOLATION);
 
+/// The handler of hypercall 78 in one firmware's lv1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpeIrqOutletHandler {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The address of the `get_spe_irq_outlet` handler.
+    pub handler: u32,
+}
+
+/// Each firmware whose lv1 image shows the handler, ascending.
+///
+/// The address is the entry of hypercall 78 in the live 4.93 hypercall
+/// table ([`super::table::LIVE_TABLE_HANDLERS`]).
+pub const SPE_IRQ_OUTLET_HANDLERS: &[SpeIrqOutletHandler] = &[SpeIrqOutletHandler {
+    firmware: "4.93",
+    handler: 0x2FC968,
+}];
+
+/// The handler of the firmware version `firmware`, or `None` when no lv1
+/// image read shows it.
+pub fn spe_irq_outlet_handler(firmware: &str) -> Option<&'static SpeIrqOutletHandler> {
+    SPE_IRQ_OUTLET_HANDLERS
+        .iter()
+        .find(|handler| handler.firmware == firmware)
+}
+
+/// The number of interrupt classes, each with one irq outlet. The worker
+/// of `get_spe_irq_outlet` refuses a class above 2
+/// [OFW-4.93 lv1 a:0x2FC738], and the type 1 worker makes three outlets
+/// [OFW-4.93 lv1 a:0x315AE0-0x315AE8].
+pub const SPE_IRQ_CLASSES: usize = 3;
+
 /// One `construct_logical_spe` call of the GameOS kernel, and the spe id
 /// that lv1 gave it on the console.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,6 +274,8 @@ pub struct GameOsSpeCall {
     pub spe_type: u64,
     /// The spe id in r9 of lv1's answer.
     pub id: u64,
+    /// The id of the irq outlet of each interrupt class, by class.
+    pub outlets: [u64; SPE_IRQ_CLASSES],
 }
 
 /// The `construct_logical_spe` calls of the GameOS kernel's boot at one
@@ -211,19 +293,23 @@ pub struct GameOsSpeCalls {
 /// kernel addresses.
 pub const LOGICAL_SPE_OBJECT_CAPTURE: &str = "tests/micro/lv2_logical_spe_object";
 
-/// The spe id of each `construct_logical_spe` call of the GameOS kernel's
-/// boot, for each firmware that a source gives the ids for.
+/// The spe id and the outlet ids of each `construct_logical_spe` call of
+/// the GameOS kernel's boot, for each firmware that a source gives the
+/// ids for.
 ///
 /// The partition's other objects decide each id, so no image read gives
-/// it. The capture [`LOGICAL_SPE_OBJECT_CAPTURE`] reads the id of the
+/// it. The capture [`LOGICAL_SPE_OBJECT_CAPTURE`] reads the ids of the
 /// 4.93 kernel's boot call [OFW-4.93 lv2_kernel a:0x800000000004f188],
-/// which passes type 1.
+/// which passes type 1. The kernel keeps the outlet ids that
+/// `get_spe_irq_outlet` returns for classes 0 to 2
+/// [OFW-4.93 lv2_kernel a:0x800000000004f1e4-0x800000000004f210].
 pub const GAME_OS_SPE_CALLS: &[GameOsSpeCalls] = &[GameOsSpeCalls {
     firmware: "4.93",
     calls: &[GameOsSpeCall {
         sc: 0x8000_0000_0004_f188,
         spe_type: LOGICAL_SPE_TYPE_1,
         id: 11,
+        outlets: [13, 14, 15],
     }],
 }];
 
@@ -238,6 +324,21 @@ pub fn game_os_spe_call(firmware: &str, sc: u64) -> Option<&'static GameOsSpeCal
         .find(|call| call.sc == sc)
 }
 
+/// The kernel's call that got the spe id `id` at the firmware version
+/// `firmware`, or `None` when no source gives that id.
+pub fn game_os_spe_by_id(firmware: &str, id: u64) -> Option<&'static GameOsSpeCall> {
+    GAME_OS_SPE_CALLS
+        .iter()
+        .find(|calls| calls.firmware == firmware)?
+        .calls
+        .iter()
+        .find(|call| call.id == id)
+}
+
 #[cfg(test)]
 #[path = "tests/spe_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/spe_irq_outlet_tests.rs"]
+mod irq_outlet_tests;

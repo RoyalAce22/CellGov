@@ -4,13 +4,14 @@
 use cellgov_mem::scheme::{HashedSurface, Stamp};
 
 use super::construct::{self, LogicalSpe, LogicalSpeState};
+use super::irq_outlet;
 use crate::group::state::StateChange;
 use crate::group::table::Group;
 
 /// The logical SPE group's registration.
 pub(crate) const GROUP: Group = Group {
     name: "spe",
-    hypercalls: &[construct::HYPERCALLS],
+    hypercalls: &[construct::HYPERCALLS, irq_outlet::HYPERCALLS],
     lanes: &[192..=207],
     hashed_surfaces: &[HashedSurface {
         name: "the logical SPEs",

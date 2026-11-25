@@ -21,3 +21,14 @@
 /// the inputs and writes the outputs in this form; see
 /// [`crate::lv1::spe`].
 pub const CONSTRUCT_LOGICAL_SPE: u64 = 57;
+
+/// `get_spe_irq_outlet`: two inputs and one output.
+///
+/// The inputs are the spe id in r3 and the interrupt class in r4. The
+/// output in r4 is the id of the class's irq outlet.
+///
+/// Linux `arch/powerpc/platforms/ps3/interrupt.c`, `ps3_spe_irq_setup`,
+/// makes the call in this form. The lv1 handler
+/// [OFW-4.93 lv1 a:0x2FC968] reads the inputs and writes the output in
+/// this form; see [`crate::lv1::spe`].
+pub const GET_SPE_IRQ_OUTLET: u64 = 78;
