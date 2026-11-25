@@ -18,9 +18,11 @@ use crate::instruction::PpuInstruction;
 /// constants, and the flow ends.
 ///
 /// A dropped constant can be the address that a later `bcctr`, `bclr` or
-/// `rfid` reaches. So a CTR copied from a lost GPR, a lost LR at a `bclr`
-/// and a lost SRR0 at an `rfid` can reach an address that the scan does
-/// not know.
+/// `rfid` reaches. So each of these can reach an address that the scan
+/// does not know:
+/// - a CTR copied from a lost GPR;
+/// - a lost LR at a `bclr`;
+/// - a lost SRR0 at an `rfid`.
 const JOIN_LIMIT: usize = 16;
 
 /// What the paths to one join word bring in the GPRs and in LR.

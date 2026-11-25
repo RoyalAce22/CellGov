@@ -127,8 +127,6 @@ fn word_after_an_unaligned_start() -> Segment {
     data_bytes(KERNEL + 0x2_0001, bytes)
 }
 
-/// The census reads each 32-bit word that starts at a word-aligned
-/// address, also in a segment that starts between two of them.
 #[test]
 fn a_bctr_enters_the_word_that_a_32_bit_word_after_an_unaligned_segment_start_names() {
     assert_eq!(ordinals(0, &[loaded_bctr(), window()]), [(SC, Some(75))]);

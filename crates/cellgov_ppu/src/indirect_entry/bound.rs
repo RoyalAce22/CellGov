@@ -123,9 +123,9 @@ pub(crate) struct IndirectBound {
     /// A path reaches the `bclr` with an LR that can hold a constant that
     /// `JoinFlow` dropped.
     ///
-    /// The set also holds each `rfid` that can keep MSR\[IR\] at 1 when a
-    /// path reaches it with an SRR0 that can hold a constant that
-    /// `JoinFlow` dropped.
+    /// The set also holds each `rfid` that can leave MSR\[IR\] at 1 when a
+    /// path reaches it with a lost SRR0. A lost SRR0 can hold a constant
+    /// that `JoinFlow` dropped.
     pub(crate) lost_targets: BTreeSet<u64>,
     /// Each address where an `rfid`, `mtmsr` or `mtmsrd` can put control
     /// into real mode.
@@ -152,8 +152,9 @@ pub(crate) struct IndirectBound {
 ///
 /// The scan repeats in rounds until a round names no new word, because
 /// each of these depends on the other:
-/// - an indirect branch in a function reaches each named word, and in
-///   real mode each word of [`IndirectBound::real_named`];
+/// - an indirect branch in a function reaches each named word, in real
+///   mode each word of [`IndirectBound::real_named`], and in 32-bit mode
+///   each word of [`IndirectBound::low_named`];
 /// - r2 on the words of a function names more words.
 ///
 /// [PPC-Book1 p:24 s:2.4] A branch alters only CTR and LR, so r2 at the target is r2 at the branch.

@@ -14,7 +14,7 @@ use super::toc::{FunctionSteps, WordTocs};
 use crate::hypercall_cfg::{low_indirect_words, real_indirect_words, Code, CodeSegment};
 use crate::instruction::spr_number;
 
-/// The real-mode switches of the code.
+/// The real-mode switches and the 32-bit switches of the code.
 #[derive(Debug, Default)]
 pub(super) struct Switches {
     /// The [`IndirectBound::real_mode_switches`].
@@ -42,8 +42,9 @@ impl Switches {
     /// `tocs` holds the TOC of each word, and `every` holds each TOC that
     /// a descriptor gives. `bound` holds the bound without its switches.
     ///
-    /// A switch target is also a word that control enters other than by
-    /// a fall-through. So the scan repeats until no switch adds a target.
+    /// A real-mode switch target is also a word that control enters other
+    /// than by a fall-through. So the scan repeats until no real-mode
+    /// switch adds a target.
     /// The targets are words of the code, so the repeats end.
     pub(super) fn find(code: &Code, tocs: &WordTocs, every: &Value, bound: &IndirectBound) -> Self {
         let mut joins = joins(code, bound);
@@ -125,10 +126,10 @@ impl Switches {
 /// the real address of each of these. Apart from the direct targets,
 /// these are the words that [`real_indirect_words`] gives. The set also
 /// holds each word that [`low_indirect_words`] gives, which a `bcctr` or
-/// `bclr` in 32-bit mode can enter. The set omits
-/// the word after a direct branch as a target of that branch. The branch
-/// reaches that word with the constants of the fall-through. A branch
-/// that links still makes that word a join, as a return point.
+/// `bclr` in 32-bit mode can enter. The set omits the word after a
+/// direct branch as a target of that branch. The branch reaches that
+/// word with the constants of the fall-through. A branch that links
+/// still makes that word a join, as a return point.
 ///
 /// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.
 /// [PPC-Book1 p:25 s:2.4] `bclr` branches to LR 0:61 || 0b00.

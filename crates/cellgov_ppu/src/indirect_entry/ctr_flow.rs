@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use cellgov_ps3_abi::hw::ppc_isa::PPC_BO_BIT2;
 
 use super::constants::{never_falls_through, GprStep, Step, Value};
+use super::slot_set::{Slot, SlotSet};
 use super::toc::FunctionSteps;
 use crate::caller_census::surely_written_gprs;
 use crate::hypercall_cfg::{branch_target, Code, CodeSegment};
@@ -158,28 +159,230 @@ impl Ctr {
 
     /// Joins `other` into `self`, and returns whether `self` changed.
     fn join(&mut self, other: &Self) -> bool {
-        let mut changed = other.lost && !self.lost;
+        let changed = other.lost && !self.lost;
         self.lost |= other.lost;
-        for (&by, value) in &other.known {
-            match self.known.get_mut(&by) {
-                Some(own) if own.holds_all(value) => {}
-                Some(own) => {
-                    *own = own.clone().union(value);
-                    changed = true;
-                }
-                None => {
-                    self.known.insert(by, value.clone());
-                    changed = true;
-                }
+        join_known(&mut self.known, &other.known) || changed
+    }
+}
+
+/// The constants of one copy of CTR, by the address of the word that
+/// wrote each one.
+type Known = BTreeMap<u64, Value>;
+
+/// Joins the constants `other` into `own`, and returns whether `own`
+/// changed.
+fn join_known(own: &mut Known, other: &Known) -> bool {
+    let mut changed = false;
+    for (&by, value) in other {
+        match own.get_mut(&by) {
+            Some(held) if held.holds_all(value) => {}
+            Some(held) => {
+                *held = held.clone().union(value);
+                changed = true;
             }
+            None => {
+                own.insert(by, value.clone());
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+/// The mask with bit `n` set for GPR `n`.
+fn bit(gpr: u8) -> u32 {
+    1u32.checked_shl(u32::from(gpr)).unwrap_or(0)
+}
+
+/// What the paths bring in the GPRs that hold a copy of CTR.
+///
+/// A GPR with no entry in `known` and no bit in `lost` holds no copy that
+/// the state records.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct GprCopies {
+    /// The constants of each copy that holds one, by GPR number.
+    known: BTreeMap<u8, Known>,
+    /// Each GPR whose copy can hold a value that the scan cannot prove,
+    /// as bit `n` for GPR `n`.
+    lost: u32,
+}
+
+impl GprCopies {
+    /// The copy in `gpr`, or `None` when the GPR holds no copy.
+    fn get(&self, gpr: u8) -> Option<Ctr> {
+        let lost = self.lost & bit(gpr) != 0;
+        let known = self.known.get(&gpr);
+        (lost || known.is_some()).then(|| Ctr {
+            known: known.cloned().unwrap_or_default(),
+            lost,
+        })
+    }
+
+    /// The GPRs that hold a copy, as a mask with bit `n` set for GPR `n`.
+    fn mask(&self) -> u32 {
+        self.known
+            .keys()
+            .fold(self.lost, |gprs, &gpr| gprs | bit(gpr))
+    }
+
+    /// Puts `copy` into `gpr` in place of the copy there.
+    fn set(&mut self, gpr: u8, copy: Ctr) {
+        if copy.known.is_empty() {
+            self.known.remove(&gpr);
+        } else {
+            self.known.insert(gpr, copy.known);
+        }
+        if copy.lost {
+            self.lost |= bit(gpr);
+        } else {
+            self.lost &= !bit(gpr);
+        }
+    }
+
+    /// Joins `copy` into the copy in `gpr`.
+    fn join_at(&mut self, gpr: u8, copy: &Ctr) {
+        if copy.lost {
+            self.lost |= bit(gpr);
+        }
+        if !copy.known.is_empty() {
+            join_known(self.known.entry(gpr).or_default(), &copy.known);
+        }
+    }
+
+    /// Removes the copy of each GPR in the mask `written`.
+    fn remove(&mut self, written: u32) {
+        self.known.retain(|&gpr, _| written & bit(gpr) == 0);
+        self.lost &= !written;
+    }
+
+    /// Joins `other` into `self`, and returns whether `self` changed.
+    fn join(&mut self, other: &Self) -> bool {
+        let mut changed = other.lost & !self.lost != 0;
+        self.lost |= other.lost;
+        for (&gpr, known) in &other.known {
+            changed |= join_known(self.known.entry(gpr).or_default(), known);
         }
         changed
     }
 }
 
-/// A stack slot: the offset from r1 of its first byte, and its width in
-/// bytes.
-type Slot = (i64, u8);
+/// What the paths bring in the stack slots that hold a copy of CTR or a
+/// part of one.
+///
+/// A slot with no entry in `known` that is not in `lost` holds no copy
+/// that the state records.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct SlotCopies {
+    /// The constants of each copy that holds one, by slot.
+    known: BTreeMap<Slot, Known>,
+    /// Each slot whose copy can hold a value that the scan cannot prove.
+    lost: SlotSet,
+}
+
+impl SlotCopies {
+    /// The slots that hold a copy.
+    fn slots(&self) -> SlotSet {
+        let mut slots = SlotSet::of(self.known.keys().copied());
+        slots.join(&self.lost);
+        slots
+    }
+
+    /// Joins `other` into `self`, and returns whether `self` changed.
+    fn join(&mut self, other: &Self) -> bool {
+        let mut changed = self.lost.join(&other.lost);
+        for (&slot, known) in &other.known {
+            changed |= join_known(self.known.entry(slot).or_default(), known);
+        }
+        changed
+    }
+
+    /// The copy that a load of `slot` gets from the slots that hold a
+    /// copy, and that `load` extends to 64 bits.
+    ///
+    /// A load whose bytes all lie in one slot gets the part of the copy
+    /// there. A load that reads some bytes of a slot and some other bytes
+    /// gets a value that the scan cannot prove.
+    ///
+    /// [CBE-Handbook p:45 s:1.3.3] The CBE processor stores the most-significant byte at the lowest address.
+    fn loaded(&self, (offset, width): Slot, load: Load) -> Ctr {
+        let end = offset + i64::from(width);
+        let mut loaded = Ctr::default();
+        for (&(held, held_width), known) in &self.known {
+            let held_end = held + i64::from(held_width);
+            if end <= held || held_end <= offset {
+                continue;
+            }
+            if held <= offset && end <= held_end {
+                let shift = 8 * (held_end - end);
+                let part = known
+                    .iter()
+                    .map(|(&by, value)| (by, value.map(|value| load.extend(value >> shift, width))))
+                    .collect();
+                join_known(&mut loaded.known, &part);
+            } else {
+                loaded.lost = true;
+            }
+        }
+        loaded.lost |= self.lost.overlaps(offset, end);
+        loaded
+    }
+
+    /// Writes `slot` with `copy`, or with a value that holds no copy when
+    /// `copy` is `None`.
+    ///
+    /// The store removes each slot that it writes in full. A slot that it
+    /// writes in part holds a value that the scan cannot prove. The new
+    /// slot holds the low-order bytes of `copy`.
+    ///
+    /// [PPC-Book1 p:42 s:3.3.3] `stw` stores RS 32:63 into the word at EA.
+    /// [PPC-Book1 p:43 s:3.3.3] `std` stores RS into the doubleword at EA.
+    fn store(&mut self, (offset, width): Slot, copy: Option<&Ctr>) {
+        let end = offset + i64::from(width);
+        let mut part_written = Vec::new();
+        self.known.retain(|&(held, held_width), _| {
+            let held_end = held + i64::from(held_width);
+            if end <= held || held_end <= offset {
+                return true;
+            }
+            if held < offset || end < held_end {
+                part_written.push((held, held_width));
+            }
+            false
+        });
+        self.lost = self.lost.without_inside(offset, end);
+        for slot in part_written {
+            self.lost.insert(slot);
+        }
+        if let Some(copy) = copy {
+            let low = copy.part(|value| Load::Zero.extend(value, width));
+            if low.lost {
+                self.lost.insert((offset, width));
+            }
+            if !low.known.is_empty() {
+                self.known.insert((offset, width), low.known);
+            }
+        }
+    }
+
+    /// The copies after r1 moves by `by`, without each slot that the move
+    /// takes out of [`SLOT_REACH`].
+    fn moved(&self, by: i64) -> Self {
+        let known = self
+            .known
+            .iter()
+            .filter_map(|(&(offset, width), known)| {
+                let offset = offset.checked_sub(by)?;
+                SLOT_REACH
+                    .contains(&offset)
+                    .then(|| ((offset, width), known.clone()))
+            })
+            .collect();
+        Self {
+            known,
+            lost: self.lost.moved(by, &SLOT_REACH),
+        }
+    }
+}
 
 /// The offsets from r1 that a displacement can reach.
 ///
@@ -191,17 +394,16 @@ const SLOT_REACH: std::ops::Range<i64> = -(1 << 15)..(1 << 15);
 
 /// What the paths to one word bring in CTR, in the GPRs that hold a copy
 /// of CTR, and in the stack slots that hold one.
+///
+/// A copy that the scan cannot prove is a bit of a mask or a slot of a
+/// [`SlotSet`], with no entry of its own. So a state that holds such a
+/// copy in each slot of [`SLOT_REACH`] stays small. The states of two
+/// words that get the same lost slots can share one [`SlotSet`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct CtrState {
     ctr: Ctr,
-    /// What the paths bring in each GPR that holds a copy of CTR, by GPR
-    /// number. A GPR that is not here holds no copy that the state
-    /// records.
-    copies: BTreeMap<u8, Ctr>,
-    /// What the paths bring in each stack slot that holds a copy of CTR
-    /// or a part of one. A slot that is not here holds no copy that the
-    /// state records.
-    slots: BTreeMap<Slot, Ctr>,
+    copies: GprCopies,
+    slots: SlotCopies,
 }
 
 impl CtrState {
@@ -209,33 +411,25 @@ impl CtrState {
     /// GPR of `gprs` and each slot of `slots`.
     ///
     /// `gprs` is a mask with bit `n` set for GPR `n`.
-    fn lost_copies(gprs: u32, slots: &BTreeSet<Slot>) -> Self {
+    fn lost_copies(gprs: u32, slots: &SlotSet) -> Self {
         Self {
             ctr: Ctr::default(),
-            copies: (0..32)
-                .filter(|&gpr| gprs >> gpr & 1 != 0)
-                .map(|gpr| (gpr, Ctr::lost()))
-                .collect(),
-            slots: slots.iter().map(|&slot| (slot, Ctr::lost())).collect(),
+            copies: GprCopies {
+                known: BTreeMap::new(),
+                lost: gprs,
+            },
+            slots: SlotCopies {
+                known: BTreeMap::new(),
+                lost: slots.clone(),
+            },
         }
-    }
-
-    /// The GPRs that hold a copy of CTR, as a mask with bit `n` set for
-    /// GPR `n`.
-    fn copy_gprs(&self) -> u32 {
-        self.copies.keys().fold(0, |gprs, &gpr| gprs | 1 << gpr)
     }
 
     /// Joins `other` into `self`, and returns whether `self` changed.
     fn join(&mut self, other: &Self) -> bool {
-        let mut changed = self.ctr.join(&other.ctr);
-        for (&gpr, copy) in &other.copies {
-            changed |= self.copies.entry(gpr).or_default().join(copy);
-        }
-        for (&slot, copy) in &other.slots {
-            changed |= self.slots.entry(slot).or_default().join(copy);
-        }
-        changed
+        let ctr = self.ctr.join(&other.ctr);
+        let copies = self.copies.join(&other.copies);
+        self.slots.join(&other.slots) || ctr || copies
     }
 
     /// The copies in GPRs and in stack slots after the word `decoded`.
@@ -251,16 +445,17 @@ impl CtrState {
     /// also copy into a GPR that it does not surely write, such as an
     /// invalid form of a load. That word joins the copy into the copy of
     /// the GPR. A store at a constant offset from r1 writes its slot, as
-    /// [`store_into`] gives. A word that moves r1 by a constant moves each
-    /// slot, and each other word that surely writes r1 removes each slot.
+    /// [`SlotCopies::store`] gives. A word that moves r1 by a constant
+    /// moves each slot, and each other word that surely writes r1 removes
+    /// each slot.
     ///
     /// [PPC-Book1 p:82 s:3.3.13] `mfctr`, a form of `mfspr`, copies CTR into RT.
-    fn after(&self, decoded: &PpuInstruction) -> (BTreeMap<u8, Ctr>, BTreeMap<Slot, Ctr>) {
+    fn after(&self, decoded: &PpuInstruction) -> (GprCopies, SlotCopies) {
         let mut copied: Vec<(u8, Ctr)> = match *decoded {
             PpuInstruction::Mfctr { rt } => vec![(rt, self.ctr.clone())],
             _ => GprStep::of(*decoded)
                 .and_then(|step| {
-                    let copy = self.copies.get(&step.source?)?;
+                    let copy = self.copies.get(step.source?)?;
                     Some((step.rt, copy.stepped(step.step)))
                 })
                 .into_iter()
@@ -271,102 +466,34 @@ impl CtrState {
         if let Some(access) = &access {
             for &(slot, gpr) in &access.parts {
                 if access.load == Load::None {
-                    let copy = gpr.and_then(|gpr| self.copies.get(&gpr));
-                    store_into(&mut slots, slot, copy);
+                    let copy = gpr.and_then(|gpr| self.copies.get(gpr));
+                    slots.store(slot, copy.as_ref());
                 } else {
-                    copied.extend(gpr.map(|gpr| (gpr, self.loaded(slot, access.load))));
+                    copied.extend(gpr.map(|gpr| (gpr, self.slots.loaded(slot, access.load))));
                 }
             }
         }
         let written = surely_written_gprs(decoded);
         let mut copies = self.copies.clone();
-        copies.retain(|&gpr, _| written >> gpr & 1 == 0);
+        copies.remove(written);
         for (gpr, copy) in copied {
             if copy == Ctr::default() {
                 continue;
             }
-            if written >> gpr & 1 == 0 {
-                copies.entry(gpr).or_default().join(&copy);
+            if written & bit(gpr) == 0 {
+                copies.join_at(gpr, &copy);
             } else {
-                copies.insert(gpr, copy);
+                copies.set(gpr, copy);
             }
         }
         if written & 1 << 1 != 0 {
             slots = match r1_move(decoded, access.as_ref()) {
-                Some(by) => moved(slots, by),
-                None => BTreeMap::new(),
+                Some(by) => slots.moved(by),
+                None => SlotCopies::default(),
             };
         }
         (copies, slots)
     }
-
-    /// The copy that a load of `slot` gets from the slots that hold a
-    /// copy, and that `load` extends to 64 bits.
-    ///
-    /// A load whose bytes all lie in one slot gets the part of the copy
-    /// there. A load that reads some bytes of a slot and some other bytes
-    /// gets a value that the scan cannot prove.
-    ///
-    /// [CBE-Handbook p:45 s:1.3.3] The CBE processor stores the most-significant byte at the lowest address.
-    fn loaded(&self, (offset, width): Slot, load: Load) -> Ctr {
-        let end = offset + i64::from(width);
-        let mut loaded = Ctr::default();
-        for (&(held, held_width), copy) in &self.slots {
-            let held_end = held + i64::from(held_width);
-            if end <= held || held_end <= offset {
-                continue;
-            }
-            if held <= offset && end <= held_end {
-                let shift = 8 * (held_end - end);
-                loaded.join(&copy.part(|value| load.extend(value >> shift, width)));
-            } else {
-                loaded.join(&copy.unproved());
-            }
-        }
-        loaded
-    }
-}
-
-/// Writes `slot` in `slots` with `copy`, or with a value that holds no
-/// copy when `copy` is `None`.
-///
-/// The store removes each slot that it writes in full. A slot that it
-/// writes in part holds a value that the scan cannot prove. The new slot
-/// holds the low-order bytes of `copy`.
-///
-/// [PPC-Book1 p:42 s:3.3.3] `stw` stores RS 32:63 into the word at EA.
-/// [PPC-Book1 p:43 s:3.3.3] `std` stores RS into the doubleword at EA.
-fn store_into(slots: &mut BTreeMap<Slot, Ctr>, (offset, width): Slot, copy: Option<&Ctr>) {
-    let end = offset + i64::from(width);
-    slots.retain(|&(held, held_width), held_copy| {
-        let held_end = held + i64::from(held_width);
-        if end <= held || held_end <= offset {
-            return true;
-        }
-        if offset <= held && held_end <= end {
-            return false;
-        }
-        *held_copy = held_copy.unproved();
-        true
-    });
-    if let Some(copy) = copy {
-        let low = copy.part(|value| Load::Zero.extend(value, width));
-        slots.insert((offset, width), low);
-    }
-}
-
-/// `slots` after r1 moves by `by`, without each slot that the move takes
-/// out of [`SLOT_REACH`].
-fn moved(slots: BTreeMap<Slot, Ctr>, by: i64) -> BTreeMap<Slot, Ctr> {
-    slots
-        .into_iter()
-        .filter_map(|((offset, width), copy)| {
-            let offset = offset.checked_sub(by)?;
-            SLOT_REACH
-                .contains(&offset)
-                .then_some(((offset, width), copy))
-        })
-        .collect()
 }
 
 /// The constant that `decoded` adds to r1, for a word that moves r1 by a
@@ -594,7 +721,8 @@ impl<'a> CtrFlow<'a> {
             after_calls(code).flat_map(real_positions).collect();
         let mut returned = CtrState::default();
         let mut returned_gprs = 0;
-        let mut returned_slots = BTreeSet::new();
+        let mut returned_slots = SlotSet::default();
+        let mut injected = SlotSet::default();
         let mut work = Worklist::new(code);
         while let Some((index, word)) = work.pop() {
             let segment = &code.segments()[index];
@@ -614,24 +742,52 @@ impl<'a> CtrFlow<'a> {
             let Some(brought) = self.returned((index, word), raw) else {
                 continue;
             };
-            let gprs = brought.copy_gprs();
-            let new_slot = brought
-                .slots
-                .keys()
-                .any(|slot| !returned_slots.contains(slot));
+            let gprs = brought.copies.mask();
+            let slots = brought.slots.slots();
+            let new_slot = !slots.is_subset(&returned_slots);
             if gprs & !returned_gprs != 0 || new_slot {
                 returned_gprs |= gprs;
-                returned_slots.extend(brought.slots.keys().copied());
+                returned_slots.join(&slots);
                 let copies = CtrState::lost_copies(returned_gprs, &returned_slots);
                 for &position in &call_returns {
-                    self.join_into(position, &copies, &mut work);
+                    self.inject(position, &copies, &injected, &mut work);
                 }
+                injected = returned_slots.clone();
             }
             if returned.join(&brought) {
                 for &position in &returns {
                     self.join_into(position, &returned, &mut work);
                 }
             }
+        }
+    }
+
+    /// Joins `copies`, the lost copies that the returns bring, into the
+    /// word at `position` after a call, and queues the word when its state
+    /// changes.
+    ///
+    /// `injected` holds the lost slots of the last injection into each
+    /// word after a call. The caller keeps each slot of `injected` in
+    /// `copies`. A word whose lost slots share their runs with `injected`
+    /// takes the lost slots of `copies` without a set comparison.
+    fn inject(
+        &mut self,
+        position: (usize, usize),
+        copies: &CtrState,
+        injected: &SlotSet,
+        work: &mut Worklist,
+    ) {
+        let (index, word) = position;
+        let state = &mut self.at[index][word];
+        let changed = if state.slots.lost.shares(injected) {
+            let grew = !copies.slots.lost.shares(injected);
+            state.slots.lost = copies.slots.lost.clone();
+            state.copies.join(&copies.copies) || grew
+        } else {
+            state.join(copies)
+        };
+        if changed {
+            work.push(position);
         }
     }
 
@@ -727,7 +883,7 @@ impl<'a> CtrFlow<'a> {
                 let written = self.writes.get(&(index, address)).cloned();
                 let mut ctr =
                     written.map_or_else(Ctr::default, |value| Ctr::written(address, value));
-                if let Some(copy) = state.copies.get(&rs) {
+                if let Some(copy) = state.copies.get(rs) {
                     ctr.join(&copy.rewritten(address));
                 }
                 if self.lost_writes.contains(&(index, address)) {
@@ -908,3 +1064,11 @@ pub(super) fn positions(code: &Code, address: u64) -> impl Iterator<Item = (usiz
             (word < segment.words.len()).then_some((index, word))
         })
 }
+
+#[cfg(test)]
+#[path = "../tests/indirect_entry_ctr_flow_bound_tests.rs"]
+mod bound_tests;
+
+#[cfg(test)]
+#[path = "../tests/indirect_entry_ctr_flow_inject_tests.rs"]
+mod inject_tests;

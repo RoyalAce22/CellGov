@@ -18,7 +18,8 @@ const DATA: u64 = KERNEL + 0x4_0000;
 const REAL_WINDOW: u64 = 0x3000;
 
 /// The address of a window in a segment at a real address above 4 GiB.
-/// No 32-bit half of the doubleword [`ALIAS`] names a word of the code.
+/// No 32-bit half of the doubleword that names [`ALIAS`] names a word of
+/// the code.
 const HIGH_WINDOW: u64 = 0x1_0000_3000;
 
 /// The kernel address of a word with the real address of the word

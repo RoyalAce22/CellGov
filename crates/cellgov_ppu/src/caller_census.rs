@@ -19,9 +19,9 @@
 //! - an interrupt enters only at its vector, and its handler returns
 //!   with the CTR, LR and GPRs that the interrupt found.
 //!
-//! When the scan cannot prove the fact, the site stays unresolved, and
-//! a number can appear in a kernel only at unresolved sites. That loss
-//! is correct behaviour. These are defects:
+//! When the scan cannot prove the fact, the site stays unresolved. A
+//! kernel can then hold the calls of a number only at unresolved sites.
+//! That loss is correct behaviour. These are defects:
 //! - a resolved site that a modelled path reaches with r11 unset or
 //!   other than N;
 //! - a word outside the bound that control can enter other than by a
@@ -32,9 +32,7 @@
 //!
 //! The scan does not state that a resolved site is reachable. It states
 //! nothing about paths that no recorded entry reaches, or about code
-//! outside the scanned segments. No test runs a kernel to check the
-//! fact. What a run observes never resolves a site, because a run takes
-//! only some of the paths.
+//! outside the scanned segments.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -166,8 +164,8 @@ pub fn scan_syscalls(elf: &[u8]) -> Result<Vec<CallerSite>, CallerScanError> {
 /// - an `rfid` that can clear MSR\[IR\] at an SRR0 that the scan does not
 ///   know, to the word at the real address of each address that the
 ///   image names;
-/// - a `bcctr` or `bclr` that can reach an address that the scan does not
-///   know, which can enter any word.
+/// - a `bcctr`, `bclr` or `rfid` that can reach an address that the scan
+///   does not know, which can enter any word.
 ///
 /// The segments may lie anywhere in the 64-bit address space, as a
 /// kernel's do.

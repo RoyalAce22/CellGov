@@ -17,9 +17,8 @@ const STUB: u64 = 0x6000;
 /// The address of the stub that builds 0x1_0000_3004.
 const BUILDER: u64 = 0x7000;
 
-/// The `rfid` takes SRR0 from a load and SRR1 from r5, which `msr`
-/// builds. A second stub builds 0x1_0000_3004 in r3, so the image names
-/// that address. No word of the code is a `bcctr` or a `bclr`.
+/// The stub at [`BUILDER`] names 0x1_0000_3004, whose low-order 32 bits
+/// are the address of the window's `nop`.
 ///
 /// [PPC-Book3 p:13 s:2.3] `rfid` fetches from 32 zeros || SRR0 32:61 || 0b00 when SF = 0 in the new MSR.
 #[test]

@@ -92,8 +92,8 @@
 //! keeps is the value on every path to the word.
 //!
 //! A hypercall site resolves only on the paths that this bound lets the
-//! scan model. So the bound can hold too many words. It must not hold
-//! too few:
+//! scan model. So the bound can hold too many words, and it must not
+//! hold too few:
 //! - a path of the hypercall walk ends at a word of the bound, and the
 //!   site stays unresolved. So an extra word can cost a resolution,
 //!   which is correct behaviour;
@@ -103,13 +103,15 @@
 //! For the same reason, a flow that drops a constant of a GPR, of LR or
 //! of CTR must mark the register as lost. A store and a load, or a call,
 //! can move a dropped constant without its mark, as the limits above
-//! state. Each of those cases is a defect. Data that decodes as code can
-//! add words to the bound. Data that decodes as code, or an extra word,
-//! can also bring more constants of one register to a branch target than
-//! [`JoinFlow`] keeps. Then [`JoinFlow`] can drop a constant that it
-//! keeps without them. On each word that a function reaches, the bound
-//! takes r2 to hold a TOC that a descriptor gives, or a constant that the
-//! paths to the word leave in r2.
+//! state. Each of those cases is a defect.
+//!
+//! Data that decodes as code can add words to the bound. Data that
+//! decodes as code, or an extra word, can also bring more constants of
+//! one register to a branch target than [`JoinFlow`] keeps. Then
+//! [`JoinFlow`] can drop a constant that it keeps without them. On each
+//! word that a function reaches, the bound takes r2 to hold a TOC that a
+//! descriptor gives, or a constant that the paths to the word leave in
+//! r2.
 //!
 //! [`CtrFlow`]: ctr_flow::CtrFlow
 //! [`JoinFlow`]: join_flow::JoinFlow
@@ -119,6 +121,7 @@ mod constants;
 mod ctr_flow;
 mod join_flow;
 mod real_mode;
+mod slot_set;
 mod toc;
 
 pub(crate) use bound::{indirect_entries, FileSegment, IndirectBound, JUMP_TABLE_LIMIT};

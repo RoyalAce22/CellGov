@@ -35,9 +35,9 @@ fn loaded_bctr(at: u64) -> Segment {
     )
 }
 
-/// The vector's `bctr` can load 0x3010 and reach the word past the
-/// window's `blr` in real mode. That path enters the window's `nop` with
-/// r11 = 76.
+/// The vector's `lwz` can load 0x3010, and its `bctr` then reaches the
+/// word past the window's `blr` in real mode. That path enters the
+/// window's `nop` with r11 = 76.
 ///
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
 /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
@@ -68,7 +68,7 @@ fn a_real_mode_bctr_enters_the_word_that_a_32_bit_word_with_low_bits_set_names()
     assert_eq!(ordinals(0, &segments), [(SC, None)]);
 }
 
-/// The low half of the doubleword KERNEL + 0x3004 is 0x3004. A `lwz`
+/// The low half of the doubleword `KERNEL + 0x3004` is 0x3004. A `lwz`
 /// can load it, and a `bctr` in virtual mode then reaches the word at
 /// 0x3004, between the `li r11` and the `sc` of the window at 0x3000.
 ///

@@ -7,17 +7,17 @@
 //! may run in real mode also reaches the word at the real address of its
 //! target. A `bcctr` or `bclr` that may run in 32-bit mode also reaches
 //! the word at the low-order 32 bits of its target. Each path must end at
-//! an `li r11` that loads the same
-//! constant. Some paths end where the walk cannot see r11:
+//! an `li r11` that loads the same constant. Some paths end where the
+//! walk cannot see r11:
 //! - a word that may write r11;
 //! - a call, which may change r11 before it returns;
 //! - a word that control can enter in another way, which
 //!   [`crate::indirect_entry`] bounds.
 //!
 //! Each of these leaves the site unresolved. A `bcctr`, `bclr` or `rfid`
-//! whose target the bound lost leaves every site unresolved. A path also ends
-//! at a word that nothing enters, such as a `nop` after `blr`. That path
-//! loads no constant.
+//! whose target the bound lost leaves every site unresolved. A path also
+//! ends at a word that nothing enters, such as a `nop` after `blr`. That
+//! path loads no constant.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -130,9 +130,9 @@ enum Flow {
 /// that may run in real mode can reach each word that
 /// [`real_indirect_words`] gives. A `bcctr` or `bclr` that may run in
 /// 32-bit mode, and an unbounded 32-bit switch of `bound`, can reach each
-/// word that [`low_indirect_words`] gives. A
-/// `bcctr`, `bclr` or `rfid` whose target `bound` lost can enter any word
-/// in either mode, so it leaves every site unresolved.
+/// word that [`low_indirect_words`] gives. A `bcctr`, `bclr` or `rfid`
+/// whose target `bound` lost can enter any word in either mode, so it
+/// leaves every site unresolved.
 pub(crate) fn scan(
     code: &Code,
     bound: &IndirectBound,
@@ -269,8 +269,8 @@ pub(crate) fn real_indirect_words<'a>(
 /// MSR\[IR\] at 1.
 ///
 /// The set holds the word at the low-order 32 bits of each of these:
-/// - an entry of `bound`, or an address that the image names, for a
-///   branch that no CTR or LR write of `bound` reaches;
+/// - an entry of `bound` or a word of [`IndirectBound::low_named`], for
+///   a branch that no CTR or LR write of `bound` reaches;
 /// - a target of `bound`;
 /// - the word after a branch that links, with the LR that the branch
 ///   wrote.
@@ -306,10 +306,10 @@ pub(crate) fn low_word(address: u64) -> u64 {
 ///
 /// Only an `rfid`, an `hrfid` or an `mtmsrd` can clear the two bits. The
 /// scan does not follow HSRR0 and HSRR1, so it takes no `hrfid` as a
-/// switch, as for real mode. A branch, an `mtmsr` and the return of an
-/// `sc` keep the bits, and an interrupt sets MSR\[SF\] to 1. The kernel
-/// run starts thread 0 with MSR\[SF\] at 1.
-/// So a branch may run in 32-bit mode in one of these cases:
+/// switch. [`real_mode_words`] has the same limit. A branch, an `mtmsr`
+/// and the return of an `sc` keep the bits. An interrupt sets MSR\[SF\]
+/// to 1. The kernel run starts thread 0 with MSR\[SF\] at 1. So a branch
+/// may run in 32-bit mode in one of these cases:
 /// - control can reach it from a word of
 ///   [`IndirectBound::mode32_switches`] by fall-throughs and direct
 ///   branches;

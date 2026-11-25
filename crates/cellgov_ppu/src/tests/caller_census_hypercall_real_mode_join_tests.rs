@@ -204,10 +204,9 @@ fn a_switch_target_forgets_the_srr1_that_the_path_before_it_builds() {
     assert_eq!(ordinals(0, &to_word_1), [(SC, None)]);
 }
 
-/// The window lies at real address 0x1_0000_3000, and a word of another
-/// segment shares the real address of its middle word, which the image
-/// names. No 32-bit half of the naming doubleword names a word of the
-/// code.
+/// A word of another segment shares the real address of the window's
+/// middle word, and the image names that word. No 32-bit half of the
+/// naming doubleword names a word of the code.
 ///
 /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
 #[test]

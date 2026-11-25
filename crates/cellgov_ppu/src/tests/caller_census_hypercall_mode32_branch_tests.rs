@@ -19,7 +19,6 @@ const STUB: u64 = 0x6000;
 /// The address of a second stub.
 const OTHER_STUB: u64 = 0x7000;
 
-/// The low window.
 fn low_window() -> Segment {
     code(LOW_WINDOW, &[li(11, 75), NOP, PPC_SC_1, PPC_BLR])
 }
@@ -57,7 +56,6 @@ fn msr_sf_ir() -> Vec<u32> {
     vec![lis_sf(5), ori(5, MSR_IR)]
 }
 
-/// `bctr`.
 fn bctr() -> u32 {
     word(PpuInstruction::Bcctr {
         bo: 0b10100,

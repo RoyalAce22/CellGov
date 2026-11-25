@@ -141,7 +141,7 @@ impl Constants {
         None
     }
 
-    /// Steps over the privileged word `raw`, which decodes to `decoded`.
+    /// Steps over the privileged word `raw`, and copies a lost mark into or out of SRR0 or SRR1.
     fn step_privileged(&mut self, raw: u32, decoded: &PpuInstruction) {
         match MsrWord::of(raw) {
             Some(MsrWord::MtSrr0 { rs }) => {
@@ -169,7 +169,7 @@ impl Constants {
         self.gprs[2] = toc.in_r2(self.gprs[2].take(), every);
     }
 
-    /// Forgets the constants in SRR0 and SRR1.
+    /// Forgets the constants and the lost marks of SRR0 and SRR1.
     ///
     /// [PPC-Book3 p:73 s:5.5.13] A System Call interrupt sets SRR0 and SRR1.
     fn forget_srrs(&mut self) {
@@ -262,12 +262,11 @@ impl Constants {
             .collect()
     }
 
-    /// Whether the word `raw` is an `rfid` that can enter a word with
-    /// MSR\[IR\] at 1 from an SRR0 that can hold a constant that the scan
-    /// dropped.
+    /// Whether the word `raw` is an `rfid` that can leave MSR\[IR\] at 1 with a lost SRR0.
     ///
-    /// The image need not name a dropped constant, so the `rfid` can enter
-    /// a word that the bound does not hold, with MSR\[SF\] at 0 or at 1.
+    /// A lost SRR0 can hold a constant that the scan dropped. The image
+    /// need not name that constant, so the `rfid` can enter a word that
+    /// the bound does not hold, with MSR\[SF\] at 0 or at 1.
     ///
     /// [PPC-Book3 p:13 s:2.3] `rfid` sets MSR\[IR\] to SRR1\[IR\] | SRR1\[PR\] and fetches the next instruction from SRR0 under the new MSR.
     pub(super) fn translated_rfid_lost(&self, raw: u32) -> bool {
