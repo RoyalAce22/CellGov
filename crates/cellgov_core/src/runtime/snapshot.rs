@@ -67,6 +67,7 @@ pub struct RuntimeSnapshot {
     pub(super) dma_queue: DmaQueue,
     pub(super) timer_wakes: crate::timer_queue::TimerWakeQueue,
     pub(super) lv2_host: Lv2Host,
+    pub(super) hypervisor: cellgov_lv2::hypervisor::Hypervisor,
     pub(super) syscall_responses: SyscallResponseTable,
     pub(super) commit_pipeline: CommitPipeline,
     pub(super) memory: GuestMemory,
@@ -108,6 +109,7 @@ fn snapshot_field_categories(rt: &Runtime) {
         dma_queue: _,
         timer_wakes: _,
         lv2_host: _,
+        hypervisor: _,
         syscall_responses: _,
         commit_pipeline: _,
         memory: _,
@@ -189,6 +191,7 @@ impl Runtime {
             dma_queue: self.dma_queue.clone(),
             timer_wakes: self.timer_wakes.clone(),
             lv2_host: self.lv2_host.clone(),
+            hypervisor: self.hypervisor.clone(),
             syscall_responses: self.syscall_responses.clone(),
             commit_pipeline: self.commit_pipeline.clone(),
             memory: self.memory.clone(),
@@ -246,6 +249,7 @@ impl Runtime {
         self.dma_queue = snap.dma_queue.clone();
         self.timer_wakes = snap.timer_wakes.clone();
         self.lv2_host = snap.lv2_host.clone();
+        self.hypervisor = snap.hypervisor.clone();
         self.syscall_responses = snap.syscall_responses.clone();
         self.commit_pipeline = snap.commit_pipeline.clone();
         self.memory = snap.memory.clone();

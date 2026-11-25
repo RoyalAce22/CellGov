@@ -94,6 +94,13 @@ fn drive(rt: &mut Runtime, ctx: &mut StepLoopCtx<'_>) -> Result<(String, BootOut
                 let diag = format!("TIME_OVERFLOW after {} steps", ctx.steps);
                 Some(fault_exit(ctx, diag, BootOutcome::TimeOverflow))
             }
+            Err(StepError::HypercallRefused) => {
+                let diag = rt.hypervisor().refusal().map_or_else(
+                    || format!("HYPERCALL_REFUSED after {} steps", ctx.steps),
+                    |refusal| format!("HYPERCALL_REFUSED after {} steps: {refusal}", ctx.steps),
+                );
+                Some(fault_exit(ctx, diag, BootOutcome::Fault))
+            }
             Err(StepError::SchedulerNotReinstalled) => {
                 unreachable!(
                     "boot driver does not call Runtime::restore_into; \

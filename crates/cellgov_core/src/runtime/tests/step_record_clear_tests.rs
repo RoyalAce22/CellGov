@@ -132,6 +132,19 @@ fn refusing(refusal: StepError) -> Runtime {
             rt.restore_into(&snap);
             rt
         }
+        StepError::HypercallRefused => {
+            let mut rt = Runtime::new(GuestMemory::new(64), Budget::new(4), 100);
+            rt.hypervisor
+                .dispatch(&cellgov_lv2::hypervisor::HypercallRequest {
+                    unit: UnitId::new(0),
+                    number: 0,
+                    inputs: [0; 8],
+                    pc: 0,
+                    thread: None,
+                    tick: GuestTicks::ZERO,
+                });
+            rt
+        }
     }
 }
 

@@ -34,6 +34,9 @@ pub(super) const TAG_SPU_STATE_FULL: u8 = 0x13;
 pub(super) const TAG_SPU_REGISTERS: u8 = 0x14;
 pub(super) const TAG_UNSYNCED_CODE_FETCH: u8 = 0x15;
 pub(super) const TAG_INTERRUPT_DELIVERED: u8 = 0x16;
+pub(super) const TAG_HYPERCALL_ENTERED: u8 = 0x17;
+pub(super) const TAG_HYPERCALL_RETURNED: u8 = 0x18;
+pub(super) const TAG_HYPERVISOR_CONSOLE: u8 = 0x19;
 
 impl TraceRecord {
     /// Append the binary encoding to `buf`.
@@ -299,6 +302,9 @@ impl TraceRecord {
                 write_u64(buf, *srr0);
                 write_u64(buf, time.raw());
             }
+            TraceRecord::HypercallEntered { .. }
+            | TraceRecord::HypercallReturned { .. }
+            | TraceRecord::HypervisorConsole { .. } => super::hypercall_codec::encode(self, buf),
         }
         debug_assert_eq!(
             Some(buf.len() - start),
@@ -635,6 +641,9 @@ impl TraceRecord {
                     time,
                 }
             }
+            TAG_HYPERCALL_ENTERED | TAG_HYPERCALL_RETURNED | TAG_HYPERVISOR_CONSOLE => {
+                super::hypercall_codec::decode(tag, bytes, &mut pos)?
+            }
             other => return Err(DecodeError::UnknownTag(other)),
         };
         Ok((record, pos))
@@ -653,13 +662,13 @@ fn write_u128(buf: &mut Vec<u8>, v: u128) {
     buf.extend_from_slice(&v.to_le_bytes());
 }
 
-fn read_u8(bytes: &[u8], pos: &mut usize) -> Result<u8, DecodeError> {
+pub(super) fn read_u8(bytes: &[u8], pos: &mut usize) -> Result<u8, DecodeError> {
     let v = *bytes.get(*pos).ok_or(DecodeError::Truncated)?;
     *pos += 1;
     Ok(v)
 }
 
-fn read_bool(bytes: &[u8], pos: &mut usize) -> Result<bool, DecodeError> {
+pub(super) fn read_bool(bytes: &[u8], pos: &mut usize) -> Result<bool, DecodeError> {
     match read_u8(bytes, pos)? {
         0 => Ok(false),
         1 => Ok(true),
@@ -677,7 +686,7 @@ fn read_u32(bytes: &[u8], pos: &mut usize) -> Result<u32, DecodeError> {
     Ok(u32::from_le_bytes(slice))
 }
 
-fn read_u64(bytes: &[u8], pos: &mut usize) -> Result<u64, DecodeError> {
+pub(super) fn read_u64(bytes: &[u8], pos: &mut usize) -> Result<u64, DecodeError> {
     let slice: [u8; 8] = bytes
         .get(*pos..*pos + 8)
         .ok_or(DecodeError::Truncated)?

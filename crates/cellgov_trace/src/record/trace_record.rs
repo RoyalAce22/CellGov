@@ -7,15 +7,17 @@ use cellgov_time::{Budget, Epoch, GuestTicks, InstructionCost};
 
 use super::codec::{
     TAG_BARRIER, TAG_COMMIT_APPLIED, TAG_EFFECT_EMITTED, TAG_HOST_INVARIANT_BREAK, TAG_HOST_WRITE,
-    TAG_INTERRUPT_DELIVERED, TAG_PPU_STATE_FULL, TAG_PPU_STATE_HASH, TAG_RESERVED_REGION_READ,
-    TAG_RUN_IDENTITY, TAG_SPU_REGISTERS, TAG_SPU_STATE_FULL, TAG_SPU_STATE_HASH,
-    TAG_STATE_HASH_CHECKPOINT, TAG_STATE_HASH_SCHEME, TAG_STEP_COMPLETED, TAG_SYSCALL_ENTERED,
-    TAG_SYSCALL_RETURNED, TAG_UNIT_BLOCKED, TAG_UNIT_SCHEDULED, TAG_UNIT_STOPPED, TAG_UNIT_WOKEN,
+    TAG_HYPERCALL_ENTERED, TAG_HYPERCALL_RETURNED, TAG_HYPERVISOR_CONSOLE, TAG_INTERRUPT_DELIVERED,
+    TAG_PPU_STATE_FULL, TAG_PPU_STATE_HASH, TAG_RESERVED_REGION_READ, TAG_RUN_IDENTITY,
+    TAG_SPU_REGISTERS, TAG_SPU_STATE_FULL, TAG_SPU_STATE_HASH, TAG_STATE_HASH_CHECKPOINT,
+    TAG_STATE_HASH_SCHEME, TAG_STEP_COMPLETED, TAG_SYSCALL_ENTERED, TAG_SYSCALL_RETURNED,
+    TAG_UNIT_BLOCKED, TAG_UNIT_SCHEDULED, TAG_UNIT_STOPPED, TAG_UNIT_WOKEN,
     TAG_UNSYNCED_CODE_FETCH,
 };
 use super::reasons::{
     HashCheckpointKind, HostWriter, TracedBarrierKind, TracedBlockReason, TracedEffectKind,
-    TracedInvariantBreakReason, TracedSyscallDisposition, TracedWakeReason, TracedYieldReason,
+    TracedHypercallDisposition, TracedInvariantBreakReason, TracedSyscallDisposition,
+    TracedWakeReason, TracedYieldReason,
 };
 
 /// Version of the binary trace format, carried by the
@@ -23,7 +25,11 @@ use super::reasons::{
 ///
 /// A stream whose first record is not `RunIdentity` is version 1 and
 /// carries no run identity.
-pub const TRACE_FORMAT_VERSION: u32 = 10;
+pub const TRACE_FORMAT_VERSION: u32 = 11;
+
+/// The most console bytes one [`TraceRecord::HypervisorConsole`] record
+/// carries: the bytes one logical console send holds in r5 to r8.
+pub const CONSOLE_RECORD_BYTES: usize = 32;
 
 /// [`TraceRecord::UnsyncedCodeFetch`] `sequence` bit: a `dcbst` on the
 /// line ran after the store.
@@ -387,6 +393,54 @@ pub enum TraceRecord {
         /// Guest-time clock of the unit when it took the interrupt.
         time: GuestTicks,
     },
+    /// A unit's hypercall; the runtime records it before it applies the answer.
+    HypercallEntered {
+        /// Unit that executed `sc` with LEV = 1.
+        unit: UnitId,
+        /// The hypercall number, from r11.
+        number: u64,
+        /// r3 to r10, in that order.
+        args: [u64; 8],
+        /// Address of the `sc`.
+        pc: u64,
+        /// PPE hardware thread of the unit, when the unit names one.
+        thread: Option<u8>,
+        /// What the hypervisor did with the call.
+        disposition: TracedHypercallDisposition,
+        /// Guest-time clock of the call.
+        time: GuestTicks,
+    },
+    /// The registers a hypercall answer wrote.
+    ///
+    /// The runtime emits it when it stores the registers for the unit's
+    /// next step. It pairs with the unit's most recent
+    /// [`HypercallEntered`](Self::HypercallEntered). A refused hypercall
+    /// has none.
+    HypercallReturned {
+        /// Unit that receives the answer.
+        unit: UnitId,
+        /// Value written to r3: an LV1 status code.
+        status: u64,
+        /// Values written to r4 onward; entries from `written` on are 0.
+        outputs: [u64; 7],
+        /// How many output registers the answer wrote.
+        written: u8,
+        /// Whether no per-number cost timed the call.
+        untimed: bool,
+        /// Guest-time clock when the runtime stored the answer.
+        time: GuestTicks,
+    },
+    /// Bytes a unit sent to CellGov's logical console through a hypercall.
+    HypervisorConsole {
+        /// Unit that sent the bytes.
+        unit: UnitId,
+        /// Console id the send named.
+        console: u64,
+        /// How many bytes of `bytes` the send carried.
+        len: u8,
+        /// The bytes; entries from `len` on are 0.
+        bytes: [u8; CONSOLE_RECORD_BYTES],
+    },
 }
 
 impl TraceRecord {
@@ -416,6 +470,9 @@ impl TraceRecord {
             TraceRecord::SpuRegisters { .. } => TAG_SPU_REGISTERS,
             TraceRecord::UnsyncedCodeFetch { .. } => TAG_UNSYNCED_CODE_FETCH,
             TraceRecord::InterruptDelivered { .. } => TAG_INTERRUPT_DELIVERED,
+            TraceRecord::HypercallEntered { .. } => TAG_HYPERCALL_ENTERED,
+            TraceRecord::HypercallReturned { .. } => TAG_HYPERCALL_RETURNED,
+            TraceRecord::HypervisorConsole { .. } => TAG_HYPERVISOR_CONSOLE,
         }
     }
 
@@ -448,6 +505,9 @@ impl TraceRecord {
             TAG_SPU_REGISTERS => 1 + 8 + 8 + 1 + 16 * 16,
             TAG_UNSYNCED_CODE_FETCH => 1 + 8 + 8 + 4 + 8 + 8 + 8 + 1 + 1,
             TAG_INTERRUPT_DELIVERED => 1 + 8 * 4,
+            TAG_HYPERCALL_ENTERED => 1 + 8 + 8 + 8 * 8 + 8 + 1 + 1 + 1 + 8,
+            TAG_HYPERCALL_RETURNED => 1 + 8 + 8 + 8 * 7 + 1 + 1 + 8,
+            TAG_HYPERVISOR_CONSOLE => 1 + 8 + 8 + 1 + CONSOLE_RECORD_BYTES,
             _ => return None,
         })
     }
@@ -476,6 +536,9 @@ impl TraceRecord {
             TraceRecord::SyscallEntered { .. } => TraceLevel::Scheduling,
             TraceRecord::ReservedRegionRead { .. } => TraceLevel::Hashes,
             TraceRecord::SyscallReturned { .. } => TraceLevel::Scheduling,
+            TraceRecord::HypercallEntered { .. }
+            | TraceRecord::HypercallReturned { .. }
+            | TraceRecord::HypervisorConsole { .. } => TraceLevel::Scheduling,
             TraceRecord::HostWrite { .. } => TraceLevel::Commits,
             TraceRecord::StateHashScheme { .. } => TraceLevel::Hashes,
         }

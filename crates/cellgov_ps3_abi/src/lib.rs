@@ -5,6 +5,7 @@
 //! - NIDs, each checked against its SHA-1 at compile time
 //! - error codes
 //! - syscall numbers and the namespace layout over them
+//! - the LV1 hypercall table, status codes and repository keys
 //! - struct offsets and flag bits
 //! - binary-format and hardware constants
 //! - the PPC64 encoders for CellGov's own stubs
@@ -24,6 +25,7 @@
 pub mod codegen;
 pub mod format;
 pub mod hw;
+pub mod lv1;
 pub mod lv2;
 pub mod nid;
 pub mod sha1;

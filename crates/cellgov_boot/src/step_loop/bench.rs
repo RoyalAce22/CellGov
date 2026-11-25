@@ -90,6 +90,7 @@ fn drive(
             }
             Err(StepError::MaxStepsExceeded) => return Ok(BootOutcome::MaxSteps),
             Err(StepError::TimeOverflow) => return Ok(BootOutcome::TimeOverflow),
+            Err(StepError::HypercallRefused) => return Ok(BootOutcome::Fault),
             Err(StepError::SchedulerNotReinstalled) => {
                 // boot bench does not call Runtime::restore_into.
                 unreachable!(

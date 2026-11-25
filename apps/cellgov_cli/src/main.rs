@@ -26,6 +26,7 @@ mod dump_prx_imports;
 mod env_vars;
 mod funcs;
 mod game;
+mod hypercall_census;
 mod lv2_census;
 mod lv2_discover;
 #[cfg(feature = "decrypt")]
@@ -203,6 +204,10 @@ fn dispatch_dev(
         }
         DevCommand::Lv2Census(args) => {
             lv2_census::run(args, vfs_flag)?;
+            Ok(CommandExitCode::SUCCESS)
+        }
+        DevCommand::HypercallCensus(args) => {
+            hypercall_census::run(args, vfs_flag)?;
             Ok(CommandExitCode::SUCCESS)
         }
         #[cfg(feature = "decrypt")]

@@ -26,7 +26,7 @@ pub(crate) use dev::{
     SpuCensusArgs, SpuDisasmArgs, TitleCensusScope, TitlesGenArgs, WorkspaceGenArgs,
     MAX_DISASM_COUNT,
 };
-pub(crate) use dev::{Lv2CensusArgs, Lv2DiscoverArgs};
+pub(crate) use dev::{HypercallCensusArgs, Lv2CensusArgs, Lv2DiscoverArgs};
 pub(crate) use diff::{
     CompareArgs, DiffCommand, ExploreArgs, ExploreCommand, ExploreTitleArgs, OutputFormat,
     ScenarioCommand,

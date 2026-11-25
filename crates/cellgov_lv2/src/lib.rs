@@ -16,6 +16,7 @@ pub mod dispatch;
 mod dispatch_lanes;
 pub mod fs_store;
 pub mod host;
+pub mod hypervisor;
 pub mod image;
 pub mod ppu_thread;
 pub mod prx_registry;

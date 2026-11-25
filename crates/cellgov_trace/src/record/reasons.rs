@@ -33,10 +33,9 @@ pub enum TracedYieldReason {
     Fault = 7,
     /// Unit reached its terminal state.
     Finished = 8,
-    /// A request with nonzero LEV (hypercall). The PPU stops on `sc` with
-    /// LEV = 1, so only a hand-built request reaches it. A separate
-    /// reason keeps its rejection from a byte collision with an
-    /// unrelated LV2 handler that returns `CELL_EINVAL`.
+    /// A request with nonzero LEV: a hypercall.
+    ///
+    /// A thread in supervisor state yields it for `sc` with LEV = 1.
     Hypercall = 9,
     /// Unit parked on a blocking channel whose count was zero; the
     /// stalled instruction runs again when the unit wakes.
@@ -209,6 +208,9 @@ pub enum HostWriter {
     /// A Raw SPU's state projected into its problem-state window: a
     /// register word or a local-store page.
     SpuProblemState = 8,
+    /// A memory write a hypercall answer carries, which lands at dispatch
+    /// time.
+    Hypervisor = 9,
 }
 
 /// Mirror of `cellgov_exec::BarrierKind` for the trace stream.
@@ -282,4 +284,23 @@ pub enum TracedSyscallDisposition {
     TimerFastPath = 5,
     /// `Lv2Request::NoSuchSyscall`: `r11` is outside the LV2 syscall table.
     NoSuchSyscall = 6,
+}
+
+/// What CellGov's hypervisor did with the hypercall a
+/// [`TraceRecord::HypercallEntered`](super::TraceRecord::HypercallEntered)
+/// record names.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive, strum::VariantArray,
+)]
+#[repr(u8)]
+#[num_enum(error_type(name = DecodeError, constructor = DecodeError::unknown_hypercall_disposition))]
+pub enum TracedHypercallDisposition {
+    /// A handler answered it.
+    Answered = 0,
+    /// No handler exists for the number: the null backend refused it,
+    /// and the run stops.
+    Unmodelled = 1,
+    /// A handler refused inputs the model does not cover, and the run
+    /// stops.
+    Refused = 2,
 }

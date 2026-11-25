@@ -42,6 +42,13 @@ pub enum DecodeError {
     /// Barrier-kind byte is not a known variant.
     #[error("unknown barrier kind 0x{0:02x}")]
     UnknownBarrierKind(u8),
+    /// Hypercall-disposition byte is not a known variant.
+    #[error("unknown hypercall disposition 0x{0:02x}")]
+    UnknownHypercallDisposition(u8),
+    /// A count byte (`HypercallReturned` `written`, `HypervisorConsole`
+    /// `len`) is larger than the array it counts.
+    #[error("count byte 0x{0:02x} is larger than the array it counts")]
+    CountOutOfRange(u8),
     /// The header names a trace format other than [`TRACE_FORMAT_VERSION`].
     ///
     /// Each format fixes its own header width, so the decoder cannot
@@ -85,5 +92,9 @@ impl DecodeError {
 
     pub(super) fn unknown_barrier_kind(v: u8) -> Self {
         Self::UnknownBarrierKind(v)
+    }
+
+    pub(super) fn unknown_hypercall_disposition(v: u8) -> Self {
+        Self::UnknownHypercallDisposition(v)
     }
 }

@@ -358,9 +358,10 @@ impl PpuExecutionUnit {
                     }
                     self.record_retirement(step_pc);
                     // A thread with supervisor registers takes the system
-                    // call interrupt at the kernel's vector instead.
+                    // call interrupt at the kernel's vector instead, or
+                    // yields a hypercall.
                     if translating {
-                        return self.system_call_yield(&entry, effects, step_pc, lev);
+                        return self.supervisor_sc_yield(&entry, effects, step_pc, lev);
                     }
                     self.close_block(effects);
                     let args = state::ppu_syscall_args(&self.state);

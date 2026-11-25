@@ -121,8 +121,13 @@ impl StopReason {
             Self::StepError(StepError::NoRunnableUnit | StepError::AllBlocked) => {
                 StopClass::Blocked
             }
-            // Guest time reaching u64::MAX is no cap anyone can raise.
-            Self::StepError(StepError::TimeOverflow | StepError::SchedulerNotReinstalled)
+            // Guest time reaching u64::MAX is no cap anyone can raise. A
+            // refused hypercall is a call the model does not answer.
+            Self::StepError(
+                StepError::TimeOverflow
+                | StepError::SchedulerNotReinstalled
+                | StepError::HypercallRefused,
+            )
             | Self::CommitError(_)
             | Self::ReservedStore { .. } => StopClass::Refusal,
             // The driver read the records out of turn.

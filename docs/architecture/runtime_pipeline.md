@@ -24,8 +24,8 @@ eight-step deterministic loop:
    the remaining per-effect updates (mailboxes, signals, DMA
    enqueue, reservations, wakes, block transitions, RSX flip
    requests) in emission order.
-6. Dispatch the unit's syscall through `Lv2Host` if the yield reason
-   was `Syscall`.
+6. Dispatch the unit's syscall through `Lv2Host`, or its hypercall
+   through CellGov's hypervisor, if the yield reason was `Syscall`.
 7. Advance the commit epoch, then fire due DMA completions and timer
    wakes, settle a finished unit, and run the RSX FIFO advance pass.
    See [DMA and timer wakes](#dma-and-timer-wakes) through
@@ -50,7 +50,7 @@ flowchart TD
   val -->|rejected| discard
   val -->|ok| drain["5. drain staging atomically, apply effects in emission order"]
   drain --> sc{"yield reason Syscall?"}
-  sc -->|yes| lv2["6. Lv2Host dispatch"] --> epoch
+  sc -->|yes| lv2["6. Lv2Host or hypervisor dispatch"] --> epoch
   sc -->|no| epoch["7. advance epoch; fire due DMA completions and timer wakes; settle finished unit; RSX advance"]
   epoch --> rec["8. emit commit records, notify scheduler"] --> sel
 ```
@@ -398,6 +398,13 @@ The full vocabulary of guest-visible operations:
     the caller -- same commit for an immediate return, wake time
     for a blocked call -- so a wrong errno is readable from the
     stream without a re-run;
+  - `HypercallEntered` (unit, number, arguments, pc, PPE thread,
+    disposition, guest time), emitted before CellGov's hypervisor
+    answers, and its counterpart `HypercallReturned` (unit, status,
+    output registers, guest time), emitted when the runtime stores
+    the answer for the unit's next step;
+  - `HypervisorConsole` (unit, console id, bytes), one per send to
+    CellGov's logical console;
   - one locator for reads of the reserved-zero RSX / SPU ranges,
     `ReservedRegionRead` (unit, step, address, length, hits). It is
     drained after every step and commit so the replay comparison

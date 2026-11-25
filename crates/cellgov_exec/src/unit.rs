@@ -362,6 +362,12 @@ pub trait ExecutionUnit {
         false
     }
 
+    /// The PPE hardware thread, 0 or 1, that this unit's last step ran
+    /// on, or `None` for a unit that is not a PPE thread.
+    fn ppe_thread(&self) -> Option<u8> {
+        None
+    }
+
     /// What this PPE thread's recent stalls at the issue point the PPE's
     /// threads share add to each instruction of another one.
     ///

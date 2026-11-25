@@ -467,10 +467,13 @@ impl StepFootprint {
                 // can land a tick-derived value anywhere in these bytes
                 // (the `sys_time_get_current_time` out parameters are
                 // one). So an LV2 write reads the clock, on the argument
-                // [`StepFootprint::reads_clock`] makes for `mftb`.
+                // [`StepFootprint::reads_clock`] makes for `mftb`. A
+                // hypercall answer also holds the tick it ran at, so a
+                // hypervisor write reads the clock too.
                 cellgov_trace::HostWriter::Lv2Effect
                 | cellgov_trace::HostWriter::SyscallOutParam
-                | cellgov_trace::HostWriter::WakeContinuation => {
+                | cellgov_trace::HostWriter::WakeContinuation
+                | cellgov_trace::HostWriter::Hypervisor => {
                     record(self, write);
                     self.reads_clock = true;
                 }

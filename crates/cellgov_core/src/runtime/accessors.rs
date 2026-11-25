@@ -108,6 +108,15 @@ impl Runtime {
         &mut self.signal_registry
     }
 
+    // -- Hypervisor --
+
+    /// CellGov's hypervisor: its witnesses, its TTY sink and the refusal
+    /// that stopped the run.
+    #[inline]
+    pub fn hypervisor(&self) -> &cellgov_lv2::hypervisor::Hypervisor {
+        &self.hypervisor
+    }
+
     // -- LV2 --
 
     /// Immutable view of the LV2 host state.

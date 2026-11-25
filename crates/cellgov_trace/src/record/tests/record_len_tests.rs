@@ -158,6 +158,29 @@ fn one_of_each() -> Vec<TraceRecord> {
             srr0: 62,
             time: GuestTicks::new(63),
         },
+        TraceRecord::HypercallEntered {
+            unit: UnitId::new(7),
+            number: 64,
+            args: [65; 8],
+            pc: 66,
+            thread: Some(1),
+            disposition: TracedHypercallDisposition::Unmodelled,
+            time: GuestTicks::new(67),
+        },
+        TraceRecord::HypercallReturned {
+            unit: UnitId::new(7),
+            status: 68,
+            outputs: [69; 7],
+            written: 7,
+            untimed: true,
+            time: GuestTicks::new(70),
+        },
+        TraceRecord::HypervisorConsole {
+            unit: UnitId::new(7),
+            console: 71,
+            len: 32,
+            bytes: [72; CONSOLE_RECORD_BYTES],
+        },
     ]
 }
 
@@ -184,10 +207,10 @@ fn every_known_tag_has_a_sample_and_the_next_tag_is_free() {
     assert_eq!(sampled, declared, "a variant is missing from one_of_each");
     assert_eq!(
         declared.iter().copied().collect::<Vec<_>>(),
-        (0..=TAG_INTERRUPT_DELIVERED).collect::<Vec<_>>(),
+        (0..=TAG_HYPERVISOR_CONSOLE).collect::<Vec<_>>(),
         "tags are dense and append-only"
     );
-    assert_eq!(TraceRecord::encoded_len(TAG_INTERRUPT_DELIVERED + 1), None);
+    assert_eq!(TraceRecord::encoded_len(TAG_HYPERVISOR_CONSOLE + 1), None);
 }
 
 #[test]

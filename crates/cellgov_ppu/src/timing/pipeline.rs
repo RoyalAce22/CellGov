@@ -1124,8 +1124,11 @@ impl PpeTiming {
                 self.end_block(t + 1);
                 return t;
             }
+            // A hypervisor call takes no LV2 round trip. No hypercall
+            // number has a measured cost, so the issue model charges
+            // nothing past the `sc`.
             Kind::Syscall { number: None, .. } => {
-                self.return_from_call(t + k::PPU_SYSCALL_UNTIMED_ROUND_TRIP_CYCLES);
+                self.end_block(t + 1);
                 return t;
             }
             Kind::Plain | Kind::Unpipelined(_) | Kind::Drain | Kind::VscrWrite => {}

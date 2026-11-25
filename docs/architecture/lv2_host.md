@@ -14,7 +14,9 @@ How a guest `sc` reaches an answer:
 ```mermaid
 flowchart TD
   sc["guest sc"] --> lev{"LEV = 0?"}
-  lev -->|no| hyp["PPU fault: the thread stops, no request"]
+  lev -->|no| hvs{"thread in supervisor state?"}
+  hvs -->|yes| hv["CellGov's hypervisor, no request"]
+  hvs -->|no| hyp["PPU fault: the thread stops, no request"]
   lev -->|yes| sup{"thread has supervisor registers?"}
   sup -->|yes| vec["system call interrupt at the kernel's vector, no request"]
   sup -->|no| timer{"141 / 142?"}
@@ -94,8 +96,11 @@ gives it beside what the other committed sources say.
 
 **Three requests have no ordinal.**
 
-- `Hypercall` -- a request with LEV != 0, which the PPU never
-  yields. It returns CELL_EINVAL with an invariant break.
+- `Hypercall` -- a request with LEV != 0. The PPU yields LEV=1 only
+  from supervisor state, and the runtime sends that call to CellGov's
+  hypervisor (`crates/cellgov_lv2/src/hypervisor/`) before it
+  classifies anything, so no such request reaches LV2. If one does, it
+  returns CELL_EINVAL with an invariant break.
 - `Malformed` -- a request whose fields the classifier could not
   bind. It returns CELL_EINVAL with an invariant break.
 - `UnresolvedImport` -- fires when CRT0 calls through a GOT slot

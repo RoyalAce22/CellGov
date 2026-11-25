@@ -145,6 +145,7 @@ pub(crate) fn report(name: &str, result: &ScenarioResult) -> String {
         ScenarioOutcome::MaxStepsExceeded => "MaxStepsExceeded".to_owned(),
         ScenarioOutcome::TimeOverflow => "TimeOverflow".to_owned(),
         ScenarioOutcome::CommitRefused(e) => format!("CommitRefused ({e})"),
+        ScenarioOutcome::HypercallRefused(e) => format!("HypercallRefused ({e})"),
     };
     format!(
         "scenario: {name}\noutcome: {outcome}\nsteps_taken: {steps}\ntrace_bytes: {bytes}\nmemory_hash: 0x{mem:016x}\nstatus_hash: 0x{status:016x}\nsync_hash: 0x{sync:016x}",

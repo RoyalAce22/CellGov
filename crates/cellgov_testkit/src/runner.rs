@@ -4,8 +4,13 @@
 //!
 //! Tests build a fixture and hand it to [`run`]; the result is the assertion
 //! surface. The loop calls `step()` then `commit_step()` each iteration.
-//! Stepping ends when the scheduler returns `NoRunnableUnit`/`AllBlocked`
-//! (stall), on `MaxStepsExceeded`, or on the first refused commit.
+//! Stepping ends on the first of these:
+//!
+//! - a stall: the scheduler returns `NoRunnableUnit` or `AllBlocked`;
+//! - `MaxStepsExceeded`;
+//! - `TimeOverflow`;
+//! - a refused commit;
+//! - a refused hypercall.
 
 use std::collections::BTreeMap;
 
@@ -35,6 +40,9 @@ pub enum ScenarioOutcome {
     /// reached guest state, so every later step would run on a state the
     /// schedule did not produce, and the run stops here.
     CommitRefused(CommitError),
+    /// CellGov's hypervisor refused a hypercall, and the caller saw no
+    /// answer. The run stops here.
+    HypercallRefused(cellgov_lv2::hypervisor::HypercallRefusal),
 }
 
 /// Structured result of a scenario run; the assertion surface for tests.
@@ -181,6 +189,12 @@ fn run_internal(fixture: ScenarioFixture, memory: GuestMemory) -> (ScenarioResul
             }
             Err(StepError::MaxStepsExceeded) => break ScenarioOutcome::MaxStepsExceeded,
             Err(StepError::TimeOverflow) => break ScenarioOutcome::TimeOverflow,
+            Err(StepError::HypercallRefused) => {
+                let refusal = rt.hypervisor().refusal();
+                break ScenarioOutcome::HypercallRefused(
+                    refusal.expect("a hypercall refusal stop has a latched refusal"),
+                );
+            }
             Err(StepError::SchedulerNotReinstalled) => {
                 // The runner builds a fresh runtime and never calls
                 // restore_into, so this arm is unreachable.

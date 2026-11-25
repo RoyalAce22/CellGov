@@ -21,9 +21,13 @@ pub struct LocalDiagnostics {
     /// call site without a downcast through the registry.
     pub lr: Option<u64>,
     /// LEV of the `sc` instruction, which the PPU reads from bit 26 alone.
-    /// Set on `YieldReason::Syscall`, where it is always 0: `sc` with
-    /// LEV = 1 stops the thread and yields no syscall. A thread with
-    /// supervisor registers yields no syscall either.
+    /// Set on `YieldReason::Syscall`:
+    /// - 0 for an LV2 call, which a thread with no supervisor registers
+    ///   yields;
+    /// - 1 for a hypercall, which a thread in supervisor state yields.
+    ///
+    /// A problem-state `sc` with LEV = 1 stops the thread and yields no
+    /// syscall.
     ///
     /// [PPC-Book1 p:26 s:2.4.2 System Call Instruction] LEV=0 user-mode kernel syscall path.
     /// [PPC-Book3 p:12 s:2.3.1] LEV=1 invokes the hypervisor; LEV>1 reserved.

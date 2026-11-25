@@ -106,7 +106,7 @@ fn step_and_commit(rt: &mut Runtime) {
 fn every_host_writer_drops_predecoded_code_over_its_bytes() {
     assert_eq!(
         HostWriter::VARIANTS.len(),
-        9,
+        10,
         "a new writer joins this test"
     );
     for &writer in HostWriter::VARIANTS {

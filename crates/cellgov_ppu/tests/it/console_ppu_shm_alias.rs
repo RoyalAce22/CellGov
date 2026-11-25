@@ -18,12 +18,12 @@
 //! holds the stored value. Case 2 reads that target through Y, and the
 //! other cases through X.
 
-use cellgov_effects::FaultKind;
 use cellgov_event::UnitId;
+use cellgov_lv2::hypervisor::HypercallRefusal;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_ppu::mmu::Partition;
 use cellgov_ppu::supervisor::{SlbEntry, SupervisorState};
-use cellgov_ppu::{PpuExecutionUnit, FAULT_SYSTEM_CALL};
+use cellgov_ppu::PpuExecutionUnit;
 use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_DR, MSR_IR, MSR_SF, SLB_VALID};
 use cellgov_testkit::fixtures::ScenarioFixture;
 use cellgov_testkit::runner::{self, ScenarioOutcome};
@@ -145,8 +145,9 @@ fn program(trials: u64) -> Vec<u32> {
         let back = (head as i32 - p.len() as i32) * 4;
         p.push(16 << 26 | 16 << 21 | (back as u32 & 0xFFFC)); // bdnz head
     }
-    // A trap takes the program interrupt at the kernel's vector, and the
-    // run continues. `sc 1` stops the thread.
+    // The run continues past a trap, which takes the program interrupt
+    // at the kernel's vector. `sc 1` with r11 = 0 is a hypercall that
+    // CellGov's hypervisor does not model, so the run stops there.
     p.push(0x4400_0022); // sc 1
     p
 }
@@ -183,6 +184,7 @@ fn translating_unit(id: UnitId) -> PpuExecutionUnit {
 /// Runs the program and returns each case's two counts.
 fn run(trials: u64) -> [[u64; 2]; CASES] {
     let words = program(trials);
+    let words_len = words.len();
     assert!(
         4 * (words.len() as u64) <= 0x1000,
         "the program fits page 0"
@@ -209,17 +211,18 @@ fn run(trials: u64) -> [[u64; 2]; CASES] {
         })
         .build();
     let result = runner::run(fixture);
+    let last = SEGMENT + 4 * (words_len as u64 - 1);
     assert_eq!(
         result.outcome,
-        ScenarioOutcome::Faulted,
+        ScenarioOutcome::HypercallRefused(HypercallRefusal::Unmodelled {
+            number: 0,
+            unit: UnitId::new(0),
+            pc: last,
+        }),
         "the program ends at its hypervisor call: {:?}",
         result.first_fault
     );
-    assert_eq!(
-        result.first_fault.map(|(_, kind)| kind),
-        Some(FaultKind::Guest(FAULT_SYSTEM_CALL | 1)),
-        "the program ends at its hypervisor call"
-    );
+    assert_eq!(result.first_fault, None, "no fault before the call");
     let m = &result.final_memory;
     let mut counts = [[0u64; 2]; CASES];
     for (c, count) in counts.iter_mut().enumerate() {

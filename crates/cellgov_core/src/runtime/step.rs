@@ -33,8 +33,9 @@ impl Runtime {
     /// [`StepError::NoRunnableUnit`] or [`StepError::AllBlocked`], and
     /// the execution is maximal. True says a unit is there to run and
     /// no more than that. `step` keeps its own refusals --
-    /// [`StepError::MaxStepsExceeded`] and
-    /// [`StepError::SchedulerNotReinstalled`] -- and a deadline that
+    /// [`StepError::MaxStepsExceeded`],
+    /// [`StepError::SchedulerNotReinstalled`] and
+    /// [`StepError::HypercallRefused`] -- and a deadline that
     /// fires without waking anyone still ends in `AllBlocked`.
     ///
     /// A caller bounding a run reads this before it reports its own
@@ -76,6 +77,8 @@ impl Runtime {
     ///   unchanged. A unit whose cost overruns its budget can still pass
     ///   `u64::MAX` after it ran: the runtime drops that step and its
     ///   effects, and the unit keeps the state the run left.
+    /// - [`StepError::HypercallRefused`] -- CellGov's hypervisor refused
+    ///   a hypercall at an earlier commit.
     ///
     /// Emitted effects are returned verbatim in [`RuntimeStep::result`];
     /// [`Runtime::commit_step`] drives the commit pipeline over them.
@@ -89,6 +92,9 @@ impl Runtime {
         self.clear_step_records();
         if self.scheduler_dirty_after_restore {
             return Err(StepError::SchedulerNotReinstalled);
+        }
+        if self.hypervisor.refusal().is_some() {
+            return Err(StepError::HypercallRefused);
         }
         if self.steps_taken >= self.max_steps {
             return Err(StepError::MaxStepsExceeded);

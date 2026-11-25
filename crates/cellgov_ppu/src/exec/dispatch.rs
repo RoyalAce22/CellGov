@@ -305,10 +305,18 @@ pub fn execute(
         }
 
         // [PPC-Book1 p:26 s:2.4.2] sc surfaces LEV to the system; service dispatch is runtime-defined.
-        // LEV = 1 invokes the hypervisor; see `PpuInterrupt::SystemCall`.
-        PpuInstruction::Sc { lev: 1 } => ExecuteVerdict::Fault(super::PpuFault::Interrupt(
-            super::PpuInterrupt::SystemCall { lev: 1 },
-        )),
+        // [PPC-Book3 p:12 s:2.3.1] LEV = 1 invokes the hypervisor.
+        // CellGov's hypervisor answers it from supervisor state only; see
+        // `PpuInterrupt::SystemCall` for the stop elsewhere.
+        PpuInstruction::Sc { lev: 1 } => {
+            if state.supervisor().is_some_and(|s| !s.problem_state()) {
+                ExecuteVerdict::Syscall { lev: 1 }
+            } else {
+                ExecuteVerdict::Fault(super::PpuFault::Interrupt(
+                    super::PpuInterrupt::SystemCall { lev: 1 },
+                ))
+            }
+        }
         PpuInstruction::Sc { lev } => ExecuteVerdict::Syscall { lev },
 
         // One unit's accesses run in program order and each step's

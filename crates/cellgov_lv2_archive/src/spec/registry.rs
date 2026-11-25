@@ -7,6 +7,7 @@ use super::census::{
 };
 use super::firmware::{FIRMWARE, PUP};
 use super::handling::{ARM, BEHAVIOR, ROUTE};
+use super::hypercall::{HYPERCALL, HYPERCALL_SITE, HYPERCALL_UNRESOLVED};
 use super::naming::{CONFLICTS, NAME, PRIORITY};
 use super::schema::{OwnerClass, TableSpec, View, GATE, REGENERATE};
 
@@ -27,6 +28,9 @@ pub const TABLES: &[TableSpec] = &[
     CALLER,
     CALLER_UNRESOLVED,
     REACH,
+    HYPERCALL_SITE,
+    HYPERCALL_UNRESOLVED,
+    HYPERCALL,
     BEHAVIOR,
     NAME,
     CONFLICTS,

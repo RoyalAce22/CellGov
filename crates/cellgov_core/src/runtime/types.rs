@@ -93,6 +93,12 @@ pub enum StepError {
          install a fresh scheduler after every restore_into"
     )]
     SchedulerNotReinstalled,
+    /// CellGov's hypervisor refused a hypercall, which stops the run.
+    ///
+    /// The calling unit gets no answer, and every later step refuses the
+    /// same way. `Runtime::hypervisor` names the refusal.
+    #[error("CellGov's hypervisor refused a hypercall")]
+    HypercallRefused,
 }
 
 /// Failure surface of an [`SpuFactory`].

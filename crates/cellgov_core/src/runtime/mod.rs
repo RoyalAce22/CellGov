@@ -30,6 +30,7 @@ mod commit_trace;
 mod construction;
 mod dma;
 mod host_write;
+mod hypercall;
 mod lv2_dispatch;
 mod mem_helpers;
 mod mfc_exception;

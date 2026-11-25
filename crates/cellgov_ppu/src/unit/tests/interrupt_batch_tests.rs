@@ -2,8 +2,8 @@
 //! - the instructions ahead of a fault commit;
 //! - the instruction that faults leaves nothing;
 //! - the reservation stays;
-//! - a machine check, a checkstop, `sc` with LEV = 1 and a CellGov stop
-//!   end the thread.
+//! - a machine check, a checkstop, a problem-state `sc` with LEV = 1 and
+//!   a CellGov stop end the thread.
 
 use super::interrupt_support::*;
 use crate::exec::{PpuFault, PpuInterrupt};
@@ -13,7 +13,7 @@ use cellgov_effects::{Effect, FaultKind};
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit, UnitStatus, YieldReason};
 use cellgov_ps3_abi::hw::ppu_interrupt as irq;
-use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_DR, MSR_ME};
+use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_DR, MSR_ME, MSR_PR};
 use cellgov_sync::{ReservationTable, ReservedLine};
 use cellgov_time::Budget;
 
@@ -182,11 +182,11 @@ fn a_machine_check_and_a_checkstop_stay_terminal_on_a_thread_with_supervisor_reg
     assert_eq!(unit.status(), UnitStatus::Faulted);
 }
 
-/// [PPC-Book3 p:12 s:2.3.1] `sc` with LEV = 1 invokes the hypervisor, which CellGov does not answer yet.
+/// [PPC-Book3 p:12 s:2.3.1] `sc` with LEV = 1 from problem state invokes the hypervisor, and the architecture calls that a programming error.
 #[test]
-fn sc_with_lev_1_stays_terminal_on_a_thread_with_supervisor_registers() {
+fn sc_with_lev_1_in_problem_state_stays_terminal_on_a_thread_with_supervisor_registers() {
     let mem = memory(&[SC_1]);
-    let mut unit = kernel_unit(KERNEL_MSR);
+    let mut unit = kernel_unit(KERNEL_MSR | MSR_PR);
     let (r, _) = run(&mut unit, &mem, 4);
     assert_eq!(r.yield_reason, YieldReason::Fault);
     assert_eq!(fault_code(r.fault), Some(FAULT_SYSTEM_CALL | 1));

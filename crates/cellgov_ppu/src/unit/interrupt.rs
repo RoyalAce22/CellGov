@@ -7,9 +7,10 @@
 //! - the system call interrupt of `sc` with any other LEV;
 //! - the external and decrementer interrupts, between two instructions.
 //!
-//! Interrupt entry ends the batch. The next batch follows the new MSR,
-//! whose IR and DR are 0. A thread with no supervisor registers keeps
-//! the terminal fault of every interrupt.
+//! `sc` with LEV = 1 yields a hypercall in supervisor state, and stops
+//! the thread in problem state. Interrupt entry ends the batch. The next
+//! batch follows the new MSR, whose IR and DR are 0. A thread with no
+//! supervisor registers keeps the terminal fault of every interrupt.
 
 use cellgov_effects::Effect;
 use cellgov_exec::{
@@ -84,7 +85,8 @@ impl PpuExecutionUnit {
     /// - a CellGov stop;
     /// - a machine check: the 4.93 kernel's machine check vector loops on
     ///   itself, so CellGov keeps the stop;
-    /// - `sc` with LEV = 1: CellGov's hypervisor does not answer it.
+    /// - `sc` with LEV = 1 from problem state: CellGov's hypervisor
+    ///   answers a hypercall from supervisor state only.
     pub(super) fn delivered_interrupt(&self, fault: &PpuFault) -> Option<PpuInterrupt> {
         if !self.translates() {
             return None;
@@ -321,3 +323,7 @@ mod interrupt_system_call_tests;
 #[cfg(test)]
 #[path = "tests/interrupt_code_event_tests.rs"]
 mod interrupt_code_event_tests;
+
+#[cfg(test)]
+#[path = "tests/hypercall_yield_tests.rs"]
+mod hypercall_yield_tests;

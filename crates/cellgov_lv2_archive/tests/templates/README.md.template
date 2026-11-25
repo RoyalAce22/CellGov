@@ -179,6 +179,30 @@ from installed, decrypted firmware modules. The loader validates shapes,
 sort order and references; `caller_rows_are_well_formed` validates the
 cross-table coverage rules.
 
+## Kernel hypercalls
+
+`tables/hypercall_site.tsv` groups each kernel's LV1 hypercall sites, an
+`sc` with LEV 1, by PUP hash and the constant the site loads into r11. A
+site is the real address of its `sc`: real mode ignores EA bits 0 and 1,
+so a kernel address loses its top bit. `tables/hypercall_unresolved.tsv`
+has one row for every scanned kernel; `sites` is `none` when every site
+resolved. Both tables hold derived facts only, never kernel bytes.
+
+`cellgov dev hypercall-census` writes one kernel's rows of both tables.
+`{{hypercall_regenerate}}` runs it over every `kernel.tsv` kernel in the
+installed firmware and rewrites both; without that flag the same test
+fails when a re-extraction differs. `{{hypercall_gate}}` checks the
+coverage rules without reading external data.
+
+`tables/hypercall.tsv` has {{hypercall_numbers}} rows, one per number a
+scanned kernel calls or CellGov's hypervisor answers. Each row joins the
+call table in `cellgov_ps3_abi::lv1::call` (the name and the input and
+output register counts), CellGov's family for the call and the work item
+that answers that family, the firmware versions whose kernel calls the
+number with its site count in the newest of them, and the state:
+`answered` ({{hypercall_answered}} numbers) or `null_backend`, where the
+call stops the run.
+
 ## Handling
 
 `tables/route.tsv` has one row per LV2 syscall slot, and `tables/arm.tsv` one row

@@ -9,16 +9,19 @@
 
 mod codec;
 mod error;
+mod hypercall_codec;
 mod reasons;
 mod trace_record;
 
 pub use error::DecodeError;
 pub use reasons::{
     HashCheckpointKind, HostWriter, TracedBarrierKind, TracedBlockReason, TracedEffectKind,
-    TracedInvariantBreakReason, TracedSyscallDisposition, TracedWakeReason, TracedYieldReason,
+    TracedHypercallDisposition, TracedInvariantBreakReason, TracedSyscallDisposition,
+    TracedWakeReason, TracedYieldReason,
 };
 pub use trace_record::{
-    TraceRecord, SEQUENCE_DCBST, SEQUENCE_ICBI, SEQUENCE_SYNC, TRACE_FORMAT_VERSION,
+    TraceRecord, CONSOLE_RECORD_BYTES, SEQUENCE_DCBST, SEQUENCE_ICBI, SEQUENCE_SYNC,
+    TRACE_FORMAT_VERSION,
 };
 
 #[cfg(test)]
@@ -52,3 +55,7 @@ mod code_fetch_tests;
 #[cfg(test)]
 #[path = "tests/record_interrupt_delivered_tests.rs"]
 mod interrupt_delivered_tests;
+
+#[cfg(test)]
+#[path = "tests/record_hypercall_tests.rs"]
+mod hypercall_tests;

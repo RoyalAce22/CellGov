@@ -1,4 +1,5 @@
-//! Reproduces the committed LV2 census from the operator-owned installed firmware.
+//! Reproduces the committed LV2 census and the committed hypercall site
+//! tables from the operator-owned installed firmware.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -177,6 +178,65 @@ fn firmware_reextracts_byte_identical_census_rows() {
             read(&output.join(&file)),
             read(&committed.join(&file)),
             "{file} changed during firmware re-extraction"
+        );
+    }
+}
+
+/// With `CELLGOV_REGENERATE=1` set, the test writes the re-extracted
+/// tables over the committed ones and compares nothing.
+#[test]
+fn firmware_reextracts_byte_identical_hypercall_rows() {
+    let root = workspace_root();
+    let committed = root.join("docs/lv2");
+    let pup_table = archive::parse(&PUP, &read(&committed.join(PUP.file())))
+        .expect("parse committed PUP table");
+    let firmware_by_pup: BTreeMap<String, String> = archive::pup_rows(&pup_table)
+        .into_iter()
+        .map(|row| (row.pup_sha256, row.fw))
+        .collect();
+    let kernel_table = archive::parse(&KERNEL, &read(&committed.join(KERNEL.file())))
+        .expect("parse committed kernel table");
+    let stored = stored_kernels(&root);
+    let output = scratch_labeled("hypercall_census_firmware");
+
+    for kernel in &archive::kernel_rows(&kernel_table) {
+        let fw = &firmware_by_pup[&kernel.pup_sha256];
+        let source = kernel_for(kernel, fw, &stored);
+        let result = Command::new(env!("CARGO_BIN_EXE_cellgov"))
+            .args(["dev", "hypercall-census"])
+            .arg(&source)
+            .args(["--fw", fw, "--pup-sha256", &kernel.pup_sha256])
+            .arg("--output-dir")
+            .arg(output.as_ref())
+            .current_dir(&root)
+            .output()
+            .expect("run hypercall-census");
+        assert!(
+            result.status.success(),
+            "hypercall-census firmware {fw} ({}) from {} failed:\n{}",
+            kernel.pup_sha256,
+            source.display(),
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+
+    let regenerate = std::env::var_os("CELLGOV_REGENERATE").is_some_and(|v| v == "1");
+    for file in [
+        archive::HYPERCALL_SITE.file(),
+        archive::HYPERCALL_UNRESOLVED.file(),
+    ] {
+        let extracted = read(&output.join(&file));
+        if regenerate {
+            std::fs::write(committed.join(&file), &extracted)
+                .unwrap_or_else(|e| panic!("write {file}: {e}"));
+            continue;
+        }
+        assert_eq!(
+            extracted,
+            read(&committed.join(&file)),
+            "{file} changed during firmware re-extraction; regenerate with:\n  \
+             CELLGOV_REGENERATE=1 cargo test -p cellgov_cli --features installed-firmware-tests \
+             --test lv2_census_firmware firmware_reextracts_byte_identical_hypercall_rows"
         );
     }
 }

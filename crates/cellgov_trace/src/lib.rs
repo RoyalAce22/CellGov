@@ -26,7 +26,8 @@ pub use level::TraceLevel;
 pub use reader::TraceReader;
 pub use record::{
     DecodeError, HashCheckpointKind, HostWriter, TraceRecord, TracedBarrierKind, TracedBlockReason,
-    TracedEffectKind, TracedInvariantBreakReason, TracedSyscallDisposition, TracedWakeReason,
-    TracedYieldReason, SEQUENCE_DCBST, SEQUENCE_ICBI, SEQUENCE_SYNC, TRACE_FORMAT_VERSION,
+    TracedEffectKind, TracedHypercallDisposition, TracedInvariantBreakReason,
+    TracedSyscallDisposition, TracedWakeReason, TracedYieldReason, CONSOLE_RECORD_BYTES,
+    SEQUENCE_DCBST, SEQUENCE_ICBI, SEQUENCE_SYNC, TRACE_FORMAT_VERSION,
 };
 pub use writer::TraceWriter;

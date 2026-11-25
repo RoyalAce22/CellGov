@@ -38,11 +38,14 @@ pub fn observe(
 ) -> Result<Observation, ObserveError> {
     let outcome = match result.outcome {
         ScenarioOutcome::Stalled => ObservedOutcome::Completed,
-        // A clock overflow or a refused commit ends the run on an
-        // invariant violation, so it reads as a fault.
+        // Each of these ends the run, so each reads as a fault:
+        // - a clock overflow or a refused commit, on an invariant
+        //   violation;
+        // - a refused hypercall, on a call the model does not answer.
         ScenarioOutcome::Faulted
         | ScenarioOutcome::TimeOverflow
-        | ScenarioOutcome::CommitRefused(_) => ObservedOutcome::Fault,
+        | ScenarioOutcome::CommitRefused(_)
+        | ScenarioOutcome::HypercallRefused(_) => ObservedOutcome::Fault,
         ScenarioOutcome::MaxStepsExceeded => ObservedOutcome::Timeout,
     };
 

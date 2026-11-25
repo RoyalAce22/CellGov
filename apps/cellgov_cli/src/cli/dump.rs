@@ -286,6 +286,60 @@ fn dump_trace(result: &ScenarioResult) -> Result<(), CommandError> {
                     time.raw()
                 );
             }
+            TraceRecord::HypercallEntered {
+                unit,
+                number,
+                args,
+                pc,
+                thread,
+                disposition,
+                time,
+            } => {
+                let thread = thread.map_or_else(|| "-".to_owned(), |t| t.to_string());
+                println!(
+                    "{i:4}  HypercallEntered   unit={} number={number} pc=0x{pc:016x} \
+                     thread={thread} disposition={disposition:?} time={} \
+                     args=[0x{:x},0x{:x},0x{:x},0x{:x},0x{:x},0x{:x},0x{:x},0x{:x}]",
+                    unit.raw(),
+                    time.raw(),
+                    args[0],
+                    args[1],
+                    args[2],
+                    args[3],
+                    args[4],
+                    args[5],
+                    args[6],
+                    args[7],
+                );
+            }
+            TraceRecord::HypercallReturned {
+                unit,
+                status,
+                outputs,
+                written,
+                untimed,
+                time,
+            } => {
+                let shown = &outputs[..usize::from(written).min(outputs.len())];
+                println!(
+                    "{i:4}  HypercallReturned  unit={} status=0x{status:x} outputs={shown:x?} \
+                     untimed={untimed} time={}",
+                    unit.raw(),
+                    time.raw()
+                );
+            }
+            TraceRecord::HypervisorConsole {
+                unit,
+                console,
+                len,
+                bytes,
+            } => {
+                let text = bytes[..usize::from(len).min(bytes.len())].escape_ascii();
+                println!(
+                    "{i:4}  HypervisorConsole  unit={} console={console} text=\"{text}\"",
+                    unit.raw()
+                );
+            }
         }
     }
     println!("--- {count} records total ---");

@@ -129,6 +129,10 @@ impl ExecutionUnit for PpuExecutionUnit {
         true
     }
 
+    fn ppe_thread(&self) -> Option<u8> {
+        Some(self.ctrl_thread())
+    }
+
     fn time_base_read(&self) -> Option<u64> {
         self.state.clock_read.then_some(self.state.tb)
     }

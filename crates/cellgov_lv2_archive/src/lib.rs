@@ -28,6 +28,7 @@ mod coverage;
 mod extraction;
 mod firmware;
 mod handling;
+mod hypercall;
 mod name;
 mod oracle_gap;
 mod pup;
@@ -68,6 +69,11 @@ pub use firmware::{
 pub use handling::{
     arm_rows, arm_tsv, route_rows, route_tsv, ArmRow, HandlingCounts, Route, RouteRow,
 };
+pub use hypercall::{
+    hypercall_family, hypercall_rows, hypercall_site_rows, hypercall_site_tsv, hypercall_tsv,
+    hypercall_unresolved_rows, hypercall_unresolved_tsv, HypercallCensus, HypercallRow,
+    HypercallSiteRow, HypercallState, HypercallUnresolvedRow,
+};
 pub use name::{
     conflict_rows, conflicts_tsv, macro_name_rows, name_rows, name_tsv, uncorroborated,
     with_cellgov_rows, ConflictRow, Disagreement, NameRow, NameSource, CELLGOV_CONSTANT_PATH,
@@ -83,10 +89,11 @@ pub use spec::{
     CENSUS, CENSUS_CLASSES, CENSUS_GATE, CENSUS_REGENERATE, COMPARISON_STATES, CONFLICTS, COVERAGE,
     COVERAGE_SCOPES, DISAGREEMENTS, DISCOVERY_CONFIDENCE, DISCOVERY_METHODS, DISPATCH_SHAPES,
     ENTRY_FORMATS, EXCEPTIONS, FIDELITY_LABELS, FIRMWARE, FIRMWARE_GATE, FIRMWARE_ROLES, GATE,
-    GATE_STATES, KERNEL, NAME, NAME_GATE, NAME_REGENERATE, NAME_SOURCES, PRESENCE, PRIMARY_LABELS,
-    PRIORITY, PROVENANCE_KINDS, PUP, PUP_GATE, REACH, REGENERATE, ROUTE, ROUTE_LABELS,
-    SCHEMA_VERSION, SELECTOR_SLOTS, STUB, SUBENTRY, SUBENTRY_ATTRIBUTION, SUBENTRY_SOURCES, TABLES,
-    TRANSITIONS, TRANSITION_KINDS, VIEWS,
+    GATE_STATES, HYPERCALL, HYPERCALL_FAMILIES, HYPERCALL_GATE, HYPERCALL_LEAVES,
+    HYPERCALL_REGENERATE, HYPERCALL_SITE, HYPERCALL_STATES, HYPERCALL_UNRESOLVED, KERNEL, NAME,
+    NAME_GATE, NAME_REGENERATE, NAME_SOURCES, PRESENCE, PRIMARY_LABELS, PRIORITY, PROVENANCE_KINDS,
+    PUP, PUP_GATE, REACH, REGENERATE, ROUTE, ROUTE_LABELS, SCHEMA_VERSION, SELECTOR_SLOTS, STUB,
+    SUBENTRY, SUBENTRY_ATTRIBUTION, SUBENTRY_SOURCES, TABLES, TRANSITIONS, TRANSITION_KINDS, VIEWS,
 };
 pub use sql::{build_sql, schema_sql, SQLITE_VERSION};
 pub use table::{check_references, parse, render, ArchiveError, Table, NONE};

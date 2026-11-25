@@ -88,6 +88,10 @@ impl Runtime {
         };
         // Synthetic / fake-ISA callers do not populate LEV.
         let lev = result.local_diagnostics.syscall_lev.unwrap_or(0);
+        // [PPC-Book3 p:12 s:2.3.1] LEV = 1 invokes the hypervisor, and LV2 receives no request.
+        if lev == 1 {
+            return self.dispatch_hypercall(result, source);
+        }
         let num = raw_args[0];
         let args8: [u64; 8] = [
             raw_args[1],

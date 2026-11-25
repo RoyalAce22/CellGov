@@ -86,6 +86,10 @@ pub trait RegisteredUnit: 'static {
     /// [`ExecutionUnit::shares_ppe_issue`].
     fn shares_ppe_issue(&self) -> bool;
 
+    /// The PPE hardware thread of the unit's last step. See
+    /// [`ExecutionUnit::ppe_thread`].
+    fn ppe_thread(&self) -> Option<u8>;
+
     /// The PPE thread's issue pressure. See
     /// [`ExecutionUnit::ppe_issue_pressure`].
     fn ppe_issue_pressure(&self) -> cellgov_exec::PpeIssuePressure;
@@ -311,6 +315,11 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn shares_ppe_issue(&self) -> bool {
         ExecutionUnit::shares_ppe_issue(self)
+    }
+
+    #[inline]
+    fn ppe_thread(&self) -> Option<u8> {
+        ExecutionUnit::ppe_thread(self)
     }
 
     #[inline]
