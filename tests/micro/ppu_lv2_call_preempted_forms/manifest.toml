@@ -1,0 +1,19 @@
+[test]
+name = "ppu_lv2_call_preempted_forms"
+
+# A hardware probe of what a higher-priority wake costs a thread in an
+# LV2 call, and of an event flag handoff whose wait a cancel ends, each
+# timed with mftb. The console capture is the answer; ppu/main.c's header
+# lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 768 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 768 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

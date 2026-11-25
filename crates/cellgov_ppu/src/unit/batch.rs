@@ -496,6 +496,7 @@ impl PpuExecutionUnit {
     /// The inputs the runtime committed since the last batch:
     /// - the reservation clear
     /// - a syscall return
+    /// - whether the unit left the PPE since its last step
     /// - register writes
     /// - the PPE sibling count
     #[inline]
@@ -512,6 +513,13 @@ impl PpuExecutionUnit {
             self.state.set_gpr(3, code);
             self.state.pc += 4;
             self.timing.note_syscall_return(code);
+        }
+        if let Some(kind) = ctx.resumed() {
+            let preempted = match kind {
+                cellgov_exec::ResumeKind::Woken => false,
+                cellgov_exec::ResumeKind::Preempted => true,
+            };
+            self.timing.note_syscall_resumed(preempted);
         }
         for &(reg, val) in ctx.register_writes() {
             if (reg as usize) < 32 {

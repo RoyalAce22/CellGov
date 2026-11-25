@@ -6,7 +6,7 @@
 //! backwards.
 
 use cellgov_event::UnitId;
-use cellgov_exec::UnitStatus;
+use cellgov_exec::{ResumeKind, UnitStatus};
 use cellgov_time::GuestTicks;
 
 use super::UnitRegistry;
@@ -74,9 +74,12 @@ impl UnitRegistry {
     /// the last clock sync, at the tick `now`.
     ///
     /// - A unit with no clock starts at `now`.
-    /// - A unit that was not runnable at the last sync (parked, held or
-    ///   stopped) and is runnable at this sync resumes at `now`, unless
-    ///   its own clock is later.
+    /// - A unit that was not runnable at the last sync and is runnable at
+    ///   this sync resumes at `now`, unless its own clock is later. The
+    ///   sync marks it resumed until its next step:
+    ///   - preempted, when it waited only for a PPE hardware thread since
+    ///     its last step
+    ///   - woken, otherwise
     /// - A unit that is not runnable goes into `parked`; a runnable unit
     ///   goes into the index at its clock.
     ///
@@ -87,17 +90,22 @@ impl UnitRegistry {
         let mut watch = std::mem::take(&mut self.clock_watch);
         for &id in &watch {
             let status = self.effective_status(id);
+            let resumes = status == Some(UnitStatus::Runnable) && self.parked.contains(&id);
+            if resumes {
+                self.mark_resumed(id);
+            }
             let clock = self.clocks.entry(id).or_insert(now);
-            if status == Some(UnitStatus::Runnable) && self.parked.contains(&id) && *clock < now {
+            if resumes && *clock < now {
                 *clock = now;
             }
             let clock = *clock;
             // A stopped unit is Finished, and a restart (a Raw SPU run
             // request) makes it Runnable again, so it goes into `parked` too.
             if matches!(status, Some(s) if s != UnitStatus::Runnable) {
-                self.parked.insert(id);
+                self.park(id);
             } else {
                 self.parked.remove(&id);
+                self.held.remove(&id);
             }
             self.unindex_runnable(id);
             if status == Some(UnitStatus::Runnable) {
@@ -107,6 +115,39 @@ impl UnitRegistry {
         // The buffer goes back empty and keeps its capacity.
         watch.clear();
         self.clock_watch = watch;
+    }
+
+    /// Mark the resuming `id` preempted when it is in `held`, woken
+    /// otherwise.
+    fn mark_resumed(&mut self, id: UnitId) {
+        // A commit syncs a wake before it places the PPE threads. So a
+        // woken unit can park again to wait for a hardware thread before
+        // its next step. Its mark stays woken.
+        if self.resumed.get(&id) == Some(&ResumeKind::Woken) {
+            return;
+        }
+        let kind = if self.held.contains(&id) {
+            ResumeKind::Preempted
+        } else {
+            ResumeKind::Woken
+        };
+        self.resumed.insert(id, kind);
+    }
+
+    /// Put the not-runnable `id` into `parked`, and keep `held` current.
+    ///
+    /// - A unit that parks to wait only for a PPE hardware thread goes
+    ///   into `held`. It leaves `held` when it blocks.
+    /// - A unit that parks blocked stays out of `held`, also when it then
+    ///   waits for a hardware thread.
+    fn park(&mut self, id: UnitId) {
+        let waits_for_core = self.is_off_core(id);
+        let newly_parked = self.parked.insert(id);
+        if newly_parked && waits_for_core {
+            self.held.insert(id);
+        } else if !newly_parked && !waits_for_core {
+            self.held.remove(&id);
+        }
     }
 
     /// Mark `id`'s status as possibly changed: its status lane goes

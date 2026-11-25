@@ -16,7 +16,8 @@
 use crate::console_ppu_issue_timing::replay_r3;
 use crate::console_ppu_lv2_call_cost::{call_replay, YIELD_LOOP};
 use cellgov_ps3_abi::hw::ppu_issue::{
-    ppu_syscall_round_trip_cycles, PPU_CYCLES_PER_TB_TICK, PPU_SYSCALL_ROUND_TRIP_CYCLES,
+    ppu_syscall_resumed_round_trip_cycles, ppu_syscall_round_trip_cycles, PPU_CYCLES_PER_TB_TICK,
+    PPU_SYSCALL_ROUND_TRIP_CYCLES,
 };
 use cellgov_ps3_abi::lv2::syscall as sc;
 
@@ -127,13 +128,22 @@ fn the_uncontended_yield_lies_within_its_loop_s_spread_of_the_table() {
 }
 
 #[test]
-fn contended_calls_cost_the_console_more_than_the_uncontended_trips_cellgov_charges() {
-    // These ratios hold the console's contended paths against the
-    // uncontended trips. Beside a runnable sibling CellGov adds a share of
-    // the trip (`console_ppu_lv2_call_sibling`), but it charges a yield
-    // that switches threads no more than that. It charges a woken wait
-    // the uncontended wait's trip from the poster's commit.
+fn contended_calls_cost_the_console_more_than_the_uncontended_trips() {
+    // Beside a runnable sibling CellGov adds a share of the trip
+    // (`console_ppu_lv2_call_sibling`). A yield that switches
+    // threads and a woken wait take the resumed trips, which CellGov's
+    // run of the probe fits (`lv2_call_contended_microtest` in the CLI).
     let w = console_words();
+    assert!(
+        ppu_syscall_resumed_round_trip_cycles(sc::PPU_THREAD_YIELD, Some(0), true)
+            > ppu_syscall_round_trip_cycles(sc::PPU_THREAD_YIELD),
+        "a switching yield costs more than a yield that keeps its hardware thread",
+    );
+    assert!(
+        ppu_syscall_resumed_round_trip_cycles(sc::SEMAPHORE_WAIT, Some(0), false)
+            > ppu_syscall_round_trip_cycles(sc::SEMAPHORE_WAIT),
+        "a woken wait costs more than a wait that does not block",
+    );
     let yield_trip = ppu_syscall_round_trip_cycles(sc::PPU_THREAD_YIELD) as f64;
     let sibling = console_cycles(&w, SIBLING_LOOP).0 - rest(&w);
     let switch = console_cycles(&w, SWITCH_LOOP).0 - rest(&w);
@@ -145,15 +155,13 @@ fn contended_calls_cost_the_console_more_than_the_uncontended_trips_cellgov_char
         (5.5..6.5).contains(&(switch / yield_trip)),
         "a yield among three threads: {switch:.0} against {yield_trip:.0}",
     );
-    // A handoff round is two posts and two waits. CellGov's waiter
-    // resumes at the post's commit, so its round is at most the four
-    // trips one after another.
+    // A handoff round is two posts and two waits, each wait woken.
     let handoff = console_cycles(&w, HANDOFF_LOOP).0;
     let serial = 2.0
         * (ppu_syscall_round_trip_cycles(sc::SEMAPHORE_POST)
             + ppu_syscall_round_trip_cycles(sc::SEMAPHORE_WAIT)) as f64;
     assert!(
         (4.7..5.2).contains(&(handoff / serial)),
-        "a handoff round: {handoff:.0} against CellGov's {serial:.0} for four serial trips",
+        "a handoff round: {handoff:.0} against {serial:.0} for four uncontended trips",
     );
 }

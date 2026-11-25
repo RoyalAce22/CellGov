@@ -50,6 +50,13 @@ mod mffs_record_wait_tests;
 #[path = "tests/kernel_share_tests.rs"]
 mod kernel_share_tests;
 
+#[cfg(test)]
+#[path = "tests/preempted_call_tests.rs"]
+mod preempted_call_tests;
+#[cfg(test)]
+#[path = "tests/resumed_call_tests.rs"]
+mod resumed_call_tests;
+
 /// The length of the ring of latest issue cycles that the fetch-ahead
 /// bound reads.
 const AHEAD_RING: usize = 32;
@@ -200,6 +207,9 @@ pub(crate) struct Core {
     gate: u64,
     /// The LV2 call whose round trip the thread has yet to charge.
     syscall: Option<PendingSyscall>,
+    /// The thread left the PPE between calls for a higher-priority thread,
+    /// and has yet to charge [`k::PPU_PREEMPTED_RESUME_CYCLES`].
+    preempted: bool,
     /// The share of this thread's recent cycles, out of [`SHARE_ONE`],
     /// spent in LV2 calls, over a window of [`KERNEL_WINDOW_CYCLES`].
     kernel_share: u32,
@@ -217,6 +227,11 @@ struct PendingSyscall {
     number: u64,
     /// The code the call returned, once the runtime commits it.
     code: Option<u64>,
+    /// The thread left the PPE before the call returned: it blocked, or
+    /// it waited for a hardware thread.
+    resumed: bool,
+    /// The thread left the PPE only for a higher-priority thread.
+    preempted: bool,
 }
 
 /// [`Core::divide_share`] for a thread that spends all its cycles on
@@ -418,6 +433,7 @@ impl PpeTiming {
                 interval: 0,
                 gate: 0,
                 syscall: None,
+                preempted: false,
                 kernel_share: 0,
             },
             tables: Box::new(Tables {
@@ -909,6 +925,8 @@ impl PpeTiming {
                     issue: t,
                     number,
                     code: None,
+                    resumed: false,
+                    preempted: false,
                 });
                 self.end_block(t + 1);
                 return t;
@@ -934,16 +952,44 @@ impl PpeTiming {
         }
     }
 
-    /// Charge the pending LV2 call's round trip, by its outcome: the next
-    /// instruction issues no earlier than the round trip after the `sc`.
-    /// A call with no committed return takes the round trip of its success
-    /// path. A runnable sibling adds [`Self::sibling_call_cycles`] to the
-    /// round trip.
+    /// Note that the thread left the PPE since its last batch.
+    ///
+    /// `preempted` is true when the thread left only for a higher-priority
+    /// thread. A pending LV2 call takes its resumed round trip. A thread
+    /// preempted between calls waits [`k::PPU_PREEMPTED_RESUME_CYCLES`]
+    /// before its next instruction issues. [`Self::charge_syscall`]
+    /// charges either.
+    pub(crate) fn note_syscall_resumed(&mut self, preempted: bool) {
+        match self.core.syscall.as_mut() {
+            Some(call) => {
+                call.resumed = true;
+                call.preempted = preempted;
+            }
+            None => self.core.preempted |= preempted,
+        }
+    }
+
+    /// Charge a preempted thread's resume wait, then the pending LV2 call's round trip.
+    ///
+    /// The next instruction issues no earlier than the round trip after the
+    /// `sc`. The first of these that applies selects the round trip:
+    /// - the resumed round trip, if the thread left the PPE before the call
+    ///   returned;
+    /// - the round trip of the committed return;
+    /// - the round trip of the success path, if no return is committed.
+    ///
+    /// A runnable sibling adds [`Self::sibling_call_cycles`] to the round trip.
     pub(crate) fn charge_syscall(&mut self) {
+        if std::mem::take(&mut self.core.preempted) {
+            self.return_from_call(self.core.floor + k::PPU_PREEMPTED_RESUME_CYCLES);
+        }
         let Some(call) = self.core.syscall.take() else {
             return;
         };
         let trip = match call.code {
+            _ if call.resumed => {
+                k::ppu_syscall_resumed_round_trip_cycles(call.number, call.code, call.preempted)
+            }
             Some(code) => k::ppu_syscall_outcome_round_trip_cycles(call.number, code),
             None => k::ppu_syscall_round_trip_cycles(call.number),
         };

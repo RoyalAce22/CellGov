@@ -307,7 +307,7 @@ microtests() {
     timed test-microtests cargo nextest run --locked --profile ci-microtests \
         -p cellgov_ppu -p cellgov_spu -p cellgov_cli \
         --features cellgov_ppu/ppu-microtests,cellgov_spu/spu-microtests,cellgov_cli/microtests \
-        -E 'package(cellgov_ppu) & kind(lib) | package(cellgov_spu) & (kind(lib) | test(/^spu_float_edges::/)) | binary_id(cellgov_cli::microtests) | binary_id(cellgov_cli::bin/cellgov) & test(=cli::scenarios::tests::explore_micro_runs_for_elf_microtests)'
+        -E 'package(cellgov_ppu) & kind(lib) | package(cellgov_spu) & (kind(lib) | test(/^spu_float_edges::/)) | binary_id(cellgov_cli::microtests) | binary_id(cellgov_cli::lv2_call_contended_microtest) | binary_id(cellgov_cli::bin/cellgov) & test(=cli::scenarios::tests::explore_micro_runs_for_elf_microtests)'
 }
 
 # The data-feature suites, on the operator's machine: every target and
@@ -319,7 +319,7 @@ microtests() {
 # (CELLGOV_DATA_LEDGER moves it): the UTC time, the commit, the
 # installed firmware and titles, and nextest's summary.
 data_features=${external_data_features//,runner_ps3\/ps3-hardware/}
-data_targets="firmware_set_load lv2_census_firmware ps3autotests process_spawn_microtest microtests spurs_microtest title_witnesses obs_null_sink authority_id bench_stdout_purity system_ver_floor"
+data_targets="firmware_set_load lv2_census_firmware ps3autotests process_spawn_microtest microtests lv2_call_contended_microtest spurs_microtest title_witnesses obs_null_sink authority_id bench_stdout_purity system_ver_floor"
 install_data_targets="npdrm_oracle_vectors parity_pkg parity_disc parity_title_digests firmware_pipeline_end_to_end parity_firmware_decrypt"
 
 # The installed firmware count and newest version, and the installed

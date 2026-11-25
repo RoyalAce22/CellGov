@@ -1,10 +1,12 @@
-//! Per-unit pending message / syscall-return / register-write buffers.
+//! Per-unit pending message / syscall-return / register-write buffers,
+//! and the resume mark.
 //!
 //! Producers (the commit pipeline and HLE dispatch) deposit values here
 //! addressed by `UnitId`; the runtime drains the relevant entries into
 //! the unit's `ExecutionContext` at the start of its next step.
 
 use cellgov_event::UnitId;
+use cellgov_exec::ResumeKind;
 
 use super::UnitRegistry;
 
@@ -61,6 +63,13 @@ impl UnitRegistry {
         self.pending_syscall_returns.remove(&id)
     }
 
+    /// Take `id`'s resume mark: its [`ResumeKind`], or `None` when no
+    /// clock sync found it resumed since its last step.
+    #[inline]
+    pub fn take_resumed(&mut self, id: UnitId) -> Option<ResumeKind> {
+        self.resumed.remove(&id)
+    }
+
     /// Queue a register write for the next step of `id`. Unknown-id
     /// policy matches [`Self::push_receive`].
     pub fn push_register_write(&mut self, id: UnitId, reg: u8, value: u64) {
@@ -88,3 +97,7 @@ impl UnitRegistry {
         self.pending_register_writes.remove(&id).unwrap_or_default()
     }
 }
+
+#[cfg(test)]
+#[path = "tests/resumed_tests.rs"]
+mod resumed_tests;

@@ -46,6 +46,20 @@ pub struct ExecutionContext<'a> {
     ppe_sibling_pressure: PpeIssuePressure,
     ppe_older_sibling: bool,
     time_base: u64,
+    resumed: Option<ResumeKind>,
+}
+
+/// Why a unit was not runnable at a clock sync before it resumed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResumeKind {
+    /// One of these kept it from running:
+    ///
+    /// - It blocked.
+    /// - It stopped.
+    /// - A hold such as a suspended thread group kept it.
+    Woken,
+    /// It stayed runnable and waited only for a PPE hardware thread.
+    Preempted,
 }
 
 /// The queued MFC commands of one unit that a new command of the unit
@@ -98,6 +112,7 @@ impl<'a> ExecutionContext<'a> {
             ppe_sibling_pressure: PpeIssuePressure::NONE,
             ppe_older_sibling: false,
             time_base: 0,
+            resumed: None,
         }
     }
 
@@ -126,6 +141,7 @@ impl<'a> ExecutionContext<'a> {
             ppe_sibling_pressure: PpeIssuePressure::NONE,
             ppe_older_sibling: false,
             time_base: 0,
+            resumed: None,
         }
     }
 
@@ -156,6 +172,7 @@ impl<'a> ExecutionContext<'a> {
             ppe_sibling_pressure: PpeIssuePressure::NONE,
             ppe_older_sibling: false,
             time_base: 0,
+            resumed: None,
         }
     }
 
@@ -190,6 +207,7 @@ impl<'a> ExecutionContext<'a> {
             ppe_sibling_pressure: PpeIssuePressure::NONE,
             ppe_older_sibling: false,
             time_base: 0,
+            resumed: None,
         }
     }
 
@@ -206,6 +224,23 @@ impl<'a> ExecutionContext<'a> {
     #[inline]
     pub const fn with_time_base(self, time_base: u64) -> Self {
         Self { time_base, ..self }
+    }
+
+    /// Attach the unit's resume mark; see [`Self::resumed`].
+    #[inline]
+    pub const fn with_resumed(self, resumed: Option<ResumeKind>) -> Self {
+        Self { resumed, ..self }
+    }
+
+    /// Why a clock sync found the unit not runnable since its last step.
+    ///
+    /// A call that the unit made before it stopped running returns:
+    ///
+    /// - [`ResumeKind::Woken`]: after the wake.
+    /// - [`ResumeKind::Preempted`]: after the unit gets a hardware thread.
+    #[inline]
+    pub const fn resumed(&self) -> Option<ResumeKind> {
+        self.resumed
     }
 
     /// Attach the committed reservation table, replacing any prior

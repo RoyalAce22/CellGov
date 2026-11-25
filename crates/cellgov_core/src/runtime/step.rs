@@ -165,6 +165,7 @@ impl Runtime {
         let received = self.registry.drain_receives(unit_id);
         let syscall_ret = self.registry.drain_syscall_return(unit_id);
         let reg_writes = self.registry.drain_register_writes(unit_id);
+        let resumed = self.registry.take_resumed(unit_id);
         let mut effects_buf = std::mem::take(&mut self.effects_buf);
         effects_buf.clear();
         let mailbox_read = core::cell::Cell::new(false);
@@ -204,6 +205,7 @@ impl Runtime {
                 .with_reservations(unit_reservations)
                 .with_current_tick(start)
                 .with_time_base(self.time_base)
+                .with_resumed(resumed)
                 .with_trace_per_step(self.mode != RuntimeMode::FaultDriven)
                 .with_outstanding_dma_tags(outstanding_tags)
                 .with_list_stall_tags(self.dma_queue.stall_notify_tags(unit_id))

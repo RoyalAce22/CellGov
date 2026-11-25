@@ -1,0 +1,21 @@
+[test]
+name = "ppu_lv2_call_woken_forms"
+
+# A hardware probe of the LV2 round trip of a wait that blocks and is
+# woken, through each kind of wait: a handoff between main and one helper
+# thread through a semaphore, an event flag, an event queue and a
+# condition variable, five loops timed with mftb. The probe creates each
+# form's objects and helper, and destroys or joins them before the next
+# form. ppu/main.c's header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 768 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 768 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 90000

@@ -275,7 +275,8 @@ pub const PPU_SYSCALL_ROUND_TRIP_CYCLES: u64 = 929;
 /// - thread create and join;
 /// - the memory allocation and mmapper calls;
 /// - the file system calls;
-/// - the waits the table lacks, such as a condition or event queue wait.
+/// - the waits the table lacks, when they do not block, such as an event
+///   queue receive.
 ///
 /// Each of these creates a kernel object, writes a result to guest memory
 /// or switches threads. The timed calls of those kinds all take more than
@@ -358,6 +359,114 @@ pub const fn ppu_syscall_round_trip_cycles(number: u64) -> u64 {
         i += 1;
     }
     PPU_SYSCALL_UNTIMED_ROUND_TRIP_CYCLES
+}
+
+/// The round trip of each timed wait that blocks, as `(syscall number, cycles)`.
+///
+/// Each entry is the cycles from the wake to the earliest issue of the
+/// instruction after the wait's `sc`. The `ppu_lv2_call_contended` and
+/// `ppu_lv2_call_woken_forms` captures time them.
+///
+/// Each capture times a handoff between two threads. The main thread
+/// wakes a helper and then waits. The helper wakes the main thread and
+/// then waits for the next round. CellGov's run of each probe through the
+/// runtime takes the console's round at these trips. Each trip in that
+/// run also takes the sibling share that the other thread adds. A round,
+/// less the probe's own loop, takes these cycles on the console:
+///
+/// | wait | wake | round |
+/// | --- | --- | --- |
+/// | `sys_semaphore_wait` | `sys_semaphore_post` | 49624 |
+/// | `sys_event_flag_wait` | `sys_event_flag_set` | 61096 |
+/// | `sys_event_queue_receive` | `sys_event_port_send` | 58725 |
+/// | `sys_cond_wait` | `sys_cond_signal` | 26076 |
+///
+/// A condition wait releases its mutex and locks it again before it
+/// returns. Its round is the shortest. The second capture repeats the
+/// semaphore handoff at 51680 cycles, within that loop's spread of 8619.
+pub const PPU_SYSCALL_WOKEN_ROUND_TRIPS: [(u64, u64); 4] = [
+    (syscall::SEMAPHORE_WAIT, 13818),
+    (syscall::EVENT_FLAG_WAIT, 17015),
+    (syscall::EVENT_QUEUE_RECEIVE, 16368),
+    (syscall::COND_WAIT, 10483),
+];
+
+/// The round trip of a wait that blocked and that no capture times.
+///
+/// The value is the lower median of [`PPU_SYSCALL_WOKEN_ROUND_TRIPS`]:
+/// the woken semaphore wait.
+pub const PPU_SYSCALL_WOKEN_ROUND_TRIP_CYCLES: u64 = 13818;
+
+/// The round trip of a `sys_ppu_thread_yield` that lost its hardware thread.
+///
+/// The trip runs from the cycle the thread gets a hardware thread again
+/// to the earliest issue of the instruction after its `sc`.
+///
+/// The `ppu_lv2_call_contended` capture times a yield among three
+/// threads of one priority on the two hardware threads. Each yield thus
+/// loses its hardware thread. A yield takes 8887 cycles on the
+/// console, less the probe's own loop. CellGov's run of the probe
+/// through the runtime takes the console's cycles at this trip.
+pub const PPU_SYSCALL_SWITCHED_YIELD_ROUND_TRIP_CYCLES: u64 = 3289;
+
+/// The cycles a preempted thread waits before its next instruction issues.
+///
+/// A higher-priority thread takes the hardware thread of a preempted
+/// thread. The wait runs from the cycle the preempted thread gets a
+/// hardware thread again.
+///
+/// The `ppu_lv2_call_preempted_forms` capture times a loop of the
+/// cheapest call beside a priority-500 thread that a spinner wakes every
+/// 2000 time-base ticks. Each wake takes the loop's hardware thread and
+/// costs the loop 21321 to 24514 cycles. CellGov's run of the probe
+/// through the runtime takes the console's cycles at this wait.
+pub const PPU_PREEMPTED_RESUME_CYCLES: u64 = 7100;
+
+/// The round trip of each cancelled wait, as `(syscall number, cycles)`.
+///
+/// A cancelled wait blocks and then returns `CELL_ECANCELED`. The
+/// `ppu_lv2_call_preempted_forms` capture times an event flag handoff
+/// that `sys_event_flag_cancel` answers. Its round takes 65854 cycles,
+/// 4725 over the same handoff that a set answers. CellGov's run of the
+/// probe through the runtime takes the console's round at this trip.
+pub const PPU_SYSCALL_CANCELLED_ROUND_TRIPS: [(u64, u64); 1] = [(syscall::EVENT_FLAG_WAIT, 19692)];
+
+/// The round trip of the call `number` when it returns after its thread left the PPE.
+///
+/// `code` is the call's committed return, if any. `preempted` is true
+/// when the thread left only for a higher-priority thread. The round
+/// trip is the first of these that applies:
+/// - [`PPU_SYSCALL_SWITCHED_YIELD_ROUND_TRIP_CYCLES`] for a yield;
+/// - for a preempted call, the round trip of its return `code`, or of
+///   its success path with no `code`, plus [`PPU_PREEMPTED_RESUME_CYCLES`];
+/// - the call's entry in [`PPU_SYSCALL_CANCELLED_ROUND_TRIPS`] when it
+///   returns `CELL_ECANCELED`;
+/// - the call's entry in [`PPU_SYSCALL_WOKEN_ROUND_TRIPS`];
+/// - [`PPU_SYSCALL_WOKEN_ROUND_TRIP_CYCLES`].
+///
+/// The lookup compares the low 32 bits of `code`.
+pub fn ppu_syscall_resumed_round_trip_cycles(
+    number: u64,
+    code: Option<u64>,
+    preempted: bool,
+) -> u64 {
+    if number == syscall::PPU_THREAD_YIELD {
+        return PPU_SYSCALL_SWITCHED_YIELD_ROUND_TRIP_CYCLES;
+    }
+    if preempted {
+        let trip = code.map_or_else(
+            || ppu_syscall_round_trip_cycles(number),
+            |code| ppu_syscall_outcome_round_trip_cycles(number, code),
+        );
+        return trip + PPU_PREEMPTED_RESUME_CYCLES;
+    }
+    let cancelled = code.is_some_and(|code| code as u32 == errno::CELL_ECANCELED.code);
+    PPU_SYSCALL_CANCELLED_ROUND_TRIPS
+        .iter()
+        .filter(|_| cancelled)
+        .chain(&PPU_SYSCALL_WOKEN_ROUND_TRIPS)
+        .find(|&&(n, _)| n == number)
+        .map_or(PPU_SYSCALL_WOKEN_ROUND_TRIP_CYCLES, |&(_, cycles)| cycles)
 }
 
 /// The round trip of each call the `ppu_lv2_call_paths` and
