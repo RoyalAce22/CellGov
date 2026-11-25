@@ -321,7 +321,7 @@ installed firmware and rewrites both; without that flag the same test
 fails when a re-extraction differs. `hypercall_site_rows_are_well_formed` checks the
 coverage rules without reading external data.
 
-`tables/hypercall.tsv` has 119 rows, one per number a
+`tables/hypercall.tsv` has 120 rows, one per number a
 scanned kernel calls or CellGov's hypervisor answers. Each row joins the
 call table in `cellgov_ps3_abi::lv1::call` (the name and the input and
 output register counts), CellGov's family for the call and the work item
@@ -332,7 +332,7 @@ live 4.93 hypercall table, and the state.
 `lv1_493` is `handler`, `invalid` or `past_table`. It comes from
 `cellgov_ps3_abi::lv1::table`, which holds the console capture
 `tests/micro/lv1_hypercall_table`. The state is `answered`
-(14 numbers) or `null_backend`: no handler answers
+(15 numbers) or `null_backend`: no handler answers
 the number. At 4.93 the null backend answers lv1's invalid-entry status
 for an `invalid` number (16 numbers) and stops the run
 for a `handler` number. At every other firmware it stops the run.
