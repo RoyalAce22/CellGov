@@ -278,6 +278,57 @@
 //! 0x80010005. Otherwise it keeps r4 at +56 of the record
 //! [OFW-4.93 lv2_kernel a:0x80000000000A36A0-0x80000000000A36D8].
 //!
+//! # Request 4, the VLAN id
+//!
+//! The switch sends request [`NET_CONTROL_GET_VLAN_ID`] to its case at
+//! 0x244DD8 [OFW-4.93 lv1 a:0x244ADC-0x244AE0]
+//! [OFW-4.93 lv1 a:0x244B58-0x244B74]. The case does these steps:
+//! 1. It loads the network device's global object from the TOC slot at
+//!    r2 - 24896 [OFW-4.93 lv1 a:0x244DD8-0x244DDC]. That slot holds
+//!    0x3682B0 [OFW-4.93 lv1 a:0x353EF8-0x353EFC], the address that the
+//!    slot at r2 - 1848 holds.
+//! 2. When bit 63 of the doubleword at +32 of the global object is set,
+//!    it returns `LV1_NO_ENTRY` (-6) [OFW-4.93 lv1 a:0x244DE0-0x244DEC]
+//!    [OFW-4.93 lv1 a:0x245014-0x245018].
+//! 3. It fails a selector in r6 above [`NET_CONTROL_VLAN_SELECTOR_MAX`],
+//!    unsigned, with `LV1_ILLEGAL_PARAMETER_VALUE` (-17)
+//!    [OFW-4.93 lv1 a:0x244DF0-0x244DF4] [OFW-4.93 lv1 a:0x244B24].
+//! 4. It branches through the table at 0x244E14 by r6
+//!    [OFW-4.93 lv1 a:0x244DF8-0x244E10] [OFW-4.93 lv1 a:0x353F78-0x353F7C];
+//!    see [`net_control_vlan_selector`].
+//!
+//! A case that gives an id stores it in the first output, leaves 0 in the
+//! second, and returns 0 [OFW-4.93 lv1 a:0x244C28-0x244C34]. A case that
+//! fails goes to the switch's exit and stores no output
+//! [OFW-4.93 lv1 a:0x244B28-0x244B54]. The handler keeps the low word of
+//! the status [OFW-4.93 lv1 a:0x307F7C], so both failures are
+//! zero-extended. The case reads no input other than r6.
+//!
+//! No lv1 code read stores the doubleword at +32 or the byte at +28 of the
+//! global object.
+//!
+//! # The 4.93 kernel's calls of `net_control` request 4
+//!
+//! The kernel's `sc` [OFW-4.93 lv2_kernel a:0x80000000000A2868] passes
+//! these inputs [OFW-4.93 lv2_kernel a:0x80000000000A2844-0x80000000000A2864]:
+//! - r3 and r4: the bus id and the device id at +16 and +8 of its
+//!   device record;
+//! - r5: 4;
+//! - r6: the function's second argument, the selector;
+//! - r7 and r8: 0.
+//!
+//! For an r3 of 0, the function keeps the low halfword of r4 and returns
+//! 0. Otherwise it returns 0x80010005
+//! [OFW-4.93 lv2_kernel a:0x80000000000A286C-0x80000000000A2890].
+//!
+//! The kernel first calls the function with the selector 1
+//! [OFW-4.93 lv2_kernel a:0x80000000000A384C-0x80000000000A385C]. When
+//! that call fails, it skips the other calls
+//! [OFW-4.93 lv2_kernel a:0x80000000000A3860-0x80000000000A386C]. Otherwise
+//! it calls the function with the selectors 16 to 20 and then 1 to 5, and
+//! it stops at the first call that fails
+//! [OFW-4.93 lv2_kernel a:0x80000000000A38F0-0x80000000000A3A54].
+//!
 //! # `net_set_interrupt_mask`
 //!
 //! The handler [OFW-4.93 lv1 a:0x307FE0] keeps r3 to r6
@@ -334,7 +385,10 @@
 //! Each call that sets bits stores r5 back at +64 of the record before
 //! its `sc`.
 
-use super::status::{zero_extended, LV1_DUPLICATE_ENTRY, LV1_NOT_IMPLEMENTED, LV1_WRONG_STATE};
+use super::status::{
+    zero_extended, LV1_DUPLICATE_ENTRY, LV1_ILLEGAL_PARAMETER_VALUE, LV1_NOT_IMPLEMENTED,
+    LV1_NO_ENTRY, LV1_WRONG_STATE,
+};
 
 /// The handler of hypercall 191 in one firmware's lv1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -584,6 +638,73 @@ pub const NET_CONTROL_GET_MAC_ADDRESS: u64 = 1;
 /// shifts r4 left by 16 bits to take them, in `gelic_net_setup_netdev`.
 pub const NET_CONTROL_MAC_ADDRESS_BITS: u32 = 48;
 
+/// The request code that gives a VLAN id in r4 for the selector in r6
+/// [OFW-4.93 lv1 a:0x244B58-0x244B74] [OFW-4.93 lv1 a:0x244DD8-0x244E10].
+pub const NET_CONTROL_GET_VLAN_ID: u64 = 4;
+
+/// The largest selector that request [`NET_CONTROL_GET_VLAN_ID`] passes,
+/// unsigned [OFW-4.93 lv1 a:0x244DF0-0x244DF4].
+pub const NET_CONTROL_VLAN_SELECTOR_MAX: u64 = 20;
+
+/// The r3 for a selector that request [`NET_CONTROL_GET_VLAN_ID`] fails:
+/// `LV1_ILLEGAL_PARAMETER_VALUE` (-17), zero-extended
+/// [OFW-4.93 lv1 a:0x244B24-0x244B2C] [OFW-4.93 lv1 a:0x307F7C].
+pub const NET_CONTROL_VLAN_SELECTOR_R3: u64 = zero_extended(LV1_ILLEGAL_PARAMETER_VALUE);
+
+/// The r3 of request [`NET_CONTROL_GET_VLAN_ID`] when bit 63 of the
+/// doubleword at +32 of the global object is set: `LV1_NO_ENTRY` (-6),
+/// zero-extended [OFW-4.93 lv1 a:0x244DE0-0x244DEC]
+/// [OFW-4.93 lv1 a:0x245014-0x245018] [OFW-4.93 lv1 a:0x307F7C].
+pub const NET_CONTROL_VLAN_NONE_R3: u64 = zero_extended(LV1_NO_ENTRY);
+
+/// What the switch of request [`NET_CONTROL_GET_VLAN_ID`] gives for one
+/// selector when bit 63 of the capability doubleword is clear.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VlanSelector {
+    /// The case gives this id in r4.
+    Fixed(u64),
+    /// The case gives 294 when the byte at +28 of the global object is 0,
+    /// and 296 otherwise [OFW-4.93 lv1 a:0x244EC8-0x244EE0]
+    /// [OFW-4.93 lv1 a:0x244E88-0x244E8C].
+    Flagged,
+    /// The case fails the selector with [`NET_CONTROL_VLAN_SELECTOR_R3`].
+    Illegal,
+}
+
+/// The switch's case for the selector `selector` of request
+/// [`NET_CONTROL_GET_VLAN_ID`].
+///
+/// The table at 0x244E14 gives these cases
+/// [OFW-4.93 lv1 a:0x244E14-0x244E64]:
+/// - 1 gives 292 [OFW-4.93 lv1 a:0x244EA8-0x244EB4];
+/// - 2 gives 294 [OFW-4.93 lv1 a:0x244E88-0x244E94];
+/// - 3 gives 295 [OFW-4.93 lv1 a:0x244E98-0x244EA4];
+/// - 4 gives 291 [OFW-4.93 lv1 a:0x244EB8-0x244EC4];
+/// - 5 is [`VlanSelector::Flagged`];
+/// - 16 gives 288 [OFW-4.93 lv1 a:0x244EE4-0x244EF0];
+/// - 17 gives 289 [OFW-4.93 lv1 a:0x244EF4-0x244F00];
+/// - 18 gives 290 [OFW-4.93 lv1 a:0x244F04-0x244F10];
+/// - 19 gives 261 [OFW-4.93 lv1 a:0x244F14-0x244F20];
+/// - 20 gives 256 [OFW-4.93 lv1 a:0x244F24-0x244F30].
+///
+/// The entries for 0 and for 6 to 15 lead to the failure at 0x244B24, as
+/// a selector above [`NET_CONTROL_VLAN_SELECTOR_MAX`] does.
+pub const fn net_control_vlan_selector(selector: u64) -> VlanSelector {
+    match selector {
+        1 => VlanSelector::Fixed(292),
+        2 => VlanSelector::Fixed(294),
+        3 => VlanSelector::Fixed(295),
+        4 => VlanSelector::Fixed(291),
+        5 => VlanSelector::Flagged,
+        16 => VlanSelector::Fixed(288),
+        17 => VlanSelector::Fixed(289),
+        18 => VlanSelector::Fixed(290),
+        19 => VlanSelector::Fixed(261),
+        20 => VlanSelector::Fixed(256),
+        _ => VlanSelector::Illegal,
+    }
+}
+
 /// The r3 of the handler's bus and device checks for device `device` of
 /// bus `bus`, or `None` when the network device passes them.
 ///
@@ -731,3 +852,11 @@ mod control_tests;
 #[cfg(test)]
 #[path = "tests/network_control_console_tests.rs"]
 mod control_console_tests;
+
+#[cfg(test)]
+#[path = "tests/network_control_vlan_tests.rs"]
+mod control_vlan_tests;
+
+#[cfg(test)]
+#[path = "tests/network_control_vlan_console_tests.rs"]
+mod control_vlan_console_tests;

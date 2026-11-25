@@ -165,9 +165,11 @@ fn a_code_that_only_the_privilege_bit_passes_is_a_refusal() {
 }
 
 #[test]
-fn a_code_from_2_to_11_is_a_refusal() {
-    let codes: Vec<u64> = (2..=NET_CONTROL_REQUEST_MAX).collect();
-    assert_eq!(codes.len(), 10);
+fn a_code_from_2_to_11_other_than_4_is_a_refusal() {
+    let codes: Vec<u64> = (2..=NET_CONTROL_REQUEST_MAX)
+        .filter(|&code| code != 4)
+        .collect();
+    assert_eq!(codes.len(), 9);
     for code in codes {
         let call = request(1, 0, code, [0; 3]);
         assert_eq!(
