@@ -1,4 +1,4 @@
-//! The problem-state class of each PPE SPR number for `mfspr` and `mtspr`.
+//! The privilege class of each PPE SPR number for `mfspr` and `mtspr`.
 //!
 //! The rows are the SPRs that the documents define for the PPE. A
 //! direction that the figures omit for a defined number takes its class
@@ -18,6 +18,13 @@
 //! The optional External Control and Performance Monitor facilities of
 //! Book III are not PPE SPRs, so EAR and SPRs 768-799 are reserved too.
 // [PPC-Book3 p:19 s:3.4.2] Figure 17 lists the mtspr encodings; spr0=1 iff writing is privileged; an optional SPR the implementation lacks is as if not listed.
+// [PPC-Book3 p:19 s:3.4.2] Figure 17 marks the SPRs that only hypervisor state can write "hypv"; in supervisor state an mtspr of one has no effect or takes a privileged-instruction interrupt.
+// [PPC-Book3 p:21 s:3.4.2] Figure 18 marks HSPRG0, HSPRG1, RMOR, HRMOR, HSRR0, HSRR1, LPCR and LPIDR "hypv" for mfspr, and SDR1, PURR, HDEC, DABR and DABRX privileged.
+// [CBE-Handbook p:254 s:9.5.9] The PPE takes a privileged-instruction interrupt for a problem-state or supervisor-state access to a hypervisor SPR.
+// [CBE-Handbook p:98 s:4.2.7.8] Only the hypervisor can read the TLB.
+// [CBE-Handbook p:332 s:11.2.3] Only the hypervisor can access the TLB facilities.
+// [CBE-Handbook p:152 s:6.3] Supervisor-state software controls the L2 and TLB replacement through the RMTs.
+// [CBE-Handbook p:153 s:6.3.1.3] The privileged mtspr and mfspr access the address range registers.
 // [PPC-Book3 p:21 s:3.4.2] Figure 18 lists the mfspr encodings; spr0=1 iff reading is privileged; every SPR number not listed is reserved.
 // [PPC-Book2 p:30 s:4.1] mftb names the time base as TBR 268 and its upper half as TBR 269; the v2.02 mfspr figure does not list them.
 // The reference console runs mfspr 268 and 269 in problem state and reads the time base (probes ppu_may_trap_mfspr268 and ppu_may_trap_mfspr269).
@@ -28,15 +35,26 @@
 // [CBEA p:313 s:Appendix E] E.4 names reads of write-only SPRs among the inaccessible accesses.
 // [CBE-Handbook p:254 s:9.5.9] The PPE takes a privileged-instruction interrupt for a problem-state access to a privileged SPR, and an illegal-instruction interrupt for a reserved SPR.
 
-/// What the PPE does with a problem-state `mfspr` or `mtspr` of an SPR.
+/// The processor states in which the PPE runs an `mfspr` or `mtspr` of an SPR.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SprClass {
-    /// The access runs.
+    /// Every state runs the access.
     User,
-    /// The PPE takes a privileged-instruction interrupt.
+    /// In problem state the PPE takes a privileged-instruction interrupt.
     Privileged,
-    /// The PPE takes an illegal-instruction interrupt.
+    /// In problem state and in supervisor state the PPE takes a
+    /// privileged-instruction interrupt.
+    Hypervisor,
+    /// In problem state the PPE takes an illegal-instruction interrupt.
     Reserved,
+}
+
+impl SprClass {
+    /// Whether the PPE takes a privileged-instruction interrupt for the
+    /// access in problem state.
+    pub const fn privileged_in_problem_state(self) -> bool {
+        matches!(self, Self::Privileged | Self::Hypervisor)
+    }
 }
 
 /// One SPR the documents define, with its class for each direction.
@@ -61,7 +79,7 @@ const fn row(spr: u16, name: &'static str, read: SprClass, write: SprClass) -> S
     }
 }
 
-use SprClass::{Privileged as P, Reserved as R, User as U};
+use SprClass::{Hypervisor as H, Privileged as P, Reserved as R, User as U};
 
 /// The SPRs the documents define for the PPE, sorted by number.
 pub const PPU_SPR_MAP: &[SprRow] = &[
@@ -71,7 +89,7 @@ pub const PPU_SPR_MAP: &[SprRow] = &[
     row(18, "DSISR", P, P),
     row(19, "DAR", P, P),
     row(22, "DEC", P, P),
-    row(25, "SDR1", P, P),
+    row(25, "SDR1", P, H),
     row(26, "SRR0", P, P),
     row(27, "SRR1", P, P),
     row(29, "ACCR", P, P),
@@ -85,23 +103,23 @@ pub const PPU_SPR_MAP: &[SprRow] = &[
     row(273, "SPRG1", P, P),
     row(274, "SPRG2", P, P),
     row(275, "SPRG3", P, P),
-    row(284, "TBL", P, P),
-    row(285, "TBU", P, P),
+    row(284, "TBL", P, H),
+    row(285, "TBU", P, H),
     row(287, "PVR", P, P),
-    row(304, "HSPRG0", P, P),
-    row(305, "HSPRG1", P, P),
-    row(309, "PURR", P, P),
-    row(310, "HDEC", P, P),
-    row(312, "RMOR", P, P),
-    row(313, "HRMOR", P, P),
-    row(314, "HSRR0", P, P),
-    row(315, "HSRR1", P, P),
-    row(318, "LPCR", P, P),
-    row(319, "LPIDR", P, P),
-    row(946, "PPE_TLB_Index_Hint", P, P),
-    row(947, "PPE_TLB_Index", P, P),
-    row(948, "PPE_TLB_RPN", P, P),
-    row(949, "PPE_TLB_VPN", P, P),
+    row(304, "HSPRG0", H, H),
+    row(305, "HSPRG1", H, H),
+    row(309, "PURR", P, H),
+    row(310, "HDEC", P, H),
+    row(312, "RMOR", H, H),
+    row(313, "HRMOR", H, H),
+    row(314, "HSRR0", H, H),
+    row(315, "HSRR1", H, H),
+    row(318, "LPCR", H, H),
+    row(319, "LPIDR", H, H),
+    row(946, "PPE_TLB_Index_Hint", H, H),
+    row(947, "PPE_TLB_Index", H, H),
+    row(948, "PPE_TLB_RPN", H, H),
+    row(949, "PPE_TLB_VPN", H, H),
     row(950, "PPE_TLB_RMT_Index", P, P),
     row(951, "PPE_TLB_RMT_Data", P, P),
     row(952, "DRSR0", P, P),
@@ -116,8 +134,8 @@ pub const PPU_SPR_MAP: &[SprRow] = &[
     row(979, "IRSR1", P, P),
     row(980, "IRMR1", P, P),
     row(981, "ICIDR1", P, P),
-    row(1013, "DABR", P, P),
-    row(1015, "DABRX", P, P),
+    row(1013, "DABR", P, H),
+    row(1015, "DABRX", P, H),
     row(1022, "BP_VR", P, P),
     row(1023, "PIR", P, P),
 ];
@@ -134,7 +152,7 @@ pub const fn spr_row(spr: u16) -> Option<&'static SprRow> {
     None
 }
 
-/// The class of a problem-state `mfspr` of SPR `spr`.
+/// The class of an `mfspr` of SPR `spr`.
 pub const fn spr_read_class(spr: u16) -> SprClass {
     match spr_row(spr) {
         Some(row) => row.read,
@@ -142,7 +160,7 @@ pub const fn spr_read_class(spr: u16) -> SprClass {
     }
 }
 
-/// The class of a problem-state `mtspr` of SPR `spr`.
+/// The class of an `mtspr` of SPR `spr`.
 pub const fn spr_write_class(spr: u16) -> SprClass {
     match spr_row(spr) {
         Some(row) => row.write,
@@ -200,3 +218,7 @@ pub const PS3_PROCESS_SPRG3: u64 = 0;
 #[cfg(test)]
 #[path = "tests/ppu_spr_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/ppu_spr_hypervisor_tests.rs"]
+mod hypervisor_tests;

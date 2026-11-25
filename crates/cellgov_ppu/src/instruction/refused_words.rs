@@ -54,10 +54,8 @@ pub const fn ppe_privileged_mnemonic(raw: u32) -> Option<&'static str> {
             306 => Some("tlbie"),
             274 => Some("tlbiel"),
             566 => Some("tlbsync"),
-            339 if matches!(spr_read_class(spr_number(raw)), SprClass::Privileged) => Some("mfspr"),
-            467 if matches!(spr_write_class(spr_number(raw)), SprClass::Privileged) => {
-                Some("mtspr")
-            }
+            339 if spr_read_class(spr_number(raw)).privileged_in_problem_state() => Some("mfspr"),
+            467 if spr_write_class(spr_number(raw)).privileged_in_problem_state() => Some("mtspr"),
             _ => None,
         },
         // [PPC-Book3 p:92 s:8.4] lq and stq are privileged.

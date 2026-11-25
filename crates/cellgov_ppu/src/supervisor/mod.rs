@@ -18,6 +18,10 @@ mod exec_tests;
 mod bp_vr_tests;
 
 #[cfg(test)]
+#[path = "tests/hypervisor_spr_tests.rs"]
+mod hypervisor_spr_tests;
+
+#[cfg(test)]
 #[path = "tests/facility_tests.rs"]
 mod facility_tests;
 

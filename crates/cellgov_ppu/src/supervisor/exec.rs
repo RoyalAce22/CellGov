@@ -1,6 +1,7 @@
 //! The privileged forms a thread in supervisor state executes.
 
 use cellgov_ps3_abi::hw::ppu::CELL_BP_VR;
+use cellgov_ps3_abi::hw::ppu_spr::{spr_read_class, spr_write_class, SprClass};
 use cellgov_ps3_abi::hw::ppu_supervisor::{
     MSR_BIT1, MSR_DR, MSR_EE, MSR_HV, MSR_IR, MSR_ME, MSR_PR, MSR_RI, MSR_SE, MSR_SF,
     PPE_SLB_INDEX, PPE_SLB_VSID_FLAGS, SLB_ESID, SLB_VALID, SPR_BP_VR, SPR_DAR, SPR_DEC, SPR_DSISR,
@@ -53,6 +54,10 @@ pub(crate) fn execute(raw: u32, state: &mut PpuState) -> Option<ExecuteVerdict> 
         }
         (31, 146) => move_to_msr(state, rt, l, MtMsr::Word),
         (31, 178) => move_to_msr(state, rt, l, MtMsr::Doubleword),
+        // [CBE-Handbook p:254 s:9.5.9] In supervisor state an access to a hypervisor SPR takes a privileged-instruction interrupt.
+        (31, 339 | 467) if !hypervisor && moves_hypervisor_spr(raw) => {
+            ExecuteVerdict::Fault(PpuFault::privileged(mnemonic))
+        }
         (31, 339) => move_from_spr(state, rt, spr_number(raw), mnemonic),
         (31, 467) => move_to_spr(state, rt, spr_number(raw), mnemonic),
         (31, 402) => slb_move_to_entry(state, rt, rb),
@@ -77,6 +82,18 @@ pub(crate) fn execute(raw: u32, state: &mut PpuState) -> Option<ExecuteVerdict> 
         _ => unmodelled(mnemonic),
     };
     Some(verdict)
+}
+
+/// Whether the `mfspr` or `mtspr` word `raw` is an access of the
+/// hypervisor class.
+fn moves_hypervisor_spr(raw: u32) -> bool {
+    let spr = spr_number(raw);
+    let class = if (raw >> 1) & 0x3FF == 339 {
+        spr_read_class(spr)
+    } else {
+        spr_write_class(spr)
+    };
+    class == SprClass::Hypervisor
 }
 
 /// The CellGov stop for a privileged form that supervisor state runs on

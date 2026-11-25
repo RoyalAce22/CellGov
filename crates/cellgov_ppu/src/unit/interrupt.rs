@@ -376,6 +376,10 @@ mod interrupt_class_tests;
 mod interrupt_bp_vr_tests;
 
 #[cfg(test)]
+#[path = "tests/interrupt_hypervisor_spr_tests.rs"]
+mod interrupt_hypervisor_spr_tests;
+
+#[cfg(test)]
 #[path = "tests/interrupt_batch_tests.rs"]
 mod interrupt_batch_tests;
 

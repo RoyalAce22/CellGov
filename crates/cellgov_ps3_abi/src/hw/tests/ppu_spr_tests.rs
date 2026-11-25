@@ -15,7 +15,12 @@ fn every_access_to_a_defined_number_is_privileged_iff_spr0_is_set() {
     for row in PPU_SPR_MAP {
         let spr0 = row.spr & 0x10 != 0;
         for (dir, class) in [("read", row.read), ("write", row.write)] {
-            assert_eq!(class == SprClass::Privileged, spr0, "{} {dir}", row.name);
+            assert_eq!(
+                class.privileged_in_problem_state(),
+                spr0,
+                "{} {dir}",
+                row.name
+            );
         }
     }
 }
@@ -33,7 +38,8 @@ fn directed_rows_take_their_documented_class() {
     assert_eq!(spr_read_class(8), SprClass::User);
     assert_eq!(spr_write_class(256), SprClass::User);
     assert_eq!(spr_read_class(272), SprClass::Privileged);
-    assert_eq!(spr_write_class(310), SprClass::Privileged);
+    // [PPC-Book3 p:19 s:3.4.2] Figure 17 marks HDEC "hypv" for mtspr.
+    assert_eq!(spr_write_class(310), SprClass::Hypervisor);
     assert_eq!(spr_read_class(136), SprClass::User);
     assert_eq!(spr_write_class(136), SprClass::Reserved);
     assert_eq!(spr_write_class(152), SprClass::Privileged);

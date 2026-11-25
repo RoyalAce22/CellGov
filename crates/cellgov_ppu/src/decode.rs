@@ -62,7 +62,7 @@ fn other_spr(
         SprDirection::MfTb => return Err(reject_spr(raw, direction, spr)),
     };
     match class {
-        SprClass::Privileged => Ok(PpuInstruction::PpePrivileged { raw }),
+        SprClass::Privileged | SprClass::Hypervisor => Ok(PpuInstruction::PpePrivileged { raw }),
         SprClass::Reserved => Ok(PpuInstruction::PpeIllegal { raw }),
         SprClass::User => Err(reject_spr(raw, direction, spr)),
     }

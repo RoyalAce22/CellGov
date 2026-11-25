@@ -80,6 +80,7 @@ fn every_book3_encoding_decodes_to_its_named_kind_and_refuses() {
 }
 
 /// [PPC-Book3 p:21 s:3.4.2] mfspr and [PPC-Book3 p:19 s:3.4.2] mtspr are user, privileged or reserved by SPR number.
+/// [CBE-Handbook p:254 s:9.5.9] The PPE takes a privileged-instruction interrupt for a problem-state or supervisor-state access to a hypervisor SPR.
 #[test]
 fn every_spr_number_decodes_by_its_class_in_both_directions() {
     let mut user = [0; 2];
@@ -93,8 +94,17 @@ fn every_spr_number_decodes_by_its_class_in_both_directions() {
         .enumerate()
         {
             let raw = spr_word(xo, spr);
+            let privileged = matches!(class, SprClass::Privileged | SprClass::Hypervisor);
+            assert_eq!(
+                ppe_privileged_mnemonic(raw),
+                privileged.then_some(mnemonic),
+                "{mnemonic} {spr}"
+            );
             match (class, crate::decode::decode(raw)) {
-                (SprClass::Privileged, Ok(PpuInstruction::PpePrivileged { .. })) => {
+                (
+                    SprClass::Privileged | SprClass::Hypervisor,
+                    Ok(PpuInstruction::PpePrivileged { .. }),
+                ) => {
                     assert_refused(raw, PpuFault::privileged(mnemonic));
                 }
                 (SprClass::Reserved, Ok(PpuInstruction::PpeIllegal { .. })) => {
