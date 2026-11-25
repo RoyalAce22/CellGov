@@ -90,7 +90,8 @@ pub(crate) fn local_branch_index(
 ) -> Option<usize> {
     let instruction = base.checked_add(u64::try_from(index.checked_mul(4)?).ok()?)?;
     let target = if absolute {
-        u64::try_from(displacement).ok()?
+        // [PPC-Book1 p:24 s:2.4] With AA = 1 the target is EXTS(displacement) in 64-bit mode.
+        0u64.wrapping_add_signed(displacement)
     } else {
         add_signed(instruction, displacement)?
     };
@@ -123,3 +124,7 @@ pub(crate) fn is_unconditional(bo: u8) -> bool {
 pub(crate) fn falls_through(bo: u8, link: bool) -> bool {
     link || !is_unconditional(bo)
 }
+
+#[cfg(test)]
+#[path = "tests/local_cfg_tests.rs"]
+mod tests;

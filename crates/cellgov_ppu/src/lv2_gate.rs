@@ -398,3 +398,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/lv2_gate_scheduled_branch_tests.rs"]
 mod scheduled_branch_tests;
+
+#[cfg(test)]
+#[path = "tests/lv2_gate_top_segment_tests.rs"]
+mod top_segment_tests;
