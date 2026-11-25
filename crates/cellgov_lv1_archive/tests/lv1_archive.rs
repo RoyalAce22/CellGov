@@ -480,20 +480,59 @@ fn hypercall_site_rows_are_well_formed() {
         );
     }
     // Every number CellGov's hypervisor answers is one each kernel calls.
+    // A kernel holds each such call as a resolved site of the number, or
+    // as an unresolved site when the census cannot prove the number. A
+    // kernel with neither has lost the call.
     let answered = cellgov_lv1::answered_numbers();
     assert!(!answered.is_empty(), "cellgov_lv1 answers no hypercall");
-    for number in answered {
+    let missing = |number: u64,
+                   sites: &[archive::HypercallSiteRow],
+                   unresolved: &[archive::HypercallUnresolvedRow]|
+     -> Vec<String> {
         let callers: BTreeSet<&str> = sites
             .iter()
             .filter(|row| row.number == number)
             .map(|row| row.pup_sha256.as_str())
+            .chain(
+                unresolved
+                    .iter()
+                    .filter(|row| !row.sites.is_empty())
+                    .map(|row| row.pup_sha256.as_str()),
+            )
             .collect();
+        scanned
+            .iter()
+            .filter(|pup| !callers.contains(pup.as_str()))
+            .cloned()
+            .collect()
+    };
+    for &number in &answered {
         assert_eq!(
-            callers.len(),
-            scanned.len(),
-            "answered hypercall {number} has no site in some scanned kernel"
+            missing(number, &sites, &unresolved),
+            Vec::<String>::new(),
+            "answered hypercall {number} has no resolved or unresolved site in these kernels"
         );
     }
+    // The rule names a kernel that drops an answered number's resolved
+    // sites and records no unresolved site.
+    let number = answered[0];
+    let lost = unresolved[0].pup_sha256.clone();
+    let without_number: Vec<archive::HypercallSiteRow> = sites
+        .iter()
+        .filter(|row| !(row.pup_sha256 == lost && row.number == number))
+        .cloned()
+        .collect();
+    let mut without_unresolved = unresolved.clone();
+    without_unresolved[0].sites.clear();
+    assert_eq!(
+        missing(number, &without_number, &without_unresolved),
+        vec![lost.clone()]
+    );
+    without_unresolved[0].sites.push(0x100);
+    assert_eq!(
+        missing(number, &without_number, &without_unresolved),
+        Vec::<String>::new()
+    );
     // The 4.93 kernel's `sc` block of 12 sits after the function's `blr`
     // [OFW-4.93 lv2_kernel a:0x80000000000087a0-0x80000000000087f8]. Its
     // site resolves to 12 and is not unresolved.

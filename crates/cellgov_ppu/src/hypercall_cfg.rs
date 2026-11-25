@@ -180,7 +180,7 @@ fn entered(code: &Code, bound: &IndirectBound, real_mode: &RealMode) -> BTreeSet
     let mut entries = bound.entries.clone();
     entries.extend(switched_words(code, bound));
     if real_mode.branches_indirectly() {
-        entries.extend(real_indirect_words(code, &bound.entries, &bound.targets));
+        entries.extend(real_indirect_words(code, bound));
     }
     for (by, targets) in &bound.targets {
         let real = real_mode.contains(*by);
@@ -232,23 +232,24 @@ impl RealMode {
 /// The words that a `bcctr` or `bclr` may reach in real mode.
 ///
 /// The set holds the word at the real address of each of these:
-/// - a word of `entries`, for a branch that no CTR or LR write of
-///   `targets` reaches;
-/// - a target of `targets`, also one whose writer did not run in real
+/// - an entry of `bound` or a word of [`IndirectBound::real_named`], for
+///   a branch that no CTR or LR write of `bound` reaches;
+/// - a target of `bound`, also one whose writer did not run in real
 ///   mode;
 /// - the word after a branch that links, with the LR that the branch
 ///   wrote.
 ///
-/// `targets` keys each target by the word that wrote CTR or LR. The scan
+/// `bound` keys each target by the word that wrote CTR or LR. The scan
 /// cannot tell which branch reaches a target, so it keeps every target.
 pub(crate) fn real_indirect_words<'a>(
     code: &'a Code,
-    entries: &'a BTreeSet<u64>,
-    targets: &'a BTreeMap<u64, BTreeSet<u64>>,
+    bound: &'a IndirectBound,
 ) -> impl Iterator<Item = u64> + 'a {
-    entries
+    bound
+        .entries
         .iter()
-        .chain(targets.values().flatten())
+        .chain(&bound.real_named)
+        .chain(bound.targets.values().flatten())
         .copied()
         .chain(return_points(code))
         .flat_map(|address| code.real_aliases(address))
@@ -361,7 +362,7 @@ fn real_mode_words(code: &Code, starts: &BTreeSet<u64>, bound: &IndirectBound) -
             pending.extend(direct_targets(code, at, raw, true));
             if !indirect && is_indirect_branch(raw) {
                 indirect = true;
-                pending.extend(real_indirect_words(code, &bound.entries, &bound.targets));
+                pending.extend(real_indirect_words(code, bound));
             }
         }
         for &target in bound.targets.get(&at).into_iter().flatten() {

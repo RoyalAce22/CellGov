@@ -78,6 +78,12 @@ pub(crate) struct IndirectBound {
     /// The words that control can enter other than by a direct branch or
     /// a fall-through, with the real-mode entries.
     pub(crate) entries: BTreeSet<u64>,
+    /// Each word at the real address of a constant that the code builds.
+    ///
+    /// A `bcctr` or a `bclr` in real mode can reach these words with a
+    /// CTR or LR that the scan does not record. A branch in virtual mode
+    /// reaches only the word at the constant itself.
+    pub(crate) real_named: BTreeSet<u64>,
     /// The address of each word that writes a constant into CTR or LR,
     /// with each address that an indirect branch reaches from it.
     ///
@@ -113,8 +119,11 @@ pub(crate) struct IndirectBound {
 ///
 /// The scan repeats in rounds until a round names no new word, because
 /// each of these depends on the other:
-/// - an indirect branch in a function reaches each named word;
+/// - an indirect branch in a function reaches each named word, and in
+///   real mode each word of [`IndirectBound::real_named`];
 /// - r2 on the words of a function names more words.
+///
+/// [PPC-Book1 p:24 s:2.4] A branch alters only CTR and LR, so r2 at the target is r2 at the branch.
 ///
 /// The named words only grow, so the rounds end.
 ///
@@ -131,6 +140,7 @@ pub(crate) fn indirect_entries(
         code,
         files,
         named: BTreeSet::new(),
+        real_named: BTreeSet::new(),
         tables: BTreeSet::new(),
         targets: BTreeMap::new(),
         ctr_writes: BTreeMap::new(),
@@ -145,15 +155,16 @@ pub(crate) fn indirect_entries(
     let every = Value::sorted(functions.values().flatten().copied().collect());
     let mut words = FunctionWords::new(code, &functions);
     loop {
-        let before = bound.named.len();
-        words.grow(&bound.named);
+        let before = (bound.named.len(), bound.real_named.len());
+        let reached: BTreeSet<u64> = bound.named.union(&bound.real_named).copied().collect();
+        words.grow(&reached);
         bound.targets.clear();
         bound.ctr_writes.clear();
         for (index, segment) in code.segments().iter().enumerate() {
             bound.code_constants(index, segment, words.tocs.segment(index), &every);
         }
         bound.jump_tables()?;
-        if bound.named.len() == before {
+        if (bound.named.len(), bound.real_named.len()) == before {
             break;
         }
     }
@@ -162,14 +173,17 @@ pub(crate) fn indirect_entries(
     let lost_targets = flow.bcctr_targets(&mut bound.targets);
     let mut entries = real_mode_entries(elf, code);
     entries.extend(bound.named);
-    let switches = Switches::find(code, &words.tocs, &every, &entries, &bound.targets);
-    Ok(IndirectBound {
+    let mut indirect = IndirectBound {
         entries,
+        real_named: bound.real_named,
         targets: bound.targets,
         lost_targets,
-        real_mode_switches: switches.targets,
-        unbounded_switches: switches.unbounded,
-    })
+        ..IndirectBound::default()
+    };
+    let switches = Switches::find(code, &words.tocs, &every, &indirect);
+    indirect.real_mode_switches = switches.targets;
+    indirect.unbounded_switches = switches.unbounded;
+    Ok(indirect)
 }
 
 /// The address of the word after each `bcctr` of `code` that does not
@@ -196,6 +210,8 @@ pub(super) struct Bound<'a> {
     /// The words of the code that the image names, and the targets of
     /// the relative jump tables.
     named: BTreeSet<u64>,
+    /// The [`IndirectBound::real_named`].
+    real_named: BTreeSet<u64>,
     /// The addresses that a relative jump table can start at, which the
     /// next call to [`Self::jump_tables`] reads. A later round can add
     /// an address again.
@@ -233,6 +249,18 @@ impl Bound<'_> {
         {
             self.tables.insert(address);
         }
+    }
+
+    /// Records a constant that the code builds. It is a named address,
+    /// and an indirect branch in real mode reaches each word at its real
+    /// address.
+    ///
+    /// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00, and `bcctr` reaches CTR0:61 || 0b00.
+    /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
+    fn name_constant(&mut self, constant: u64) {
+        self.name(constant);
+        let code = self.code;
+        self.real_named.extend(code.real_aliases(constant & !0b11));
     }
 
     /// Names each constant that the code of `segment` builds in a GPR,
@@ -274,7 +302,7 @@ impl Bound<'_> {
                 .iter()
                 .flat_map(Value::constants)
             {
-                self.name(constant);
+                self.name_constant(constant);
             }
         }
     }

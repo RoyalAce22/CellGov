@@ -1,13 +1,14 @@
 //! The words where control enters in real mode, and the words where an
 //! `rfid`, `mtmsr` or `mtmsrd` can put control into real mode.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use cellgov_ps3_abi::format::elf::ELF64_E_ENTRY;
 use cellgov_ps3_abi::hw::ppu_interrupt::INTERRUPT_VECTOR_REAL_ADDRESSES;
 use cellgov_ps3_abi::hw::ppu_mmu::REAL_MODE_IGNORED_EA;
 use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_BIT1, MSR_SF, SPR_SRR0, SPR_SRR1};
 
+use super::bound::IndirectBound;
 use super::constants::{Constants, Value};
 use super::toc::{FunctionSteps, WordTocs};
 use crate::hypercall_cfg::{real_indirect_words, Code, CodeSegment};
@@ -31,20 +32,13 @@ impl Switches {
     /// switch builds.
     ///
     /// `tocs` holds the TOC of each word, and `every` holds each TOC that
-    /// a descriptor gives. `entries` and `targets` are the entries and the
-    /// indirect-branch targets of the bound.
+    /// a descriptor gives. `bound` holds the bound without its switches.
     ///
     /// A switch target is also a word that control enters other than by
     /// a fall-through. So the scan repeats until no switch adds a target.
     /// The targets are words of the code, so the repeats end.
-    pub(super) fn find(
-        code: &Code,
-        tocs: &WordTocs,
-        every: &Value,
-        entries: &BTreeSet<u64>,
-        targets: &BTreeMap<u64, BTreeSet<u64>>,
-    ) -> Self {
-        let mut joins = joins(code, entries, targets);
+    pub(super) fn find(code: &Code, tocs: &WordTocs, every: &Value, bound: &IndirectBound) -> Self {
+        let mut joins = joins(code, bound);
         loop {
             let switches = Self::scan(code, tocs, every, &joins);
             let before = joins.len();
@@ -87,9 +81,10 @@ impl Switches {
 
 /// The words of `code` that control can enter other than by a
 /// fall-through, apart from the switch targets:
-/// - each word of `entries`;
+/// - each entry of `bound`;
 /// - each target of a direct branch;
-/// - each target that `targets` gives;
+/// - each target that `bound` gives;
+/// - each word of [`IndirectBound::real_named`];
 /// - the word after each branch that links, where a `bclr` can return
 ///   with other registers.
 ///
@@ -103,11 +98,7 @@ impl Switches {
 /// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.
 /// [PPC-Book1 p:25 s:2.4] `bclr` branches to LR 0:61 || 0b00.
 /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
-fn joins(
-    code: &Code,
-    entries: &BTreeSet<u64>,
-    targets: &BTreeMap<u64, BTreeSet<u64>>,
-) -> BTreeSet<u64> {
+fn joins(code: &Code, bound: &IndirectBound) -> BTreeSet<u64> {
     let direct = code
         .segments()
         .iter()
@@ -120,9 +111,7 @@ fn joins(
                 .flat_map(|target| code.real_aliases(target))
                 .filter(move |&alias| Some(alias) != next)
         });
-    real_indirect_words(code, entries, targets)
-        .chain(direct)
-        .collect()
+    real_indirect_words(code, bound).chain(direct).collect()
 }
 
 /// Where one `rfid`, `mtmsr` or `mtmsrd` can put control into real mode.

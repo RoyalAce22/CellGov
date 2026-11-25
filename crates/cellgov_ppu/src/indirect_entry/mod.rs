@@ -19,6 +19,11 @@
 //! named address, the bound holds the word at the address with those
 //! bits at 0.
 //!
+//! Real mode also ignores EA bits 0 and 1. So for each constant that the
+//! code builds, the bound also keeps each word at its real address,
+//! which an indirect branch in real mode can reach. Each other named
+//! address names only the word at the address itself.
+//!
 //! A function reaches each word that control can get to from its first
 //! word with r2 unchanged. On each word that a function reaches, r2 can
 //! hold the TOC that the function's descriptor gives. On a word that

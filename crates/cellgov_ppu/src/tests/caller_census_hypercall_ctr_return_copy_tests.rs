@@ -88,12 +88,15 @@ fn a_real_mode_bctr_of_a_ctr_a_routine_returns_in_a_gpr_leaves_every_site_unreso
 }
 
 /// The routine's copy of CTR does not reach its `blr` in r5, so the
-/// `mtctr r5` after the call copies no CTR that the routine wrote.
+/// `mtctr r5` after the call copies no CTR that the routine wrote. The
+/// routine's constant 0x3005 names the window's `nop` at its real
+/// address, so the first window's site stays unresolved.
 ///
 /// [PPC-Book1 p:82 s:3.3.13] `mfctr`, a form of `mfspr`, copies CTR into RT.
+/// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
 #[test]
-fn a_copy_of_ctr_that_leaves_r5_before_the_return_keeps_every_site_resolved() {
-    let resolved = [(SC, Some(75)), (QUIET_SC, Some(77))];
+fn a_copy_of_ctr_that_leaves_r5_before_the_return_keeps_the_second_window_resolved() {
+    let resolved = [(SC, None), (QUIET_SC, Some(77))];
     let overwritten = [bc(0b10000, 4), mfctr(5), li(5, 0)];
     assert_eq!(after_routine(0x3005, &overwritten), resolved);
     let other_gpr = [bc(0b10000, 4), mfctr(6)];

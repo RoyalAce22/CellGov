@@ -66,7 +66,10 @@ fn after_calls(code: &Code) -> impl Iterator<Item = u64> + '_ {
 ///
 /// A path can also bring a CTR that no word of the scan writes, such as
 /// a value that the code loads. The bound takes such a CTR to hold a
-/// named address, so the state does not record it.
+/// named address, or in real mode a word of
+/// [`IndirectBound::real_named`]. So the state does not record it.
+///
+/// [`IndirectBound::real_named`]: super::IndirectBound::real_named
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Ctr {
     /// The constants that the paths bring in CTR, by the address of the
