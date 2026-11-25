@@ -165,27 +165,6 @@ fn the_storage_call_gets_the_captured_id_with_r5_to_r10_cleared_and_is_kept() {
 }
 
 #[test]
-fn a_second_call_at_the_storage_sc_is_refused_and_keeps_both_ports() {
-    let mut hv = after_network_call();
-    assert_eq!(
-        hv.dispatch(&construct(0, STORAGE_SC)),
-        constructed(storage_port())
-    );
-    let held = hv.event_receive_ports().clone();
-    let term = hv.sync_term();
-    let r = construct(0, STORAGE_SC);
-    assert_eq!(
-        hv.dispatch(&r),
-        refused(
-            &r,
-            "an event receive port call whose port id the hypervisor already holds"
-        )
-    );
-    assert_eq!(hv.event_receive_ports(), &held);
-    assert_eq!(hv.sync_term(), term);
-}
-
-#[test]
 fn the_storage_sc_on_thread_1_is_refused() {
     let mut hv = after_network_call();
     let r = construct(1, STORAGE_SC);

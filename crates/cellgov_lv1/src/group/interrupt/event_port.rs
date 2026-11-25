@@ -21,15 +21,16 @@
 //! ports and irq outlets with a pending event, and hashes them.
 //!
 //! Console captures give the port id of each call of the GameOS kernel's
-//! boot, by the call's hardware thread and its `sc` address. So
-//! the handler reads [`HypercallRequest::thread`] and
-//! [`HypercallRequest::pc`], although lv1 reads neither.
+//! boot, by the call's hardware thread, its `sc` address and its place
+//! among the calls there. So the handler reads
+//! [`HypercallRequest::thread`], [`HypercallRequest::pc`] and the ports
+//! it holds, although lv1 reads neither the thread nor the address.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use cellgov_mem::lanes::{self, LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::call::CONSTRUCT_EVENT_RECEIVE_PORT;
-use cellgov_ps3_abi::lv1::event_port::{event_receive_port_handler, game_os_port_id};
+use cellgov_ps3_abi::lv1::event_port::{event_receive_port_handler, game_os_port_ids};
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
 use super::bitmap::IrqStateBitmapKey;
@@ -236,16 +237,18 @@ fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDispositio
 ///
 /// The answer carries the port, and the hypervisor keeps it. lv1 gives
 /// the port the first free id of the partition's object table, so the
-/// partition's other objects decide that id. CellGov answers the id that
-/// a console capture gives for the call's hardware thread and its `sc`
-/// address. It gives that id whatever objects the hypervisor holds and
-/// whatever order it runs the threads in.
+/// partition's other objects decide that id. Console captures give the
+/// ids of the calls at the call's hardware thread and `sc` address, in
+/// the order of the calls. CellGov answers the first of those ids that
+/// the hypervisor does not hold. The ids ascend in the order of the
+/// calls, so that id is the lowest free id among them.
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
-/// - no source gives the port id for the thread and the address at
+/// - no source gives a port id for the thread and the address at
 ///   `firmware`;
-/// - the hypervisor already holds a port or an irq outlet with that id.
+/// - the hypervisor already holds a port or an irq outlet with each of
+///   those ids.
 pub(crate) fn construct_port(
     request: &HypercallRequest,
     firmware: Option<&str>,
@@ -257,23 +260,25 @@ pub(crate) fn construct_port(
             "an event receive port call at a firmware whose lv1 handler is not read",
         );
     };
-    let Some(id) = request
+    let mut ids = request
         .thread
-        .and_then(|thread| game_os_port_id(firmware, thread, request.pc))
-    else {
+        .into_iter()
+        .flat_map(|thread| game_os_port_ids(firmware, thread, request.pc))
+        .peekable();
+    if ids.peek().is_none() {
         return refuse(
             request,
             "an event receive port call whose port id no source gives for its thread and address",
         );
-    };
+    }
     // An outlet takes its id from the same object table as a port; see
     // [`cellgov_ps3_abi::lv1::spe`]. So lv1 never gives a port an outlet's id.
-    if ports.port(id).is_some() || ports.outlet(id).is_some() {
+    let Some(id) = ids.find(|&id| ports.port(id).is_none() && ports.outlet(id).is_none()) else {
         return refuse(
             request,
             "an event receive port call whose port id the hypervisor already holds",
         );
-    }
+    };
     let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), [id]);
     answer.push_change(InterruptChange::PortConstructed(EventReceivePort::new(id)));
     HypercallDisposition::Answered(answer)
@@ -306,3 +311,7 @@ mod record_start_tests;
 #[cfg(test)]
 #[path = "tests/event_port_storage_tests.rs"]
 mod storage_tests;
+
+#[cfg(test)]
+#[path = "tests/event_port_storage_device_tests.rs"]
+mod storage_device_tests;

@@ -5,6 +5,7 @@
 use super::*;
 use cellgov_event::UnitId;
 use cellgov_mem::lanes::{contribution, LaneIndex};
+use cellgov_ps3_abi::lv1::event_port::game_os_port_id;
 use cellgov_time::GuestTicks;
 
 fn outlets(outlets: &[EventReceivePort]) -> EventReceivePortState {

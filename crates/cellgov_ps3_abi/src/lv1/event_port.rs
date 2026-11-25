@@ -161,6 +161,13 @@ pub const NETWORK_PORT_CAPTURE: &str = "tests/micro/lv1_network_port_id";
 /// method and the analysis.
 pub const STORAGE_PORT_CAPTURE: &str = "tests/micro/lv1_storage_port_id";
 
+/// The console capture of the port that lv1 connects to each storage
+/// device for the game OS partition, and of each port's id.
+///
+/// The path is relative to the workspace root. Its README gives the
+/// method and the analysis.
+pub const STORAGE_DEVICE_PORT_CAPTURE: &str = "tests/micro/lv1_storage_device_port_ids";
+
 const fn call(thread: u8, sc: u64, id: u64) -> GameOsPortCall {
     GameOsPortCall { thread, sc, id }
 }
@@ -224,9 +231,22 @@ const fn call(thread: u8, sc: u64, id: u64) -> GameOsPortCall {
 /// - one passes its caller's type
 ///   [OFW-4.93 lv2_kernel a:0x8000000000094580-0x80000000000945bc].
 ///
-/// The row keys only the thread and the address. So it gives the id of
-/// the first call there on thread 0, and it is true only while the
-/// storage bus function makes that call. A later call there finds the id
+/// The first of the two is the kernel's device object. It registers its
+/// object only after `open_device` of its device returns 0
+/// [OFW-4.93 lv2_kernel a:0x80000000000ac120-0x80000000000ac12c]. So the
+/// open of each storage device reaches the port setup after the storage
+/// bus function. The capture [`STORAGE_DEVICE_PORT_CAPTURE`] reads the
+/// port that lv1 connects to each of the five storage devices: devices 0
+/// to 4 hold the ids 21 to 25. lv1 gives the lowest free id each time
+/// [OFW-4.93 lv1 a:0x2CA3DC-0x2CA42C], so the ids are in the order of the
+/// calls.
+///
+/// The rows key only the thread and the address. The rows of one thread
+/// and address are in the order of the calls, so their ids ascend. The
+/// hypervisor gives a call the first of those ids that it does not hold:
+/// the lowest free id among them. The rows of the storage `sc` are true
+/// only while the storage bus function and the five storage device opens
+/// make the calls there on thread 0. A later call there finds each id
 /// held, and the hypervisor refuses it.
 pub const GAME_OS_PORT_CALLS: &[GameOsPortCalls] = &[GameOsPortCalls {
     firmware: "4.93",
@@ -244,6 +264,11 @@ pub const GAME_OS_PORT_CALLS: &[GameOsPortCalls] = &[GameOsPortCalls {
         call(0, RECORD_START_SC, 17),
         call(0, NETWORK_SC, 19),
         call(0, STORAGE_SC, 20),
+        call(0, STORAGE_SC, 21),
+        call(0, STORAGE_SC, 22),
+        call(0, STORAGE_SC, 23),
+        call(0, STORAGE_SC, 24),
+        call(0, STORAGE_SC, 25),
     ],
 }];
 
@@ -256,15 +281,26 @@ pub fn game_os_port_calls(firmware: &str) -> Option<&'static [GameOsPortCall]> {
         .map(|calls| calls.calls)
 }
 
-/// The port id that lv1 gave the GameOS kernel's call at the `sc` address
-/// `sc` on the hardware thread `thread`.
+/// The port id that lv1 gave the GameOS kernel's first call at the `sc`
+/// address `sc` on the hardware thread `thread`.
 ///
 /// The value is `None` when no source gives that id at the firmware
 /// version `firmware`.
 pub fn game_os_port_id(firmware: &str, thread: u8, sc: u64) -> Option<u64> {
-    game_os_port_calls(firmware)?
+    game_os_port_ids(firmware, thread, sc).next()
+}
+
+/// Each port id that lv1 gave the GameOS kernel's calls at the `sc`
+/// address `sc` on the hardware thread `thread`, in the order of the
+/// calls.
+///
+/// The iterator is empty when no source gives an id at the firmware
+/// version `firmware`.
+pub fn game_os_port_ids(firmware: &str, thread: u8, sc: u64) -> impl Iterator<Item = u64> {
+    game_os_port_calls(firmware)
+        .unwrap_or_default()
         .iter()
-        .find(|call| call.thread == thread && call.sc == sc)
+        .filter(move |call| call.thread == thread && call.sc == sc)
         .map(|call| call.id)
 }
 
@@ -295,3 +331,7 @@ mod network_console_tests;
 #[cfg(test)]
 #[path = "tests/event_port_storage_console_tests.rs"]
 mod storage_console_tests;
+
+#[cfg(test)]
+#[path = "tests/event_port_storage_device_console_tests.rs"]
+mod storage_device_console_tests;
