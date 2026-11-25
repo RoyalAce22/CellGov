@@ -1,13 +1,24 @@
 use super::hypercall_ctr_copy_tests::call;
 use super::hypercall_ctr_decrement_tests::{window, SC, VECTOR};
 use super::hypercall_ctr_virtual_tests::{bctr, OUTSIDE};
-use super::hypercall_entry_tests::{code, data_bytes, ordinals, pointers, word, Segment, POINTERS};
+use super::hypercall_entry_tests::{
+    code, data_bytes, elf, ordinals, pointers, word, Segment, POINTERS,
+};
+use super::hypercall_real_mode_switch_tests::{lis_sf, rfid_stub, window as switch_window};
 use super::hypercall_tests::{li, KERNEL};
 use super::*;
 use cellgov_ps3_abi::hw::ppc_isa::PPC_BLR;
 
 /// The window's `nop`, between its `li r11` and `sc`.
 const NOP_WORD: u64 = SC - 4;
+
+/// The address of each `bcctr`, `bclr` or `rfid` whose target the scan of
+/// `segments` loses.
+fn lost_targets(segments: &[Segment]) -> Vec<u64> {
+    hypercall_losses(&elf(0, segments))
+        .expect("the ELF scans")
+        .lost_targets
+}
 
 /// The kernel address of a routine that builds the real address of the
 /// window's `nop`. Its real address is above 4 GiB, so no 2-byte or
@@ -74,6 +85,7 @@ fn a_constant_that_a_branch_from_the_vector_reaches_names_its_real_alias() {
     tail.push(PPC_BLR);
     let segments = [code(VECTOR, &[to_tail]), window(&tail)];
     assert_eq!(ordinals(0, &segments), [(SC, None)]);
+    assert!(lost_targets(&segments).is_empty());
 }
 
 /// A code pointer names a call outside the vectors. The return point of
@@ -94,6 +106,7 @@ fn a_constant_at_the_return_point_of_a_reached_call_names_its_real_alias() {
         window(&[]),
     ];
     assert_eq!(ordinals(0, &segments), [(SC, None)]);
+    assert!(lost_targets(&segments).is_empty());
 }
 
 /// The vector builds 0x5000 as 0xA00 shifted left by 3, so no word of the
@@ -117,6 +130,7 @@ fn a_bctr_after_a_call_at_the_real_alias_of_a_built_constant_leaves_every_site_u
         window(&[]),
     ];
     assert_eq!(ordinals(0, &segments), [(SC, None)]);
+    assert_eq!(lost_targets(&segments), [OUTSIDE + 4]);
 }
 
 /// A `bl` and a `bctr` after the window's `blr` would bring a CTR that
@@ -142,6 +156,7 @@ fn a_bctr_after_a_call_that_a_code_pointer_reaches_leaves_every_site_unresolved(
         window(&[]),
     ];
     assert_eq!(ordinals(0, &segments), [(SC, None)]);
+    assert_eq!(lost_targets(&segments), [OUTSIDE + 4]);
 }
 
 /// The word after the `bctr` reads as a relative jump table entry to the
@@ -167,6 +182,7 @@ fn a_jump_table_after_a_bctr_that_a_code_pointer_reaches_enters_its_target() {
         window(&[]),
     ];
     assert_eq!(ordinals(0, &segments), [(SC, None)]);
+    assert!(lost_targets(&segments).is_empty());
 }
 
 /// The data holds the routine's address one byte past a word boundary.
@@ -187,4 +203,20 @@ fn a_routine_that_only_an_unaligned_pointer_names_still_names_its_constants() {
         window(&[]),
     ];
     assert_eq!(ordinals(0, &segments), [(SC, None)]);
+    assert!(lost_targets(&segments).is_empty());
+}
+
+/// No word reaches the `rfid` stub until a code pointer names it, so
+/// until then its switch puts no word into real mode, and the window's
+/// tail does not reach the real address of the `nop`.
+///
+/// [PPC-Book3 p:13 s:2.3] `rfid` sets MSR\[IR\] to SRR1\[IR\] | SRR1\[PR\] and fetches the next instruction from SRR0.
+#[test]
+fn an_rfid_that_no_word_reaches_puts_no_target_in_real_mode() {
+    let stub = || rfid_stub(&[lis_sf(4)], &[]);
+    assert_eq!(ordinals(0, &[stub(), switch_window(76)]), [(SC, Some(75))]);
+    assert_eq!(
+        ordinals(0, &[stub(), switch_window(76), pointers(&[OUTSIDE])]),
+        [(SC, None)]
+    );
 }

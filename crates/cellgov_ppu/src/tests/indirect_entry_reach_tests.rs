@@ -159,8 +159,8 @@ fn a_fall_through_past_the_last_word_below_4_gib_reaches_address_0() {
     assert!(reach.contains(1, 0));
 }
 
-/// Its low-order 32 bits, 0, name no word, so only the start with bits
-/// 62 and 63 at 0 reaches the word.
+/// The low-order 32 bits of the start name no word. So only the start
+/// with its bits 62 and 63 at 0 reaches the word.
 ///
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
 #[test]
@@ -196,8 +196,6 @@ fn a_start_reaches_each_segment_at_its_real_address() {
     assert!(reach.contains(1, 0));
 }
 
-/// The bound repeats its rounds while the set grows, so a wrong answer
-/// either repeats them forever or stops them early.
 #[test]
 fn grow_and_fill_return_whether_the_set_took_a_word() {
     let code = Code::new(vec![CodeSegment {

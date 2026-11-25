@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::iter::once;
 
 use super::constants::Value;
-use super::join_flow::{Bounds, JoinFlow, JoinWords};
+use super::join_flow::{Bounds, EntryWords, JoinFlow, JoinWords};
 use super::lost::{join_origins, Origins};
 use super::reach::Reach;
 use super::tests::word;
@@ -48,8 +48,8 @@ fn paths(count: u16) -> Vec<u32> {
     words
 }
 
-/// The drops of one `JoinFlow` run over `words` at [`BASE`] with the
-/// bounds `bounds`, which counts the drops when `counting` is set.
+/// The drops of one `JoinFlow` run over `words` at [`BASE`] with
+/// `bounds`. The run counts the drops when `counting` is set.
 fn drops_of(words: Vec<u32>, bounds: &Bounds, counting: bool) -> Vec<(usize, JoinDrop)> {
     let code = Code::new(vec![CodeSegment { vaddr: BASE, words }]);
     let functions = BTreeMap::new();
@@ -63,6 +63,7 @@ fn drops_of(words: Vec<u32>, bounds: &Bounds, counting: bool) -> Vec<(usize, Joi
         &every,
         bounds,
         &reach,
+        &EntryWords::default(),
         counting,
     )
     .drops()
@@ -77,6 +78,19 @@ fn drops(words: Vec<u32>, bounds: &Bounds) -> Vec<(usize, JoinDrop)> {
 fn a_flow_that_does_not_count_gives_the_same_drops_with_no_count() {
     let found = drops_of(paths(17), &Bounds::default(), false);
     assert_eq!(found, vec![r3_drop(17, None)]);
+    let counted: Vec<(usize, JoinDrop)> = drops(paths(17), &Bounds::default())
+        .into_iter()
+        .map(|(slot, drop)| {
+            (
+                slot,
+                JoinDrop {
+                    brought: None,
+                    ..drop
+                },
+            )
+        })
+        .collect();
+    assert_eq!(found, counted);
 }
 
 /// The drop of r3 at the only join word, the `mtctr` after `count`
@@ -115,7 +129,7 @@ fn a_drop_past_the_raised_limit_has_no_count() {
 }
 
 #[test]
-fn a_raise_doubles_the_bound_up_to_the_raised_limit_and_skips_a_drop_with_no_count() {
+fn a_raise_takes_the_count_or_double_the_bound_up_to_the_raised_limit_and_skips_no_count() {
     let mut bounds = Bounds::default();
     let r3 = JoinRegister::Gpr(3);
     let origins = Origins::of(0);
@@ -129,6 +143,12 @@ fn a_raise_doubles_the_bound_up_to_the_raised_limit_and_skips_a_drop_with_no_cou
     assert!(fresh.raise(once(&origins), &[r3_drop(0, Some(40))]));
     assert_eq!(fresh.bound(0, r3), 40);
     assert_eq!(fresh.bound(0, JoinRegister::Lr), 16);
+    // Twice 40 is past the raised limit, so the bound stops at 64.
+    assert!(fresh.raise(once(&origins), &[r3_drop(0, Some(41))]));
+    assert_eq!(fresh.bound(0, r3), 64);
+    // A count at the bound raises nothing.
+    assert!(!fresh.raise(once(&origins), &[r3_drop(0, Some(64))]));
+    assert_eq!(fresh.bound(0, r3), 64);
 }
 
 #[test]

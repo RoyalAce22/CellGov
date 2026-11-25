@@ -1,6 +1,6 @@
 use super::hypercall_constant_join_tests::{
-    bctr, lr_writers, mflr, mtctr, sites, twenty_pass_loop, writers, EVERY_UNRESOLVED, JOIN_LIMIT,
-    WINDOW_RESOLVED,
+    addi, bctr, build, lr_writers, mflr, mtctr, sites, twenty_pass_loop, writers, EVERY_UNRESOLVED,
+    JOIN_LIMIT, WINDOW_RESOLVED,
 };
 use super::hypercall_ctr_decrement_tests::{bc, quiet, window, VECTOR};
 use super::hypercall_entry_tests::{code, elf};
@@ -133,6 +133,19 @@ fn a_bctr_of_an_mflr_copy_of_an_lr_past_the_raised_limit_names_the_join_of_lr() 
     );
 }
 
+/// `lis r3,0; ori r3,r3,0x2FB4; loop: addi r3,r3,4; blt loop`.
+///
+/// A step of 4 gives r3 each word address in some pass, so the values of
+/// the loop are not a class of fewer words, and r3 stays lost.
+///
+/// [PPC-Book1 p:20 s:2.4.1] BO 011at branches if the CR bit is 1 and does not decrement CTR.
+/// [PPC-Book1 p:51 s:3.3.8] `addi` adds EXTS(SI) to RA.
+fn word_step_loop() -> Vec<u32> {
+    let mut words = build(3, 0x2FB4).to_vec();
+    words.extend([addi(3, 3, 4), bc(0b01100, -4)]);
+    words
+}
+
 /// The loop brings one constant more than each bound to its `addi` at
 /// word 2, so each raise doubles the bound until it passes the raised
 /// limit.
@@ -140,7 +153,7 @@ fn a_bctr_of_an_mflr_copy_of_an_lr_past_the_raised_limit_names_the_join_of_lr() 
 /// [PPC-Book1 p:51 s:3.3.8] `addi` adds EXTS(SI) to RA.
 #[test]
 fn a_bctr_of_a_gpr_that_a_loop_steps_names_the_loop_join_past_the_raised_limit() {
-    let mut words = twenty_pass_loop();
+    let mut words = word_step_loop();
     words.extend([mtctr(3), bctr()]);
     let drop = past(2, JoinRegister::Gpr(3));
     assert_eq!(losses(VECTOR, &words), lost(at(5), at(4), &[drop]));
@@ -153,9 +166,9 @@ fn a_bctr_of_a_gpr_that_a_loop_steps_names_the_loop_join_past_the_raised_limit()
 /// [PPC-Book1 p:20 s:2.4.1] BO 011at branches if the CR bit is 1 and does not decrement CTR.
 #[test]
 fn a_join_of_two_lost_paths_names_the_joins_of_both() {
-    let mut words = twenty_pass_loop();
+    let mut words = word_step_loop();
     words.push(bc(0b01100, 4 * 5));
-    words.extend(twenty_pass_loop());
+    words.extend(word_step_loop());
     words.extend([mtctr(3), bctr()]);
     let drops = [past(2, JoinRegister::Gpr(3)), past(7, JoinRegister::Gpr(3))];
     assert_eq!(losses(VECTOR, &words), lost(at(10), at(9), &drops));
@@ -189,5 +202,12 @@ fn a_value_that_more_joins_drop_than_a_mark_names_has_more() {
         .drops
         .iter()
         .all(|drop| drop.register == JoinRegister::Gpr(3)));
+    // The join words are the `addi` of each loop, at word 2 of its five,
+    // and the `mtctr`.
+    let joins: Vec<u64> = (0..usize::from(LOOPS.unsigned_abs()))
+        .map(|count| at(5 * count + 2))
+        .chain([at(mtctr_word)])
+        .collect();
+    assert!(value.drops.iter().all(|drop| joins.contains(&drop.join)));
     assert!(value.more);
 }

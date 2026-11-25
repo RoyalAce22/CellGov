@@ -301,7 +301,8 @@ fn a_bctr_of_a_gpr_that_a_build_rewrites_after_a_loop_marks_it_lost_keeps_the_si
     assert_eq!(sites(VECTOR, &words), WINDOW_RESOLVED);
 }
 
-/// The most constants that the join keeps in one register.
+/// The most constants that a join keeps in one register when its bound
+/// does not rise.
 pub(super) const JOIN_LIMIT: u16 = 16;
 
 /// The ordinals when no indirect branch reaches the window's `nop`.
@@ -394,24 +395,33 @@ pub(super) fn descriptor(entry: u64, toc: u64) -> Vec<u8> {
 /// holds each of them on the path to the `mtctr`. The `blt` brings that
 /// r2 to the `mtctr`, a join with more TOCs than the raised limit, so
 /// the join marks r2. The join dropped only TOCs, and the bound names
-/// each of them, so the `bctr` reaches no word that the bound misses.
+/// each of them, so the `bctr` enters no word that the bound does not
+/// name. When the last TOC is the real address of the window's `nop`,
+/// the `bctr` enters the window with r11 unset.
 ///
 /// [PPC-Book1 p:24 s:2.4] A branch alters only CTR and LR, so r2 at the target is r2 at the branch.
 /// [PPC-Book1 p:81 s:3.3.13] `mtlr` and `mtctr` copy RS into LR or CTR.
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
+/// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
 #[test]
-fn a_bctr_of_an_r2_with_more_tocs_than_the_raised_limit_at_a_join_keeps_the_sites_resolved() {
+fn a_bctr_of_an_r2_with_more_tocs_than_the_raised_limit_at_a_join_enters_each_toc() {
     let words = [skip(0), mtctr(2), bctr()];
-    let descriptors: Vec<u8> = (0..=RAISED_LIMIT)
-        .flat_map(|toc| descriptor(VECTOR, u64::from(NOWHERE + 0x10 * toc)))
-        .collect();
-    let segments = [
-        code(VECTOR, &words),
-        window(&[]),
-        quiet(),
-        data_bytes(DESCRIPTORS, descriptors),
-    ];
-    assert_eq!(ordinals(0, &segments), WINDOW_RESOLVED);
+    let census = |last: u16| {
+        let descriptors: Vec<u8> = (0..RAISED_LIMIT)
+            .map(|toc| NOWHERE + 0x10 * toc)
+            .chain([last])
+            .flat_map(|toc| descriptor(VECTOR, u64::from(toc)))
+            .collect();
+        let segments = [
+            code(VECTOR, &words),
+            window(&[]),
+            quiet(),
+            data_bytes(DESCRIPTORS, descriptors),
+        ];
+        ordinals(0, &segments)
+    };
+    assert_eq!(census(NOWHERE + 0x10 * RAISED_LIMIT), WINDOW_RESOLVED);
+    assert_eq!(census(NOP_REAL), WINDOW_UNRESOLVED);
 }
 
 /// The 65 paths bring more constants in r3 than a raised bound keeps,

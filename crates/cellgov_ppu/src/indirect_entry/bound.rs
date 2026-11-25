@@ -7,9 +7,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use cellgov_ps3_abi::format::elf::ppc64_function_descriptor as descriptor;
 
 use super::constants::{Constants, Value};
-use super::ctr_flow::CtrFlow;
-use super::join_flow::{Bounds, JoinFlow, JoinWords};
+use super::ctr_flow::{CtrFlow, CtrWrites};
+use super::join_flow::{Bounds, EntryWords, JoinFlow, JoinWords};
 use super::lost::Origins;
+use super::progression::Residue;
 use super::reach::Reach;
 use super::real_mode::{real_mode_entries, Switches};
 use super::toc::{function_tocs, FunctionToc, FunctionWords};
@@ -63,8 +64,10 @@ impl FileSegment<'_> {
     }
 
     /// Each value that a load of 1, 2, 4 or 8 bytes at any address of the
-    /// file bytes gives: in either byte order, and with zero and with
-    /// sign extension. The list can hold a value more than once.
+    /// file bytes gives, in either byte order.
+    ///
+    /// A halfword or a word gives one value with zero extension and one
+    /// with sign extension. The list can hold a value more than once.
     ///
     /// [PPC-Book1 p:34 s:3.3.2] `lbz` puts the byte into RT bits 56:63 and sets RT bits 0:55 to 0.
     /// [PPC-Book1 p:38 s:3.3.2] `lwa` fills RT bits 0:31 with a copy of bit 0 of the loaded word.
@@ -227,6 +230,8 @@ pub(crate) struct IndirectBound {
     /// A dropped constant that is a TOC of a descriptor, and that no word
     /// stepped, does not make the `bcctr` or the `bclr` lost. The bound
     /// names each such TOC, because it is a doubleword of the file bytes.
+    /// A value of a progression does not make the branch lost either, once
+    /// the bound names each word of its classes.
     ///
     /// The set also holds each `rfid` that can leave MSR\[IR\] at 1 when a
     /// path reaches it with a lost SRR0. A lost SRR0 can hold a constant
@@ -287,25 +292,27 @@ const REFINEMENTS: usize = 16;
 ///
 /// The rounds step only the words of a [`Reach`] set. It starts at the
 /// ELF entry, the interrupt vectors and each value that a load of the
-/// file bytes gives, and each round adds the words that the named words
-/// reach. After the rounds, the bound also adds the
-/// words that the targets and the switches reach, and runs the rounds
-/// again until the set stops growing. The set only grows, so this ends.
+/// file bytes gives. Each round adds the words that the named words
+/// reach. After the rounds, the bound adds the words that the targets and
+/// the switches reach, and runs the rounds again until the set stops
+/// growing. The set only grows, so this ends.
 ///
-/// When the rounds end with a lost target, the bound refines `JoinFlow`
-/// and runs the rounds again from the named words it has:
-/// - it takes the origins of each lost value that an `mtctr`, a `bclr`
-///   or an `rfid` takes;
-/// - it raises the bound of each join that dropped those constants, as
-///   [`Bounds::raise`] states.
+/// When the rounds end with a lost target, the bound tries these steps in
+/// order. The first step that changes something runs the rounds again,
+/// from the named words that the bound has:
+/// 1. Raise the bound of each join that dropped the constants of a lost
+///    value that an `mtctr`, a `bclr` or an `rfid` takes, as
+///    [`Bounds::raise`] states. A raised join keeps each constant that
+///    the paths bring. The bound skips this step after [`REFINEMENTS`]
+///    raises. A loop that steps a constant brings more constants than
+///    any bound, so this step leaves its value lost.
+/// 2. Name each word of the classes of a lost value that keeps one
+///    progression, as [`JoinFlow::progression`] gives them.
+/// 3. Add every word to the reach set, because a lost target can enter
+///    any word.
 ///
-/// A raised join keeps each constant that the paths bring, so it drops
-/// none. The refinement stops when no lost target remains, when it can
-/// raise no bound, or after [`REFINEMENTS`] runs. A loop that steps a
-/// constant brings more constants than any bound, so it stays lost.
-///
-/// A lost target that remains can enter any word. So the bound then adds
-/// every word to the set and runs again, and the refinement goes on.
+/// When no step changes anything, the bound returns the lost targets that
+/// remain.
 ///
 /// # Errors
 ///
@@ -328,9 +335,21 @@ pub(crate) fn indirect_entries(
         targets: BTreeMap::new(),
         ctr_writes: BTreeMap::new(),
         lost_ctr_writes: BTreeMap::new(),
+        ranged_ctr_writes: BTreeSet::new(),
         lost_returns: BTreeMap::new(),
         lost_rfids: BTreeMap::new(),
+        progressions: false,
+        deferred: false,
+        residues: BTreeSet::new(),
+        loaded: EntryWords::new(code),
     };
+    // A real-mode branch to a loaded value enters the word at its real
+    // address too.
+    let loads = files.iter().flat_map(FileSegment::loads);
+    bound.loaded.add(
+        code,
+        loads.flat_map(|value| code.real_aliases(value & !0b11)),
+    );
     for file in files {
         for value in file.doublewords() {
             bound.name(value);
@@ -347,7 +366,7 @@ pub(crate) fn indirect_entries(
     let join_words = JoinWords::new(code);
     let mut reach = Reach::new(code);
     reach.grow(bound.real_mode.iter().copied());
-    // The bound does not yet name the value of an unaligned load, a byte
+    // The bound does not name the value of an unaligned load, a byte
     // load, a halfword load or a byte-reversed load. Each can be a code
     // address, so the reach set starts at each such value.
     reach.grow(files.iter().flat_map(FileSegment::loads));
@@ -360,10 +379,23 @@ pub(crate) fn indirect_entries(
         }
         // The last round named no new word, so this run repeats its flow,
         // with the same drop ids, and counts each drop.
-        let drops = JoinFlow::run(&join_words, &words.tocs, &every, &bounds, &reach, true).drops();
-        let origins = bound.lost_values().map(|(_, origins)| origins);
-        if refinements < REFINEMENTS && bounds.raise(origins, &drops) {
+        let entries = bound.entry_words();
+        let drops = JoinFlow::run(
+            &join_words,
+            &words.tocs,
+            &every,
+            &bounds,
+            &reach,
+            &entries,
+            true,
+        )
+        .drops();
+        let origins = || bound.lost_values().map(|(_, origins)| origins);
+        if refinements < REFINEMENTS && bounds.raise(origins(), &drops) {
             refinements += 1;
+            continue;
+        }
+        if bound.take_progressions() {
             continue;
         }
         if reach.fill() {
@@ -430,17 +462,63 @@ pub(super) struct Bound<'a> {
     ctr_writes: BTreeMap<(usize, u64), Value>,
     /// Each `mtctr` that can also copy a constant that [`JoinFlow`]
     /// dropped, by segment index and address, with the origins of the
-    /// GPR, from the TOCs of the latest round. The map leaves out a GPR
-    /// for which [`JoinFlow::holds_only_tocs`] holds.
+    /// GPR, from the TOCs of the latest round.
+    ///
+    /// The map leaves out a GPR in these cases:
+    /// - [`JoinFlow::holds_only_tocs`] holds for it;
+    /// - [`Self::progressions`] is true and [`JoinFlow::progression`]
+    ///   gives classes for it.
     lost_ctr_writes: BTreeMap<(usize, u64), Origins>,
     /// The address of each `bclr` whose LR can hold a constant that
     /// [`JoinFlow`] dropped, with the origins of LR, from the TOCs of the
-    /// latest round. The map leaves out an LR for which
-    /// [`JoinFlow::holds_only_tocs`] holds.
+    /// latest round.
+    ///
+    /// The map leaves out an LR in these cases:
+    /// - [`JoinFlow::holds_only_tocs`] holds for it;
+    /// - [`Self::progressions`] is true and [`JoinFlow::progression`]
+    ///   gives classes for it.
     lost_returns: BTreeMap<u64, Origins>,
+    /// Each `mtctr` that can also copy a lost value for which
+    /// [`JoinFlow::progression`] gives classes, by segment index and
+    /// address, from the TOCs of the latest round. The bound names each
+    /// word of those classes.
+    ranged_ctr_writes: BTreeSet<(usize, u64)>,
     /// The address of each `rfid` that [`Constants::translated_rfid_lost`]
     /// gives, with the origins of SRR0, from the TOCs of the latest round.
     lost_rfids: BTreeMap<u64, Origins>,
+    /// Whether an `mtctr` or a `bclr` takes a lost value that keeps one
+    /// progression as the classes of [`JoinFlow::progression`].
+    ///
+    /// The bound sets it only when one of these is true:
+    /// - the refinement of the joins can raise no more bounds;
+    /// - the refinement ran [`REFINEMENTS`] times.
+    ///
+    /// A raised join keeps each constant, which names fewer words than a
+    /// class. The named words only grow, so the bound does not name the
+    /// words of a class before that.
+    progressions: bool,
+    /// Whether the latest round took as lost a value that keeps one
+    /// progression, because [`Self::progressions`] was false.
+    deferred: bool,
+    /// Each class whose words the bound names.
+    residues: BTreeSet<Residue>,
+    /// The word at each value that an unaligned, byte, halfword or
+    /// byte-reversed load of the file bytes gives, which an indirect
+    /// branch can enter.
+    loaded: EntryWords,
+}
+
+/// How an `mtctr` or a `bclr` takes a lost value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LostUse {
+    /// The branch can reach an address that the scan does not know.
+    Lost,
+    /// The value is a constant of the GPR or of LR, or a TOC that a
+    /// descriptor gives, as [`JoinFlow::holds_only_tocs`] states.
+    Tocs,
+    /// The value is in a class whose words the bound names, as
+    /// [`JoinFlow::progression`] gives it.
+    Progression,
 }
 
 /// Joins `origins` into the origins of `key` in `lost`.
@@ -469,7 +547,12 @@ impl Bound<'_> {
             self.rounds(reach, words, join_words, every, bounds)?;
             let lost_writes: BTreeSet<(usize, u64)> =
                 self.lost_ctr_writes.keys().copied().collect();
-            let mut flow = CtrFlow::new(code, &self.ctr_writes, &lost_writes, reach);
+            let writes = CtrWrites {
+                constants: &self.ctr_writes,
+                lost: &lost_writes,
+                ranged: &self.ranged_ctr_writes,
+            };
+            let mut flow = CtrFlow::new(code, writes, reach);
             flow.run();
             let mut lost_targets = flow.bcctr_targets(&mut self.targets);
             lost_targets.extend(self.lost_returns.keys());
@@ -547,13 +630,26 @@ impl Bound<'_> {
             self.targets.clear();
             self.ctr_writes.clear();
             self.lost_ctr_writes.clear();
+            self.ranged_ctr_writes.clear();
             self.lost_returns.clear();
             self.lost_rfids.clear();
+            self.deferred = false;
+            // The round names no new word when it is the last one, so the
+            // run that counts the drops gets the same entries.
+            let entries = self.entry_words();
             for (index, segment) in code.segments().iter().enumerate() {
                 let tocs = words.tocs.segment(index);
                 self.code_constants(index, segment, tocs, every, None, reach);
             }
-            let joins = JoinFlow::run(join_words, &words.tocs, every, bounds, reach, false);
+            let joins = JoinFlow::run(
+                join_words,
+                &words.tocs,
+                every,
+                bounds,
+                reach,
+                &entries,
+                false,
+            );
             for (index, segment) in code.segments().iter().enumerate() {
                 let tocs = words.tocs.segment(index);
                 self.code_constants(index, segment, tocs, every, Some(&joins), reach);
@@ -576,6 +672,70 @@ impl Bound<'_> {
             }
             false
         });
+    }
+
+    /// The words that control can enter from a path that [`JoinFlow`]
+    /// does not follow.
+    ///
+    /// These are the words:
+    /// - each named word, in real mode and in 32-bit mode too;
+    /// - each real-mode entry;
+    /// - each word at address 0 or its real alias, which a `bcctr` reaches
+    ///   after a `bdnz` falls through;
+    /// - each word that [`Self::loaded`] holds.
+    fn entry_words(&self) -> EntryWords {
+        let code = self.code;
+        let mut entries = self.loaded.clone();
+        entries.add(
+            code,
+            self.named
+                .iter()
+                .chain(&self.real_named)
+                .chain(&self.low_named)
+                .chain(&self.real_mode)
+                .copied()
+                .chain(code.real_aliases(0)),
+        );
+        entries
+    }
+
+    /// Sets [`Self::progressions`] when the latest round deferred a lost
+    /// value that keeps one progression, and returns whether it did.
+    fn take_progressions(&mut self) -> bool {
+        if self.progressions || !self.deferred {
+            return false;
+        }
+        self.progressions = true;
+        true
+    }
+
+    /// How an `mtctr` or a `bclr` takes a lost value with the mark
+    /// `origins`, from the [`JoinFlow`] run `joins` that gave the mark.
+    ///
+    /// For [`LostUse::Progression`], the bound names each word of each
+    /// class of the mark. Each word that a branch to a value of a class
+    /// can enter, in each mode, is such a word.
+    fn lost_use(&mut self, joins: Option<&JoinFlow<'_>>, origins: &Origins) -> LostUse {
+        let Some(joins) = joins else {
+            return LostUse::Lost;
+        };
+        if joins.holds_only_tocs(origins) {
+            return LostUse::Tocs;
+        }
+        let Some(residues) = joins.progression(origins) else {
+            return LostUse::Lost;
+        };
+        if !self.progressions {
+            self.deferred = true;
+            return LostUse::Lost;
+        }
+        let code = self.code;
+        for residue in residues {
+            if self.residues.insert(residue) {
+                self.named.extend(residue.words(code));
+            }
+        }
+        LostUse::Progression
     }
 
     /// The address of each `mtctr`, `bclr` and `rfid` that takes a lost
@@ -681,9 +841,8 @@ impl Bound<'_> {
     /// - names each constant that the code builds in a GPR;
     /// - keeps the target of each `bclr` whose LR the code builds;
     /// - keeps each constant that an `mtctr` copies;
-    /// - keeps each `mtctr` and each `bclr` that takes a lost value,
-    ///   unless [`JoinFlow::holds_only_tocs`] holds for its mark. Then an
-    ///   `mtctr` copies each TOC that a descriptor gives;
+    /// - keeps each `mtctr` and each `bclr` that takes a lost value, as
+    ///   [`Self::lost_use`] takes its mark;
     /// - enters each word that an `rfid` can enter with MSR\[IR\] at 1;
     /// - keeps each `rfid` that can enter a word with MSR\[IR\] at 1 from
     ///   an SRR0 that can hold a constant that [`JoinFlow`] dropped.
@@ -711,7 +870,6 @@ impl Bound<'_> {
         joins: Option<&JoinFlow<'_>>,
         reach: &Reach<'_>,
     ) {
-        let lost = |origins: &&Origins| !joins.is_some_and(|joins| joins.holds_only_tocs(origins));
         let mut constants = Constants::default();
         for (word, ((address, raw), &toc)) in segment.addressed().zip(tocs).enumerate() {
             if !reach.contains(index, word) {
@@ -720,6 +878,9 @@ impl Bound<'_> {
             }
             if let Some(entered) = joins.and_then(|joins| joins.entered((index, word))) {
                 constants = entered;
+            }
+            if joins.is_some_and(|joins| joins.enters_unheld((index, word))) {
+                constants.enter_unheld();
             }
             constants.enter_toc(toc, every);
             let decoded = crate::decode::decode(raw);
@@ -730,8 +891,10 @@ impl Bound<'_> {
                         .or_default()
                         .extend(lr.constants().iter().map(|&lr| lr & !0b11));
                 }
-                if let Some(origins) = constants.lr_lost.as_ref().filter(lost) {
-                    note(&mut self.lost_returns, address, origins);
+                if let Some(origins) = &constants.lr_lost {
+                    if self.lost_use(joins, origins) == LostUse::Lost {
+                        note(&mut self.lost_returns, address, origins);
+                    }
                 }
             }
             if let Ok(PpuInstruction::Mtctr { rs }) = decoded {
@@ -741,21 +904,8 @@ impl Bound<'_> {
                         .and_modify(|own| *own = own.clone().union(value))
                         .or_insert_with(|| value.clone());
                 }
-                match constants.lost(rs) {
-                    Some(origins) if lost(&origins) => {
-                        note(&mut self.lost_ctr_writes, (index, address), origins);
-                    }
-                    // The GPR can also hold a dropped TOC. CTR keeps it as
-                    // a constant, so that a decrement or a stepped copy of
-                    // CTR makes the `bcctr` lost, as for a kept constant.
-                    // [PPC-Book1 p:24 s:2.4] A `bc` with BO bit 2 at 0 decrements CTR.
-                    Some(_) => {
-                        self.ctr_writes
-                            .entry((index, address))
-                            .and_modify(|own| *own = own.clone().union(every))
-                            .or_insert_with(|| every.clone());
-                    }
-                    None => {}
+                if let Some(origins) = constants.lost(rs) {
+                    self.lost_ctr_write(index, address, joins, origins, every);
                 }
             }
             for target in constants.translated_rfid_targets(raw) {
@@ -770,6 +920,38 @@ impl Bound<'_> {
                 .flat_map(Value::constants)
             {
                 self.name(constant);
+            }
+        }
+    }
+
+    /// Keeps the `mtctr` at `address` of the segment at `index`, which
+    /// copies a GPR with the lost mark `origins`, as [`Self::lost_use`]
+    /// takes the mark.
+    ///
+    /// `every` holds each TOC that a descriptor gives. The bound keeps a
+    /// dropped TOC in CTR as a constant, and keeps the `mtctr` of a
+    /// progression as a ranged write. So a decrement or a stepped copy of
+    /// CTR makes the `bcctr` lost, as for a kept constant.
+    ///
+    /// [PPC-Book1 p:24 s:2.4] A `bc` with BO bit 2 at 0 decrements CTR.
+    fn lost_ctr_write(
+        &mut self,
+        index: usize,
+        address: u64,
+        joins: Option<&JoinFlow<'_>>,
+        origins: &Origins,
+        every: &Value,
+    ) {
+        match self.lost_use(joins, origins) {
+            LostUse::Lost => note(&mut self.lost_ctr_writes, (index, address), origins),
+            LostUse::Tocs => {
+                self.ctr_writes
+                    .entry((index, address))
+                    .and_modify(|own| *own = own.clone().union(every))
+                    .or_insert_with(|| every.clone());
+            }
+            LostUse::Progression => {
+                self.ranged_ctr_writes.insert((index, address));
             }
         }
     }

@@ -239,9 +239,9 @@ pub struct HypercallLosses {
     pub dropped: Vec<DroppedValue>,
 }
 
-/// Find each indirect branch whose target the LV1 hypercall scan of `elf`
-/// cannot bound, and the branch targets where the scan dropped the
-/// constants that it can reach.
+/// Find each `bcctr`, `bclr` or `rfid` whose target the LV1 hypercall
+/// scan of `elf` cannot bound, and the branch targets where the scan
+/// dropped the constants that it can reach.
 ///
 /// The scan is the one that [`scan_hypercalls`] runs.
 ///
@@ -1061,3 +1061,11 @@ mod hypercall_storage_lost_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_toc_drop_tests.rs"]
 mod hypercall_toc_drop_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_progression_tests.rs"]
+mod hypercall_progression_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_progression_mode32_tests.rs"]
+mod hypercall_progression_mode32_tests;

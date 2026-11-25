@@ -93,7 +93,8 @@ fn under_an_unbounded_rfid_a_bctr_enters_the_word_at_the_real_address_of_a_doubl
 }
 
 /// No `bcctr` or `bclr` runs in real mode, and a branch in virtual mode
-/// reaches only the word at the address itself.
+/// reaches only the word at the address itself. A code pointer names
+/// the `bctr` path.
 ///
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
 #[test]
@@ -102,6 +103,7 @@ fn a_virtual_mode_bctr_leaves_the_word_at_the_real_address_of_a_doubleword_unent
         loaded_bctr(VIRTUAL),
         plain_window(&[]),
         doubleword(NOP_REAL),
+        pointers(&[VIRTUAL]),
     ];
     assert_eq!(ordinals(0, &segments), [(SC, Some(75))]);
 }

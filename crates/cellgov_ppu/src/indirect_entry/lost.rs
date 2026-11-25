@@ -22,9 +22,43 @@ pub(super) struct Origins {
     /// Whether the register can also hold a constant of a drop that
     /// `drops` does not name.
     more: bool,
-    /// Whether the register can hold a value that a word computed from a
-    /// dropped constant, other than an unchanged copy of it.
-    stepped: bool,
+    /// What the words on the way computed from a dropped constant.
+    steps: Steps,
+}
+
+/// What the words on the way to a register computed from the dropped
+/// constants of its lost mark.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Steps {
+    /// Each value is a dropped constant.
+    Unstepped,
+    /// Each value is a dropped constant plus `k` times this constant,
+    /// with `k` from 0. The constant is not 0.
+    By(i64),
+    /// A value can be any value that a word computed from a dropped
+    /// constant.
+    Any,
+}
+
+impl Steps {
+    /// Whether each value that `other` allows, `self` allows too.
+    fn holds(self, other: Self) -> bool {
+        self == other || self == Self::Any || other == Self::Unstepped
+    }
+
+    /// The steps that allow each value of `self` and of `other`.
+    ///
+    /// Two different constant steps give [`Steps::Any`]: the sums of both
+    /// are not one progression.
+    fn join(self, other: Self) -> Self {
+        if self.holds(other) {
+            self
+        } else if other.holds(self) {
+            other
+        } else {
+            Self::Any
+        }
+    }
 }
 
 impl Origins {
@@ -33,7 +67,7 @@ impl Origins {
         Self {
             drops: Rc::from([drop]),
             more: false,
-            stepped: false,
+            steps: Steps::Unstepped,
         }
     }
 
@@ -43,23 +77,61 @@ impl Origins {
         Self {
             drops: Rc::from([]),
             more: true,
-            stepped: false,
+            steps: Steps::Unstepped,
         }
     }
 
     /// The origins of a value that a word computes from a register with
-    /// these origins, when the word does not copy the value unchanged.
+    /// these origins, when the word does not copy the value unchanged and
+    /// does not add a constant to it.
     pub(super) fn stepped(&self) -> Self {
         Self {
-            stepped: true,
+            steps: Steps::Any,
             ..self.clone()
+        }
+    }
+
+    /// The origins of a value that a word computes by adding `add` to a
+    /// register with these origins.
+    ///
+    /// An add of 0 copies the value. A first add, or an add of the step
+    /// that the mark holds, keeps one progression. Any other add gives
+    /// [`Steps::Any`].
+    pub(super) fn added(&self, add: i64) -> Self {
+        let steps = match self.steps {
+            _ if add == 0 => self.steps,
+            Steps::Unstepped => Steps::By(add),
+            Steps::By(step) if step == add => self.steps,
+            Steps::By(_) | Steps::Any => Steps::Any,
+        };
+        Self {
+            steps,
+            ..self.clone()
+        }
+    }
+
+    /// The origins of a register with these origins that can also hold a
+    /// value for which the scan keeps no constant and no lost mark.
+    ///
+    /// A word that the scan does not follow can step a dropped constant
+    /// into such a value. So a mark stepped by one constant becomes
+    /// [`Steps::Any`]. An unstepped mark stays as it is.
+    pub(super) fn without_one_step(&self) -> Self {
+        match self.steps {
+            Steps::By(_) => self.stepped(),
+            Steps::Unstepped | Steps::Any => self.clone(),
         }
     }
 
     /// Whether the register can hold a value that a word computed from a
     /// dropped constant, other than an unchanged copy of it.
     pub(super) fn is_stepped(&self) -> bool {
-        self.stepped
+        self.steps != Steps::Unstepped
+    }
+
+    /// What the words on the way computed from a dropped constant.
+    pub(super) fn steps(&self) -> Steps {
+        self.steps
     }
 
     /// The drop ids that the mark names, in ascending order.
@@ -89,7 +161,7 @@ impl Origins {
         Self {
             drops: drops.into(),
             more,
-            stepped: self.stepped || other.stepped,
+            steps: self.steps.join(other.steps),
         }
     }
 
@@ -99,7 +171,7 @@ impl Origins {
     /// [`ORIGIN_LIMIT`] drops and has more, and the drop is above each
     /// of them.
     fn holds_all(&self, other: &Self) -> bool {
-        if (!self.more && other.more) || (!self.stepped && other.stepped) {
+        if (!self.more && other.more) || !self.steps.holds(other.steps) {
             return false;
         }
         if Rc::ptr_eq(&self.drops, &other.drops) {
@@ -161,6 +233,19 @@ impl LostGprs {
         if gprs != 0 && !self.0.is_empty() {
             self.0
                 .retain(|&(gpr, _)| gprs.checked_shr(u32::from(gpr)).unwrap_or(0) & 1 == 0);
+        }
+    }
+
+    /// Makes the mark of each GPR `n` whose bit `n` of `gprs` is set
+    /// keep no single step, as [`Origins::without_one_step`] gives it.
+    pub(super) fn forget_steps(&mut self, gprs: u32) {
+        if gprs == 0 {
+            return;
+        }
+        for (gpr, origins) in &mut self.0 {
+            if gprs.checked_shr(u32::from(*gpr)).unwrap_or(0) & 1 != 0 {
+                *origins = origins.without_one_step();
+            }
         }
     }
 

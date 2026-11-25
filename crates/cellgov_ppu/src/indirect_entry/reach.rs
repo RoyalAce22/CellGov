@@ -2,40 +2,36 @@
 //! bound.
 //!
 //! Data in a code segment, such as a string or a table, decodes as
-//! instructions. Control does not reach a word of data at run time, so
-//! the constants, the CTR and LR values and the switches that its
-//! decoded form gives are not values of the code. The bound takes these
-//! only from the words of this set.
+//! instructions. Control does not reach a word of data at run time. So
+//! the constants, the CTR and LR values and the switches of its decoded
+//! form are not values of the code. The bound takes these only from the
+//! words of this set.
 //!
 //! A word is in the set when control can get to it from a start by
-//! these steps:
+//! these steps, which the hypercall walk takes backward:
 //! - a fall-through: from each word except a `b`, `bc`, `bclr` or `bcctr`
 //!   that branches always and does not link. A call falls through to the
 //!   word where its routine returns;
 //! - a direct branch, to its target.
 //!
-//! These are the steps that the hypercall walk takes backward. A start
-//! is a word that the bound records as an entry: the ELF entry, an
-//! interrupt vector, a named word, a target of a CTR or LR write, or a
-//! word where a switch puts control.
+//! The starts are these:
+//! - each word that the bound records as an entry: the ELF entry, an
+//!   interrupt vector, a named word, a target of a CTR or LR write, or a
+//!   word where a switch puts control;
+//! - each value that a load of 1, 2, 4 or 8 bytes at any address of the
+//!   file bytes gives, in either byte order, with zero and with sign
+//!   extension. Such a value can name a code address that the bound does
+//!   not record yet, for example at an address that is not word-aligned.
+//!   These values add no word to the bound;
+//! - every word, when a `bcctr`, `bclr` or `rfid` that the bound lost can
+//!   enter any word.
 //!
 //! For each start and each step, the set holds the word at the address
-//! with bits 62 and 63 at 0 and the word at its low-order 32 bits, and
-//! each word at the real address of these two. So it holds each word
-//! that control can get to in real mode or in 32-bit mode as well, also
-//! after a switch to 32-bit mode or with MSR\[SF\] at 0 in real mode.
-//!
-//! The image can also name an address in ways that the bound does not
-//! record yet: a value that the file bytes hold at an address that is not
-//! word-aligned, and a value that a byte, a halfword or a byte-reversed
-//! load gives. A code address that only such a value names would leave
-//! its code out of the set. So the set also starts at every value that a
-//! load of 1, 2, 4 or 8 bytes at any address of the file bytes gives, in
-//! either byte order, with zero and with sign extension. These values
-//! add no word to the bound.
-//!
-//! A `bcctr`, `bclr` or `rfid` that the bound lost can enter any word.
-//! Then the set holds every word.
+//! with bits 62 and 63 at 0 and the word at its low-order 32 bits. It
+//! also holds each word at the real address of these two. So it holds
+//! each word that control can get to in real mode or in 32-bit mode,
+//! also after a switch to 32-bit mode or with MSR\[SF\] at 0 in real
+//! mode.
 //!
 //! [PPC-Book1 p:24 s:2.4] `b` and `bc` reach CIA + EXTS(displacement), or EXTS(displacement) when AA = 1.
 //! [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.

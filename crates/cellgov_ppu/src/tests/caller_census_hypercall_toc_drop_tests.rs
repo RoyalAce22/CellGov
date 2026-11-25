@@ -50,8 +50,34 @@ fn a_bctr_of_a_copy_of_an_r2_that_joins_drop_only_tocs_from_keeps_the_sites_reso
     assert_eq!(sites(&words), WINDOW_RESOLVED);
 }
 
+/// The `blt` brings r5 with the constant that the first `li` builds to
+/// the `mtctr`, a join that keeps it. On the path that falls through, the
+/// `or` copies r2, with that constant and each TOC, into r5. So the join
+/// drops only TOCs from r5, and the `mtctr` copies the kept constant and
+/// each TOC into CTR.
+///
+/// [PPC-Book1 p:51 s:3.3.8] `addi` adds EXTS(SI) to RA, or to 0 when RA is 0.
+/// [PPC-Book1 p:24 s:2.4] A branch alters only CTR and LR, so r2 at the target is r2 at the branch.
+/// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
+#[test]
+fn a_bctr_of_a_gpr_whose_join_keeps_a_built_constant_and_drops_only_tocs_keeps_the_sites_resolved()
+{
+    let built = i16::try_from(NOWHERE + 0x800).expect("a short constant");
+    let words = [
+        addi(5, 0, built),
+        skip(2),
+        addi(2, 0, built),
+        copy(5, 2),
+        mtctr(5),
+        bctr(),
+    ];
+    assert_eq!(sites(&words), WINDOW_RESOLVED);
+}
+
 /// The join drops only TOCs from r2, but the `addi` adds 8 to each value
-/// of r2, so r5 can hold a value that the image does not name.
+/// of r2, so r5 can hold a value that the image does not name. The
+/// `mtctr` is in the interrupt vectors, where an interrupt can leave any
+/// value in r5, so r5 keeps no class there.
 ///
 /// [PPC-Book1 p:51 s:3.3.8] `addi` adds EXTS(SI) to RA.
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
@@ -62,14 +88,16 @@ fn a_bctr_of_an_addi_of_an_r2_that_a_join_drops_only_tocs_from_leaves_every_site
 }
 
 /// The loop adds 0x10 to r2 on each pass, so its join drops values of
-/// r2 that no descriptor gives.
+/// r2 that no descriptor gives. The loop starts 4 past a TOC, so a
+/// dropped value and a TOC differ in the bit of value 4, and the values
+/// of r2 are not a class of fewer words.
 ///
 /// [PPC-Book1 p:20 s:2.4.1] BO 011at branches if the CR bit is 1 and does not decrement CTR.
 /// [PPC-Book1 p:51 s:3.3.8] `addi` adds EXTS(SI) to RA.
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
 #[test]
 fn a_bctr_of_an_r2_that_a_loop_steps_past_the_raised_limit_leaves_every_site_unresolved() {
-    let mut words = build(2, NOWHERE).to_vec();
+    let mut words = build(2, NOWHERE + 4).to_vec();
     words.extend([addi(2, 2, 0x10), bc(0b01100, -4), mtctr(2), bctr()]);
     assert_eq!(sites(&words), EVERY_UNRESOLVED);
 }
@@ -107,7 +135,8 @@ fn a_bctr_of_an_r2_that_a_join_drops_built_constants_from_leaves_every_site_unre
 /// [PPC-Book1 p:20 s:2.4.1] BO 1a01t decrements CTR, then branches if the decremented CTR M:63 is 0.
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
 #[test]
-fn a_bctr_after_a_bdz_of_a_ctr_that_joins_drop_only_tocs_from_leaves_every_site_unresolved() {
+fn a_bctr_after_a_bdz_of_a_ctr_from_a_gpr_that_a_join_drops_only_tocs_from_leaves_every_site_unresolved(
+) {
     let mut bytes: Vec<u8> = (0..RAISED_LIMIT)
         .flat_map(|toc| descriptor(VECTOR, u64::from(NOWHERE + 0x10 * toc)))
         .collect();

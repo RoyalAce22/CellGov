@@ -100,7 +100,26 @@
 //!   that no word stepped, makes no `bcctr` or `bclr` lost. Each such TOC
 //!   is a doubleword of the file bytes, so the bound names it. A word
 //!   that steps the register, such as an `addi` that builds an address
-//!   from r2, makes the mark lost again.
+//!   from r2, makes the mark lost again;
+//! - a mark that each word on the way stepped only by adding one
+//!   constant, such as the pointer of a loop, keeps a progression. Its
+//!   values have the low-order bits that the constants of its drops
+//!   share, up to the trailing zero bits of the step. When a run raises
+//!   no more bounds, or the runs reach their limit, an `mtctr` or a
+//!   `bclr` of such a mark names each word with those low-order bits,
+//!   and is not lost. These make it lost again:
+//!   - a second step, or any other step of the value;
+//!   - a change of the CTR that it gives;
+//!   - a value for which the scan keeps no constant and no mark, in the
+//!     register or in a register that a word copied or stepped it from.
+//!     Such a value can be a dropped constant that a word the scan does
+//!     not follow stepped. These can bring one:
+//!     - a path to a join word;
+//!     - a word that an indirect branch, an `rfid` or an interrupt can
+//!       enter;
+//!     - the routine of a call;
+//!     - an `sc`;
+//!     - a word that the scan does not follow.
 //!
 //! A second scan finds where an `rfid`, `mtmsr` or `mtmsrd` can put
 //! control into real mode. It forgets each constant at a word that
@@ -121,18 +140,17 @@
 //! can move a dropped constant without its mark, as the limits above
 //! state. Each of those cases is a defect.
 //!
-//! The scan takes the constants, the CTR and LR targets, the lost
-//! targets, the relative jump tables after a `bcctr` and the switches
-//! only from the words that control can reach. Control reaches a word by
-//! fall-throughs and direct branches from the ELF entry, an interrupt
-//! vector, a named word, a target or a switch. It also starts at each
-//! value that a load of 1, 2, 4 or 8 bytes of the file bytes gives, which
-//! can be a code address that the bound does not name yet. A lost target
-//! can enter any word, so then the scan takes them from every word.
+//! The scan takes these only from the words in [`Reach`], the words that
+//! control can reach:
+//! - the constants;
+//! - the CTR and LR targets;
+//! - the lost targets;
+//! - the relative jump tables after a `bcctr`;
+//! - the switches.
 //!
 //! So a word that the bound misses as an entry also loses the constants
-//! of the code that only that word reaches. This makes the defect of a
-//! missing word larger.
+//! of the code that only that word reaches. This makes a missing word a
+//! larger defect.
 //!
 //! Data that decodes as code can still add words to the bound, through
 //! its doublewords and 32-bit words, or when control reaches it. Data
@@ -145,12 +163,14 @@
 //!
 //! [`CtrFlow`]: ctr_flow::CtrFlow
 //! [`JoinFlow`]: join_flow::JoinFlow
+//! [`Reach`]: reach::Reach
 
 mod bound;
 mod constants;
 mod ctr_flow;
 mod join_flow;
 mod lost;
+mod progression;
 mod reach;
 mod real_mode;
 mod slot_set;

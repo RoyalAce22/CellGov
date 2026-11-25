@@ -4,7 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::constants::{ends_path, Constants, Value};
 use super::ctr_flow::{calls, links_to_next_word, positions};
-use super::lost::{join_origins, LostGprs, Origins};
+use super::lost::{join_origins, LostGprs, Origins, Steps};
+use super::progression::{Congruence, Residue};
 use super::reach::Reach;
 use super::toc::WordTocs;
 use crate::caller_census::{JoinDrop, JoinRegister};
@@ -59,6 +60,12 @@ struct Brought {
     /// constant that the flow dropped. The flow brings no SRR0 or SRR1
     /// constant to a join word.
     srrs_lost: [Option<Origins>; 2],
+    /// The GPRs that a path brings with a value for which the scan keeps
+    /// no constant and no lost mark, as [`Constants::unheld`] holds them.
+    unheld: u32,
+    /// Whether a path brings LR with a value for which the scan keeps no
+    /// constant and no lost mark.
+    lr_unheld: bool,
 }
 
 impl Brought {
@@ -75,6 +82,8 @@ impl Brought {
         constants.lr_copies = self.lr_copies;
         constants.lr_stepped = self.lr_stepped;
         [constants.srr0_lost, constants.srr1_lost] = self.srrs_lost.clone();
+        constants.unheld = self.unheld;
+        constants.lr_unheld = self.lr_unheld;
         constants
     }
 
@@ -88,6 +97,12 @@ impl Brought {
     /// the path marks as lost.
     fn join(&mut self, path: &Constants, join: JoinAt<'_>, drops: &mut Drops) -> bool {
         let mut changed = self.lost_gprs.join(&path.lost_gprs);
+        let unheld = (
+            self.unheld | path.unheld_gprs(),
+            self.lr_unheld || path.lr_is_unheld(),
+        );
+        changed |= unheld != (self.unheld, self.lr_unheld);
+        (self.unheld, self.lr_unheld) = unheld;
         for gpr in 0..32u8 {
             let Some(value) = path.gpr(gpr) else {
                 continue;
@@ -107,9 +122,12 @@ impl Brought {
                 Joined::Grew => changed = true,
                 Joined::Overflowed => {
                     let own = self.gpr(gpr);
-                    let dropped = missing(own, value).map(|constant| (0, constant));
-                    let only_tocs = || drops_only_tocs(join.every, own, value);
-                    let origins = drops.record(join.slot, register, dropped, only_tocs);
+                    let dropped = Dropped {
+                        items: missing(own, value).map(|constant| (0, constant)),
+                        brought: value.constants().iter().copied(),
+                        only_tocs: || drops_only_tocs(join.every, own, value),
+                    };
+                    let origins = drops.record(join.slot, register, dropped);
                     changed |= self.lost_gprs.join_gpr(gpr, &origins);
                 }
             }
@@ -140,7 +158,12 @@ impl Brought {
             }
         }
         if !dropped.is_empty() {
-            let origins = drops.record(join.slot, JoinRegister::Lr, dropped.into_iter(), || false);
+            let lr = Dropped {
+                items: dropped.iter().copied(),
+                brought: dropped.iter().map(|&(_, constant)| constant),
+                only_tocs: || false,
+            };
+            let origins = drops.record(join.slot, JoinRegister::Lr, lr);
             changed |= join_origins(&mut self.lr_lost, Some(&origins));
         }
         changed |= join_origins(&mut self.srrs_lost[0], path.srr0_lost.as_ref());
@@ -159,8 +182,10 @@ impl Brought {
         self.lr.values().map(|value| value.constants().len()).sum()
     }
 
-    /// Whether `register` holds `item`: a constant of a GPR keyed by 0,
-    /// or a constant of LR keyed by the word that wrote it.
+    /// Whether `register` holds the keyed constant `(by, constant)`.
+    ///
+    /// A GPR constant has `by` at 0. An LR constant has the address of
+    /// the word that wrote it.
     fn holds(&self, register: JoinRegister, (by, constant): (u64, u64)) -> bool {
         let value = match register {
             JoinRegister::Gpr(gpr) => self.gpr(gpr),
@@ -303,10 +328,66 @@ pub(super) struct JoinFlow<'a> {
     every: &'a Value,
     bounds: &'a Bounds,
     reach: &'a Reach<'a>,
+    /// The words that control can enter from a path that the flow does
+    /// not follow. Each GPR and LR there can hold a value for which the
+    /// scan keeps no constant and no lost mark.
+    entries: &'a EntryWords,
     /// What the paths to each join word bring, by the slot of the join
     /// word.
     at: Vec<Brought>,
     drops: Drops,
+}
+
+/// The words that an indirect branch, an `rfid` or an interrupt can
+/// enter, by the index of the segment and of the word there.
+#[derive(Debug, Clone, Default)]
+pub(super) struct EntryWords(Vec<Vec<bool>>);
+
+impl EntryWords {
+    /// The set with no word of `code`.
+    pub(super) fn new(code: &Code) -> Self {
+        Self(
+            code.segments()
+                .iter()
+                .map(|segment| vec![false; segment.words.len()])
+                .collect(),
+        )
+    }
+
+    /// Adds the word of `code` at each address of `entries`, with bits 62
+    /// and 63 of the address at 0.
+    ///
+    /// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00, and `bcctr` reaches CTR0:61 || 0b00.
+    pub(super) fn add(&mut self, code: &Code, entries: impl IntoIterator<Item = u64>) {
+        let segments = code.segments();
+        for address in entries {
+            let address = address & !0b11;
+            for (segment, entered) in segments.iter().zip(&mut self.0) {
+                let Some(offset) = address.checked_sub(segment.vaddr) else {
+                    continue;
+                };
+                if !offset.is_multiple_of(4) {
+                    continue;
+                }
+                if let Some(word) = usize::try_from(offset / 4)
+                    .ok()
+                    .and_then(|word| entered.get_mut(word))
+                {
+                    *word = true;
+                }
+            }
+        }
+    }
+
+    /// Whether control can enter the word at `word` of the segment at
+    /// `index` from a path that the flow does not follow.
+    pub(super) fn contains(&self, index: usize, word: usize) -> bool {
+        self.0
+            .get(index)
+            .and_then(|words| words.get(word))
+            .copied()
+            .unwrap_or(false)
+    }
 }
 
 impl<'a> JoinFlow<'a> {
@@ -315,7 +396,8 @@ impl<'a> JoinFlow<'a> {
     /// `tocs` holds the TOC of each word, and `every` holds each TOC that
     /// a descriptor gives. `bounds` holds the join words where a register
     /// keeps more than [`JOIN_LIMIT`] constants. The paths go through the
-    /// words that `reach` holds.
+    /// words that `reach` holds, and enter the words of `entries` also
+    /// from paths that the flow does not follow.
     ///
     /// With `counting`, the flow keeps the constants that each drop
     /// dropped, so [`Self::drops`] can count them. The flow is the same
@@ -326,6 +408,7 @@ impl<'a> JoinFlow<'a> {
         every: &'a Value,
         bounds: &'a Bounds,
         reach: &'a Reach<'a>,
+        entries: &'a EntryWords,
         counting: bool,
     ) -> Self {
         let mut flow = Self {
@@ -334,6 +417,7 @@ impl<'a> JoinFlow<'a> {
             every,
             bounds,
             reach,
+            entries,
             at: vec![Brought::default(); words.joins.len()],
             drops: Drops {
                 counting,
@@ -361,6 +445,13 @@ impl<'a> JoinFlow<'a> {
         flow
     }
 
+    /// Whether control can enter the word at `position` from a path that
+    /// the flow does not follow, so that each GPR and LR there can hold a
+    /// value for which the scan keeps no constant and no lost mark.
+    pub(super) fn enters_unheld(&self, position: (usize, usize)) -> bool {
+        self.entries.contains(position.0, position.1)
+    }
+
     /// The constants on the word at `position` when it is a join word,
     /// before its TOC enters r2.
     pub(super) fn entered(&self, position: (usize, usize)) -> Option<Constants> {
@@ -378,8 +469,8 @@ impl<'a> JoinFlow<'a> {
     /// - no word stepped a dropped constant on the way.
     ///
     /// The bound names each such TOC, because each is a doubleword of the
-    /// file bytes. So the register adds no value to the bound that it
-    /// does not hold.
+    /// file bytes. So the register adds no value that the bound does not
+    /// hold.
     pub(super) fn holds_only_tocs(&self, origins: &Origins) -> bool {
         !origins.has_more()
             && !origins.is_stepped()
@@ -390,6 +481,31 @@ impl<'a> JoinFlow<'a> {
                     .get(id as usize)
                     .is_some_and(|record| record.only_tocs)
             })
+    }
+
+    /// The residue classes that hold each value of a register with the
+    /// lost mark `origins`, when the mark keeps one progression.
+    ///
+    /// The mark keeps one progression when each of these is true:
+    /// - it names each of its drops;
+    /// - each word on the way that computed a value from a dropped
+    ///   constant added one constant step to it, as [`Steps::By`] holds.
+    ///
+    /// The result holds one class for each drop that the mark names, as
+    /// [`Congruence::residue`] gives it from the constants that the paths
+    /// brought there. It is `None` when a class holds each word.
+    pub(super) fn progression(&self, origins: &Origins) -> Option<Vec<Residue>> {
+        let Steps::By(step) = origins.steps() else {
+            return None;
+        };
+        if origins.has_more() || origins.drops().is_empty() {
+            return None;
+        }
+        origins
+            .drops()
+            .iter()
+            .map(|&id| self.drops.records.get(id as usize)?.brought.residue(step))
+            .collect()
     }
 
     /// Steps from the word at `start` to the next join word or to the end
@@ -411,6 +527,9 @@ impl<'a> JoinFlow<'a> {
             if let Some(slot) = step.join.filter(|_| word != first) {
                 self.join_into(slot, &constants, work);
                 return;
+            }
+            if self.entries.contains(index, word) {
+                constants.enter_unheld();
             }
             constants.enter_toc(toc, self.every);
             for &slot in &step.targets {
@@ -442,8 +561,8 @@ impl<'a> JoinFlow<'a> {
 
     /// Each drop of the flow, by its id, with the slot of its join word.
     ///
-    /// The count of a drop holds the constants that the paths brought to
-    /// the register at the join word: those it kept and those it dropped.
+    /// The count of a drop is the number of constants that the paths
+    /// brought to the register at the join word, kept and dropped.
     /// The count is `None` past [`RAISED_LIMIT`], and in a run without
     /// `counting`.
     pub(super) fn drops(&self) -> Vec<(usize, JoinDrop)> {
@@ -497,6 +616,21 @@ struct DropRecord {
     /// Whether each constant that the joins dropped is a TOC that a
     /// descriptor gives.
     only_tocs: bool,
+    /// The low-order bits that each constant that a path brought with a
+    /// drop shares, over each join of the record.
+    brought: Congruence,
+}
+
+/// What one join dropped from one register.
+struct Dropped<I, B, T> {
+    /// The dropped constants, each keyed as [`Brought::holds`] keys it.
+    items: I,
+    /// The constants that the path brought in the register. They hold
+    /// each dropped constant.
+    brought: B,
+    /// Tells whether each dropped constant is a TOC that a descriptor
+    /// gives.
+    only_tocs: T,
 }
 
 impl Drops {
@@ -504,19 +638,23 @@ impl Drops {
     /// of `register`, and returns the origins of the mark that the drop
     /// sets.
     ///
-    /// `only_tocs` tells whether each dropped constant is a TOC that a
-    /// descriptor gives. The record calls it only while each earlier
-    /// drop of the record dropped only TOCs.
+    /// The record calls `dropped.only_tocs` only while each earlier drop
+    /// of the record dropped only TOCs. It notes the constants of
+    /// `dropped.brought` until they share too few low-order bits.
     ///
     /// A drop past the last id that a `u32` holds gets no id: its mark
     /// names no drop and has more, so the register stays lost.
-    fn record(
+    fn record<I, B, T>(
         &mut self,
         slot: usize,
         register: JoinRegister,
-        dropped: impl Iterator<Item = (u64, u64)>,
-        only_tocs: impl FnOnce() -> bool,
-    ) -> Origins {
+        dropped: Dropped<I, B, T>,
+    ) -> Origins
+    where
+        I: Iterator<Item = (u64, u64)>,
+        B: Iterator<Item = u64>,
+        T: FnOnce() -> bool,
+    {
         let id = match self.ids.get(&(slot, register)) {
             Some(&id) => id,
             None => {
@@ -529,15 +667,21 @@ impl Drops {
                     register,
                     dropped: BTreeSet::new(),
                     only_tocs: true,
+                    brought: Congruence::default(),
                 });
                 id
             }
         };
         let record = &mut self.records[id as usize];
-        record.only_tocs = record.only_tocs && only_tocs();
+        record.only_tocs = record.only_tocs && (dropped.only_tocs)();
+        for constant in dropped.brought {
+            if record.brought.is_spread() {
+                break;
+            }
+            record.brought.note(constant);
+        }
         if self.counting {
-            let record = &mut self.records[id as usize];
-            for item in dropped {
+            for item in dropped.items {
                 if record.dropped.len() > RAISED_LIMIT {
                     break;
                 }

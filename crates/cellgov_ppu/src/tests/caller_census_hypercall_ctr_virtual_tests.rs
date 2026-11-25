@@ -154,3 +154,31 @@ fn a_bctr_outside_real_mode_after_a_call_leaves_every_site_unresolved() {
         [(SC, None), (QUIET_SC, None)]
     );
 }
+
+/// The caller copies the kernel address of the window's `blr` into CTR
+/// and calls the routine, which decrements CTR with a `bdz` and runs
+/// `bctr`. That `bctr` can enter the window's `sc`. The CTR flow does not
+/// follow CTR into the routine that a call runs, and it neither targets
+/// nor loses a `bctr` of a CTR that no word of the scan writes. So the
+/// census keeps the window's site resolved, and the test pins that open
+/// defect.
+///
+/// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.
+/// [PPC-Book1 p:24 s:2.4] A `bc` with BO bit 2 at 0 decrements CTR.
+/// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
+#[test]
+fn a_bctr_in_a_routine_after_a_bdz_of_the_callers_ctr_keeps_the_window_site_resolved_as_pinned() {
+    let mut stub = build(0x300C).to_vec();
+    stub.push(word(PpuInstruction::Mtctr { rs: 3 }));
+    stub.push(word(PpuInstruction::B {
+        offset: 0x1000 - 0x10,
+        aa: false,
+        link: true,
+    }));
+    stub.push(PPC_BLR);
+    let routine = code(OUTSIDE + 0x1000, &[bc(0b10010, 4), bctr()]);
+    assert_eq!(
+        sites(vec![code(OUTSIDE, &stub), routine]),
+        [(SC, Some(75)), (QUIET_SC, Some(77))]
+    );
+}

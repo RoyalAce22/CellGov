@@ -11,9 +11,14 @@ fn injected(state: &CtrState, copies: &CtrState, before: &SlotSet) -> (CtrState,
         vaddr: BASE,
         words: vec![PPC_NOP],
     }]);
-    let (writes, lost_writes) = (BTreeMap::new(), BTreeSet::new());
+    let (constants, lost, ranged) = (BTreeMap::new(), BTreeSet::new(), BTreeSet::new());
     let reach = Reach::every(&code);
-    let mut flow = CtrFlow::new(&code, &writes, &lost_writes, &reach);
+    let writes = CtrWrites {
+        constants: &constants,
+        lost: &lost,
+        ranged: &ranged,
+    };
+    let mut flow = CtrFlow::new(&code, writes, &reach);
     flow.at[0][0] = state.clone();
     let mut work = Worklist::new(&code, &reach);
     assert_eq!(work.pop(), Some((0, 0)));
@@ -62,6 +67,33 @@ fn an_injection_gives_the_state_and_queue_of_a_join_with_or_without_shared_slots
     assert_eq!(queued, [true, true, false, true, false, false]);
 }
 
+#[test]
+fn an_injection_or_a_join_into_a_word_outside_the_reach_set_leaves_it_unchanged_and_unqueued() {
+    let code = Code::new(vec![CodeSegment {
+        vaddr: BASE,
+        words: vec![PPC_NOP],
+    }]);
+    let (constants, lost, ranged) = (BTreeMap::new(), BTreeSet::new(), BTreeSet::new());
+    let reach = Reach::new(&code);
+    let writes = CtrWrites {
+        constants: &constants,
+        lost: &lost,
+        ranged: &ranged,
+    };
+    let mut flow = CtrFlow::new(&code, writes, &reach);
+    let mut work = Worklist::new(&code, &reach);
+    assert_eq!(work.pop(), None);
+    let before = SlotSet::of([(8, 8)]);
+    let copies = CtrState::lost_copies(1 << 3, &before);
+    assert_ne!(copies, CtrState::default());
+    flow.inject((0, 0), &copies, &SlotSet::default(), &mut work);
+    assert_eq!(flow.at[0][0], CtrState::default());
+    assert_eq!(work.pop(), None);
+    flow.join_into((0, 0), &copies, &mut work);
+    assert_eq!(flow.at[0][0], CtrState::default());
+    assert_eq!(work.pop(), None);
+}
+
 /// [PPC-Book1 p:42 s:3.3.3] `stw` stores RS 32:63 into the word at EA.
 /// [PPC-Book1 p:43 s:3.3.3] `std` stores RS into the doubleword at EA.
 #[test]
@@ -86,7 +118,7 @@ fn a_store_over_part_of_a_lost_slot_keeps_it_lost_and_a_store_over_all_of_it_rem
 fn a_known_slot_survives_a_store_beside_it_and_a_store_over_part_of_it_makes_it_lost() {
     let copy = Ctr {
         known: BTreeMap::from([(BASE, Value::sorted(vec![0x1234_5678_9ABC_DEF0]))]),
-        lost: false,
+        ..Ctr::default()
     };
     let stored = || {
         let mut slots = SlotCopies {

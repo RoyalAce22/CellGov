@@ -93,11 +93,11 @@ impl Value {
 /// An LR that the scan does not know holds the return point of a call,
 /// because the bound takes each such `bclr` to return there. A routine can
 /// also step a copy of that LR and return to the result, past the return
-/// point. So a GPR that an arithmetic, logical or rotate word, or the
-/// address update of a load or a store, computes from such a copy is lost,
-/// unless the word copies the value unchanged. A GPR that such a word
-/// computes from a lost GPR of this kind is also lost. The usual save and
-/// restore of LR stays a plain copy of the return point.
+/// point. An arithmetic, logical or rotate word, or the address update of
+/// a load or a store, can compute a GPR from such a copy. That GPR is
+/// lost, unless the word copies the value unchanged. A GPR that such a
+/// word computes from a lost GPR of this kind is also lost. The usual save
+/// and restore of LR stays a plain copy of the return point.
 #[derive(Debug, Default)]
 pub(super) struct Constants {
     pub(super) gprs: [Option<Value>; 32],
@@ -114,10 +114,30 @@ pub(super) struct Constants {
     /// The GPRs that hold an unstepped copy of an LR that the scan does not
     /// know, as a mask with bit `n` set for GPR `n`.
     pub(super) lr_copies: u32,
-    /// The GPRs that hold a value that a word computed from a copy of an
-    /// LR that the scan does not know, other than an unchanged copy, as a
-    /// mask with bit `n` set for GPR `n`. Each of these GPRs is lost.
+    /// The GPRs that hold a stepped copy of an LR that the scan does not
+    /// know, as a mask with bit `n` set for GPR `n`.
+    ///
+    /// A stepped copy is a value that a word computes from such a copy,
+    /// other than an unchanged copy. Each of these GPRs is lost.
     pub(super) lr_stepped: u32,
+    /// The GPRs that can also hold, on a path, a value for which the scan
+    /// keeps no constant and no lost mark.
+    ///
+    /// The mask has bit `n` set for GPR `n`. A GPR with no constant and no
+    /// mark holds such a value, whatever its bit. A copy or a step of the
+    /// GPR keeps its bit. Such a value can be a dropped constant that a
+    /// word the scan does not follow stepped. So the lost mark of such a
+    /// GPR keeps no single step, as [`Self::forget_unheld_steps`] gives it.
+    ///
+    /// A join or an indirect entry brings such a value beside the
+    /// constants and the mark of a GPR. These can also leave one in a GPR:
+    /// - the routine of a call;
+    /// - an `sc`;
+    /// - a word that can write a GPR and that the scan does not follow.
+    pub(super) unheld: u32,
+    /// Whether LR can also hold, on a path, a value for which the scan
+    /// keeps no constant and no lost mark.
+    pub(super) lr_unheld: bool,
     srr0: Option<Value>,
     srr1: Option<Value>,
     /// The origins of SRR0 when it is lost.
@@ -140,7 +160,21 @@ impl Constants {
         let lr_copy = self.lr_copy_write(&decoded);
         let value = self.step_decoded(address, decoded);
         self.after_lr_copy_write(&decoded, lr_copy);
+        self.forget_unheld_steps();
         value
+    }
+
+    /// Makes the lost mark of each GPR in [`Self::unheld`], and of LR when
+    /// [`Self::lr_is_unheld`] holds, keep no single step.
+    ///
+    /// [`Origins::without_one_step`] gives the new mark.
+    fn forget_unheld_steps(&mut self) {
+        self.lost_gprs.forget_steps(self.unheld);
+        if self.lr_is_unheld() {
+            if let Some(origins) = &mut self.lr_lost {
+                *origins = origins.without_one_step();
+            }
+        }
     }
 
     /// Steps over the decoded word `decoded` at `address`, and returns the
@@ -148,7 +182,9 @@ impl Constants {
     fn step_decoded(&mut self, address: u64, decoded: PpuInstruction) -> Option<Value> {
         if let Some((gpr, value)) = self.written(decoded) {
             let lost = self.copied_lost(decoded);
+            let unheld = self.written_unheld(decoded);
             self.lost_gprs.set(gpr, lost);
+            self.unheld = (self.unheld & !gpr_bit(gpr)) | if unheld { gpr_bit(gpr) } else { 0 };
             self.gprs[usize::from(gpr)].clone_from(&value);
             return value;
         }
@@ -157,6 +193,7 @@ impl Constants {
                 self.lr = self.written_by(rs, address);
                 self.lr_lost = self.lost(rs).cloned();
                 self.lr_unknown = self.lr_copies & gpr_bit(rs) != 0;
+                self.lr_unheld = self.is_unheld(rs);
             }
             PpuInstruction::B { link, .. } => self.after_branch(address, 0b10100, link),
             PpuInstruction::Bc { bo, link, .. }
@@ -197,8 +234,18 @@ impl Constants {
     /// Adds to r2 the TOCs that `toc` gives a word.
     ///
     /// `every` holds each TOC that a descriptor gives.
+    ///
+    /// On a word that a function reaches, r2 holds a TOC or a constant of
+    /// the paths. So r2 then holds no value for which the scan keeps no
+    /// constant and no lost mark. The lost mark of each register
+    /// that can hold such a value then keeps no single step, as
+    /// [`Self::forget_unheld_steps`] gives it.
     pub(super) fn enter_toc(&mut self, toc: FunctionToc, every: &Value) {
         self.gprs[2] = toc.in_r2(self.gprs[2].take(), every);
+        if toc != FunctionToc::Outside {
+            self.unheld &= !gpr_bit(2);
+        }
+        self.forget_unheld_steps();
     }
 
     /// Forgets the constants and the lost marks of SRR0 and SRR1.
@@ -374,6 +421,7 @@ impl Constants {
     /// the scan dropped, so it keeps its mark.
     fn forget_written(&mut self, decoded: &PpuInstruction) {
         let mut bits = written_gprs(decoded);
+        self.unheld |= bits;
         while bits != 0 {
             self.gprs[bits.trailing_zeros() as usize] = None;
             bits &= bits - 1;
@@ -396,19 +444,62 @@ impl Constants {
     /// The origins of the GPR that `decoded` builds, when its source can
     /// hold a constant that the scan dropped.
     ///
-    /// A word that copies its source unchanged gives the origins of the
-    /// source. Any other step gives them stepped.
+    /// These steps give these origins:
+    /// - a word that copies its source unchanged gives the origins of the
+    ///   source;
+    /// - an add of a constant gives them as [`Origins::added`] states;
+    /// - any other step gives them stepped.
     fn copied_lost(&self, decoded: PpuInstruction) -> Option<Origins> {
         if let PpuInstruction::Mflr { .. } = decoded {
             return self.lr_lost.clone();
         }
         let step = GprStep::of(decoded)?;
         let origins = self.lost(step.source?)?;
-        Some(if step.step.keeps_value() {
-            origins.clone()
-        } else {
-            origins.stepped()
+        Some(match step.step {
+            step if step.keeps_value() => origins.clone(),
+            Step::Add(add) => origins.added(add),
+            Step::Or(_) | Step::RotateAnd { .. } => origins.stepped(),
         })
+    }
+
+    /// Whether the GPR that `decoded` builds can hold a value for which
+    /// the scan keeps no constant and no lost mark, as [`Self::unheld`]
+    /// holds it.
+    fn written_unheld(&self, decoded: PpuInstruction) -> bool {
+        if let PpuInstruction::Mflr { .. } = decoded {
+            return self.lr_is_unheld();
+        }
+        GprStep::of(decoded)
+            .and_then(|step| step.source)
+            .is_some_and(|source| self.is_unheld(source))
+    }
+
+    /// Whether `gpr` can hold a value for which the scan keeps no
+    /// constant and no lost mark.
+    fn is_unheld(&self, gpr: u8) -> bool {
+        self.unheld & gpr_bit(gpr) != 0 || (self.gpr(gpr).is_none() && self.lost(gpr).is_none())
+    }
+
+    /// Whether LR can hold a value for which the scan keeps no constant
+    /// and no lost mark.
+    pub(super) fn lr_is_unheld(&self) -> bool {
+        self.lr_unheld || self.lr_unknown || (self.lr.is_empty() && self.lr_lost.is_none())
+    }
+
+    /// The GPRs that can hold a value for which the scan keeps no
+    /// constant and no lost mark, as a mask with bit `n` set for GPR `n`.
+    pub(super) fn unheld_gprs(&self) -> u32 {
+        (0..32u8)
+            .filter(|&gpr| self.is_unheld(gpr))
+            .fold(0, |mask, gpr| mask | gpr_bit(gpr))
+    }
+
+    /// Takes each GPR and LR to hold also a value for which the scan
+    /// keeps no constant and no lost mark, as at a word that an indirect
+    /// branch can enter from a path that the scan does not follow.
+    pub(super) fn enter_unheld(&mut self) {
+        self.unheld = u32::MAX;
+        self.lr_unheld = true;
     }
 
     /// The GPR that `decoded` writes and the constant it writes there,
@@ -517,10 +608,15 @@ impl Constants {
             return;
         }
         if link {
+            // The scan does not join what the routine of the call leaves
+            // in the GPRs back into the word after it. The routine can
+            // write each GPR.
+            self.unheld = u32::MAX;
             self.srr0 = None;
             self.srr1 = None;
             self.lr_lost = None;
             self.lr_unknown = false;
+            self.lr_unheld = false;
             self.lr = address
                 .checked_add(4)
                 .map(|value| BTreeMap::from([(address, Value::One(value))]))
@@ -671,8 +767,8 @@ fn gpr_bit(gpr: u8) -> u32 {
 /// The result is `None` for each other word. A load computes its address
 /// from its base GPR but loads its result from storage, so it is such a
 /// word. The update form of a load or a store also places that address
-/// into RA, so for it the result is RA, computed from RA and from RB when
-/// the word is indexed.
+/// into RA. For that form the result is RA, which the word computes from
+/// RA, and also from RB for an indexed form.
 ///
 /// [PPC-Book1 p:33 s:3.3.2] A load with update places the EA into RA.
 /// [PPC-Book1 p:40 s:3.3.3] A store with update places the EA into RA.

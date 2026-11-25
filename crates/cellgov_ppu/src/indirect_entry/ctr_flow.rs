@@ -79,6 +79,12 @@ struct Ctr {
     known: BTreeMap<u64, Value>,
     /// Whether a path brings a value that the scan cannot prove.
     lost: bool,
+    /// Whether a path brings a value of a class whose words the bound
+    /// names, from an `mtctr` of [`CtrWrites::ranged`].
+    ///
+    /// Only CTR itself holds such a value. A copy of it is lost, so a
+    /// copy that a word changes cannot leave the class.
+    ranged: bool,
 }
 
 impl Ctr {
@@ -86,26 +92,48 @@ impl Ctr {
     fn written(by: u64, value: Value) -> Self {
         Self {
             known: BTreeMap::from([(by, value)]),
-            lost: false,
+            ..Self::default()
         }
     }
 
     /// CTR after a step that can leave it at any value.
     fn lost() -> Self {
         Self {
-            known: BTreeMap::new(),
             lost: true,
+            ..Self::default()
+        }
+    }
+
+    /// CTR after an `mtctr` that copies a value of a class whose words
+    /// the bound names.
+    fn ranged() -> Self {
+        Self {
+            ranged: true,
+            ..Self::default()
         }
     }
 
     /// CTR after a step that keeps no constant of it.
     ///
-    /// Each constant becomes a value that the scan cannot prove. A CTR
-    /// that no word of the scan writes stays out of the state.
+    /// Each constant, and each value of a class, becomes a value that the
+    /// scan cannot prove. A CTR that no word of the scan writes stays out
+    /// of the state.
     fn unproved(&self) -> Self {
         Self {
-            known: BTreeMap::new(),
-            lost: self.lost || !self.known.is_empty(),
+            lost: self.lost || self.ranged || !self.known.is_empty(),
+            ..Self::default()
+        }
+    }
+
+    /// A copy of CTR in a GPR.
+    ///
+    /// The copy holds a value of a class as a value that the scan cannot
+    /// prove.
+    fn copied(&self) -> Self {
+        Self {
+            known: self.known.clone(),
+            lost: self.lost || self.ranged,
+            ranged: false,
         }
     }
 
@@ -114,10 +142,11 @@ impl Ctr {
     /// A step that changes a constant leaves a value that the scan cannot
     /// prove, because a loop can run the step more than once.
     fn stepped(&self, step: Step) -> Self {
-        let unchanged = self
-            .known
-            .values()
-            .all(|value| value.map(|constant| step.apply(constant)) == *value);
+        let unchanged = !self.ranged
+            && self
+                .known
+                .values()
+                .all(|value| value.map(|constant| step.apply(constant)) == *value);
         if unchanged {
             self.clone()
         } else {
@@ -136,7 +165,8 @@ impl Ctr {
                 .iter()
                 .map(|(&by, value)| (by, value.map(&part)))
                 .collect(),
-            lost: self.lost,
+            lost: self.lost || self.ranged,
+            ranged: false,
         }
     }
 
@@ -155,13 +185,15 @@ impl Ctr {
                 .map(|value| BTreeMap::from([(by, value)]))
                 .unwrap_or_default(),
             lost: self.lost,
+            ranged: self.ranged,
         }
     }
 
     /// Joins `other` into `self`, and returns whether `self` changed.
     fn join(&mut self, other: &Self) -> bool {
-        let changed = other.lost && !self.lost;
+        let changed = (other.lost && !self.lost) || (other.ranged && !self.ranged);
         self.lost |= other.lost;
+        self.ranged |= other.ranged;
         join_known(&mut self.known, &other.known) || changed
     }
 }
@@ -216,6 +248,7 @@ impl GprCopies {
         (lost || known.is_some()).then(|| Ctr {
             known: known.cloned().unwrap_or_default(),
             lost,
+            ranged: false,
         })
     }
 
@@ -453,7 +486,7 @@ impl CtrState {
     /// [PPC-Book1 p:82 s:3.3.13] `mfctr`, a form of `mfspr`, copies CTR into RT.
     fn after(&self, decoded: &PpuInstruction) -> (GprCopies, SlotCopies) {
         let mut copied: Vec<(u8, Ctr)> = match *decoded {
-            PpuInstruction::Mfctr { rt } => vec![(rt, self.ctr.clone())],
+            PpuInstruction::Mfctr { rt } => vec![(rt, self.ctr.copied())],
             _ => GprStep::of(*decoded)
                 .and_then(|step| {
                     let copy = self.copies.get(step.source?)?;
@@ -670,33 +703,36 @@ impl StackAccess {
 pub(super) struct CtrFlow<'a> {
     code: &'a Code,
     reach: &'a Reach<'a>,
-    /// The constants that each `mtctr` copies, as
-    /// [`Bound::code_constants`] keeps them.
-    ///
-    /// [`Bound::code_constants`]: super::bound::Bound::code_constants
-    writes: &'a BTreeMap<(usize, u64), Value>,
-    /// Each `mtctr` that can also copy a constant that the scan dropped,
-    /// so its CTR is one the scan cannot prove.
-    lost_writes: &'a BTreeSet<(usize, u64)>,
+    writes: CtrWrites<'a>,
     /// What the paths to each word bring in CTR and in its copies, in one
     /// vector for each code segment.
     at: Vec<Vec<CtrState>>,
 }
 
+/// What each `mtctr` copies into CTR, as [`Bound::code_constants`] keeps
+/// it, by segment index and address.
+///
+/// [`Bound::code_constants`]: super::bound::Bound::code_constants
+#[derive(Clone, Copy)]
+pub(super) struct CtrWrites<'a> {
+    /// The constants that each `mtctr` copies.
+    pub(super) constants: &'a BTreeMap<(usize, u64), Value>,
+    /// Each `mtctr` that can also copy a constant that the scan dropped,
+    /// so its CTR is one the scan cannot prove.
+    pub(super) lost: &'a BTreeSet<(usize, u64)>,
+    /// Each `mtctr` that can also copy a value of a class whose words the
+    /// bound names.
+    pub(super) ranged: &'a BTreeSet<(usize, u64)>,
+}
+
 impl<'a> CtrFlow<'a> {
     /// The flow before its first step, with no CTR on any word. The flow
     /// steps the words that `reach` holds.
-    pub(super) fn new(
-        code: &'a Code,
-        writes: &'a BTreeMap<(usize, u64), Value>,
-        lost_writes: &'a BTreeSet<(usize, u64)>,
-        reach: &'a Reach<'a>,
-    ) -> Self {
+    pub(super) fn new(code: &'a Code, writes: CtrWrites<'a>, reach: &'a Reach<'a>) -> Self {
         Self {
             code,
             reach,
             writes,
-            lost_writes,
             at: code
                 .segments()
                 .iter()
@@ -891,14 +927,17 @@ impl<'a> CtrFlow<'a> {
         let ctr = &state.ctr;
         match decoded {
             PpuInstruction::Mtctr { rs } => {
-                let written = self.writes.get(&(index, address)).cloned();
+                let written = self.writes.constants.get(&(index, address)).cloned();
                 let mut ctr =
                     written.map_or_else(Ctr::default, |value| Ctr::written(address, value));
                 if let Some(copy) = state.copies.get(rs) {
                     ctr.join(&copy.rewritten(address));
                 }
-                if self.lost_writes.contains(&(index, address)) {
+                if self.writes.lost.contains(&(index, address)) {
                     ctr.join(&Ctr::lost());
+                }
+                if self.writes.ranged.contains(&(index, address)) {
+                    ctr.join(&Ctr::ranged());
                 }
                 (Some(ctr), None)
             }
@@ -1092,3 +1131,7 @@ mod bound_tests;
 #[cfg(test)]
 #[path = "../tests/indirect_entry_ctr_flow_inject_tests.rs"]
 mod inject_tests;
+
+#[cfg(test)]
+#[path = "../tests/indirect_entry_ctr_flow_ranged_tests.rs"]
+mod ranged_tests;

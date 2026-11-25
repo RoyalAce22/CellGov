@@ -34,10 +34,15 @@ fn bl_routine(from: usize) -> u32 {
 /// Gives `flow` the CTR flow over `code` after its run, with a lost CTR
 /// from the `mtctr` at word 0.
 fn run(code: &Code, flow: impl FnOnce(&CtrFlow<'_>)) {
-    let writes = BTreeMap::new();
-    let lost_writes = BTreeSet::from([(0, BASE)]);
+    let (constants, ranged) = (BTreeMap::new(), BTreeSet::new());
+    let lost = BTreeSet::from([(0, BASE)]);
     let reach = Reach::every(code);
-    let mut ctr_flow = CtrFlow::new(code, &writes, &lost_writes, &reach);
+    let writes = CtrWrites {
+        constants: &constants,
+        lost: &lost,
+        ranged: &ranged,
+    };
+    let mut ctr_flow = CtrFlow::new(code, writes, &reach);
     ctr_flow.run();
     flow(&ctr_flow);
 }
