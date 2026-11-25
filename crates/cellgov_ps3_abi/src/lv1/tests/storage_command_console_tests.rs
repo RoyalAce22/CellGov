@@ -95,7 +95,9 @@ const SLOT_READY: u64 = 1;
 
 /// The value of the word at `address` in the capture's file `name`.
 ///
-/// Panics when the two reads of the word disagree.
+/// # Panics
+///
+/// Panics if the two reads of the word disagree.
 fn captured(name: &str, address: u64) -> u64 {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")

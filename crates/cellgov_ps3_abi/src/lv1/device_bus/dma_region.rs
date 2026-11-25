@@ -185,9 +185,9 @@
 //! - index 3 selects +56, device 1 [OFW-4.93 lv1 a:0x22B838-0x22B844];
 //! - index 4 selects +64, device 2 [OFW-4.93 lv1 a:0x3A9AC4].
 //!
-//! The search and the free take their address allocator at
-//! +192 + 8 x k of the backend, where k is the word at +160 of the pool
-//! [OFW-4.93 lv1 a:0x22CA78-0x22CB08] [OFW-4.93 lv1 a:0x22CF80-0x22CFF0].
+//! The search and the free take their address allocator from a table of
+//! the backend at the index k, the word at +160 of the pool
+//! [OFW-4.93 lv1 a:0x22CA78-0x22CA84] [OFW-4.93 lv1 a:0x22CF80-0x22CF8C].
 //! The pool's constructor stores at +160 the word that its caller gives
 //! [OFW-4.93 lv1 a:0x3A9750-0x3A9780] [OFW-4.93 lv1 a:0x22DDE4], and
 //! lv1's init gives a different word to each device:
@@ -195,11 +195,82 @@
 //! - index 3 gets 8 [OFW-4.93 lv1 a:0x3A9A4C-0x3A9A5C];
 //! - index 4 gets 9 [OFW-4.93 lv1 a:0x3A9AA0-0x3A9AB0].
 //!
+//! The search and the free first load the object that r13 - 26600
+//! locates. When that object and its +80 are not 0, they take the
+//! allocator at +328 + 8 x k [OFW-4.93 lv1 a:0x22CA1C-0x22CA74]
+//! [OFW-4.93 lv1 a:0x22CC9C-0x22CCBC] [OFW-4.93 lv1 a:0x22CF5C-0x22CF7C]
+//! [OFW-4.93 lv1 a:0x22D1E4-0x22D208]. Otherwise they take the allocator
+//! at +192 + 8 x k [OFW-4.93 lv1 a:0x22CAA4-0x22CAC4]
+//! [OFW-4.93 lv1 a:0x22CFAC-0x22CFCC]. The capture
+//! [`DMA_SEGMENTS_CAPTURE`] reads an allocator at +328 + 8 x k for each of
+//! the three devices, and none at +192 + 8 x k for devices 1 and 2. So
+//! the partition's calls take the table at +328.
+//!
 //! The backend's init clears each allocator entry
-//! [OFW-4.93 lv1 a:0x22B738-0x22B754], and the first use of a clear entry
-//! stores a newly allocated allocator in it
-//! [OFW-4.93 lv1 a:0x22CBD8-0x22CC04]. So each of the three devices has an
-//! allocator of its own.
+//! [OFW-4.93 lv1 a:0x22B738-0x22B754]. The first use of a clear entry at
+//! +328 stores a new 56-byte allocator in it
+//! [OFW-4.93 lv1 a:0x22CD58-0x22CD90]. The allocator's constructor stores
+//! two ranges, the first at +8 and +16 and the second at +32 and +40
+//! [OFW-4.93 lv1 a:0x22A1F0-0x22A214]. The ranges come from k
+//! [OFW-4.93 lv1 a:0x22CCCC-0x22CCF8] [OFW-4.93 lv1 a:0x22CD38-0x22CD54]:
+//! - k = 2: 0x1_4000_0000 and 0x1_2000_0000
+//!   [OFW-4.93 lv1 a:0x22CD9C-0x22CDAC];
+//! - k = 8: 0x4_4000_0000 and 0x4_2000_0000
+//!   [OFW-4.93 lv1 a:0x22CDE4-0x22CDF8];
+//! - k = 9: 0x5_4000_0000 and 0x5_2000_0000
+//!   [OFW-4.93 lv1 a:0x22CDFC-0x22CE10].
+//!
+//! The first range has the size 0x4000_0000 and the second range the size
+//! 0x2000_0000. So each of the three devices has an allocator of its own,
+//! and the ranges of two devices do not overlap.
+//!
+//! ## The I/O segments
+//!
+//! The ranges that the allocators give are 256 MB I/O segments of one
+//! global table. The table's entry count is the word that the TOC slot
+//! r2 - 8480 locates, and the table is the doubleword that the TOC slot
+//! r2 - 8488 locates [OFW-4.93 lv1 a:0x2D9D20-0x2D9D4C]
+//! [OFW-4.93 lv1 a:0x2D9E1C-0x2D9E2C]. The capture
+//! [`DMA_SEGMENTS_CAPTURE`] reads a count of 1.
+//!
+//! When the search finds no gap, it asks the allocator's method at +24
+//! for a new range. It passes the word that it then stores at +8 of the
+//! new block [OFW-4.93 lv1 a:0x22B0B8-0x22B0E8] [OFW-4.93 lv1 a:0x22B13C].
+//! That method takes the second range
+//! for the word 1 and the first range for another word
+//! [OFW-4.93 lv1 a:0x22A748-0x22A7AC] [OFW-4.93 lv1 a:0x22A824-0x22A834].
+//! It passes the range to 0x2DA2C8, which does these steps:
+//! 1. It computes the range's first segment, base >> 28, and its end,
+//!    (base + size) >> 28 [OFW-4.93 lv1 a:0x2DA434-0x2DA460].
+//! 2. It calls 0x2D9D20 with entry 0 of the table and both bounds
+//!    [OFW-4.93 lv1 a:0x2DA454-0x2DA470].
+//!
+//! 0x2D9D20 passes the bounds to 0x2D9868
+//! [OFW-4.93 lv1 a:0x2D9EB8-0x2D9EE0], which gets the segment from
+//! 0x2D9510 [OFW-4.93 lv1 a:0x2D9960-0x2D9974]. 0x2D9510 caps the end at
+//! 0x80 [OFW-4.93 lv1 a:0x2D9680-0x2D9690] [OFW-4.93 lv1 a:0x2D9858].
+//! It then claims the first free
+//! segment s with first <= s < end, in the table's segment bitmap
+//! [OFW-4.93 lv1 a:0x2D9694-0x2D96A8] [OFW-4.93 lv1 a:0x2D9634-0x2D964C].
+//! The claim changes the bit of s alone
+//! [OFW-4.93 lv1 a:0x2CA160-0x2CA198]. With no free segment in the range,
+//! the call fails [OFW-4.93 lv1 a:0x2D997C-0x2D9980]
+//! [OFW-4.93 lv1 a:0x2D9F04-0x2D9F08]. The new range's bus address is
+//! s << 28 [OFW-4.93 lv1 a:0x2DA0F8-0x2DA104].
+//!
+//! When a free empties a block, the allocator's method at +32 passes each
+//! segment of the block to 0x2D890C [OFW-4.93 lv1 a:0x22A660-0x22A684].
+//! 0x2D890C works on the segment s = address >> 28 alone
+//! [OFW-4.93 lv1 a:0x2D8974-0x2D8990]. It gives back s by setting the bit
+//! of s [OFW-4.93 lv1 a:0x2D8C84-0x2D8CAC] [OFW-4.93 lv1 a:0x2D8D64-0x2D8D6C]
+//! [OFW-4.93 lv1 a:0x2CA544-0x2CA570].
+//!
+//! So a free gives back only segments of the freeing device's own ranges,
+//! and a new range of another device comes only from that device's own
+//! ranges. A close of one device leaves the address that the next new
+//! range of another device gets. The capture [`DMA_SEGMENTS_CAPTURE`]
+//! reads the blocks of each device in its own first range, and their
+//! segments held in the bitmap.
 //!
 //! So lv1 gives each device its bus addresses from the device's own
 //! space, and an address of one device says nothing of another device.
@@ -540,3 +611,10 @@ pub const DMA_REGION_CAPTURE: &str = "tests/micro/lv1_device_dma_region";
 /// The path is relative to the workspace root. Its README gives the
 /// method and the analysis.
 pub const DMA_SLOTS_CAPTURE: &str = "tests/micro/lv1_device_dma_slots";
+
+/// The console capture of the address allocators of devices 0, 1 and 2
+/// of bus 1, their blocks, and lv1's global I/O segment table.
+///
+/// The path is relative to the workspace root. Its README gives the
+/// method and the analysis.
+pub const DMA_SEGMENTS_CAPTURE: &str = "tests/micro/lv1_device_dma_segments";

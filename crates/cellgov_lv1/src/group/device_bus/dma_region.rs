@@ -112,22 +112,30 @@ const OTHER_HELD: UnmodelledError = UnmodelledError::new(
 /// [OFW-4.93 lv1 a:0x22CA78-0x22CB08]. When a block of the object holds
 /// no other entry, that function returns the block's range through the
 /// method at +32 of the object [OFW-4.93 lv1 a:0x22AC18-0x22AC3C]. That
-/// method passes each part of the range to a function that works on a
-/// global table [OFW-4.93 lv1 a:0x22A5B4-0x22A62C]
+/// method passes each I/O segment of the range to a function that works
+/// on lv1's global segment table [OFW-4.93 lv1 a:0x22A660-0x22A684]
 /// [OFW-4.93 lv1 a:0x2D890C-0x2D8990].
 ///
-/// The next search that finds no gap takes a new range from that table
-/// [OFW-4.93 lv1 a:0x22B0B8-0x22B154] [OFW-4.93 lv1 a:0x2D9E1C-0x2D9E38].
-/// CellGov does not hold the table, and no read shows how lv1 picks the
-/// range. So no source shows the address after the close.
+/// The next search that finds no gap takes the first free segment of the
+/// device's own range [OFW-4.93 lv1 a:0x22B0B8-0x22B0E8]
+/// [OFW-4.93 lv1 a:0x2D9680-0x2D96A8]. The free gives back a segment only
+/// when a call on the segment's object returns 0
+/// [OFW-4.93 lv1 a:0x2D8AA8-0x2D8AB4]. For a segment that has an owner,
+/// a lookup of that owner must also succeed [OFW-4.93 lv1 a:0x2D8A50]
+/// [OFW-4.93 lv1 a:0x2D8C18-0x2D8C44]. No read shows the result of either
+/// call. So no source shows the address after the close.
 ///
 /// The refusal holds for the closed device alone. lv1's init gives the
 /// word at +160 the value 2 for device 0, 8 for device 1 and 9 for
 /// device 2 [OFW-4.93 lv1 a:0x3A9924-0x3A9938]
 /// [OFW-4.93 lv1 a:0x3A9A4C-0x3A9A5C] [OFW-4.93 lv1 a:0x3A9AA0-0x3A9AB0].
-/// Each value selects an allocator that lv1 makes for that value alone
-/// [OFW-4.93 lv1 a:0x22CBD8-0x22CC04]. So a free for one device
-/// leaves the allocators of the other devices.
+/// Each value selects an allocator with ranges of its own
+/// [OFW-4.93 lv1 a:0x22CD58-0x22CD90] [OFW-4.93 lv1 a:0x22A1F0-0x22A214],
+/// and the ranges of two devices do not overlap. A free gives back only
+/// the segment of the freed address [OFW-4.93 lv1 a:0x2D8974-0x2D8990],
+/// and the segment pick stays in the caller's range. So a close of one
+/// device leaves the next address of each other device, as the console
+/// capture of the allocators and the segment table shows.
 const FREED_POOL: UnmodelledError = UnmodelledError::new(
     "an allocate_device_dma_region for a device after a close freed one of its regions, whose \
      address depends on the pool state that lv1's free leaves",

@@ -148,19 +148,24 @@
 //!    [OFW-4.93 lv1 a:0x22AC18-0x22AC3C].
 //!
 //! That method reads no field of the object. It calls a function for each
-//! part of the range [OFW-4.93 lv1 a:0x22A5B4-0x22A62C], and that function
-//! works on a global table [OFW-4.93 lv1 a:0x2D890C-0x2D8990].
+//! I/O segment of the range [OFW-4.93 lv1 a:0x22A5B4-0x22A62C]
+//! [OFW-4.93 lv1 a:0x22A630-0x22A6A8], and that function works on lv1's
+//! global segment table [OFW-4.93 lv1 a:0x2D890C-0x2D8990].
 //!
 //! The allocate's search takes the first gap that fits in a block of the
 //! object. It starts the scan of each block at the end of the block's
 //! first entry [OFW-4.93 lv1 a:0x22AD1C-0x22AE34]. When no block has a gap
 //! that fits, the search makes a block from a new range
-//! [OFW-4.93 lv1 a:0x22B0B8-0x22B154]. The new range comes from a function
-//! that reads the same global table [OFW-4.93 lv1 a:0x2DA250-0x2DA2A4]
-//! [OFW-4.93 lv1 a:0x2D9D20-0x2D9D4C] [OFW-4.93 lv1 a:0x2D9E1C-0x2D9E38].
-//! CellGov does not hold that table, and no image read shows how the
-//! function picks the range. So no source shows the address of a region
-//! after a close frees the last entry of a block.
+//! [OFW-4.93 lv1 a:0x22B0B8-0x22B154]. The new range is the first free
+//! segment of the object's own range in the same table
+//! [OFW-4.93 lv1 a:0x2DA434-0x2DA470] [OFW-4.93 lv1 a:0x2D9D20-0x2D9D4C]
+//! [OFW-4.93 lv1 a:0x2D9E1C-0x2D9E38] [OFW-4.93 lv1 a:0x2D9694-0x2D96A8].
+//! The free gives back a segment only when a call on the segment's object
+//! returns 0 [OFW-4.93 lv1 a:0x2D8AA8-0x2D8AB4]. For a segment that has an
+//! owner, a lookup of that owner must also succeed
+//! [OFW-4.93 lv1 a:0x2D8A50] [OFW-4.93 lv1 a:0x2D8C18-0x2D8C44]. No image
+//! read shows the result of either call. So no source shows the address of
+//! a region after a close frees the last entry of a block.
 //!
 //! The entry at +120 gave each mapping of the partition its I/O address
 //! when `map_device_dma_region` made the mapping. It used the same bus
