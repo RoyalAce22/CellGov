@@ -700,6 +700,18 @@ fn after_next_word_links(code: &Code) -> impl Iterator<Item = u64> + '_ {
         .filter_map(|(address, _)| address.checked_add(4))
 }
 
+/// The address of the word after each call of `code`, where the `bclr`
+/// of its routine returns.
+///
+/// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.
+fn after_calls(code: &Code) -> impl Iterator<Item = u64> + '_ {
+    code.segments()
+        .iter()
+        .flat_map(CodeSegment::addressed)
+        .filter(|&(address, raw)| calls(address, raw))
+        .filter_map(|(address, _)| address.checked_add(4))
+}
+
 /// Where one `rfid`, `mtmsr` or `mtmsrd` can put control into real mode.
 #[derive(Debug, PartialEq, Eq)]
 enum Switch {
@@ -1271,6 +1283,24 @@ struct CtrState {
 }
 
 impl CtrState {
+    /// A state with no CTR and with a copy of a CTR that the scan cannot
+    /// prove in each GPR of `gprs`, a mask with bit `n` set for GPR `n`.
+    fn lost_copies(gprs: u32) -> Self {
+        Self {
+            ctr: Ctr::default(),
+            copies: (0..32)
+                .filter(|&gpr| gprs >> gpr & 1 != 0)
+                .map(|gpr| (gpr, Ctr::lost()))
+                .collect(),
+        }
+    }
+
+    /// The GPRs that hold a copy of CTR, as a mask with bit `n` set for
+    /// GPR `n`.
+    fn copy_gprs(&self) -> u32 {
+        self.copies.keys().fold(0, |gprs, &gpr| gprs | 1 << gpr)
+    }
+
     /// Joins `other` into `self`, and returns whether `self` changed.
     fn join(&mut self, other: &Self) -> bool {
         let mut changed = self.ctr.join(&other.ctr);
@@ -1363,8 +1393,15 @@ fn surely_written_gprs(decoded: &PpuInstruction) -> u32 {
 ///
 /// The flow also follows each copy of CTR in a GPR on the same paths. An
 /// `mtctr` of a GPR that holds a copy puts the copy back into CTR, so a
-/// CTR that the scan cannot prove stays so through the copy. A call
-/// keeps each copy, because its routine can return the GPR unchanged.
+/// CTR that the scan cannot prove stays so through the copy. The word
+/// after a call gets these copies:
+/// - each copy before the call, because its routine can return the GPR
+///   unchanged;
+/// - a copy of a CTR that the scan cannot prove, in each GPR that holds
+///   a copy at a `bclr`, because its routine can make that copy.
+///
+/// The second kind keeps no constant, so the flow carries no constant
+/// of one routine to the return point of another.
 ///
 /// The flow joins the CTR of each path to a word, and continues until no
 /// word changes. Each state only grows, from finite sets of constants,
@@ -1400,13 +1437,24 @@ impl<'a> CtrFlow<'a> {
     /// The flow joins what each `bclr` brings into one state. When that
     /// state changes, the flow joins it into the word after each link to
     /// the next word. So each `bclr` costs one join.
+    ///
+    /// The flow also keeps the GPRs that hold a copy at a `bclr`. When
+    /// that set grows, the flow joins [`CtrState::lost_copies`] of it
+    /// into the word after each call. The set has at most 32 GPRs, so
+    /// it grows at most 32 times.
     fn run(&mut self) {
         let code = self.code;
+        let real_positions = |address: u64| {
+            code.real_aliases(address)
+                .flat_map(move |alias| positions(code, alias))
+        };
         let returns: Vec<(usize, usize)> = after_next_word_links(code)
-            .flat_map(|address| code.real_aliases(address))
-            .flat_map(|alias| positions(code, alias))
+            .flat_map(real_positions)
             .collect();
+        let call_returns: Vec<(usize, usize)> =
+            after_calls(code).flat_map(real_positions).collect();
         let mut returned = CtrState::default();
+        let mut returned_gprs = 0;
         let mut work = Worklist::new(code);
         while let Some((index, word)) = work.pop() {
             let segment = &code.segments()[index];
@@ -1426,6 +1474,14 @@ impl<'a> CtrFlow<'a> {
             let Some(brought) = self.returned((index, word), raw) else {
                 continue;
             };
+            let gprs = brought.copy_gprs();
+            if gprs & !returned_gprs != 0 {
+                returned_gprs |= gprs;
+                let copies = CtrState::lost_copies(returned_gprs);
+                for &position in &call_returns {
+                    self.join_into(position, &copies, &mut work);
+                }
+            }
             if returned.join(&brought) {
                 for &position in &returns {
                     self.join_into(position, &returned, &mut work);
