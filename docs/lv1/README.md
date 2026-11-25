@@ -65,7 +65,10 @@ decodes as `sc 1` but has a nonzero reserved field is not a site. The
 table records the real address of each site: real mode ignores EA bits 0
 and 1, so a kernel address loses its top bit. `tables/hypercall_unresolved.tsv`
 has one row for every scanned kernel; `sites` is `none` when every site
-resolved. Both tables hold derived facts only, never kernel bytes.
+resolved. A site is also unresolved when control can enter a word between
+its `li r11` and `sc` in another way. These ways are the ELF entry, an
+interrupt vector, and an indirect branch to an address that the kernel
+names. Both tables hold derived facts only, never kernel bytes.
 
 `cellgov dev hypercall-census` writes one kernel's rows of both tables.
 `CELLGOV_REGENERATE=1 cargo test -p cellgov_cli --features installed-firmware-tests --test lv2_census_firmware firmware_reextracts_byte_identical_hypercall_rows` runs it over every `kernel.tsv` kernel in the
