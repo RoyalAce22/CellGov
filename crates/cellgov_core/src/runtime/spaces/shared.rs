@@ -1,7 +1,7 @@
 //! Process-shared mappings: registration, keyed attach and promotion, the segment copy, and alias ranges.
 
 use cellgov_event::UnitId;
-use cellgov_mem::{ByteRange, GuestAddr, MemError, PageSize};
+use cellgov_mem::{ByteRange, GuestAddr, PageSize};
 use cellgov_trace::HostWriter;
 
 use crate::runtime::state::Runtime;
@@ -17,10 +17,10 @@ impl Runtime {
     /// # Errors
     /// - [`SpaceError::KeyExists`] on a duplicate key.
     /// - [`SpaceError::UnknownSpace`] when a view names a missing space.
-    /// - [`SpaceError::ViewInstall`] when a view's range overlaps an
-    ///   existing region in its space, another view in this call, or
-    ///   the end of the address space; nothing is installed and the
-    ///   mapping is not registered.
+    /// - [`SpaceError::ViewInstall`] when `install_region` refuses a view.
+    ///   The check of each view comes before any install, so a refusal
+    ///   installs no view and registers no mapping. Each earlier view of
+    ///   this call in the same space counts as a region.
     pub fn register_shared_mapping(
         &mut self,
         key: u64,
@@ -37,37 +37,19 @@ impl Runtime {
         }
         // Every view is checked before any is installed, so a refusal
         // leaves no orphaned region to shift `committed_memory_hash`.
+        // The earlier views of the same space count as installed.
         for (idx, &(space, base)) in views.iter().enumerate() {
-            let end = u128::from(base) + u128::from(size);
-            if end > u128::from(u64::MAX) {
-                return Err(SpaceError::ViewInstall(MemError::OverlappingRegions));
-            }
             let mem = match space {
                 AddressSpaceId::BOOT => &self.memory,
                 s => self.spaces.extra.get(&s).expect("presence checked above"),
             };
-            // `install_region`'s own rejection predicate, a zero-size
-            // view at an existing base included.
-            let rejects = |other_base: u128, other_end: u128| {
-                (other_base <= u128::from(base) && other_end > u128::from(base))
-                    || (other_base > u128::from(base) && end > other_base)
-            };
-            let overlaps_existing = mem.regions().any(|r| {
-                rejects(
-                    u128::from(r.base()),
-                    u128::from(r.base()) + u128::from(r.size()),
-                )
-            });
-            let overlaps_earlier_view = views[..idx].iter().any(|&(other_space, other_base)| {
-                other_space == space
-                    && rejects(
-                        u128::from(other_base),
-                        u128::from(other_base) + u128::from(size),
-                    )
-            });
-            if overlaps_existing || overlaps_earlier_view {
-                return Err(SpaceError::ViewInstall(MemError::OverlappingRegions));
-            }
+            let pending: Vec<(u64, usize)> = views[..idx]
+                .iter()
+                .filter(|&&(other_space, _)| other_space == space)
+                .map(|&(_, other_base)| (other_base, size as usize))
+                .collect();
+            mem.check_install_region(base, size as usize, &pending)
+                .map_err(SpaceError::ViewInstall)?;
         }
         for &(space, base) in views {
             let mem = match space {
@@ -377,3 +359,7 @@ mod shared_view_store_tests;
 #[cfg(test)]
 #[path = "tests/shared_view_span_tests.rs"]
 mod shared_view_span_tests;
+
+#[cfg(test)]
+#[path = "tests/shared_view_install_check_tests.rs"]
+mod shared_view_install_check_tests;
