@@ -110,3 +110,11 @@ mod firmware_tests;
 #[cfg(test)]
 #[path = "tests/repository_reader_tests.rs"]
 mod reader_tests;
+
+#[cfg(test)]
+#[path = "tests/repository_debug_support_tests.rs"]
+mod debug_support_tests;
+
+#[cfg(test)]
+#[path = "tests/console_repository_debug_support_tests.rs"]
+mod console_tests;

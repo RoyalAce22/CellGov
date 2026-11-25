@@ -52,12 +52,12 @@ fn captured_firmware(capture: &str) -> String {
 }
 
 #[test]
-fn every_console_row_is_the_doubleword_its_capture_read_at_the_capture_firmware() {
+fn every_boot_record_row_is_the_doubleword_its_capture_read_at_the_capture_firmware() {
     let rows: Vec<_> = NODES
         .iter()
         .filter_map(|node| match node.source {
             NodeSource::ConsoleCapture { capture, address } => Some((node, capture, address)),
-            NodeSource::PsdevwikiDump { .. } => None,
+            NodeSource::PsdevwikiDump { .. } | NodeSource::Lv1NodeCapture { .. } => None,
         })
         .collect();
     assert_eq!(rows.len(), 7);

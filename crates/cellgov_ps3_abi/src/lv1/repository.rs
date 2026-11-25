@@ -133,6 +133,15 @@ pub enum NodeSource {
         /// The kernel address whose doubleword the capture read.
         address: u64,
     },
+    /// A console capture that read both values from the node in lv1's
+    /// repository, through a read-only peek of lv1 memory.
+    Lv1NodeCapture {
+        /// The capture directory, relative to the workspace root.
+        capture: &'static str,
+        /// The lv1 address of the node's first value on the captured
+        /// console.
+        address: u64,
+    },
 }
 
 impl NodeSource {
@@ -140,7 +149,7 @@ impl NodeSource {
     pub fn class(&self) -> &'static str {
         match self {
             Self::PsdevwikiDump { .. } => "psdevwiki",
-            Self::ConsoleCapture { .. } => "console",
+            Self::ConsoleCapture { .. } | Self::Lv1NodeCapture { .. } => "console",
         }
     }
 
@@ -149,7 +158,7 @@ impl NodeSource {
     pub fn citation(&self) -> &'static str {
         match self {
             Self::PsdevwikiDump { alias, .. } => alias,
-            Self::ConsoleCapture { capture, .. } => capture,
+            Self::ConsoleCapture { capture, .. } | Self::Lv1NodeCapture { capture, .. } => capture,
         }
     }
 
@@ -159,7 +168,9 @@ impl NodeSource {
     pub fn section(&self) -> Option<String> {
         match self {
             Self::PsdevwikiDump { section, .. } => Some((*section).to_string()),
-            Self::ConsoleCapture { address, .. } => Some(format!("{address:#018x}")),
+            Self::ConsoleCapture { address, .. } | Self::Lv1NodeCapture { address, .. } => {
+                Some(format!("{address:#018x}"))
+            }
         }
     }
 }
@@ -219,8 +230,9 @@ const GAME_OS_341_DUMP: NodeSource = NodeSource::PsdevwikiDump {
 /// values to.
 ///
 /// The dump is of firmware 3.41, which no logged boot is. No source gives
-/// the values for 1.50, 1.94 or 3.70. At 4.93 the console capture
-/// [`BOOT_RECORD_CAPTURE`] gives each value that the 4.93 boot reads.
+/// the values for 1.50, 1.94 or 3.70. At 4.93 the console captures
+/// [`BOOT_RECORD_CAPTURE`] and [`DEBUG_SUPPORT_CAPTURE`] give each value
+/// that the 4.93 boot reads.
 const DUMP_FIRMWARE_BEFORE_4_93: &[&str] = &["1.50", "1.94", "3.70"];
 
 /// The console capture of the 4.93 kernel's boot repository record, on
@@ -235,7 +247,7 @@ pub const BOOT_RECORD_CAPTURE: &str = "tests/micro/lv2_repository_boot_nodes/ps3
 /// The address of the 4.93 kernel's boot repository record.
 pub const BOOT_RECORD_4_93: u64 = 0x8000_0000_0037_a5a0;
 
-/// The firmware of [`BOOT_RECORD_CAPTURE`].
+/// The firmware of [`BOOT_RECORD_CAPTURE`] and [`DEBUG_SUPPORT_CAPTURE`].
 const CAPTURE_FIRMWARE: &[&str] = &["4.93"];
 
 /// The value at offset `offset` of the 4.93 boot record, as
@@ -266,6 +278,16 @@ const fn boot_read_4_93(lr: u64) -> ReadSite {
         lr,
     }
 }
+
+/// The console capture of lpar 1's `ss.param.debug.support` node in lv1's
+/// repository, on the reference console at firmware 4.93. Its README
+/// gives the method.
+pub const DEBUG_SUPPORT_CAPTURE: &str =
+    "tests/micro/lv1_repository_debug_support/peek/cech20-cex-493";
+
+/// The lv1 address of the first value of the node that
+/// [`DEBUG_SUPPORT_CAPTURE`] read.
+const DEBUG_SUPPORT_V1_ADDRESS: u64 = 0x0076_3d58;
 
 /// The second value of a node that [`BOOT_RECORD_CAPTURE`] gives. The
 /// capture does not observe it, and the reads at `discarded_by` discard
@@ -328,6 +350,27 @@ pub const NODES: &[RepositoryNode] = &[
         unobserved(&[boot_read_4_93(0x8000_0000_0000_c8d0)]),
         CAPTURE_FIRMWARE,
         captured(0xa8),
+    ),
+    // `ss.param.debug.support`. The kernel stores both values
+    // [OFW-4.93 lv2_kernel a:0x8000000000050a70-0x8000000000050a80].
+    // lpar 1's update manager sets both to all-ones unless the unit's
+    // target id is 0x81 or 0x82 [OFW-4.93 lv1 a:0x4F4874-0x4F48E4]. The
+    // reference console is a retail unit.
+    node(
+        LPAR_ID_PME,
+        [
+            first_field(b"ss", 0),
+            field(b"param", 0),
+            field(b"debug", 0),
+            field(b"support", 0),
+        ],
+        0xffff_ffff_ffff_ffff,
+        SecondValue::Given(0xffff_ffff_ffff_ffff),
+        CAPTURE_FIRMWARE,
+        NodeSource::Lv1NodeCapture {
+            capture: DEBUG_SUPPORT_CAPTURE,
+            address: DEBUG_SUPPORT_V1_ADDRESS,
+        },
     ),
     // `bi.pu` at index 0: the logical PU id. Linux reads it in
     // `ps3_repository_read_pu_id`.
@@ -466,3 +509,7 @@ mod console_tests;
 #[cfg(test)]
 #[path = "tests/repository_second_value_tests.rs"]
 mod second_value_tests;
+
+#[cfg(test)]
+#[path = "tests/repository_debug_support_tests.rs"]
+mod debug_support_tests;

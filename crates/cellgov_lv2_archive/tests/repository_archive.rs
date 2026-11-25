@@ -119,6 +119,17 @@ fn repository_rows_are_well_formed() {
                     node.key
                 );
             }
+            NodeSource::Lv1NodeCapture { capture, .. } => {
+                assert!(
+                    archive_dir()
+                        .join("../..")
+                        .join(capture)
+                        .join("node.tsv")
+                        .is_file(),
+                    "{} cites {capture}, which holds no committed node.tsv",
+                    node.key
+                );
+            }
         }
     }
 
