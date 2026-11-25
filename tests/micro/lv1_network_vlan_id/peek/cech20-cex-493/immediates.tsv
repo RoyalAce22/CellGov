@@ -1,0 +1,6 @@
+address	field	value
+0x0000000000244df0	selector_max	20
+0x0000000000244b24	illegal_status	-17
+0x0000000000245014	no_entry_status	-6
+0x0000000000244de0	capability_offset	32
+0x0000000000244ec8	flag_offset	28

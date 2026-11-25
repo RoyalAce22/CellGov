@@ -1,0 +1,3 @@
+address	role	reads	agree	value
+0x0000000000353ef8	toc_slot_network_global	2	yes	0x00000000003682b0
+0x0000000000353f78	toc_slot_vlan_table	2	yes	0x0000000000244e14

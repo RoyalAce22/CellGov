@@ -1,0 +1,8 @@
+first	last	holds	doublewords	agree	stock
+0x0000000000244ad8	0x0000000000244ae7	switch_request_range	2	yes	identical
+0x0000000000244b20	0x0000000000244b77	switch_exit_and_dispatch	11	yes	identical
+0x0000000000244c28	0x0000000000244c37	switch_success_store	2	yes	identical
+0x0000000000244dd8	0x0000000000244f37	vlan_id_case	44	yes	identical
+0x0000000000245010	0x000000000024501f	vlan_no_entry_path	2	yes	identical
+0x0000000000307d68	0x0000000000307d6f	handler_keeps_r6	1	yes	identical
+0x0000000000307f78	0x0000000000307f7f	handler_keeps_status_low_word	1	yes	identical
