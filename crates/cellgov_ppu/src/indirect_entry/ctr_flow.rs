@@ -1,0 +1,925 @@
+//! What the paths to each word bring in CTR, in the GPRs that hold a copy
+//! of CTR, and in the stack slots that hold one.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use cellgov_ps3_abi::hw::ppc_isa::PPC_BO_BIT2;
+
+use super::constants::{never_falls_through, GprStep, Step, Value};
+use super::toc::FunctionSteps;
+use crate::caller_census::written_gprs;
+use crate::hypercall_cfg::{branch_target, Code, CodeSegment};
+use crate::instruction::PpuInstruction;
+use crate::local_cfg::falls_through;
+
+/// Whether the word `raw` at `address` is a branch that links, other
+/// than a `b` or a `bc` that links to the next word.
+///
+/// A `bc` that links to the next word, such as `bcl 20,31,$+4`, reaches
+/// the next word on the taken and on the fall-through path, so it runs
+/// no routine.
+///
+/// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.
+/// [PPC-Book1 p:24 s:2.4] A taken `bc` sets NIA to its target, and a `bc` sets LR whether or not it branches.
+fn calls(address: u64, raw: u32) -> bool {
+    match crate::decode::decode(raw) {
+        Ok(PpuInstruction::B { link, .. } | PpuInstruction::Bc { link, .. }) => {
+            link && !links_to_next_word(address, raw)
+        }
+        Ok(PpuInstruction::Bclr { link, .. } | PpuInstruction::Bcctr { link, .. }) => link,
+        _ => false,
+    }
+}
+
+/// Whether the word `raw` at `address` is a `b` or a `bc` that links to
+/// the next word.
+fn links_to_next_word(address: u64, raw: u32) -> bool {
+    matches!(
+        crate::decode::decode(raw),
+        Ok(PpuInstruction::B { link: true, .. } | PpuInstruction::Bc { link: true, .. })
+    ) && FunctionSteps::of(address, raw).target == address.checked_add(4)
+}
+
+/// The address of the word after each `b` or `bc` of `code` that links
+/// to the next word.
+fn after_next_word_links(code: &Code) -> impl Iterator<Item = u64> + '_ {
+    code.segments()
+        .iter()
+        .flat_map(CodeSegment::addressed)
+        .filter(|&(address, raw)| links_to_next_word(address, raw))
+        .filter_map(|(address, _)| address.checked_add(4))
+}
+
+/// The address of the word after each call of `code`, where the `bclr`
+/// of its routine returns.
+///
+/// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.
+fn after_calls(code: &Code) -> impl Iterator<Item = u64> + '_ {
+    code.segments()
+        .iter()
+        .flat_map(CodeSegment::addressed)
+        .filter(|&(address, raw)| calls(address, raw))
+        .filter_map(|(address, _)| address.checked_add(4))
+}
+
+/// What the paths to one word bring in CTR.
+///
+/// A path can also bring a CTR that no word of the scan writes, such as
+/// a value that the code loads. The bound takes such a CTR to hold a
+/// named address, so the state does not record it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Ctr {
+    /// The constants that the paths bring in CTR, by the address of the
+    /// word that wrote each one.
+    known: BTreeMap<u64, Value>,
+    /// Whether a path brings a value that the scan cannot prove.
+    lost: bool,
+}
+
+impl Ctr {
+    /// CTR after the word at `by` writes the constants `value`.
+    fn written(by: u64, value: Value) -> Self {
+        Self {
+            known: BTreeMap::from([(by, value)]),
+            lost: false,
+        }
+    }
+
+    /// CTR after a step that can leave it at any value.
+    fn lost() -> Self {
+        Self {
+            known: BTreeMap::new(),
+            lost: true,
+        }
+    }
+
+    /// CTR after a step that keeps no constant of it.
+    ///
+    /// Each constant becomes a value that the scan cannot prove. A CTR
+    /// that no word of the scan writes stays out of the state.
+    fn unproved(&self) -> Self {
+        Self {
+            known: BTreeMap::new(),
+            lost: self.lost || !self.known.is_empty(),
+        }
+    }
+
+    /// A copy of CTR after a word applies `step` to each of its constants.
+    ///
+    /// A step that changes a constant leaves a value that the scan cannot
+    /// prove, because a loop can run the step more than once.
+    fn stepped(&self, step: Step) -> Self {
+        let unchanged = self
+            .known
+            .values()
+            .all(|value| value.map(|constant| step.apply(constant)) == *value);
+        if unchanged {
+            self.clone()
+        } else {
+            self.unproved()
+        }
+    }
+
+    /// A copy of CTR after `part` changes each of its constants.
+    ///
+    /// The change is not a step of a loop, so each constant stays a
+    /// constant.
+    fn part(&self, part: impl Fn(u64) -> u64) -> Self {
+        Self {
+            known: self
+                .known
+                .iter()
+                .map(|(&by, value)| (by, value.map(&part)))
+                .collect(),
+            lost: self.lost,
+        }
+    }
+
+    /// CTR after the word at `by` copies this copy of CTR back into CTR.
+    ///
+    /// The result records the word at `by` as the word that wrote each
+    /// constant.
+    fn rewritten(&self, by: u64) -> Self {
+        let known = self
+            .known
+            .values()
+            .cloned()
+            .reduce(|one, two| one.union(&two));
+        Self {
+            known: known
+                .map(|value| BTreeMap::from([(by, value)]))
+                .unwrap_or_default(),
+            lost: self.lost,
+        }
+    }
+
+    /// Joins `other` into `self`, and returns whether `self` changed.
+    fn join(&mut self, other: &Self) -> bool {
+        let mut changed = other.lost && !self.lost;
+        self.lost |= other.lost;
+        for (&by, value) in &other.known {
+            match self.known.get_mut(&by) {
+                Some(own) if own.holds_all(value) => {}
+                Some(own) => {
+                    *own = own.clone().union(value);
+                    changed = true;
+                }
+                None => {
+                    self.known.insert(by, value.clone());
+                    changed = true;
+                }
+            }
+        }
+        changed
+    }
+}
+
+/// A stack slot: the offset from r1 of its first byte, and its width in
+/// bytes.
+type Slot = (i64, u8);
+
+/// The offsets from r1 that a displacement can reach. A move of r1 drops
+/// each slot that it takes out of this range, so a loop that moves r1
+/// keeps a finite set of slots.
+///
+/// [PPC-Book1 p:37 s:3.3.2] `lwz` computes EA as (RA|0) + EXTS(D), with D a 16-bit field.
+const SLOT_REACH: std::ops::Range<i64> = -(1 << 15)..(1 << 15);
+
+/// What the paths to one word bring in CTR, in the GPRs that hold a copy
+/// of CTR, and in the stack slots that hold one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct CtrState {
+    ctr: Ctr,
+    /// What the paths bring in each GPR that holds a copy of CTR, by GPR
+    /// number. A GPR that is not here holds no copy that the state
+    /// records.
+    copies: BTreeMap<u8, Ctr>,
+    /// What the paths bring in each stack slot that holds a copy of CTR
+    /// or a part of one. A slot that is not here holds no copy that the
+    /// state records.
+    slots: BTreeMap<Slot, Ctr>,
+}
+
+impl CtrState {
+    /// A state with no CTR and with a copy of a CTR that the scan cannot
+    /// prove in each GPR of `gprs` and in each slot of `slots`.
+    ///
+    /// `gprs` is a mask with bit `n` set for GPR `n`.
+    fn lost_copies(gprs: u32, slots: &BTreeSet<Slot>) -> Self {
+        Self {
+            ctr: Ctr::default(),
+            copies: (0..32)
+                .filter(|&gpr| gprs >> gpr & 1 != 0)
+                .map(|gpr| (gpr, Ctr::lost()))
+                .collect(),
+            slots: slots.iter().map(|&slot| (slot, Ctr::lost())).collect(),
+        }
+    }
+
+    /// The GPRs that hold a copy of CTR, as a mask with bit `n` set for
+    /// GPR `n`.
+    fn copy_gprs(&self) -> u32 {
+        self.copies.keys().fold(0, |gprs, &gpr| gprs | 1 << gpr)
+    }
+
+    /// Joins `other` into `self`, and returns whether `self` changed.
+    fn join(&mut self, other: &Self) -> bool {
+        let mut changed = self.ctr.join(&other.ctr);
+        for (&gpr, copy) in &other.copies {
+            changed |= self.copies.entry(gpr).or_default().join(copy);
+        }
+        for (&slot, copy) in &other.slots {
+            changed |= self.slots.entry(slot).or_default().join(copy);
+        }
+        changed
+    }
+
+    /// The copies in GPRs and in stack slots after the word `decoded`.
+    ///
+    /// These words copy CTR or a copy into a GPR:
+    /// - `mfctr`, which copies CTR;
+    /// - a word that the scan follows a constant through, from a GPR
+    ///   that holds a copy;
+    /// - a load at a constant offset from r1, from the slots that hold a
+    ///   copy there.
+    ///
+    /// Each other word that surely writes a GPR removes its copy. A store
+    /// at a constant offset from r1 writes its slot, as
+    /// [`store_into`] gives. A word that moves r1 by a constant moves
+    /// each slot, and each other word that surely writes r1 removes each
+    /// slot.
+    ///
+    /// [PPC-Book1 p:82 s:3.3.13] `mfctr`, a form of `mfspr`, copies CTR into RT.
+    fn after(&self, decoded: &PpuInstruction) -> (BTreeMap<u8, Ctr>, BTreeMap<Slot, Ctr>) {
+        let mut copied: Vec<(u8, Ctr)> = match *decoded {
+            PpuInstruction::Mfctr { rt } => vec![(rt, self.ctr.clone())],
+            _ => GprStep::of(*decoded)
+                .and_then(|step| {
+                    let copy = self.copies.get(&step.source?)?;
+                    Some((step.rt, copy.stepped(step.step)))
+                })
+                .into_iter()
+                .collect(),
+        };
+        let mut slots = self.slots.clone();
+        let access = StackAccess::of(decoded);
+        if let Some(access) = &access {
+            for &(slot, gpr) in &access.parts {
+                if access.load == Load::None {
+                    let copy = gpr.and_then(|gpr| self.copies.get(&gpr));
+                    store_into(&mut slots, slot, copy);
+                } else {
+                    copied.extend(gpr.map(|gpr| (gpr, self.loaded(slot, access.load))));
+                }
+            }
+        }
+        let written = surely_written_gprs(decoded);
+        let mut copies = self.copies.clone();
+        copies.retain(|&gpr, _| written >> gpr & 1 == 0);
+        for (gpr, copy) in copied {
+            if copy != Ctr::default() {
+                copies.insert(gpr, copy);
+            }
+        }
+        if written & 1 << 1 != 0 {
+            slots = match r1_move(decoded, access.as_ref()) {
+                Some(by) => moved(slots, by),
+                None => BTreeMap::new(),
+            };
+        }
+        (copies, slots)
+    }
+
+    /// The copy that a load of `slot` gets from the slots that hold a
+    /// copy, and that `load` extends to 64 bits.
+    ///
+    /// A load that the bytes of one slot hold gets the part of that copy.
+    /// A load that holds bytes of a slot and other bytes gets a value
+    /// that the scan cannot prove.
+    ///
+    /// [CBE-Handbook p:45 s:1.3.3] The CBE processor stores the most-significant byte at the lowest address.
+    fn loaded(&self, (offset, width): Slot, load: Load) -> Ctr {
+        let end = offset + i64::from(width);
+        let mut loaded = Ctr::default();
+        for (&(held, held_width), copy) in &self.slots {
+            let held_end = held + i64::from(held_width);
+            if end <= held || held_end <= offset {
+                continue;
+            }
+            if held <= offset && end <= held_end {
+                let shift = 8 * (held_end - end);
+                loaded.join(&copy.part(|value| load.extend(value >> shift, width)));
+            } else {
+                loaded.join(&copy.unproved());
+            }
+        }
+        loaded
+    }
+}
+
+/// Writes `slot` in `slots` with `copy`, or with a value that holds no
+/// copy when `copy` is `None`.
+///
+/// The store removes each slot whose bytes it writes. A slot that it
+/// writes only some bytes of holds a value that the scan cannot prove.
+/// The new slot holds the low-order bytes of `copy`.
+///
+/// [PPC-Book1 p:42 s:3.3.3] `stw` stores RS 32:63 into the word at EA.
+/// [PPC-Book1 p:43 s:3.3.3] `std` stores RS into the doubleword at EA.
+fn store_into(slots: &mut BTreeMap<Slot, Ctr>, (offset, width): Slot, copy: Option<&Ctr>) {
+    let end = offset + i64::from(width);
+    slots.retain(|&(held, held_width), held_copy| {
+        let held_end = held + i64::from(held_width);
+        if end <= held || held_end <= offset {
+            return true;
+        }
+        if offset <= held && held_end <= end {
+            return false;
+        }
+        *held_copy = held_copy.unproved();
+        true
+    });
+    if let Some(copy) = copy {
+        let low = copy.part(|value| Load::Zero.extend(value, width));
+        slots.insert((offset, width), low);
+    }
+}
+
+/// `slots` after r1 moves by `by`, without each slot that the move takes
+/// out of [`SLOT_REACH`].
+fn moved(slots: BTreeMap<Slot, Ctr>, by: i64) -> BTreeMap<Slot, Ctr> {
+    slots
+        .into_iter()
+        .filter_map(|((offset, width), copy)| {
+            let offset = offset.checked_sub(by)?;
+            SLOT_REACH
+                .contains(&offset)
+                .then_some(((offset, width), copy))
+        })
+        .collect()
+}
+
+/// The constant that `decoded` adds to r1, for a word that moves r1 by a
+/// constant.
+///
+/// [PPC-Book1 p:51 s:3.3.8] `addi` and `addis` add EXTS(SI) or EXTS(SI || 0x0000) to RA, or to 0 when RA is 0.
+/// [PPC-Book1 p:40 s:3.3.3] A store with update places EA into RA.
+fn r1_move(decoded: &PpuInstruction, access: Option<&StackAccess>) -> Option<i64> {
+    if let Some(by) = access.and_then(|access| access.moves_r1) {
+        return Some(by);
+    }
+    match GprStep::of(*decoded)? {
+        GprStep {
+            rt: 1,
+            source: Some(1),
+            step: Step::Add(by),
+        } => Some(by),
+        _ => None,
+    }
+}
+
+/// How a load fills the bytes of RT that it does not load, or
+/// [`Load::None`] for a store.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Load {
+    /// A store, which loads no GPR.
+    None,
+    /// A load that sets the other bytes to 0.
+    Zero,
+    /// A load that copies the high-order bit of the loaded bytes into the
+    /// other bytes.
+    Sign,
+}
+
+impl Load {
+    /// The 64-bit value of the low-order `width` bytes of `value`.
+    fn extend(self, value: u64, width: u8) -> u64 {
+        let bits = 8 * u32::from(width);
+        if bits >= 64 {
+            return value;
+        }
+        let low = value & ((1 << bits) - 1);
+        if self == Self::Sign && low >> (bits - 1) & 1 != 0 {
+            low | (u64::MAX << bits)
+        } else {
+            low
+        }
+    }
+}
+
+/// A load or a store that a word makes at a constant offset from r1.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StackAccess {
+    load: Load,
+    /// The slot of each GPR that the word loads or stores, and the GPR.
+    /// The GPR is `None` for the FPR of a floating-point load or store.
+    parts: Vec<(Slot, Option<u8>)>,
+    /// The constant that the update form adds to r1.
+    moves_r1: Option<i64>,
+}
+
+impl StackAccess {
+    /// The access of `decoded`, or `None` for a word that makes no load
+    /// or store at a constant offset from r1.
+    ///
+    /// [PPC-Book1 p:33 s:3.3.2] A load writes RT, and its update form also writes the EA into RA.
+    /// [PPC-Book1 p:36 s:3.3.2] `lha` loads the halfword at EA and extends its sign into RT.
+    /// [PPC-Book1 p:38 s:3.3.2] `lwa` loads the word at EA and extends its sign into RT.
+    /// [PPC-Book1 p:40 s:3.3.3] A store writes no GPR, and its update form writes the EA into RA.
+    /// [PPC-Book1 p:46 s:3.3.5] `lmw` and `stmw` load or store the low-order words of the GPRs from RT or RS through 31.
+    /// [PPC-Book1 p:104 s:4.6.2] `lfsu` loads an FPR and places the EA into RA.
+    /// [PPC-Book1 p:105 s:4.6.2] `lfdu` loads an FPR and places the EA into RA.
+    /// [PPC-Book1 p:107 s:4.6.3] `stfs` stores a word at EA.
+    /// [PPC-Book1 p:108 s:4.6.3] `stfd` stores a doubleword at EA.
+    fn of(decoded: &PpuInstruction) -> Option<Self> {
+        use PpuInstruction as I;
+        let (load, ra, imm, width, gpr, update) = match *decoded {
+            I::Lbz { rt, ra, imm } => (Load::Zero, ra, imm, 1, Some(rt), false),
+            I::Lbzu { rt, ra, imm } => (Load::Zero, ra, imm, 1, Some(rt), true),
+            I::Lhz { rt, ra, imm } => (Load::Zero, ra, imm, 2, Some(rt), false),
+            I::Lhzu { rt, ra, imm } => (Load::Zero, ra, imm, 2, Some(rt), true),
+            I::Lha { rt, ra, imm } => (Load::Sign, ra, imm, 2, Some(rt), false),
+            I::Lhau { rt, ra, imm } => (Load::Sign, ra, imm, 2, Some(rt), true),
+            I::Lwz { rt, ra, imm } => (Load::Zero, ra, imm, 4, Some(rt), false),
+            I::Lwzu { rt, ra, imm } => (Load::Zero, ra, imm, 4, Some(rt), true),
+            I::Lwa { rt, ra, imm } => (Load::Sign, ra, imm, 4, Some(rt), false),
+            I::Ld { rt, ra, imm } => (Load::Zero, ra, imm, 8, Some(rt), false),
+            I::Ldu { rt, ra, imm } => (Load::Zero, ra, imm, 8, Some(rt), true),
+            I::Lfsu { ra, imm, .. } => (Load::Zero, ra, imm, 4, None, true),
+            I::Lfdu { ra, imm, .. } => (Load::Zero, ra, imm, 8, None, true),
+            I::Stb { rs, ra, imm } => (Load::None, ra, imm, 1, Some(rs), false),
+            I::Stbu { rs, ra, imm } => (Load::None, ra, imm, 1, Some(rs), true),
+            I::Sth { rs, ra, imm } => (Load::None, ra, imm, 2, Some(rs), false),
+            I::Sthu { rs, ra, imm } => (Load::None, ra, imm, 2, Some(rs), true),
+            I::Stw { rs, ra, imm } => (Load::None, ra, imm, 4, Some(rs), false),
+            I::Stwu { rs, ra, imm } => (Load::None, ra, imm, 4, Some(rs), true),
+            I::Std { rs, ra, imm } => (Load::None, ra, imm, 8, Some(rs), false),
+            I::Stdu { rs, ra, imm } => (Load::None, ra, imm, 8, Some(rs), true),
+            I::Stfs { ra, imm, .. } => (Load::None, ra, imm, 4, None, false),
+            I::Stfsu { ra, imm, .. } => (Load::None, ra, imm, 4, None, true),
+            I::Stfd { ra, imm, .. } => (Load::None, ra, imm, 8, None, false),
+            I::Stfdu { ra, imm, .. } => (Load::None, ra, imm, 8, None, true),
+            I::Lmw { rt, ra, imm } => return Self::multiple(Load::Zero, rt, ra, imm),
+            I::Stmw { rs, ra, imm } => return Self::multiple(Load::None, rs, ra, imm),
+            _ => return None,
+        };
+        let offset = i64::from(imm);
+        (ra == 1).then(|| Self {
+            load,
+            parts: vec![((offset, width), gpr)],
+            moves_r1: update.then_some(offset),
+        })
+    }
+
+    /// The access of an `lmw` or an `stmw` of the GPRs from `first`
+    /// through 31 at `imm` from RA.
+    fn multiple(load: Load, first: u8, ra: u8, imm: i16) -> Option<Self> {
+        (ra == 1).then(|| Self {
+            load,
+            parts: (first..32)
+                .map(|gpr| ((i64::from(imm) + 4 * i64::from(gpr - first), 4), Some(gpr)))
+                .collect(),
+            moves_r1: None,
+        })
+    }
+}
+
+/// The GPRs that the word `decoded` writes on each run, as a mask with
+/// bit `n` set for GPR `n`.
+///
+/// The mask holds no GPR for these words, which [`written_gprs`] takes to
+/// write GPRs that they can leave unchanged:
+/// - `sc`, whose handler can return each GPR unchanged;
+/// - `lswx`, which loads no byte and leaves RT undefined when its byte
+///   count in XER is 0;
+/// - a divide, which leaves RT undefined when its divisor is 0 or its
+///   quotient overflows;
+/// - an illegal word, whose error handler need not emulate it;
+/// - a fused pair, which decode does not produce.
+///
+/// [PPC-Book1 p:48 s:3.3.6] `lswx` loads the number of bytes that XER\[57:63\] gives, and with a count of 0 the contents of RT are undefined.
+/// [PPC-Book1 p:58] For `divd` and `divw`, a divisor of 0 or a quotient that overflows leaves the contents of RT undefined.
+/// [PPC-Book1 p:59] For `divdu` and `divwu`, a divisor of 0 leaves the contents of RT undefined.
+fn surely_written_gprs(decoded: &PpuInstruction) -> u32 {
+    match decoded {
+        PpuInstruction::Sc { .. }
+        | PpuInstruction::Lswx { .. }
+        | PpuInstruction::Divw { .. }
+        | PpuInstruction::Divwu { .. }
+        | PpuInstruction::Divd { .. }
+        | PpuInstruction::Divdu { .. }
+        | PpuInstruction::PpeIllegal { .. }
+        | PpuInstruction::Fused(_) => 0,
+        _ => written_gprs(decoded),
+    }
+}
+
+/// What the paths to each word of the code bring in CTR.
+///
+/// A path goes from a word to these words:
+/// - the next word, when the word can fall through;
+/// - each word at the real address of the target of a direct branch
+///   that is not a call;
+/// - from a `bclr`, each word at the real address of the word after a
+///   `b` or a `bc` that links to the next word.
+///
+/// The flow does not follow CTR or a copy of it to these words:
+/// - the first word of the routine that a call runs;
+/// - the target of an indirect branch, an `rfid` or an interrupt.
+///
+/// A path to one of these words brings a CTR that the bound takes to
+/// hold a named address. The word after a call gets a CTR that the scan
+/// cannot prove. The word after an `sc` gets the CTR before the `sc`, so
+/// the flow takes the handler to return with CTR unchanged.
+///
+/// A `b` or a `bc` that links to the next word calls no routine, so the
+/// next word gets the CTR before the branch. A `bclr` can return there
+/// later with another CTR, so that word also gets what each `bclr`
+/// brings.
+///
+/// The flow also follows each copy of CTR in a GPR on the same paths. An
+/// `mtctr` of a GPR that holds a copy puts the copy back into CTR, so a
+/// CTR that the scan cannot prove stays so through the copy.
+///
+/// The flow follows a copy through a stack slot at a constant offset from
+/// r1. A store there puts the copy in the slot, and a load of the slot
+/// puts it back in a GPR. The flow does not follow a copy through a store
+/// or a load that has another base or an index. After a word that writes
+/// r1 other than by a constant, the flow follows no slot.
+///
+/// The word after a call gets these copies:
+/// - each copy before the call, because its routine can return the GPR
+///   or the slot unchanged;
+/// - a copy of a CTR that the scan cannot prove, in each GPR and slot
+///   that holds a copy at a `bclr`, because its routine can make that
+///   copy.
+///
+/// The second kind keeps no constant, so the flow carries no constant
+/// of one routine to the return point of another.
+///
+/// The flow joins the CTR of each path to a word, and continues until no
+/// word changes. Each state only grows, from finite sets of constants,
+/// so the flow ends.
+///
+/// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
+pub(super) struct CtrFlow<'a> {
+    code: &'a Code,
+    /// The constants that each `mtctr` copies, as
+    /// [`Bound::code_constants`] keeps them.
+    ///
+    /// [`Bound::code_constants`]: super::bound::Bound::code_constants
+    writes: &'a BTreeMap<(usize, u64), Value>,
+    /// What the paths to each word bring in CTR and in its copies, in one
+    /// vector for each code segment.
+    at: Vec<Vec<CtrState>>,
+}
+
+impl<'a> CtrFlow<'a> {
+    /// The flow before its first step, with no CTR on any word.
+    pub(super) fn new(code: &'a Code, writes: &'a BTreeMap<(usize, u64), Value>) -> Self {
+        Self {
+            code,
+            writes,
+            at: code
+                .segments()
+                .iter()
+                .map(|segment| vec![CtrState::default(); segment.words.len()])
+                .collect(),
+        }
+    }
+
+    /// Steps from each word until no word changes.
+    ///
+    /// The flow joins what each `bclr` brings into one state. When that
+    /// state changes, the flow joins it into the word after each link to
+    /// the next word. So each `bclr` costs one join.
+    ///
+    /// The flow also keeps the GPRs and the stack slots that hold a copy
+    /// at a `bclr`. When that set grows, the flow joins
+    /// [`CtrState::lost_copies`] of it into the word after each call. The
+    /// set has at most 32 GPRs and the slots in [`SLOT_REACH`], so it
+    /// grows a finite number of times.
+    pub(super) fn run(&mut self) {
+        let code = self.code;
+        let real_positions = |address: u64| {
+            code.real_aliases(address)
+                .flat_map(move |alias| positions(code, alias))
+        };
+        let returns: Vec<(usize, usize)> = after_next_word_links(code)
+            .flat_map(real_positions)
+            .collect();
+        let call_returns: Vec<(usize, usize)> =
+            after_calls(code).flat_map(real_positions).collect();
+        let mut returned = CtrState::default();
+        let mut returned_gprs = 0;
+        let mut returned_slots = BTreeSet::new();
+        let mut work = Worklist::new(code);
+        while let Some((index, word)) = work.pop() {
+            let segment = &code.segments()[index];
+            let address = segment.vaddr + (word as u64) * 4;
+            let raw = segment.words[word];
+            let (next, taken) = self.steps((index, word), address, raw);
+            let next = next.and_then(|ctr| Some((address.checked_add(4)?, ctr)));
+            let taken = taken.into_iter().flat_map(|(target, ctr)| {
+                code.real_aliases(target)
+                    .map(move |alias| (alias, ctr.clone()))
+            });
+            for (to, ctr) in next.into_iter().chain(taken) {
+                for position in positions(code, to) {
+                    self.join_into(position, &ctr, &mut work);
+                }
+            }
+            let Some(brought) = self.returned((index, word), raw) else {
+                continue;
+            };
+            let gprs = brought.copy_gprs();
+            let new_slot = brought
+                .slots
+                .keys()
+                .any(|slot| !returned_slots.contains(slot));
+            if gprs & !returned_gprs != 0 || new_slot {
+                returned_gprs |= gprs;
+                returned_slots.extend(brought.slots.keys().copied());
+                let copies = CtrState::lost_copies(returned_gprs, &returned_slots);
+                for &position in &call_returns {
+                    self.join_into(position, &copies, &mut work);
+                }
+            }
+            if returned.join(&brought) {
+                for &position in &returns {
+                    self.join_into(position, &returned, &mut work);
+                }
+            }
+        }
+    }
+
+    /// Joins `state` into the word at `position`, and queues the word
+    /// when its state changes.
+    fn join_into(&mut self, position: (usize, usize), state: &CtrState, work: &mut Worklist) {
+        let (index, word) = position;
+        if self.at[index][word].join(state) {
+            work.push(position);
+        }
+    }
+
+    /// The state that the word `raw` at `position` brings to the word
+    /// where LR points, or `None` when the word is not a `bclr`.
+    ///
+    /// [PPC-Book1 p:25 s:2.4] `bclr` branches to LR 0:61 || 0b00.
+    /// [PPC-Book1 p:24 s:2.4] A `bc` with BO bit 2 at 0 decrements CTR.
+    fn returned(&self, position: (usize, usize), raw: u32) -> Option<CtrState> {
+        let Ok(PpuInstruction::Bclr { bo, .. }) = crate::decode::decode(raw) else {
+            return None;
+        };
+        let (index, word) = position;
+        let state = &self.at[index][word];
+        let ctr = if bo & PPC_BO_BIT2 == 0 {
+            state.ctr.unproved()
+        } else {
+            state.ctr.clone()
+        };
+        Some(CtrState {
+            ctr,
+            copies: state.copies.clone(),
+            slots: state.slots.clone(),
+        })
+    }
+
+    /// The state that the word `raw` at `address` passes to the next word,
+    /// and the target of a direct branch with the state that the branch
+    /// passes there.
+    ///
+    /// `position` holds the index of the segment and of the word there. A
+    /// word that does not decode passes no state, as the straight-line
+    /// scan forgets each constant there. A call passes no copy to its
+    /// target.
+    fn steps(
+        &self,
+        position: (usize, usize),
+        address: u64,
+        raw: u32,
+    ) -> (Option<CtrState>, Option<(u64, CtrState)>) {
+        let (index, word) = position;
+        let state = &self.at[index][word];
+        let Ok(decoded) = crate::decode::decode(raw) else {
+            return (None, None);
+        };
+        let (next, taken) = self.ctr_steps(index, address, raw, decoded, state);
+        let (copies, slots) = state.after(&decoded);
+        let with = |ctr| CtrState {
+            ctr,
+            copies: copies.clone(),
+            slots: slots.clone(),
+        };
+        let taken = taken.map(|(target, ctr)| {
+            let state = if calls(address, raw) {
+                CtrState::default()
+            } else {
+                with(ctr)
+            };
+            (target, state)
+        });
+        (next.map(with), taken)
+    }
+
+    /// The CTR that the word `decoded` at `address` passes to the next
+    /// word, and the target of a direct branch with the CTR that the
+    /// branch passes there. The word is `raw`, in the segment at `index`,
+    /// and `state` is what the paths to it bring.
+    ///
+    /// An `mtctr` of a GPR that holds a copy of CTR joins the copy into
+    /// the constant that the straight-line scan gives.
+    ///
+    /// [PPC-Book1 p:81 s:3.3.13] `mtlr` and `mtctr`, forms of `mtspr`, copy RS into LR or CTR.
+    fn ctr_steps(
+        &self,
+        index: usize,
+        address: u64,
+        raw: u32,
+        decoded: PpuInstruction,
+        state: &CtrState,
+    ) -> (Option<Ctr>, Option<(u64, Ctr)>) {
+        let ctr = &state.ctr;
+        match decoded {
+            PpuInstruction::Mtctr { rs } => {
+                let written = self.writes.get(&(index, address)).cloned();
+                let mut ctr =
+                    written.map_or_else(Ctr::default, |value| Ctr::written(address, value));
+                if let Some(copy) = state.copies.get(&rs) {
+                    ctr.join(&copy.rewritten(address));
+                }
+                (Some(ctr), None)
+            }
+            PpuInstruction::B { offset, aa, link } => {
+                let target = branch_target(address, i64::from(offset), aa);
+                let next = branched(address, raw, 0b10100, link, ctr);
+                (next, Some((target, taken(address, raw, 0b10100, ctr))))
+            }
+            PpuInstruction::Bc {
+                bo,
+                offset,
+                aa,
+                link,
+                ..
+            } => {
+                let target = branch_target(address, i64::from(offset), aa);
+                let next = branched(address, raw, bo, link, ctr);
+                (next, Some((target, taken(address, raw, bo, ctr))))
+            }
+            PpuInstruction::Bclr { bo, link, .. } | PpuInstruction::Bcctr { bo, link, .. } => {
+                (branched(address, raw, bo, link, ctr), None)
+            }
+            _ if never_falls_through(&decoded) => (None, None),
+            _ => (Some(ctr.clone()), None),
+        }
+    }
+
+    /// Adds the target of each `bcctr` to `targets`, by the word that
+    /// wrote each constant that the paths to it bring in CTR, and returns
+    /// the [`IndirectBound::lost_targets`].
+    ///
+    /// [`IndirectBound::lost_targets`]: super::IndirectBound::lost_targets
+    ///
+    /// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00, and `bcctr` reaches CTR0:61 || 0b00.
+    pub(super) fn bcctr_targets(
+        &self,
+        targets: &mut BTreeMap<u64, BTreeSet<u64>>,
+    ) -> BTreeSet<u64> {
+        let mut lost = BTreeSet::new();
+        for (segment, states) in self.code.segments().iter().zip(&self.at) {
+            for ((address, raw), state) in segment.addressed().zip(states) {
+                if !matches!(crate::decode::decode(raw), Ok(PpuInstruction::Bcctr { .. })) {
+                    continue;
+                }
+                let ctr = &state.ctr;
+                for (&by, value) in &ctr.known {
+                    targets
+                        .entry(by)
+                        .or_default()
+                        .extend(value.constants().iter().map(|&ctr| ctr & !0b11));
+                }
+                if ctr.lost {
+                    lost.insert(address);
+                }
+            }
+        }
+        lost
+    }
+}
+
+/// The CTR that a direct branch at `address` passes to its target. The
+/// branch is the word `raw`, with the BO field `bo`, and `ctr` is what
+/// the paths to the branch bring.
+///
+/// A decrement leaves CTR at a value that the scan cannot prove, because
+/// a loop can run it more than once. The flow does not follow CTR into
+/// the routine that a call runs. The bound takes the routine to start
+/// with a CTR that no word of the scan writes, as at an indirect entry.
+///
+/// [PPC-Book1 p:24 s:2.4] A `bc` with BO bit 2 at 0 decrements CTR.
+fn taken(address: u64, raw: u32, bo: u8, ctr: &Ctr) -> Ctr {
+    if calls(address, raw) {
+        return Ctr::default();
+    }
+    if bo & PPC_BO_BIT2 == 0 {
+        ctr.unproved()
+    } else {
+        ctr.clone()
+    }
+}
+
+/// The CTR that a branch at `address` passes to the next word, or `None`
+/// when it cannot fall through. The branch is the word `raw`, with the
+/// BO field `bo`, and it writes LR when `link` is set. `ctr` is what the
+/// paths to the branch bring.
+///
+/// A `bc` with BO 1a00t that does not link falls through only when the
+/// decremented CTR is 0. A `bcctr` then reaches address 0 in either
+/// mode, and the `bc` is the word that wrote CTR. The taken path brings
+/// its own CTR to the target.
+///
+/// Each other decrement leaves CTR at a value that the scan cannot prove.
+/// A call leaves CTR at any value, because its routine can write CTR
+/// before it returns.
+///
+/// [PPC-Book1 p:24 s:2.4] A `bc` with BO bit 2 at 0 decrements CTR.
+/// [PPC-Book1 p:20 s:2.4.1] BO 1a00t decrements CTR, then branches if CTR M:63 is not 0, with M = 0 in 64-bit mode and M = 32 in 32-bit mode.
+/// [PPC-Book1 p:20 s:2.4.1] In 32-bit mode a branch sets the high-order 32 bits of its target address to 0.
+/// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.
+fn branched(address: u64, raw: u32, bo: u8, link: bool, ctr: &Ctr) -> Option<Ctr> {
+    if !falls_through(bo, link) {
+        return None;
+    }
+    Some(if calls(address, raw) {
+        Ctr::lost()
+    } else if bo & PPC_BO_BIT2 != 0 {
+        ctr.clone()
+    } else if bo & 0b10110 == 0b10000 && !link {
+        Ctr::written(address, Value::One(0))
+    } else {
+        ctr.unproved()
+    })
+}
+
+/// The words that [`CtrFlow::run`] has yet to step from, by the index of
+/// the segment and of the word there.
+struct Worklist {
+    /// Whether each word is in `pending`, in one vector for each segment.
+    queued: Vec<Vec<bool>>,
+    pending: Vec<(usize, usize)>,
+}
+
+impl Worklist {
+    /// A worklist that holds each word of `code`, with the first word
+    /// next.
+    fn new(code: &Code) -> Self {
+        Self {
+            queued: code
+                .segments()
+                .iter()
+                .map(|segment| vec![true; segment.words.len()])
+                .collect(),
+            pending: code
+                .segments()
+                .iter()
+                .enumerate()
+                .flat_map(|(index, segment)| {
+                    (0..segment.words.len()).map(move |word| (index, word))
+                })
+                .rev()
+                .collect(),
+        }
+    }
+
+    /// Takes the next word.
+    fn pop(&mut self) -> Option<(usize, usize)> {
+        let (index, word) = self.pending.pop()?;
+        self.queued[index][word] = false;
+        Some((index, word))
+    }
+
+    /// Queues the word at `position`, unless it is in the list.
+    fn push(&mut self, position: (usize, usize)) {
+        let (index, word) = position;
+        if !self.queued[index][word] {
+            self.queued[index][word] = true;
+            self.pending.push(position);
+        }
+    }
+}
+
+/// The index of the segment and of the word of each segment that holds a
+/// word at `address`.
+fn positions(code: &Code, address: u64) -> impl Iterator<Item = (usize, usize)> + '_ {
+    code.segments()
+        .iter()
+        .enumerate()
+        .filter_map(move |(index, segment)| {
+            let offset = address.checked_sub(segment.vaddr)?;
+            if offset % 4 != 0 {
+                return None;
+            }
+            let word = usize::try_from(offset / 4).ok()?;
+            (word < segment.words.len()).then_some((index, word))
+        })
+}

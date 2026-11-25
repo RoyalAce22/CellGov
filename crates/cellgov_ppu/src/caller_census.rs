@@ -808,3 +808,7 @@ mod hypercall_ctr_copy_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_ctr_return_copy_tests.rs"]
 mod hypercall_ctr_return_copy_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_ctr_stack_copy_tests.rs"]
+mod hypercall_ctr_stack_copy_tests;

@@ -5,16 +5,16 @@ use super::hypercall_tests::{li, NOP};
 use super::*;
 use cellgov_ps3_abi::hw::ppc_isa::{PPC_BLR, PPC_SC_1};
 
-fn mfctr(rt: u8) -> u32 {
+pub(super) fn mfctr(rt: u8) -> u32 {
     word(PpuInstruction::Mfctr { rt })
 }
 
-fn mtctr(rs: u8) -> u32 {
+pub(super) fn mtctr(rs: u8) -> u32 {
     word(PpuInstruction::Mtctr { rs })
 }
 
 /// A `bl` to a routine that the image does not hold.
-fn call() -> u32 {
+pub(super) fn call() -> u32 {
     word(PpuInstruction::B {
         offset: 0x1000,
         aa: false,
@@ -24,7 +24,7 @@ fn call() -> u32 {
 
 /// A stub at [`OUTSIDE`]: [`build`] of 0x300C, `mtctr r3`, then
 /// `between`, then `bctr`. The built address is the window's `blr`.
-fn copy_stub(between: &[u32]) -> Segment {
+pub(super) fn copy_stub(between: &[u32]) -> Segment {
     let mut words = build(0x300C).to_vec();
     words.push(mtctr(3));
     words.extend_from_slice(between);
@@ -37,7 +37,7 @@ fn copy_stub(between: &[u32]) -> Segment {
 ///
 /// A path at [`LOADER`] loads 75 and branches to address 0, so the `sc`
 /// at 4 resolves unless a `bctr` enters address 0.
-fn after_bdnz_falls_through(between: &[u32]) -> Vec<(u64, Option<u16>)> {
+pub(super) fn after_bdnz_falls_through(between: &[u32]) -> Vec<(u64, Option<u16>)> {
     let to_zero = word(PpuInstruction::B {
         offset: 0,
         aa: true,

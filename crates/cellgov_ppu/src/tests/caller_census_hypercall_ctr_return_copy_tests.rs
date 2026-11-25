@@ -5,7 +5,7 @@ use super::*;
 use cellgov_ps3_abi::hw::ppc_isa::PPC_BLR;
 
 /// The kernel address of a routine that leaves a copy of CTR in a GPR.
-const ROUTINE: u64 = KERNEL + 0x7000;
+pub(super) const ROUTINE: u64 = KERNEL + 0x7000;
 
 /// `bl ROUTINE; mtctr r5; bctr` at [`VECTOR`], where control enters in
 /// real mode.
@@ -29,7 +29,7 @@ fn caller() -> Segment {
 
 /// `lis r3,0; ori r3,r3,address; mtctr r3`, then `body`, then `blr`, at
 /// [`ROUTINE`].
-fn routine(address: u16, body: &[u32]) -> Segment {
+pub(super) fn routine(address: u16, body: &[u32]) -> Segment {
     let mut words = vec![
         word(PpuInstruction::Addis {
             rt: 3,
