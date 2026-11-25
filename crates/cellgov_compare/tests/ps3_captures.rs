@@ -7,10 +7,10 @@
 //! so with the same reason) or `no-frame` (emits no CGOV frame).
 //!
 //! Two more guards hold the captures themselves: every committed capture
-//! is well formed and carries no console identifier, and every byte an
-//! emulator's observation answers differently from the console's is
-//! classified in the test's `hardware_peer.tsv`. The console is the
-//! reference; nothing is copied from either side.
+//! is well formed and carries no console identifier or address, and
+//! every byte an emulator's observation answers differently from the
+//! console's is classified in the test's `hardware_peer.tsv`. The
+//! console is the reference; nothing is copied from either side.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -23,6 +23,10 @@ use cellgov_compare::hardware_capture::{
 };
 use cellgov_compare::manifest;
 use cellgov_compare::observation::{blank_volatile, NamedMemoryRegion, Observation};
+
+#[path = "ps3_captures/host_scan.rs"]
+mod host_scan;
+use host_scan::host_leaks;
 
 /// The ledger, under the microtest root.
 const LEDGER: &str = "ps3_gaps.tsv";
@@ -628,7 +632,10 @@ fn every_hardware_capture_is_well_formed() {
         }
         let transcript = fs::read_to_string(capture.join(TRANSCRIPT_FILE))
             .unwrap_or_else(|e| panic!("{name}: {e}"));
-        for leak in identifier_leaks(&transcript) {
+        for leak in identifier_leaks(&transcript)
+            .into_iter()
+            .chain(host_leaks(&transcript))
+        {
             problems.push(format!("{name}: {TRANSCRIPT_FILE} {leak}"));
         }
     }

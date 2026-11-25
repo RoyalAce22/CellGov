@@ -218,7 +218,7 @@ fn a_session_logs_in_stores_a_file_and_quits_with_every_exchange_transcribed() {
             "#0006 > TYPE I",
             "#0007 < 200 binary",
             "#0008 > PASV",
-            "#0009 < 227 Entering Passive Mode (192,0,2,2,195,80)",
+            "#0009 < 227 Entering Passive Mode (<host>,195,80)",
             "#0010 > STOR /dev_hdd0/tmp/x.bin (4 bytes)",
             "#0011 < 150 opening",
             "#0012 < 226 Transfer complete",

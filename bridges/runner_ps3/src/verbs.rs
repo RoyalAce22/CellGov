@@ -299,7 +299,7 @@ fn unlock<C: ConsoleOps>(
     let host = command.host(context.host_env.as_deref())?;
     StopList::load(&context.workspace_root)?;
     let mut console = connect(&host);
-    let mut transcript = Transcript::new();
+    let mut transcript = Transcript::for_host(&host);
     let (turn, _page) = take_console(context, &host, &mut console, sleep, &mut transcript)?;
     let removed = lease::unlock(&mut console, &mut transcript);
     console.end_session(&mut transcript);
@@ -325,7 +325,7 @@ fn peek<C: ConsoleOps>(
         stop_list.admit(plan.space(), page, page + (PAGE - 1))?;
     }
     let mut console = connect(&host);
-    let mut transcript = Transcript::new();
+    let mut transcript = Transcript::for_host(&host);
     let (turn, _page) = take_console(context, &host, &mut console, sleep, &mut transcript)?;
     let rows = peek::read(&mut console, &plan, &mut transcript);
     console.end_session(&mut transcript);
@@ -514,7 +514,7 @@ fn on_console<C: ConsoleOps>(
         claimed: &claimed,
     };
     let mut webman = connect(&host);
-    let mut transcript = Transcript::new();
+    let mut transcript = Transcript::for_host(&host);
     let (turn, html) = take_console(context, &host, &mut webman, sleep, &mut transcript)?;
     let Some(job) = job else {
         return status_only(&session, &profiles, &html);

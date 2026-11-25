@@ -225,9 +225,16 @@ frame that does not convert leaves an existing capture whole.
 
 Every request (`>`), reply (`<`) and decision (`=`) is one numbered
 line. Before a line is kept, the redactor masks every console
-identifier it can see (IDPS, PSID, MAC), so a transcript is safe to
-commit. Control characters are flattened, so a reply cannot forge a
-line.
+identifier it can see (IDPS, PSID, MAC) and the console's address, so
+a transcript is safe to commit. The address becomes `<host>` in each
+form a line can carry:
+
+- the host the runner was given, as a name or a dotted address;
+- any dotted IPv4 address;
+- the first four fields of an FTP host-port argument, which a `227`
+  reply to `PASV` carries as `(h1,h2,h3,h4,p1,p2)`.
+
+Control characters are flattened, so a reply cannot forge a line.
 
 ## When to re-capture
 
