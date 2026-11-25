@@ -1,5 +1,6 @@
-//! The registers of the EHCI USB host controllers of the system bus, and
-//! the loads of them that the 4.93 kernel makes in its controller reset.
+//! The registers of the EHCI USB host controllers of the system bus, the
+//! loads of them that the 4.93 kernel makes in its controller reset, and
+//! the stores to the PS3 setup registers that follow the reset.
 //!
 //! The MMIO region at slot 2 of devices 1 and 2 of bus 1 is the register
 //! space of an EHCI host controller:
@@ -35,6 +36,29 @@ pub const USBSTS: u64 = 0x4;
 
 /// The offset of USBINTR from the operational base.
 pub const USBINTR: u64 = 0x8;
+
+/// The offset of the first PS3 setup register from the operational base.
+///
+/// The EHCI specification gives no register at this offset. Linux
+/// `drivers/usb/host/ehci-ps3.c`, `ps3_ehci_setup_insnreg`, names it
+/// `insnreg01`, a PS3 internal setup register that holds the burst
+/// transfer counts.
+pub const INSNREG01: u64 = 0x84;
+
+/// The offset of the third PS3 setup register from the operational base.
+///
+/// The same Linux function names it `insnreg03`. A write of 1 to it
+/// enables the burst transfer counts.
+pub const INSNREG03: u64 = 0x8C;
+
+/// The word that the kernel stores to [`INSNREG01`]. Linux writes the
+/// same word and says that it sets the burst counts to 256 out and 32
+/// in.
+pub const INSNREG01_BURST_COUNTS: u32 = 0x0100_0020;
+
+/// The word that the kernel stores to [`INSNREG03`]. Linux writes the
+/// same word to enable the burst counts.
+pub const INSNREG03_BURST_ENABLE: u32 = 0x0000_0001;
 
 /// The Run/Stop bit of USBCMD.
 ///
@@ -185,6 +209,56 @@ pub const EHCI_RESET_READERS: &[EhciRegisterRead] = &[
     },
 ];
 
+/// A store of a whole word to a PS3 setup register by one kernel
+/// instruction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EhciSetupStore {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The offset of the register from the operational base.
+    pub register: u64,
+    /// The effective address of the store instruction.
+    pub store: u64,
+    /// The stored word.
+    pub value: u32,
+}
+
+/// The stores to the PS3 setup registers that the kernel makes after its
+/// controller reset, at each controller of [`EHCI_CONTROLLERS`].
+///
+/// The reset at [OFW-4.93 lv2_kernel a:0x80000000002422B4] returns to
+/// the caller, which calls the register write helper at
+/// [OFW-4.93 lv2_kernel a:0x800000000023F924] two times:
+/// 1. with offset 0x94 and the word 0x01000020
+///    [OFW-4.93 lv2_kernel a:0x8000000000245998-0x80000000002459AC];
+/// 2. with offset 0x9C and the word 1
+///    [OFW-4.93 lv2_kernel a:0x80000000002459B0-0x80000000002459C0].
+///
+/// The helper stores the word at the region's mapping plus the offset,
+/// so each offset is the capability length plus the register's offset.
+/// Linux `drivers/usb/host/ehci-ps3.c`, `ps3_ehci_setup_insnreg`, writes
+/// the same two words to the same two registers in the same order.
+pub const EHCI_SETUP_STORES: &[EhciSetupStore] = &[
+    EhciSetupStore {
+        firmware: "4.93",
+        register: INSNREG01,
+        // [OFW-4.93 lv2_kernel a:0x800000000023F964] stwx r6,r5,r9.
+        store: 0x8000_0000_0023_F964,
+        value: INSNREG01_BURST_COUNTS,
+    },
+    EhciSetupStore {
+        firmware: "4.93",
+        register: INSNREG03,
+        // [OFW-4.93 lv2_kernel a:0x800000000023F964] stwx r6,r5,r9.
+        store: 0x8000_0000_0023_F964,
+        value: INSNREG03_BURST_ENABLE,
+    },
+];
+
 #[cfg(test)]
 #[path = "tests/ehci_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/ehci_setup_tests.rs"]
+mod setup_tests;

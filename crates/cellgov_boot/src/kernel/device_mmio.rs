@@ -12,8 +12,8 @@
 //!   instruction each ([`DEVICE_REGISTER_READS`]). The run declares each
 //!   such word a sourced word of its span, so that instruction's load
 //!   gets the word.
-//! - The run models the operational registers of each EHCI controller as
-//!   register words ([`ehci`]).
+//! - The run models some operational registers and the PS3 setup
+//!   registers of each EHCI controller as register words ([`ehci`]).
 //!
 //! Every other access there still stops.
 
@@ -34,6 +34,10 @@ mod ehci;
 #[cfg(test)]
 #[path = "tests/ehci_tests.rs"]
 mod ehci_tests;
+
+#[cfg(test)]
+#[path = "tests/ehci_setup_tests.rs"]
+mod ehci_setup_tests;
 
 /// An access of a hardware thread to the MMIO of a device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,8 +71,8 @@ fn regions_of(firmware: &str) -> impl Iterator<Item = (u64, &'static MmioRegion)
 /// span of `mem`. In those spans it declares these words:
 /// - each register word that a source gives at `firmware`, as a sourced
 ///   word;
-/// - the operational registers of each EHCI controller at `firmware`, as
-///   register words.
+/// - some operational registers and the PS3 setup registers of each EHCI
+///   controller at `firmware`, as register words.
 ///
 /// # Errors
 ///

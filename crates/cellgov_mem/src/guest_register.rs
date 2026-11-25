@@ -21,6 +21,10 @@
 //! commit gives the rule the bits that this store owns
 //! ([`GuestMemory::register_store_accepted`]).
 //!
+//! A loader can also declare the store instructions that write a word
+//! ([`GuestMemory::declare_register_writer`]). The unit then accepts a
+//! store to that word only from a declared writer.
+//!
 //! The words are guest state, so the content hash covers them.
 
 use super::{GuestMemory, MemError};
@@ -137,6 +141,15 @@ pub(crate) struct RegisterReader {
     pass_back: Option<RegisterPassBack>,
 }
 
+/// A store instruction that a register word takes a store from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct RegisterWriter {
+    /// The real address of the word.
+    real: u64,
+    /// The effective address of the store instruction.
+    store: u64,
+}
+
 impl GuestMemory {
     /// Declare `words`, each at its real address, as one register file
     /// whose stores `rule` applies.
@@ -229,6 +242,40 @@ impl GuestMemory {
         Ok(())
     }
 
+    /// Declare the store instruction at the effective address `store` a
+    /// writer of the register word at `real`.
+    ///
+    /// After the first such declaration, the word takes a store only from
+    /// a declared writer ([`Self::register_store_accepted`]). A word with
+    /// no declared writer takes a store from any instruction.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemError::RegisterRefused`], and declares nothing, when
+    /// the memory holds no register word at `real`, or holds `store` as a
+    /// writer of it already.
+    pub fn declare_register_writer(&mut self, real: u64, store: u64) -> Result<(), MemError> {
+        let refused = MemError::RegisterRefused { real };
+        self.register_at(real).ok_or(refused)?;
+        let writer = RegisterWriter { real, store };
+        match self.register_writers.binary_search(&writer) {
+            Ok(_) => Err(refused),
+            Err(at) => {
+                self.register_writers.insert(at, writer);
+                Ok(())
+            }
+        }
+    }
+
+    /// Whether the register word at `real` takes a store from the
+    /// instruction at `store`: the word has no declared writer, or
+    /// `store` is one.
+    fn writer_allowed(&self, real: u64, store: u64) -> bool {
+        let writer = RegisterWriter { real, store };
+        self.register_writers.binary_search(&writer).is_ok()
+            || !self.register_writers.iter().any(|w| w.real == real)
+    }
+
     /// The bits of the register word at `real` that the store at `store`
     /// can pass back unknown.
     fn passed_by(&self, real: u64, store: u64) -> u32 {
@@ -292,13 +339,18 @@ impl GuestMemory {
     /// unless the bits that the commit takes as passed back are the bits
     /// that this instruction passes back. Then the rule judges at the
     /// commit the bits that this instruction owns.
+    ///
+    /// A word with a declared writer refuses a store from any other
+    /// instruction ([`Self::declare_register_writer`]).
     pub fn register_store_accepted(&self, real: u64, value: u32, store: u64) -> bool {
         self.register_at(real).is_some_and(|(file, index)| {
             let file = &self.register_files[file];
             let unknown_zeros = !file.words[index].known & !value;
             let taken = unknown_zeros & file.passed[index];
             let passed = unknown_zeros & self.passed_by(real, store);
-            taken == passed && file.after_store(index, value).is_some()
+            taken == passed
+                && self.writer_allowed(real, store)
+                && file.after_store(index, value).is_some()
         })
     }
 

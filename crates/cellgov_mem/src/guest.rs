@@ -448,6 +448,9 @@ pub struct GuestMemory {
     /// The readers of the register words, sorted by real address and then
     /// by reader; see [`Self::declare_register_reader`].
     register_readers: Vec<RegisterReader>,
+    /// The writers of the register words, sorted by real address and then
+    /// by store; see [`Self::declare_register_writer`].
+    register_writers: Vec<RegisterWriter>,
 }
 
 /// Diagnostic context for an out-of-region access.
@@ -612,6 +615,7 @@ impl GuestMemory {
             sourced_words: Vec::new(),
             register_files: Vec::new(),
             register_readers: Vec::new(),
+            register_writers: Vec::new(),
         })
     }
 
@@ -1229,12 +1233,16 @@ mod sourced_word_tests;
 
 #[path = "guest_register.rs"]
 mod register;
-use register::{RegisterFile, RegisterReader};
+use register::{RegisterFile, RegisterReader, RegisterWriter};
 pub use register::{RegisterPassBack, RegisterRule, RegisterStore, RegisterWord};
 
 #[cfg(test)]
 #[path = "tests/register_tests.rs"]
 mod register_tests;
+
+#[cfg(test)]
+#[path = "tests/register_writer_tests.rs"]
+mod register_writer_tests;
 
 #[cfg(test)]
 #[path = "tests/fetch_tests.rs"]
