@@ -4,7 +4,9 @@
 //! - the irq outlet that lv1 constructs, and the bitmap that it fills;
 //! - the outlet id of the GameOS kernel's call;
 //! - the handler of `get_virtual_uart_param` (hypercall 165), its
-//!   checks, and the buffer sizes of the GameOS kernel's ports.
+//!   checks, and the buffer sizes of the GameOS kernel's ports;
+//! - the handler of `set_virtual_uart_param` (hypercall 164), its checks,
+//!   and the interrupt status that lv1 computes after each call.
 //!
 //! The facts come from the 4.93 `lv1.self`, decrypted offline and read
 //! with `cellgov dev disasm`. The repository holds no byte of lv1, only
@@ -98,7 +100,8 @@
 //! [OFW-4.93 lv1 a:0x2F3F40-0x2F3F8C] is a step of the worker
 //! [OFW-4.93 lv1 a:0x2F3C0C] of `set_virtual_uart_param` (hypercall 164),
 //! which its handler calls [OFW-4.93 lv1 a:0x2F419C]. So the shadow and
-//! the count stay 0 until the partition sets an endpoint's mask.
+//! the count stay 0 until the partition sets an endpoint's mask to a
+//! value other than 0; see the section on the interrupt status.
 //!
 //! # The parameters of a port
 //!
@@ -151,6 +154,95 @@
 //!
 //! No image read shows when that code runs. So the capture gives the sizes
 //! only at the kernel's own calls; see [`GAME_OS_VIRTUAL_UART_PARAM_CALLS`].
+//!
+//! # Setting a parameter of a port
+//!
+//! The handler of hypercall 164 [OFW-4.93 lv1 a:0x2F4100] gives r3, r4
+//! and r5 to the worker [OFW-4.93 lv1 a:0x2F4190-0x2F419C]. It returns
+//! the worker's r3 [OFW-4.93 lv1 a:0x2F41A4] [OFW-4.93 lv1 a:0x2F4208],
+//! and writes no return slot. The vector's entry zeroes the return slots
+//! [OFW-4.93 lv1 a:0x0C08], so r4 to r10 return 0.
+//!
+//! The worker [OFW-4.93 lv1 a:0x2F3C0C] does these steps in this order:
+//! 1. It refuses r3 above [`VIRTUAL_UART_PORT_MAX`]
+//!    [OFW-4.93 lv1 a:0x2F3C0C] [OFW-4.93 lv1 a:0x2F3C30].
+//! 2. It reads the port's endpoint from the slot of r3 in the table at
+//!    +152 of the virtual UART object [OFW-4.93 lv1 a:0x2F3C34-0x2F3CB8].
+//!    It refuses a slot with no endpoint [OFW-4.93 lv1 a:0x2F3CF4-0x2F3CF8].
+//! 3. It refuses r4 above [`VIRTUAL_UART_SET_PARAM_MAX`]
+//!    [OFW-4.93 lv1 a:0x2F3CFC-0x2F3D08] [OFW-4.93 lv1 a:0x2F3DF0-0x2F3E04].
+//! 4. For the mask, it refuses r5 above [`VIRTUAL_UART_INTERRUPT_MASK_MAX`].
+//! 5. It stores r5 in the endpoint's field of r4; see
+//!    [`VIRTUAL_UART_PARAM_TX_TRIGGER`] for the fields.
+//! 6. It calls each listener in the list at +48 of the endpoint
+//!    [OFW-4.93 lv1 a:0x2F3D70-0x2F3DC4], and returns 0
+//!    [OFW-4.93 lv1 a:0x2F3DC8-0x2F3DCC].
+//!
+//! The endpoint constructor sets the three fields to 0
+//! [OFW-4.93 lv1 a:0x2F1864] [OFW-4.93 lv1 a:0x2F18D4-0x2F18DC]. The
+//! image read has no other store to the three fields of an endpoint.
+//! `get_virtual_uart_param` reads them for the parameters 0 to 2
+//! [OFW-4.93 lv1 a:0x2F3670] [OFW-4.93 lv1 a:0x2F36F4]
+//! [OFW-4.93 lv1 a:0x2F3748]. The port function can put a new endpoint in
+//! the port's slot, as the section on the parameters of a port gives. So
+//! the three values of a port can return to 0 at a time that no image
+//! read shows.
+//!
+//! # The interrupt status
+//!
+//! The port function adds a listener to the endpoint that it puts in a
+//! port's slot [OFW-4.93 lv1 a:0x2F1A50-0x2F1A70]. The listener holds the
+//! virtual UART object and the status function
+//! [OFW-4.93 lv1 a:0x2F0F18-0x2F0F94] [OFW-4.93 lv1 a:0x3588C0]
+//! [OFW-4.93 lv1 a:0x349908]. The method that the worker calls
+//! [OFW-4.93 lv1 a:0x3625F0-0x362604] [OFW-4.93 lv1 a:0x3495A8] calls the
+//! status function with the object and the endpoint
+//! [OFW-4.93 lv1 a:0x2F0AF4-0x2F0B38].
+//!
+//! The list at +48 of an endpoint holds only this listener:
+//! - The port function's call is the only call of the listener's builder
+//!   in the image read, and no word of the image holds the builder's
+//!   descriptor [OFW-4.93 lv1 a:0x349728].
+//! - The builder claims the slot at +160 of the endpoint. When the slot
+//!   holds a listener, it removes the new listener from the list again
+//!   [OFW-4.93 lv1 a:0x2F0FBC-0x2F1058].
+//! - The other builders of the same form add their listener to an object
+//!   that they make, and not to an endpoint
+//!   [OFW-4.93 lv1 a:0x209E5C-0x209ED4] [OFW-4.93 lv1 a:0x22E0B4-0x22E12C]
+//!   [OFW-4.93 lv1 a:0x2F55D8-0x2F5668].
+//!
+//! The status function [OFW-4.93 lv1 a:0x2F20E4] acts only when the
+//! port's slot holds the endpoint [OFW-4.93 lv1 a:0x2F2128-0x2F2140]. It
+//! sets these bits of the status:
+//! - 1 when the endpoint has a peer with a reference, and the doubleword
+//!   at +120 of the peer is not above the transmit trigger
+//!   [OFW-4.93 lv1 a:0x2F21E0-0x2F2204] [OFW-4.93 lv1 a:0x2F2380-0x2F2384];
+//! - 2 when the buffer size less the doubleword at +120 of the endpoint
+//!   is not above the receive trigger
+//!   [OFW-4.93 lv1 a:0x2F2208-0x2F2210] [OFW-4.93 lv1 a:0x2F233C-0x2F2348];
+//! - 4 when the endpoint has no peer with a reference
+//!   [OFW-4.93 lv1 a:0x2F21B0-0x2F21C8] [OFW-4.93 lv1 a:0x2F21E8]
+//!   [OFW-4.93 lv1 a:0x2F23A4];
+//! - 8 when the endpoint has a peer with a reference
+//!   [OFW-4.93 lv1 a:0x2F21F4-0x2F21FC]. No mask that lv1 accepts holds
+//!   this bit.
+//!
+//! The function then does one of these steps:
+//! - When the byte at +128 of the endpoint is 0, and the status and the
+//!   mask share a bit, it sets the port's shadow bit, as the section on
+//!   the shadow gives [OFW-4.93 lv1 a:0x2F217C-0x2F2184]
+//!   [OFW-4.93 lv1 a:0x2F221C-0x2F2278]. It gives the outlet to the event
+//!   function when the count becomes 1
+//!   [OFW-4.93 lv1 a:0x2F227C-0x2F2280] [OFW-4.93 lv1 a:0x2F2394-0x2F239C].
+//! - Otherwise it clears the port's shadow bit, only when the bit is set
+//!   [OFW-4.93 lv1 a:0x2F22DC-0x2F2334].
+//!
+//! So a call that leaves the mask at 0 sets no shadow bit, and changes no
+//! byte while the shadow is 0. A call that leaves a mask other than 0 can
+//! raise the port's interrupt. Whether it does depends on the peer and on
+//! the doublewords at +120, which change with the port's traffic. The
+//! kernel sets such a mask on each of its ports; see
+//! [`VIRTUAL_UART_PORT_MASK_CAPTURE`].
 
 use crate::hw::ppu_mmu::SMALL_PAGE_LOG2;
 
@@ -461,6 +553,93 @@ pub fn is_game_os_virtual_uart_param_call(firmware: &str, sc: u64, param: u64) -
         .any(|call| call.firmware == firmware && call.sc == sc && call.param == param)
 }
 
+/// The handler of hypercall 164 in one firmware's lv1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VirtualUartSetParamHandler {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The address of the `set_virtual_uart_param` handler.
+    pub handler: u32,
+}
+
+/// Each firmware whose lv1 image shows the handler, ascending.
+///
+/// The address is the entry of hypercall 164 in the live 4.93 hypercall
+/// table ([`super::table::LIVE_TABLE_HANDLERS`]).
+pub const VIRTUAL_UART_SET_PARAM_HANDLERS: &[VirtualUartSetParamHandler] =
+    &[VirtualUartSetParamHandler {
+        firmware: "4.93",
+        handler: 0x2F4100,
+    }];
+
+/// The handler of the firmware version `firmware`, or `None` when no lv1
+/// image read shows it.
+pub fn virtual_uart_set_param_handler(
+    firmware: &str,
+) -> Option<&'static VirtualUartSetParamHandler> {
+    VIRTUAL_UART_SET_PARAM_HANDLERS
+        .iter()
+        .find(|handler| handler.firmware == firmware)
+}
+
+/// The parameter id of the port's transmit trigger, `PARAM_TX_TRIGGER` in
+/// Linux `drivers/ps3/ps3-vuart.c`.
+///
+/// The worker stores r5 for this id at +136 of the endpoint
+/// [OFW-4.93 lv1 a:0x2F3D0C-0x2F3D4C].
+pub const VIRTUAL_UART_PARAM_TX_TRIGGER: u64 = 0;
+
+/// The parameter id of the port's receive trigger, `PARAM_RX_TRIGGER` in
+/// Linux `drivers/ps3/ps3-vuart.c`.
+///
+/// The worker stores r5 for this id at +144 of the endpoint
+/// [OFW-4.93 lv1 a:0x2F3CFC-0x2F3D00] [OFW-4.93 lv1 a:0x2F3E58-0x2F3E94].
+pub const VIRTUAL_UART_PARAM_RX_TRIGGER: u64 = 1;
+
+/// The parameter id of the port's interrupt mask, `PARAM_INTERRUPT_MASK`
+/// in Linux `drivers/ps3/ps3-vuart.c`.
+///
+/// The worker stores r5 for this id at +152 of the endpoint
+/// [OFW-4.93 lv1 a:0x2F3DF0-0x2F3DF4] [OFW-4.93 lv1 a:0x2F3F4C-0x2F3F8C].
+pub const VIRTUAL_UART_PARAM_INTERRUPT_MASK: u64 = 2;
+
+/// The largest parameter id that `set_virtual_uart_param` sets. The
+/// worker refuses an r4 above 2, unsigned
+/// [OFW-4.93 lv1 a:0x2F3CFC-0x2F3D08] [OFW-4.93 lv1 a:0x2F3DF0-0x2F3DF8].
+pub const VIRTUAL_UART_SET_PARAM_MAX: u64 = VIRTUAL_UART_PARAM_INTERRUPT_MASK;
+
+/// The largest interrupt mask. The worker refuses an r5 with a bit above
+/// bit 2 for the mask [OFW-4.93 lv1 a:0x2F3F40-0x2F3F48]. The status
+/// bits that a mask can match are 1, 2 and 4; see [`crate::lv1::uart`].
+pub const VIRTUAL_UART_INTERRUPT_MASK_MAX: u64 = 7;
+
+/// The r3 of `set_virtual_uart_param` for a port that lv1 does not hold:
+/// `LV1_NO_ENTRY` (-6), with r3 marked in the high word
+/// [OFW-4.93 lv1 a:0x2F4038-0x2F4044].
+///
+/// The worker returns this r3 in these cases:
+/// - r3 is above [`VIRTUAL_UART_PORT_MAX`];
+/// - the table holds no endpoint for r3.
+pub const SET_VIRTUAL_UART_PARAM_NO_PORT_R3: u64 = 0x0000_0001_FFFF_FFFA;
+
+/// The r3 of `set_virtual_uart_param` for a parameter id above
+/// [`VIRTUAL_UART_SET_PARAM_MAX`]: `LV1_NO_ENTRY` (-6), with r4 marked in
+/// the high word [OFW-4.93 lv1 a:0x2F3DF8-0x2F3E04].
+pub const SET_VIRTUAL_UART_PARAM_NO_PARAM_R3: u64 = 0x0000_0002_FFFF_FFFA;
+
+/// The r3 of `set_virtual_uart_param` for a mask above
+/// [`VIRTUAL_UART_INTERRUPT_MASK_MAX`]: `LV1_ILLEGAL_PARAMETER_VALUE`
+/// (-17), with r5 marked in the high word
+/// [OFW-4.93 lv1 a:0x2F40EC-0x2F40F8].
+pub const SET_VIRTUAL_UART_PARAM_MASK_R3: u64 = 0x0000_0004_FFFF_FFEF;
+
+/// The console capture of the interrupt mask that the 4.93 kernel keeps
+/// for each of its ports.
+///
+/// The path is relative to the workspace root. Its README gives the
+/// method and the kernel addresses.
+pub const VIRTUAL_UART_PORT_MASK_CAPTURE: &str = "tests/micro/lv2_vuart_port_mask";
+
 #[cfg(test)]
 #[path = "tests/uart_tests.rs"]
 mod tests;
@@ -476,3 +655,11 @@ mod param_tests;
 #[cfg(test)]
 #[path = "tests/uart_param_console_tests.rs"]
 mod param_console_tests;
+
+#[cfg(test)]
+#[path = "tests/uart_set_param_tests.rs"]
+mod set_param_tests;
+
+#[cfg(test)]
+#[path = "tests/uart_set_param_console_tests.rs"]
+mod set_param_console_tests;

@@ -57,9 +57,11 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
 /// - no source gives the port r3 at `firmware`;
-/// - r4 is a parameter other than the two buffer sizes, because those
-///   values change with the port's traffic or with
-///   `set_virtual_uart_param`, which CellGov does not answer;
+/// - r4 is a parameter other than the two buffer sizes, because no
+///   capture gives lv1's value of another parameter. lv1 reads the
+///   triggers and the mask from the port's endpoint, but its own code can
+///   put a new endpoint, whose values are 0, in the port's slot at a time
+///   that no image read shows;
 /// - the call is not the GameOS kernel's call for that buffer size, at
 ///   its `sc` address, because no source gives the size at another time.
 pub(crate) fn get_param(

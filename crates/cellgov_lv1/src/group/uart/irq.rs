@@ -98,8 +98,8 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 ///
 /// The answer clears r5 to r10 and writes 0 to the 32 bytes of the
 /// bitmap. lv1 copies its shadow there, and the shadow is 0 because no
-/// call that CellGov answers sets an endpoint's interrupt mask. For the
-/// same reason lv1 raises no event on the outlet. The answer carries the
+/// call that CellGov answers sets an endpoint's interrupt mask to a value
+/// other than 0. For the same reason lv1 raises no event on the outlet. The answer carries the
 /// outlet with no connection, and the interrupt configuration. The
 /// hypervisor keeps both.
 ///

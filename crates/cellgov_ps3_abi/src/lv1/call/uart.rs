@@ -1,5 +1,15 @@
 //! The numbers of the virtual UART hypercalls.
 
+/// `set_virtual_uart_param`: three inputs and no output.
+/// - r3 is the number of a port of the partition's virtual UART.
+/// - r4 is the id of the port's parameter.
+/// - r5 is the parameter's new value.
+///
+/// Linux `drivers/ps3/ps3-vuart.c` makes the call in this form. The lv1
+/// handler [OFW-4.93 lv1 a:0x2F4100] reads the inputs in this form; see
+/// [`crate::lv1::uart`].
+pub const SET_VIRTUAL_UART_PARAM: u64 = 164;
+
 /// `get_virtual_uart_param`: two inputs and one output.
 /// - r3 is the number of a port of the partition's virtual UART.
 /// - r4 is the id of the port's parameter.
