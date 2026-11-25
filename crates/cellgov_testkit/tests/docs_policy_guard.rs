@@ -10,6 +10,8 @@
 //!   track. The trees below are the ones a clone cannot populate:
 //!   nothing describes how, so a pointer into one dangles for every
 //!   public reader.
+//! - No tracked text file names a decision record by number. The
+//!   records live in an untracked tree, so the number also dangles.
 //! - A backticked `cellgov_<name>` in a doc comment names a workspace
 //!   crate, so no doc still names a crate after its rename or removal.
 
@@ -368,6 +370,46 @@ fn cites_untracked_tree(line: &str) -> Option<&'static str> {
     })
 }
 
+/// Whether a line names a decision record by number: `ADR` or `ADRs`,
+/// then an optional space, then an optional hyphen or `#`, then digits,
+/// as a whole word.
+fn names_a_decision_record(line: &str) -> bool {
+    line.match_indices("ADR").any(|(at, _)| {
+        let before = line[..at].chars().next_back();
+        if before.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return false;
+        }
+        let rest = &line[at + "ADR".len()..];
+        let rest = rest.strip_prefix('s').unwrap_or(rest);
+        let rest = rest.strip_prefix(' ').unwrap_or(rest);
+        let rest = rest.strip_prefix(['-', '#']).unwrap_or(rest);
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        let after = rest.as_bytes().get(digits);
+        digits > 0 && !after.is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')
+    })
+}
+
+/// Each line of `files` that `finding` flags, as `path:line  finding`,
+/// sorted.
+fn flagged_lines(
+    root: &Path,
+    files: &[PathBuf],
+    finding: impl Fn(&str) -> Option<String>,
+) -> Vec<String> {
+    let mut flagged = Vec::new();
+    for file in files {
+        let text = read(file);
+        for (n, line) in text.lines().enumerate() {
+            if let Some(found) = finding(line) {
+                let shown = file.strip_prefix(root).unwrap_or(file);
+                flagged.push(format!("  {}:{}  {found}\n", shown.display(), n + 1));
+            }
+        }
+    }
+    flagged.sort();
+    flagged
+}
+
 /// The guards whose own subject is a rule over source text. Each one
 /// spells out the shapes it rejects, so the rule it defines does not
 /// apply to it.
@@ -569,6 +611,28 @@ fn the_tree_matcher_needs_a_path_boundary() {
 }
 
 #[test]
+fn the_decision_record_matcher_needs_a_whole_word() {
+    for hit in [
+        "ADR 0022",
+        "ADR-9",
+        "ADRs 0020",
+        "see ADR 0009, point 3",
+        "ADR 22",
+        "(ADR 0022)",
+        "ADR-0022: the rule",
+        "ADR#22",
+        "ADR #22",
+    ] {
+        assert!(names_a_decision_record(hit), "{hit:?} must match");
+    }
+    for miss in [
+        "ADRESS", "MADR 2", "_ADR 1", "adr0", "ADR", "ADRX 12", "ADR #", "ADR 12a", "ADR 7_",
+    ] {
+        assert!(!names_a_decision_record(miss), "{miss:?} must not match");
+    }
+}
+
+#[test]
 fn every_untracked_tree_is_still_ignored() {
     let gitignore = read(&workspace_root().join(".gitignore"));
     let rules: Vec<&str> = gitignore.lines().map(str::trim).collect();
@@ -766,21 +830,34 @@ fn no_tracked_text_cites_a_path_git_does_not_track() {
         "gate went vacuous: only {} text file(s) walked",
         files.len()
     );
-    let mut violations = Vec::new();
-    for file in &files {
-        let text = read(file);
-        for (n, line) in text.lines().enumerate() {
-            if let Some(tree) = cites_untracked_tree(line) {
-                let shown = file.strip_prefix(&root).unwrap_or(file);
-                violations.push(format!("  {}:{}  cites {tree}\n", shown.display(), n + 1));
-            }
-        }
-    }
-    violations.sort();
+    let violations = flagged_lines(&root, &files, |line| {
+        cites_untracked_tree(line).map(|tree| format!("cites {tree}"))
+    });
     assert!(
         violations.is_empty(),
         "{} line(s) point a reader at a path git does not track. State the fact inline and \
          delete the pointer:\n{}",
+        violations.len(),
+        violations.concat()
+    );
+}
+
+#[test]
+fn no_tracked_text_names_a_decision_record_by_number() {
+    let root = workspace_root();
+    let files = tracked_text_files(&root);
+    assert!(
+        files.len() >= MIN_TEXT_FILES,
+        "gate went vacuous: only {} text file(s) walked",
+        files.len()
+    );
+    let violations = flagged_lines(&root, &files, |line| {
+        names_a_decision_record(line).then(|| "names a decision record by number".to_string())
+    });
+    assert!(
+        violations.is_empty(),
+        "{} line(s) name a decision record by number, which a public reader cannot open. \
+         State the rule inline and delete the number:\n{}",
         violations.len(),
         violations.concat()
     );

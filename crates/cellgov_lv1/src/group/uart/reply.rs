@@ -58,8 +58,8 @@ pub(super) const IDENTITY_PART: &str =
 ///
 /// The value is synthetic: the 24 ASCII bytes of the label
 /// `CellGov synthetic random`. It is never a draw of lv1, and no
-/// operator can change it. ADR 0022 point 3 gives the rule for
-/// hypervisor entropy.
+/// operator can change it. CellGov serves random bytes that lv1 draws as
+/// one committed synthetic value, so a run reproduces on every machine.
 pub(super) const SYNTHETIC_RANDOM_DATA: [u8; DISPATCHER_RANDOM_DATA_BYTES] =
     *b"CellGov synthetic random";
 

@@ -42,7 +42,7 @@ impl Question {
         Self::ConversionDenormalInput,
     ];
 
-    /// The stable name the vector list and ADR 0009 use.
+    /// The stable name of this question, the same as its serialized form.
     pub fn id(self) -> &'static str {
         match self {
             Self::EstimateTables => "estimate-tables",
