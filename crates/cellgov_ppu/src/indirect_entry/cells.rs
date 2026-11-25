@@ -141,10 +141,10 @@ impl CellWrite {
 /// - each other move into a register writes a part of cell 10;
 /// - each word of [`flag_writes`].
 ///
-/// For an FXM without exactly one bit set, the PPE writes only the
-/// leftmost field that FXM selects, and no field for an FXM of 0, on each
-/// such FXM that the reference console ran. So an `mtocrf` leaves each
-/// field that FXM does not select unchanged.
+/// The reference console ran `mtocrf` with FXM values that do not have
+/// exactly one bit set. On each, the PPE wrote only the leftmost field
+/// that FXM selects, and no field for an FXM of 0. So an `mtocrf` leaves
+/// each field that FXM does not select unchanged.
 ///
 /// [PPC-Book1 p:124 s:5.1.1] When FXM has exactly one bit set, `mtocrf` places RS into CR field n; otherwise the contents of CR are undefined.
 /// [PPC-Book1 p:32 s:3.2.2] An `mtspr` to XER sets SO and OV from the values that it supplies.
@@ -393,8 +393,8 @@ impl FlagBits {
 
 /// The lost mark of each cell, for the scan of the code constants.
 ///
-/// Each mark is stepped, because a move out can take only a part of the
-/// value. The scan keeps no array while no cell holds a mark.
+/// The scan steps each mark, because a move out can take only a part of
+/// the value. The scan keeps no array while no cell holds a mark.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(super) struct CellMarks(Option<Box<[Option<Origins>; CELL_COUNT]>>);
 

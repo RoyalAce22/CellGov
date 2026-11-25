@@ -6,6 +6,11 @@ use cellgov_ppu::differential::{
     PpuStateSnapshot,
 };
 
+use cellgov_event::UnitId;
+use cellgov_ppu::decode::decode;
+use cellgov_ppu::exec::{execute, ExecuteVerdict};
+use cellgov_ppu::state::PpuState;
+use cellgov_ppu::store_buffer::StoreBuffer;
 use cellgov_testkit::console_cases::{Case, Reg, Run, PROFILE};
 
 /// `<probe>/<profile>`, the capture id the differential report prints.
@@ -33,6 +38,40 @@ pub fn cellgov_after(case: &Case, index: usize) -> Result<PpuStateSnapshot, Box<
         (s, mem.bytes) = execute_state_in(w, &s, mem.base, mem.bytes)?;
     }
     Ok(s)
+}
+
+/// The address of the first word of a [`run_with_branches`] run.
+pub const RUN_BASE: u64 = 0x1_0000;
+
+/// The state after `case`'s words run from [`RUN_BASE`]. Each branch moves the
+/// PC, and the run stops when the PC leaves the words.
+pub fn run_with_branches(case: &Case, index: usize) -> PpuState {
+    const BASE: u64 = RUN_BASE;
+    let mut s = PpuState::new();
+    case.initial(index, 0).apply(&mut s);
+    s.pc = BASE;
+    let end = BASE + 4 * case.words.len() as u64;
+    for _ in 0..4 * case.words.len() {
+        if !(BASE..end).contains(&s.pc) {
+            return s;
+        }
+        let word = case.words[((s.pc - BASE) / 4) as usize];
+        let insn = decode(word).unwrap_or_else(|e| panic!("{}: {e}", case.id));
+        let verdict = execute(
+            &insn,
+            &mut s,
+            UnitId::new(0),
+            &[],
+            &mut Vec::new(),
+            &mut StoreBuffer::new(),
+        );
+        match verdict {
+            ExecuteVerdict::Continue => s.pc += 4,
+            ExecuteVerdict::Branch => {}
+            other => panic!("{}: {other:?} at {:#x}", case.id, s.pc),
+        }
+    }
+    panic!("{}: the words did not run to their end", case.id)
 }
 
 /// Replay `case` against the console's `run`: the differential case

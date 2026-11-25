@@ -64,7 +64,7 @@ fn data_sites(named: &[u64]) -> Vec<(u64, Option<u16>)> {
 /// [PPC-Book3 p:30 s:4.2.6.2] The offset real mode mechanism compares EA bits 2:63 with the RMLR limit and ORs them with the RMOR offset.
 /// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00.
 #[test]
-fn an_absolute_bc_in_named_data_brings_a_lost_r0_to_the_mtlr_at_its_real_alias() {
+fn an_absolute_bc_in_named_data_to_the_real_alias_of_an_mtlr_leaves_every_site_unresolved() {
     assert_eq!(
         crate::decode::decode(CONN),
         Ok(PpuInstruction::Bc {

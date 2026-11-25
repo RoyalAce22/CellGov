@@ -7,6 +7,7 @@ use cellgov_ps3_abi::hw::ppc_isa::PPC_BO_BIT2;
 
 use super::cells::{cell_writes, read_cells, Cells};
 use super::constants::{ctr_flow_spr_move, never_falls_through, GprStep, SprMove, Step, Value};
+use super::fp_vector::{address_into_vector, cr_writes, vector_at_r1, Access, VECTOR_SPAN};
 use super::reach::Reach;
 use super::slot_set::{Slot, SlotSet};
 use super::toc::FunctionSteps;
@@ -387,6 +388,40 @@ impl SlotCopies {
         loaded
     }
 
+    /// Whether a byte of `slot` holds a byte of a copy.
+    fn holds_copy(&self, (offset, width): Slot) -> bool {
+        let end = offset + i64::from(width);
+        self.lost.overlaps(offset, end)
+            || self
+                .known
+                .keys()
+                .any(|&(held, held_width)| held < end && offset < held + i64::from(held_width))
+    }
+
+    /// Writes some bytes of `slot`, which the flow cannot place, with a
+    /// copy that the scan cannot prove when `lost` is set.
+    ///
+    /// The store removes no slot, because the flow cannot tell which bytes
+    /// it writes. Each slot with constants that it can write a byte of then
+    /// holds a copy that the scan cannot prove.
+    fn store_within(&mut self, (offset, width): Slot, lost: bool) {
+        let end = offset + i64::from(width);
+        let mut written = Vec::new();
+        self.known.retain(|&(held, held_width), _| {
+            let apart = end <= held || held + i64::from(held_width) <= offset;
+            if !apart {
+                written.push((held, held_width));
+            }
+            apart
+        });
+        for slot in written {
+            self.lost.insert(slot);
+        }
+        if lost {
+            self.lost.insert((offset, width));
+        }
+    }
+
     /// Writes `slot` with `copy`, or with a value that holds no copy when
     /// `copy` is `None`.
     ///
@@ -474,6 +509,11 @@ struct CtrState {
     /// scan cannot prove. A cell keeps no constant, so a copy with
     /// constants that the scan knows also sets it.
     moved: Cells,
+    /// Whether an FPR, a VR, FPSCR or VSCR can hold a part of a copy.
+    ///
+    /// One mark covers each of these registers and keeps no constant. So a
+    /// store of any FPR or VR writes a copy that the scan cannot prove.
+    fp_vector: bool,
 }
 
 impl CtrState {
@@ -503,7 +543,9 @@ impl CtrState {
         let lr = self.lr.join(&other.lr);
         let moved = !other.moved.without(self.moved).is_empty();
         self.moved = self.moved.union(other.moved);
-        self.slots.join(&other.slots) || ctr || copies || lr || moved
+        let fp_vector = other.fp_vector && !self.fp_vector;
+        self.fp_vector |= other.fp_vector;
+        self.slots.join(&other.slots) || ctr || copies || lr || moved || fp_vector
     }
 
     /// The copies in the registers and in the stack slots after the word
@@ -527,6 +569,16 @@ impl CtrState {
     /// each slot. [`Self::lr_after`] gives LR, and [`Self::moved_after`]
     /// gives the cells.
     ///
+    /// These words set the mark of the FPRs and the VRs:
+    /// - a floating-point or vector load that reads a byte of a slot that
+    ///   holds a copy;
+    /// - a vector word that places bits of its EA into a VR, when a GPR of
+    ///   the EA holds a copy.
+    ///
+    /// No word clears the mark. A floating-point or vector store writes a
+    /// copy that the scan cannot prove while the mark is set, and else a
+    /// value that holds no copy.
+    ///
     /// [PPC-Book1 p:82 s:3.3.13] `mflr` and `mfctr`, forms of `mfspr`, copy LR or CTR into RT.
     fn after(&self, decoded: &PpuInstruction) -> Self {
         let mut copied: Vec<(u8, Ctr)> = match *decoded {
@@ -543,9 +595,16 @@ impl CtrState {
             },
         };
         let mut slots = self.slots.clone();
+        let mut fp_vector =
+            self.fp_vector || address_into_vector(decoded) & self.copies.mask() != 0;
         let access = StackAccess::of(decoded);
         if let Some(access) = &access {
-            self.stack_step(access, &mut slots, &mut copied);
+            fp_vector |= self.stack_step(access, &mut slots, &mut copied);
+        }
+        match vector_at_r1(decoded) {
+            Some(Access::Load) => fp_vector |= self.slots.holds_copy(VECTOR_SPAN),
+            Some(Access::Store) => slots.store_within(VECTOR_SPAN, self.fp_vector),
+            None => {}
         }
         let written = surely_written_gprs(decoded);
         let mut copies = self.copies.clone();
@@ -572,6 +631,7 @@ impl CtrState {
             slots,
             lr: self.lr_after(decoded),
             moved: self.moved_after(decoded),
+            fp_vector,
         }
     }
 
@@ -618,33 +678,49 @@ impl CtrState {
     /// of a cell from no copy clears the cell.
     ///
     /// A copy with constants that the scan knows also sets a cell. The
-    /// image need not name such a constant, for example a part of CTR
-    /// that a load takes back from the stack, so the bound does not hold
-    /// it as an entry.
+    /// image need not name such a constant, so the bound does not hold it
+    /// as an entry. An example is a part of CTR that a load gets again
+    /// from the stack.
+    ///
+    /// While the mark of the FPRs and the VRs is set, each CR field that a
+    /// word sets from these registers, as [`cr_writes`] gives, also holds
+    /// a copy. A write of such a field clears no cell.
     ///
     /// [PPC-Book1 p:81 s:3.3.13] `mtspr` copies RS into the SPR that its SPR field names.
     fn moved_after(&self, decoded: &PpuInstruction) -> Cells {
         let copies = self.copies.mask();
-        cell_writes(decoded, ctr_flow_spr_move(decoded))
+        let moved = cell_writes(decoded, ctr_flow_spr_move(decoded))
             .iter()
             .fold(self.moved, |moved, write| {
                 let set = write.gprs & copies != 0 || self.moved.meets(write.from);
                 moved.written(write, set)
-            })
+            });
+        if self.fp_vector {
+            moved.union(cr_writes(decoded))
+        } else {
+            moved
+        }
     }
 
     /// Writes into `slots` each slot that the store `access` writes, or
     /// adds to `copied` the copy that the load `access` gives each GPR.
+    ///
+    /// Returns whether a floating-point load reads a byte of a copy. A
+    /// floating-point store writes a copy that the scan cannot prove while
+    /// the mark of the FPRs and the VRs is set.
     fn stack_step(
         &self,
         access: &StackAccess,
         slots: &mut SlotCopies,
         copied: &mut Vec<(u8, Ctr)>,
-    ) {
+    ) -> bool {
+        let mut fp_vector = false;
         for part in &access.parts {
             match (part.gpr, access.load) {
-                (None, Load::None) => slots.store(part.slot, None),
-                (None, _) => {}
+                (None, Load::None) => {
+                    slots.store(part.slot, self.fp_vector.then(Ctr::lost).as_ref());
+                }
+                (None, _) => fp_vector |= self.slots.holds_copy(part.slot),
                 (Some(gpr), Load::None) => {
                     let copy = self.copies.get(gpr).map(|copy| part.stored(copy));
                     slots.store(part.slot, copy.as_ref());
@@ -654,6 +730,7 @@ impl CtrState {
                 }
             }
         }
+        fp_vector
     }
 }
 
@@ -669,6 +746,8 @@ struct Returned {
     lr: bool,
     /// The cells of [`CtrState::moved`] that hold a copy.
     moved: Cells,
+    /// Whether the mark of [`CtrState::fp_vector`] is set.
+    fp_vector: bool,
 }
 
 impl Returned {
@@ -681,12 +760,14 @@ impl Returned {
         let grew = gprs & !self.gprs != 0
             || !slots.is_subset(&self.slots)
             || (lr && !self.lr)
-            || !brought.moved.without(self.moved).is_empty();
+            || !brought.moved.without(self.moved).is_empty()
+            || (brought.fp_vector && !self.fp_vector);
         if grew {
             self.gprs |= gprs;
             self.slots = self.slots.widened(&slots, &SLOT_REACH);
             self.lr |= lr;
             self.moved = self.moved.union(brought.moved);
+            self.fp_vector |= brought.fp_vector;
         }
         grew
     }
@@ -697,6 +778,7 @@ impl Returned {
         CtrState {
             lr: if self.lr { Ctr::lost() } else { Ctr::default() },
             moved: self.moved,
+            fp_vector: self.fp_vector,
             ..CtrState::lost_copies(self.gprs, &self.slots)
         }
     }
@@ -808,10 +890,21 @@ impl StackAccess {
     /// [PPC-Book1 p:38 s:3.3.2] `lwa` loads the word at EA and extends its sign into RT.
     /// [PPC-Book1 p:40 s:3.3.3] A store writes no GPR, and its update form writes the EA into RA.
     /// [PPC-Book1 p:46 s:3.3.5] `lmw` and `stmw` load or store the low-order words of the GPRs from RT or RS through 31.
+    /// [PPC-Book1 p:104 s:4.6.2] `lfs` loads the word at EA = (RA|0) + D, converted to double format, into FRT.
+    /// [PPC-Book1 p:105 s:4.6.2] `lfd` loads the doubleword at EA = (RA|0) + D into FRT.
     /// [PPC-Book1 p:104 s:4.6.2] `lfsu` loads an FPR and places the EA into RA.
     /// [PPC-Book1 p:105 s:4.6.2] `lfdu` loads an FPR and places the EA into RA.
     /// [PPC-Book1 p:107 s:4.6.3] `stfs` stores a word at EA.
     /// [PPC-Book1 p:108 s:4.6.3] `stfd` stores a doubleword at EA.
+    ///
+    /// An indexed floating-point load or store with RA at 0 and RB at 1
+    /// has EA = (r1), so it reads or writes the slot at 0 from r1.
+    ///
+    /// [PPC-Book1 p:104 s:4.6.2] `lfsx` loads the word at EA = (RA|0) + (RB) into FRT.
+    /// [PPC-Book1 p:105 s:4.6.2] `lfdx` loads the doubleword at EA = (RA|0) + (RB) into FRT.
+    /// [PPC-Book1 p:107 s:4.6.3] `stfsx` stores FRS in single format into the word at EA = (RA|0) + (RB).
+    /// [PPC-Book1 p:108 s:4.6.3] `stfdx` stores FRS into the doubleword at EA = (RA|0) + (RB).
+    /// [PPC-Book1 p:109 s:4.6.3] `stfiwx` stores FRS 32:63 into the word at EA = (RA|0) + (RB).
     fn of(decoded: &PpuInstruction) -> Option<Self> {
         use PpuInstruction as I;
         let (load, ra, imm, width, gpr, update) = match *decoded {
@@ -826,7 +919,9 @@ impl StackAccess {
             I::Lwa { rt, ra, imm } => (Load::Sign, ra, imm, 4, Some(rt), false),
             I::Ld { rt, ra, imm } => (Load::Zero, ra, imm, 8, Some(rt), false),
             I::Ldu { rt, ra, imm } => (Load::Zero, ra, imm, 8, Some(rt), true),
+            I::Lfs { ra, imm, .. } => (Load::Zero, ra, imm, 4, None, false),
             I::Lfsu { ra, imm, .. } => (Load::Zero, ra, imm, 4, None, true),
+            I::Lfd { ra, imm, .. } => (Load::Zero, ra, imm, 8, None, false),
             I::Lfdu { ra, imm, .. } => (Load::Zero, ra, imm, 8, None, true),
             I::Stb { rs, ra, imm } => (Load::None, ra, imm, 1, Some(rs), false),
             I::Stbu { rs, ra, imm } => (Load::None, ra, imm, 1, Some(rs), true),
@@ -840,6 +935,12 @@ impl StackAccess {
             I::Stfsu { ra, imm, .. } => (Load::None, ra, imm, 4, None, true),
             I::Stfd { ra, imm, .. } => (Load::None, ra, imm, 8, None, false),
             I::Stfdu { ra, imm, .. } => (Load::None, ra, imm, 8, None, true),
+            I::Lfsx { ra: 0, rb: 1, .. } => (Load::Zero, 1, 0, 4, None, false),
+            I::Lfdx { ra: 0, rb: 1, .. } => (Load::Zero, 1, 0, 8, None, false),
+            I::Stfsx { ra: 0, rb: 1, .. } | I::Stfiwx { ra: 0, rb: 1, .. } => {
+                (Load::None, 1, 0, 4, None, false)
+            }
+            I::Stfdx { ra: 0, rb: 1, .. } => (Load::None, 1, 0, 8, None, false),
             I::Lmw { rt, ra, imm } => return Self::multiple(Load::Zero, rt, ra, imm),
             I::Stmw { rs, ra, imm } => return Self::multiple(Load::None, rs, ra, imm),
             I::Lswi { rt, ra, nb } => return Self::string(Load::Zero, rt, ra, nb),
@@ -938,7 +1039,9 @@ impl StackAccess {
 /// - a stack slot at a constant offset from r1;
 /// - LR, from an `mtlr` into a `bclr` or an `mflr`;
 /// - the cells of CR, XER and the SPRs of [`ctr_flow_spr_move`], which
-///   keep each copy as one that the scan cannot prove.
+///   keep each copy as one that the scan cannot prove;
+/// - one mark for the FPRs, the VRs, FPSCR and VSCR, which also keeps
+///   each copy as one that the scan cannot prove.
 ///
 /// The word after a call gets these copies:
 /// - each copy before the call, because its routine can return the
@@ -1029,7 +1132,8 @@ impl<'a> CtrFlow<'a> {
     /// injected slots back at new offsets, one move at a time. So the flow
     /// keeps the slots as [`SlotSet::widened`] gives them. The set grows at
     /// most 32 times for the GPRs, once for LR, once for each of the 11
-    /// cells, and at most four times for each width
+    /// cells, once for the mark of the FPRs and the VRs, and at most four
+    /// times for each width
     /// and residue of a slot in [`SLOT_REACH`]. An `lmw` or an `stmw` near
     /// the top of the displacements can put a slot past the end of
     /// [`SLOT_REACH`], and each such slot can add one more growth. The
@@ -1115,7 +1219,9 @@ impl<'a> CtrFlow<'a> {
             let lr = state.lr.join(&copies.lr);
             let moved = !copies.moved.without(state.moved).is_empty();
             state.moved = state.moved.union(copies.moved);
-            gprs || lr || moved || grew
+            let fp_vector = copies.fp_vector && !state.fp_vector;
+            state.fp_vector |= copies.fp_vector;
+            gprs || lr || moved || fp_vector || grew
         } else {
             state.join(copies)
         };
@@ -1174,6 +1280,7 @@ impl<'a> CtrFlow<'a> {
                 state.lr.clone()
             },
             moved: state.moved,
+            fp_vector: state.fp_vector,
         })
     }
 
@@ -1185,8 +1292,9 @@ impl<'a> CtrFlow<'a> {
     /// word that does not decode passes no state, as the scan of the code
     /// constants forgets each constant there. A call passes to its target
     /// a CTR that no word of the scan writes, and no copy in a GPR, a slot
-    /// or LR. It passes the cells of [`CtrState::moved`], because CR, XER
-    /// and the SPRs keep their values across the branch.
+    /// or LR. It passes the cells of [`CtrState::moved`] and the mark of
+    /// [`CtrState::fp_vector`]. CR, XER, the SPRs, the FPRs and the VRs keep
+    /// their values across the branch.
     fn steps(
         &self,
         position: (usize, usize),
@@ -1209,6 +1317,7 @@ impl<'a> CtrFlow<'a> {
                 CtrState {
                     ctr,
                     moved: after.moved,
+                    fp_vector: after.fp_vector,
                     ..CtrState::default()
                 }
             } else {

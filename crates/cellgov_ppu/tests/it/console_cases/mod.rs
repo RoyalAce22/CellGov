@@ -20,12 +20,12 @@ pub use cellgov_testkit::console_cases::{
     capture, parse_table, probe_dir, table, Capture, Case, Run,
 };
 pub use render::render;
-pub use replay::{cellgov_after, replay, varies};
+pub use replay::{cellgov_after, replay, run_with_branches, varies, RUN_BASE};
 
 /// The table-driven probes, each with its own `cases.tsv`.
 /// `ppu_reference_vectors` takes its table from the `cellgov_fuzz`
 /// module `ppu_documented`, which replays its capture.
-pub const PROBES: [&str; 131] = [
+pub const PROBES: [&str; 132] = [
     "ppu_int_edges",
     "ppu_vmx_float_cr6",
     "ppu_vmx_float_arith",
@@ -157,4 +157,5 @@ pub const PROBES: [&str; 131] = [
     "ppu_may_trap_lfdu_m1",
     "ppu_may_trap_stfsu_m2",
     "ppu_may_trap_stfdu_m3",
+    "ppu_branch_keeps_fpr_vr",
 ];

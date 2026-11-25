@@ -7,6 +7,7 @@ mod console_lv1_sc_return_registers;
 mod console_lv2_span_shm_buffers;
 mod console_ppu_addc_xer;
 mod console_ppu_alignment;
+mod console_ppu_branch_keeps_fpr_vr;
 mod console_ppu_code_call_raw_spu;
 mod console_ppu_code_patch;
 mod console_ppu_cr_spr_moves;

@@ -78,14 +78,21 @@
 //!   with an SRR0 that can hold a constant the scan dropped.
 //!
 //! [`CtrFlow`] gives the paths that bring CTR to a `bcctr`, and the paths
-//! that bring a copy of CTR in LR to a `bclr`: an `mtlr` puts a copy into
-//! LR, and an `mflr` takes it back out. The flow keeps a cell for each CR
-//! field, for XER\[CA\], for XER\[OV\] and XER\[SO\], and one cell for the
-//! SPRs that it does not follow on their own. A call passes these cells
-//! into its routine. A word that sets a bit of XER or a CR field from a
-//! copy sets the cell of that bit or field. A copy that comes out of a
-//! cell is one that the scan cannot prove. [`JoinFlow`]
-//! gives the constants that the paths to a branch target bring in the
+//! that bring a copy of CTR in LR to a `bclr`. An `mtlr` puts a copy into
+//! LR, and an `mflr` copies it from LR into a GPR.
+//!
+//! The flow keeps a cell for each CR field, for XER\[CA\], for XER\[OV\]
+//! and XER\[SO\], and one cell for the SPRs that it does not follow on
+//! their own. A call passes these cells into its routine. A word that
+//! sets a bit of XER or a CR field from a copy sets the cell of that bit
+//! or field. A copy that comes out of a cell is one that the scan cannot
+//! prove.
+//!
+//! The flow also keeps one mark for the FPRs, the VRs, FPSCR and VSCR. A
+//! floating-point or vector load of a copy sets it. A floating-point or
+//! vector store then writes a copy that the scan cannot prove.
+//!
+//! [`JoinFlow`] gives the constants that the paths to a branch target bring in the
 //! GPRs and in LR. These limits apply to it:
 //! - it does not follow a call into its routine;
 //! - it keeps at most 16 constants of one register at a branch target,
@@ -178,6 +185,7 @@ mod bound;
 mod cells;
 mod constants;
 mod ctr_flow;
+mod fp_vector;
 mod join_flow;
 mod lost;
 mod progression;
@@ -254,3 +262,7 @@ mod byte_load_tests;
 #[cfg(test)]
 #[path = "../tests/indirect_entry_cells_console_tests.rs"]
 mod cells_console_tests;
+
+#[cfg(test)]
+#[path = "../tests/indirect_entry_fp_vector_console_tests.rs"]
+mod fp_vector_console_tests;

@@ -282,6 +282,16 @@ fn cr_writers() -> Vec<u32> {
             ra: 0,
             rb: 3,
         }),
+        word(I::Stwcx {
+            rs: 5,
+            ra: 3,
+            rb: 5,
+        }),
+        word(I::Stwcx {
+            rs: 5,
+            ra: 3,
+            rb: 3,
+        }),
     ]
 }
 
@@ -291,9 +301,9 @@ fn cr_writers() -> Vec<u32> {
 /// [PPC-Book1 p:82 s:3.3.13] `mfspr` of XER places XER into RT.
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
 #[test]
-fn a_bctr_of_cr_or_xer_read_after_a_compare_or_record_of_a_lost_gpr_leaves_every_site_unresolved() {
+fn a_bctr_of_cr_or_xer_read_after_a_flag_write_of_a_lost_gpr_leaves_every_site_unresolved() {
     let writers = cr_writers();
-    assert_eq!(writers.len(), 11);
+    assert_eq!(writers.len(), 13);
     for writer in writers {
         let words = after_loop(&[writer, word(I::Mfcr { rt: 4 }), mtctr(4), bctr()]);
         assert_eq!(sites(VECTOR, &words), EVERY_UNRESOLVED, "{writer:08x}");
@@ -341,8 +351,8 @@ fn a_bctr_of_a_known_gpr_through_a_carry_or_a_compare_after_the_loop_keeps_the_s
 
 /// r4 holds a copy of the CTR constant 0x5000, so the constant scan marks
 /// no GPR. The compare or the carry puts a part of the copy into the
-/// cell of its CR field or of XER\[CA\], and the copy that comes back out
-/// is one that the scan cannot prove.
+/// cell of its CR field or of XER\[CA\]. The scan cannot prove the copy
+/// that the `mfcr` or `mfxer` reads from that cell.
 ///
 /// [PPC-Book1 p:82 s:3.3.13] `mfctr`, a form of `mfspr`, copies CTR into RT.
 /// [PPC-Book1 p:60 s:3.3.9] A compare sets the CR field BF from a comparison of RA with SI, UI or RB.

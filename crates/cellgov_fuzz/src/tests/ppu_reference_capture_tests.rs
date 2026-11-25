@@ -59,14 +59,17 @@ fn the_converter_skips_only_other_units_and_the_cases_it_cannot_represent() {
     //   whose address move is an `or`; the four invalid or unmapped lswx
     //   forms; and the lwz and stw cases at a null or low address. Each
     //   one ended the console run.
-    // - Flow: the two bcctr probes that move SPRs around a branch.
+    // - OtherUnit: among others, the three cases of the branch probe whose
+    //   one word is a branch.
+    // - Flow: the two bcctr probes that move SPRs around a branch, and the
+    //   six cases of the branch probe that move LR or CTR around a branch.
     assert_eq!(
         skipped,
         [
-            (Skip::OtherUnit, 37),
+            (Skip::OtherUnit, 40),
             (Skip::WritesUnrecorded, 234),
             (Skip::Ended, 11),
-            (Skip::Flow, 2)
+            (Skip::Flow, 8)
         ]
     );
 }

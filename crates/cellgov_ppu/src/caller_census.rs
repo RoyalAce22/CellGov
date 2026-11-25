@@ -1113,3 +1113,7 @@ mod hypercall_ctr_unwritten_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_ctr_copy_unfollowed_tests.rs"]
 mod hypercall_ctr_copy_unfollowed_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_ctr_fp_vector_copy_tests.rs"]
+mod hypercall_ctr_fp_vector_copy_tests;

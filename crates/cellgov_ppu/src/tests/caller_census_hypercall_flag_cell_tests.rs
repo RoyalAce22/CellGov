@@ -192,7 +192,8 @@ fn a_write_of_each_bit_of_a_cell_from_an_unmarked_gpr_clears_its_mark() {
 }
 
 /// The PPE places the whole CR into RT for each FXM of `mfocrf`, so an
-/// `mfocrf` of cr0 also takes the mark of cr7.
+/// `mfocrf` of cr0 also takes the mark of cr7. The console capture of the
+/// `ppu_ocrf_fxm` probe shows this for `mfocrf r3, 0x80`.
 ///
 /// [PPC-Book1 p:60 s:3.3.9] A compare sets the CR field BF from a comparison of RA with SI, UI or RB, and copies XER\[SO\] into bit 3 of the field.
 /// [PPC-Book1 p:124 s:5.1.1] `mtocrf` and `mfocrf` move one CR field between CR and a GPR.
@@ -221,6 +222,14 @@ fn a_bctr_of_cr_after_a_cr_field_move_of_a_lost_mark_leaves_every_site_unresolve
             word(I::Cror {
                 bt: 2,
                 ba: 30,
+                bb: 8,
+            }),
+        ],
+        [
+            cmpd(7, 3),
+            word(I::Cror {
+                bt: 2,
+                ba: 8,
                 bb: 30,
             }),
         ],
@@ -356,7 +365,7 @@ fn a_return_brings_only_the_ctr_flow_cells_that_its_routine_set() {
 
 /// The `blt` skips the compare, so the `blr` first returns with r6 and no
 /// cell. The `b` brings the cell of cr7 back to the `blr`, which the flow
-/// has stepped, with each other register and slot unchanged. The word
+/// already stepped, with each other register and slot unchanged. The word
 /// after the call gets the cell only when that second return counts as a
 /// change.
 ///
@@ -372,7 +381,7 @@ fn a_second_return_that_brings_only_a_new_ctr_flow_cell_reaches_the_word_after_t
 }
 
 /// The first `blt` skips to the compare of the lost r3, whose `b` brings
-/// the mark of cr7 back to the second `blt`, which the flow has walked,
+/// the mark of cr7 back to the second `blt`, which the flow already walked,
 /// with each other register unchanged. The `mfcr` at the next join word
 /// gets the mark only when that join counts as a change.
 ///

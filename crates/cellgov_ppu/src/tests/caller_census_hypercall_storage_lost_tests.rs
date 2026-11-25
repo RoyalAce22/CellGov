@@ -90,11 +90,8 @@ fn a_bctr_of_a_load_after_a_store_of_a_built_constant_keeps_the_sites_resolved()
 }
 
 /// The 17 paths bring one constant in r3 more than the join keeps, and
-/// the `std` stores the lost r3. While the census carries no mark through
-/// storage, the `ld` gives r4 no mark and no word takes the drop. A
-/// census that carries the mark gives r4 the drop of the join. Then the
-/// bound of the join rises, the join keeps every constant, and the `std`
-/// stores no lost GPR.
+/// the `std` stores the lost r3. The census carries no mark through
+/// storage, so the `ld` gives r4 no mark and no word takes the drop.
 ///
 /// [PPC-Book1 p:43 s:3.3.3] `std` stores RS into the doubleword at EA.
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
