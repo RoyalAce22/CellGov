@@ -140,6 +140,19 @@
 //! [`super::storage`]. The reply's status and the three words come from
 //! the controller. No lv1 image read gives them.
 //!
+//! # The state after boot
+//!
+//! The capture [`CONTROLLER_QUERY_CAPTURE`] reads the lv1 state that
+//! decides the start of the query for the game OS partition:
+//! - The policy check passes the query. The first record of the table's
+//!   entry 1 matches the partition's `ss.laid` value and passes each
+//!   command.
+//! - The current slot of device 2's ring is ready, and its controller
+//!   is idle.
+//! - Device 2 holds no request tag.
+//!
+//! The capture's README gives lv1's path and each read.
+//!
 //! The 4.93 kernel's call [OFW-4.93 lv2_kernel a:0x80000000000ab390]
 //! passes these inputs
 //! [OFW-4.93 lv2_kernel a:0x80000000000ab36c-0x80000000000ab38c]:
@@ -161,6 +174,11 @@
 use super::status::{
     LV1_BUSY, LV1_DENIED_BY_POLICY, LV1_ILLEGAL_PARAMETER_VALUE, LV1_NO_ENTRY, LV1_WRONG_STATE,
 };
+
+/// The console capture of lv1's policy table and of device 2's command
+/// ring, controller and request tags, relative to the workspace root.
+pub const CONTROLLER_QUERY_CAPTURE: &str =
+    "tests/micro/lv1_storage_controller_query/peek/cech20-cex-493";
 
 /// The handler of hypercall 248 in one firmware's lv1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -254,3 +272,7 @@ pub const CONTROLLER_BUSY_COMPLETION: u64 = 0x0200_0000;
 #[cfg(test)]
 #[path = "tests/storage_command_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/storage_command_console_tests.rs"]
+mod console_tests;

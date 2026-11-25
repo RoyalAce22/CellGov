@@ -183,6 +183,12 @@ fn tagged_answer(status: i64, tag: u8) -> HypercallDisposition {
 ///   the device waits. So the dispatcher starts the command in the call.
 /// - The controller takes the query.
 ///
+/// The capture
+/// [`CONTROLLER_QUERY_CAPTURE`](cellgov_ps3_abi::lv1::storage_command::CONTROLLER_QUERY_CAPTURE)
+/// shows this state after boot: device 2 holds no request tag, the
+/// policy passes the query, and the ring and the controller are idle.
+/// It does not show which partitions opened device 2.
+///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
 /// - no source gives the bus table for `firmware`;
