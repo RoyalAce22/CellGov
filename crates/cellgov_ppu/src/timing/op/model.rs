@@ -105,31 +105,36 @@ pub(crate) enum Kind {
     Plain,
     /// Holds its units for this many cycles after it issues.
     Unpipelined(u16),
-    /// Reads `len` bytes at `ea`. When `tail` is `Some`, the bytes from
-    /// its offset on are at its real address.
+    /// Reads `len` bytes at effective address `ea` and real address `ra`.
+    /// When `tail` is `Some`, the bytes from its offset on are at its real
+    /// address.
     Load {
         ea: u64,
+        ra: u64,
         len: u8,
         class: LoadClass,
         tail: Option<Tail>,
     },
-    /// Writes `len` bytes at `ea`. When `tail` is `Some`, the bytes from
-    /// its offset on are at its real address. A conditional store's CR
-    /// field waits for the line's ownership.
+    /// Writes `len` bytes at effective address `ea` and real address `ra`.
+    /// When `tail` is `Some`, the bytes from its offset on are at its real
+    /// address. A conditional store's CR field waits for the line's
+    /// ownership.
     Store {
         ea: u64,
+        ra: u64,
         len: u8,
         conditional: bool,
         tail: Option<Tail>,
     },
-    /// Zeroes the line at `ea` in the L2 and drops it from the L1.
-    ZeroLine { ea: u64 },
-    /// Reloads the line at `ea` into the L2 and the L1.
-    Touch { ea: u64 },
-    /// Drops the line at `ea` from the L1 and the L2.
-    Flush { ea: u64 },
-    /// Writes the line at `ea` back and keeps it valid.
-    StoreBack { ea: u64 },
+    /// Zeroes the line at `ra` in the L2 and drops it from the L1.
+    ZeroLine { ea: u64, ra: u64 },
+    /// Reloads the line at `ra` into the L2, and into the L1 set of `ea`.
+    /// `ra` is `None` for a touch that the PPE cancels.
+    Touch { ea: u64, ra: Option<u64> },
+    /// Drops the line at `ra` from the L1 and the L2.
+    Flush { ea: u64, ra: u64 },
+    /// Writes the line at `ra` back and keeps it valid.
+    StoreBack { ea: u64, ra: u64 },
     /// A branch with this `BO` field.
     ///
     /// `taken` is its direction from the state it executes from. A fused
@@ -206,20 +211,44 @@ impl Op {
         }
     }
 
-    /// Replaces each storage address the op reads or writes, and the tail
-    /// of a load or store, with what `to` gives.
+    /// Replaces the real address of each storage access the op makes, and
+    /// the tail of a load or store, with what `to` gives.
     ///
-    /// `to` takes the address, the access's length and whether the access
-    /// stores. A cache-line operation has a length of 1 and keeps no tail.
+    /// `to` takes the effective address, the access's length and whether
+    /// the access stores. A cache-line operation has a length of 1 and
+    /// keeps no tail. The effective addresses stay. A cancelled touch
+    /// stays cancelled.
     pub(crate) fn map_storage(&mut self, to: impl Fn(u64, u8, bool) -> (u64, Option<Tail>)) {
         match &mut self.kind {
-            Kind::Load { ea, len, tail, .. } => (*ea, *tail) = to(*ea, *len, false),
-            Kind::Store { ea, len, tail, .. } => (*ea, *tail) = to(*ea, *len, true),
-            Kind::Touch { ea } | Kind::Flush { ea } | Kind::StoreBack { ea } => {
-                *ea = to(*ea, 1, false).0;
+            Kind::Load {
+                ea, ra, len, tail, ..
+            } => (*ra, *tail) = to(*ea, *len, false),
+            Kind::Store {
+                ea, ra, len, tail, ..
+            } => (*ra, *tail) = to(*ea, *len, true),
+            Kind::Touch { ea, ra: Some(ra) } => *ra = to(*ea, 1, false).0,
+            Kind::Flush { ea, ra } | Kind::StoreBack { ea, ra } => {
+                *ra = to(*ea, 1, false).0;
             }
-            Kind::ZeroLine { ea } => *ea = to(*ea, 1, true).0,
+            Kind::ZeroLine { ea, ra } => *ra = to(*ea, 1, true).0,
             _ => {}
+        }
+    }
+
+    /// The effective address of the op's touch, or `None` when the op is
+    /// no touch or a cancelled touch.
+    pub(crate) fn touch_ea(&self) -> Option<u64> {
+        match self.kind {
+            Kind::Touch { ea, ra: Some(_) } => Some(ea),
+            _ => None,
+        }
+    }
+
+    /// Cancel the op's touch, so that it reloads no line. An op that is no
+    /// touch stays as it is.
+    pub(crate) fn cancel_touch(&mut self) {
+        if let Kind::Touch { ra, .. } = &mut self.kind {
+            *ra = None;
         }
     }
 

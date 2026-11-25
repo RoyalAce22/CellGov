@@ -35,8 +35,8 @@
 //! [`PPU_BRANCH_MISS_CYCLES`]: k::PPU_BRANCH_MISS_CYCLES
 //! [`PPU_FETCH_AHEAD_INSTRUCTIONS`]: k::PPU_FETCH_AHEAD_INSTRUCTIONS
 
-use super::cache::{Caches, Level};
-use super::op::{is_fpr, is_vr, unit, Barrier, Kind, LoadClass, Op, Tail, Target, NO_REG, REGS};
+use super::cache::{Caches, Level, Operand};
+use super::op::{is_fpr, is_vr, unit, Barrier, Kind, LoadClass, Op, Target, NO_REG, REGS};
 use super::predictor::Predictor;
 use cellgov_exec::PpeIssuePressure;
 use cellgov_ps3_abi::hw::ppc_isa::PPC_BO_ALWAYS;
@@ -620,6 +620,12 @@ impl PpeTiming {
         self.core.floor
     }
 
+    /// The tag-only caches.
+    #[cfg(test)]
+    pub(crate) fn caches(&self) -> &super::cache::Caches {
+        &self.tables.caches
+    }
+
     /// The scalar state, for a batch to restore after a fault.
     pub(crate) fn core(&self) -> Core {
         self.core
@@ -787,8 +793,8 @@ impl PpeTiming {
             }
             t = drained;
         }
-        if let Kind::Store { ea, len, .. } = op.kind {
-            t = queue_room(&self.tables, t, ea, len);
+        if let Kind::Store { ra, len, .. } = op.kind {
+            t = queue_room(&self.tables, t, ra, len);
         }
         let s = &self.shared_stall;
         let own_vscr = op.kind == Kind::VscrWrite || (fenced && c.vsu_fence > c.floor);
@@ -1081,17 +1087,20 @@ impl PpeTiming {
         match op.kind {
             Kind::Load {
                 ea,
+                ra,
                 len,
                 class,
                 tail,
-            } => self.load(exec, op, ea, len, tail, class),
-            Kind::Store { ea, len, tail, .. } => {
-                queue_store(&mut self.tables, exec, op, ea, len, tail);
+            } => self.load(exec, op, Operand { ea, ra, len, tail }, class),
+            Kind::Store {
+                ea, ra, len, tail, ..
+            } => {
+                queue_store(&mut self.tables, exec, op, Operand { ea, ra, len, tail });
             }
-            Kind::ZeroLine { ea } => self.tables.caches.zero(ea),
-            Kind::Touch { ea } => self.tables.caches.touch(t, ea),
-            Kind::Flush { ea } => self.tables.caches.flush(t, ea),
-            Kind::StoreBack { ea } => self.tables.caches.store_back(t, ea),
+            Kind::ZeroLine { ra, .. } => self.tables.caches.zero(ra),
+            Kind::Touch { ea, ra } => self.tables.caches.touch(t, ea, ra),
+            Kind::Flush { ra, .. } => self.tables.caches.flush(t, ra),
+            Kind::StoreBack { ra, .. } => self.tables.caches.store_back(t, ra),
             Kind::Branch {
                 bo,
                 link,
@@ -1258,19 +1267,19 @@ impl PpeTiming {
     /// - a store to the same bytes still in the store queue.
     ///
     /// A load that waits for such a store also holds the issue of the
-    /// instructions after it.
-    fn load(&mut self, t: u64, op: &Op, ea: u64, len: u8, tail: Option<Tail>, class: LoadClass) {
+    /// instructions after it. The store queue and the sector check use
+    /// the real address.
+    fn load(&mut self, t: u64, op: &Op, at: Operand, class: LoadClass) {
         let tables = &mut *self.tables;
-        let level = tables
-            .caches
-            .load(ea, len, tail, class == LoadClass::Reserve);
+        let level = tables.caches.load(at, class == LoadClass::Reserve);
         let arrival = match level {
             Level::Memory => 0,
-            Level::L1 | Level::L2 => tables.caches.arrival(t, ea, len, tail),
+            Level::L1 | Level::L2 => tables.caches.arrival(t, at),
         };
         // The load starts when a flush or store-back still busy with its
         // lines finishes.
-        let start = t.max(tables.caches.busy(t, ea, len, tail));
+        let start = t.max(tables.caches.busy(t, at));
+        let Operand { ra, len, .. } = at;
         let hit_lat = match class {
             LoadClass::Fixed | LoadClass::Reserve => k::PPU_LOAD_FX_USE_CYCLES,
             LoadClass::Float => k::PPU_FP_LOAD_LATENCY_CYCLES,
@@ -1281,7 +1290,7 @@ impl PpeTiming {
             Level::L2 => Some(k::PPU_L2_LOAD_USE_CYCLES),
             Level::Memory => Some(k::PPU_MEMORY_LOAD_USE_CYCLES),
         };
-        let end = ea.wrapping_add(u64::from(len.max(1)));
+        let end = ra.wrapping_add(u64::from(len.max(1)));
         // [CBE-Handbook p:762 s:A.7.4] a load that hits a store still in
         // the store queue waits until the store has written its data into
         // the cache, and is then recycled.
@@ -1300,7 +1309,7 @@ impl PpeTiming {
         let forwarded = tables
             .stores
             .iter()
-            .filter(|s| s.mask & bytes_in(s.block, ea, end) != 0)
+            .filter(|s| s.mask & bytes_in(s.block, ra, end) != 0)
             .map(|s| s.done)
             .filter(|done| *done > t)
             .max()
@@ -1325,7 +1334,7 @@ impl PpeTiming {
         // [CBE-Handbook p:730 s:A.1.3.2] an integer load across a 32-byte
         // sector is flushed, refetched and split into microcode, so the
         // instructions after it issue again behind it.
-        let split = sector_split_cycles(op, ea, len, class);
+        let split = sector_split_cycles(op, ra, len, class);
         if split != 0 && start + split > c.floor {
             c.floor = start + split;
             c.older = None;
@@ -1515,10 +1524,10 @@ fn store_wait(op: &Op) -> u64 {
 /// for a younger `mfvscr`.
 #[inline]
 fn note_store_done(c: &mut Core, op: &Op, t: u64, last: u64) {
-    let Kind::Store { ea, len, .. } = op.kind else {
+    let Kind::Store { ra, len, .. } = op.kind else {
         return;
     };
-    let dwords = (ea >> 3, ea.wrapping_add(u64::from(len.max(1)) - 1) >> 3);
+    let dwords = (ra >> 3, ra.wrapping_add(u64::from(len.max(1)) - 1) >> 3);
     let pending = c.store_done > t;
     let same = dwords.0 <= c.store_dwords.1 && c.store_dwords.0 <= dwords.1;
     let queued = match (pending, same) {

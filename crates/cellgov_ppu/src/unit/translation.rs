@@ -25,6 +25,10 @@ use crate::timing::Tail;
 #[path = "tests/page_cross_line_tests.rs"]
 mod page_cross_line_tests;
 
+#[cfg(test)]
+#[path = "tests/l1_effective_index_tests.rs"]
+mod l1_effective_index_tests;
+
 /// The region label a view gives when it refuses a store to a read-only
 /// page.
 pub(super) const PAGE_PROTECTION: &str = "page protection";
@@ -593,9 +597,13 @@ impl PpuExecutionUnit {
     /// Drop the C writes that the block's searches added after the count
     /// `writes`. The R writes and the group reads stay.
     ///
-    /// The unit drops them for a store that takes the data storage or data
-    /// segment interrupt. The PPE then sets C for no page of the store.
-    /// This includes a page whose part of the operand the PPE permitted.
+    /// The unit drops them for a store that takes one of these interrupts:
+    /// - the data storage or data segment interrupt;
+    /// - the alignment interrupt, when caching-inhibited storage refuses
+    ///   the store at any alignment.
+    ///
+    /// The PPE then sets C for no page of the store. This includes a page
+    /// whose part of the operand the PPE permitted.
     ///
     /// The unit also drops them for an instruction whose batch ends ahead
     /// of it. The instruction runs again in the next batch and writes C
@@ -835,17 +843,20 @@ impl PpuExecutionUnit {
         Ok(((to_ea(start.max(t.ra)), last), (to_ea(lo), piece)))
     }
 
-    /// Move the storage addresses of `ops` from effective to real.
+    /// Give each storage access of `ops` its real address. Each access
+    /// keeps its effective address too.
     ///
     /// The timing model's caches tag lines by real address, so a line
     /// reached through two aliases is one line, and the L2 picks its set
-    /// from the real line. An access whose bytes leave the translation of
-    /// its first byte gets a tail at the real address of the next block.
+    /// from the real line. The L1 picks its set from the effective line.
+    /// An access whose bytes leave the translation of its first byte gets
+    /// a tail at the real address of the next block.
     ///
-    /// An address no cached translation holds keeps its effective address.
-    /// Such an access misses, and the batch classifies its instruction
-    /// again after the refill. Only a touch of a page the batch has not
-    /// translated stays effective.
+    /// An address no cached translation holds keeps its effective address
+    /// as its real address. Such an access misses, and the batch
+    /// classifies its instruction again after the refill. A touch looks
+    /// up its page before this step, so the cache holds the page of each
+    /// touch that reloads a line. A cancelled touch stays cancelled.
     ///
     /// [CBE-Handbook p:135 s:6.1] The L1 data cache has an effective-addressed index and real-addressed tags.
     pub(super) fn real_op_addresses(&self, ops: &mut [crate::timing::Op]) {
@@ -856,9 +867,11 @@ impl PpuExecutionUnit {
 
     /// The real address of the `len` bytes at `ea`, and their tail.
     ///
-    /// The tail is `None` when one translation holds every byte, or when
-    /// the real address of the next block follows the first block's. An
-    /// access whose first byte no translation holds has no tail.
+    /// The tail is `None` in these cases:
+    /// - one translation holds every byte;
+    /// - the real address of the next block follows that of the first
+    ///   block;
+    /// - no translation holds the first byte.
     fn real_operand(&self, ea: u64, len: u8, store: bool) -> (u64, Option<Tail>) {
         let access = if store { Access::Store } else { Access::Load };
         let held = |at: u64| {

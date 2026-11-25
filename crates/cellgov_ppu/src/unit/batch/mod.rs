@@ -7,6 +7,7 @@ mod miss;
 mod regions;
 mod retire;
 mod run;
+mod touch;
 
 pub(super) use decode::{fetch_window, CodeBytes};
 pub(super) use exit::FaultExit;

@@ -6,7 +6,7 @@ use super::exit::{Attempt, FaultExit};
 use super::regions::RegionTable;
 use crate::exec::{PpuFault, PpuInterrupt};
 use crate::instruction;
-use crate::mmu::Access;
+use crate::mmu::{Access, Translation};
 use crate::unit::ppu_unit::PpuExecutionUnit;
 use crate::unit::translation::{RefillStop, CHANGE_UNSET};
 use cellgov_effects::Effect;
@@ -37,6 +37,23 @@ impl PpuExecutionUnit {
         }
         self.follow_translation();
         RegionTable::new(self.translated_views(mem).into_iter())
+    }
+
+    /// Rebuild `regions` from the translations after a refill gave `t`.
+    /// Returns `false`, and leaves `regions` as it is, when the batch ends
+    /// first because `t` aliases real bytes of a buffered store.
+    #[inline]
+    pub(super) fn take_refill<'m>(
+        &self,
+        mem: &'m cellgov_mem::GuestMemory,
+        regions: &mut RegionTable<'m>,
+        t: &Translation,
+    ) -> bool {
+        if self.alias_with_buffered_stores(t) {
+            return false;
+        }
+        *regions = RegionTable::new(self.translated_views(mem).into_iter());
+        true
     }
 
     /// Whether a translating thread's batch ends after `insn`, which
@@ -72,6 +89,8 @@ impl PpuExecutionUnit {
     /// - at the alignment interrupt, when misaligned
     ///   (`refused_at_any_alignment` is false): the R and C writes and the
     ///   group reads;
+    /// - at the alignment interrupt, when `refused_at_any_alignment` is
+    ///   true: the C writes;
     /// - at the data storage or data segment interrupt: the C writes.
     ///
     /// When the batch ends ahead of the instruction, the unit drops the C
@@ -109,13 +128,18 @@ impl PpuExecutionUnit {
                 self.drop_searches(attempt.searches_before);
             }
             // [CBE-Handbook p:90 s:4.2.6.8] The MMU does not update C when the store takes a storage exception.
-            // [PPC-Book3 p:26 s:4.2.1] A storage exception is one that causes, among others, a Data Storage or a Data Segment interrupt.
+            // [PPC-Book3 p:26 s:4.2.1] A storage exception is one that causes, among others, a Data Storage, a Data Segment or an Alignment interrupt.
             // [PPC-Book3 p:43 s:4.9] The part of a crossing operand in each page is a separate access for R and C, and C may be set for a permitted store that is not performed.
+            // [PPC-Book3 p:44 s:4.9] Figure 29 lets an in-order store that is not performed set C, so the PPE handbook decides.
             // The unit reads the handbook's storage access as the whole
             // store, so a page whose part of the operand the table
             // permitted keeps no C write either.
+            // A store that caching-inhibited storage refuses at any
+            // alignment reaches this arm at the alignment interrupt. It is
+            // not misaligned, so its searches keep their R writes.
             Some(
-                PpuInterrupt::DataStorage { store: true, .. }
+                PpuInterrupt::Alignment { store: true, .. }
+                | PpuInterrupt::DataStorage { store: true, .. }
                 | PpuInterrupt::DataSegment { store: true, .. },
             ) => {
                 self.drop_change_writes(attempt.searches_before.0);
@@ -228,10 +252,9 @@ impl PpuExecutionUnit {
             Some(Err(RefillStop::AfterStores)) => return MissStep::EndBatch,
             Some(Ok(t)) => t,
         };
-        if self.alias_with_buffered_stores(&t) {
+        if !self.take_refill(mem, regions, &t) {
             return MissStep::EndBatch;
         }
-        *regions = RegionTable::new(self.translated_views(mem).into_iter());
         if views_hold(regions.as_slice(), ea) {
             return MissStep::Rerun;
         }
@@ -293,13 +316,16 @@ impl PpuExecutionUnit {
 ///   `stvrxl`.
 ///
 /// Such a store that takes the interrupt there is not misaligned, so its
-/// table searches keep their R and C writes. A misaligned `stmw`,
-/// `stwcx.` or `stdcx.` takes its alignment interrupt before any access,
-/// so it makes no search.
+/// table searches keep their R writes and group reads. The interrupt is a
+/// storage exception, so the unit drops their C writes. A misaligned
+/// `stmw`, `stwcx.` or `stdcx.` takes its alignment interrupt before any
+/// access, so it makes no search.
 ///
 /// [CBE-Handbook p:253 s:9.5.8] The scalar instructions take the alignment interrupt for an operand in caching-inhibited storage, aligned or not.
 /// [CBE-Handbook p:290 s:9.10] Table 9-39 gives a VSU store left or right in caching-inhibited storage the alignment interrupt, with no alignment condition.
 /// [CBE-Handbook p:90 s:4.2.6.8] Each table lookup but that of a misaligned caching-inhibited store is nonspeculative, so it sets R whatever interrupt the access takes.
+/// [PPC-Book3 p:26 s:4.2.1] A storage exception is one that causes, among others, an Alignment interrupt.
+/// [CBE-Handbook p:90 s:4.2.6.8] The MMU does not update C when the store takes a storage exception.
 fn refused_at_any_alignment(insn: &instruction::PpuInstruction) -> bool {
     use instruction::PpuInstruction as I;
     matches!(

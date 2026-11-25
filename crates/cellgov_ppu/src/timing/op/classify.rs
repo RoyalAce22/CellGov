@@ -179,9 +179,11 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
             } else {
                 4
             };
+            let ea = ea_x(state, ra, rb);
             one(Op::on(INT_STORE)
                 .kind(Kind::Store {
-                    ea: ea_x(state, ra, rb),
+                    ea,
+                    ra: ea,
                     len,
                     conditional: true,
                     tail: None,
@@ -637,12 +639,13 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
         I::Nop => one(Op::on(unit::FXU)),
         I::Fused(pair) => classify_fused(pair, state),
         I::Consumed => ([none, none], 0),
-        I::Dcbz { ra, rb } => one(Op::on(unit::LSU)
-            .kind(Kind::ZeroLine {
-                ea: ea_x(state, ra, rb),
-            })
-            .base(ra)
-            .index(rb)),
+        I::Dcbz { ra, rb } => {
+            let ea = ea_x(state, ra, rb);
+            one(Op::on(unit::LSU)
+                .kind(Kind::ZeroLine { ea, ra: ea })
+                .base(ra)
+                .index(rb))
+        }
         // [CBE-Handbook p:145 s:6.1.6.1] the load-store unit translates the icbi address; the model
         // issues every cache-block instruction there.
         // [CBE-Handbook p:146 s:6.1.6.2] a TH(0) = '0' form other than
@@ -651,33 +654,37 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
         // `ppu_issue_touch_forms` capture, a dcbt with TH = '1000' or
         // '1010' touches no line. A dcbt with TH = '0001' touches its line
         // as TH = '0000' does.
-        I::Dcbt { ra, rb, th } if th & 0b1000 == 0 => one(Op::on(unit::LSU)
-            .kind(Kind::Touch {
-                ea: ea_x(state, ra, rb),
-            })
-            .base(ra)
-            .index(rb)),
+        I::Dcbt { ra, rb, th } if th & 0b1000 == 0 => {
+            let ea = ea_x(state, ra, rb);
+            one(Op::on(unit::LSU)
+                .kind(Kind::Touch { ea, ra: Some(ea) })
+                .base(ra)
+                .index(rb))
+        }
         // [CBE-Handbook p:145 s:6.1.6.2] dcbtst behaves as dcbt with TH = '0000'.
         // In the `ppu_issue_touch_forms` capture, a dcbtst with TH = '1010'
         // touches its line as TH = '0000' does.
-        I::Dcbtst { ra, rb, .. } => one(Op::on(unit::LSU)
-            .kind(Kind::Touch {
-                ea: ea_x(state, ra, rb),
-            })
-            .base(ra)
-            .index(rb)),
-        I::Dcbf { ra, rb, .. } => one(Op::on(unit::LSU)
-            .kind(Kind::Flush {
-                ea: ea_x(state, ra, rb),
-            })
-            .base(ra)
-            .index(rb)),
-        I::Dcbst { ra, rb } => one(Op::on(unit::LSU)
-            .kind(Kind::StoreBack {
-                ea: ea_x(state, ra, rb),
-            })
-            .base(ra)
-            .index(rb)),
+        I::Dcbtst { ra, rb, .. } => {
+            let ea = ea_x(state, ra, rb);
+            one(Op::on(unit::LSU)
+                .kind(Kind::Touch { ea, ra: Some(ea) })
+                .base(ra)
+                .index(rb))
+        }
+        I::Dcbf { ra, rb, .. } => {
+            let ea = ea_x(state, ra, rb);
+            one(Op::on(unit::LSU)
+                .kind(Kind::Flush { ea, ra: ea })
+                .base(ra)
+                .index(rb))
+        }
+        I::Dcbst { ra, rb } => {
+            let ea = ea_x(state, ra, rb);
+            one(Op::on(unit::LSU)
+                .kind(Kind::StoreBack { ea, ra: ea })
+                .base(ra)
+                .index(rb))
+        }
         I::Icbi { ra, rb }
         | I::Dcbt { ra, rb, .. }
         | I::Dst { ra, rb, .. }

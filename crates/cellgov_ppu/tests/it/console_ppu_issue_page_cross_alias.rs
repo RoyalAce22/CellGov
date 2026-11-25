@@ -2,8 +2,8 @@
 //! `ppu_issue_page_cross_store` and `ppu_issue_page_cross_waits` console
 //! captures.
 //!
-//! Each probe maps one segment at X and at Y = X + 1 MiB, so the page
-//! after X's last page is Y's first page, which maps to the segment's
+//! Each probe maps one segment at X and at Y = X + 1 MiB. The page after
+//! X's last page is then Y's first page, which maps to the segment's
 //! first real page. An `ld` or `std` at the last 4 bytes of X reaches
 //! its second line at that real page, which X + 0 also reaches.
 
@@ -103,7 +103,7 @@ const FLUSH_TOUCH_OTHER_LOAD: &[u32] = &[
     0x7C00_04AC,
     0x4200_FFEC,
 ];
-/// The line r7 holds: one no load of the probes reaches.
+/// The line r7 holds, which no load in the probes reaches.
 const OTHER: u64 = X + 0x100;
 
 /// One probe's capture and the shape of its payload.
@@ -293,7 +293,7 @@ fn cellgov(probe: &Probe) -> Vec<f64> {
         .collect()
 }
 
-/// The largest share of the console's cycles the model may sit from them.
+/// The largest share of the console's cycles that the model may differ by.
 const BAND: f64 = 0.20;
 
 /// The cases the model holds within [`BAND`] of the console, by probe.
@@ -311,10 +311,11 @@ const HELD: [(&Probe, &[usize]); 3] = [
 ///   than the `sync` alone (case 4). The model charges nothing for it.
 /// - `ppu_issue_page_cross_alias` case 5 and `ppu_issue_page_cross_store`
 ///   cases 0, 1, 2 and 4: a store to a line the L2 does not hold makes
-///   the next `sync` wait about 300 cycles on the console, for a crossing
-///   `std` and for a plain `stw` alike. In the model the store puts the
-///   line in the L2 at once and the `sync` does not wait for it. Case 1
-///   also flushes a line the caches do not hold.
+///   the next `sync` wait about 300 cycles on the console. The wait is
+///   the same for a crossing `std` and a plain `stw`. In the model, the
+///   store puts the line in the L2 at once, so the `sync` does not wait.
+///   `ppu_issue_page_cross_store` case 1 also flushes a line the caches
+///   do not hold.
 const DIFFERENT: [(&Probe, &[usize]); 2] = [(&ALIAS, &[2, 5]), (&STORE, &[0, 1, 2, 4])];
 
 #[test]
@@ -333,8 +334,8 @@ fn each_held_case_comes_within_the_band_of_the_console() {
     }
 }
 
-/// The test fails when the model comes within the band of the console.
-/// Then move the case into [`HELD`].
+/// If the model comes within [`BAND`] of a case, move the case into
+/// [`HELD`].
 #[test]
 fn each_other_case_is_a_known_difference_under_the_console() {
     for (probe, cases) in DIFFERENT {

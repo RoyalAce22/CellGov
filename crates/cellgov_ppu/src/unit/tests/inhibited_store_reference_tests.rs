@@ -7,7 +7,10 @@
 //! - the search of the fetch;
 //! - the search of an earlier instruction;
 //! - the search of a store that caching-inhibited storage refuses at any
-//!   alignment.
+//!   alignment, which keeps its R write and drops its C write.
+
+#[path = "inhibited_store_change_tests.rs"]
+mod change;
 
 use crate::mmu::Partition;
 use crate::supervisor::{SlbEntry, SupervisorState};
@@ -52,36 +55,6 @@ fn stw(rs: u32, d: u16, ra: u32) -> u32 {
 
 fn sth(rs: u32, d: u16, ra: u32) -> u32 {
     (44 << 26) | (rs << 21) | (ra << 16) | u32::from(d)
-}
-
-/// `dcbz ra,rb`.
-fn dcbz(ra: u32, rb: u32) -> u32 {
-    (31 << 26) | (ra << 16) | (rb << 11) | (1014 << 1)
-}
-
-/// `stwcx. rs,0,rb`.
-fn stwcx(rs: u32, rb: u32) -> u32 {
-    (31 << 26) | (rs << 21) | (rb << 11) | (150 << 1) | 1
-}
-
-/// `stdcx. rs,0,rb`.
-fn stdcx(rs: u32, rb: u32) -> u32 {
-    (31 << 26) | (rs << 21) | (rb << 11) | (214 << 1) | 1
-}
-
-/// `stmw rs,d(ra)`.
-fn stmw(rs: u32, d: u16, ra: u32) -> u32 {
-    (47 << 26) | (rs << 21) | (ra << 16) | u32::from(d)
-}
-
-/// `stswi rs,ra,nb`.
-fn stswi(rs: u32, ra: u32, nb: u32) -> u32 {
-    (31 << 26) | (rs << 21) | (ra << 16) | (nb << 11) | (725 << 1)
-}
-
-/// `stswx rs,0,rb`.
-fn stswx(rs: u32, rb: u32) -> u32 {
-    (31 << 26) | (rs << 21) | (rb << 11) | (661 << 1)
 }
 
 fn put(mem: &mut GuestMemory, at: u64, bytes: &[u8]) {
@@ -304,48 +277,6 @@ fn a_misaligned_inhibited_load_keeps_the_r_write_and_the_group_read_of_its_searc
     );
 }
 
-/// [CBE-Handbook p:90 s:4.2.6.8] Each table lookup but that of a misaligned caching-inhibited store is nonspeculative, so it sets R whatever interrupt the access takes.
-/// [CBE-Handbook p:90 s:4.2.6.8] A store's lookup sets C = 0 to 1 unless the access takes a storage exception.
-/// [CBE-Handbook p:253 s:9.5.8] A dcbz in caching-inhibited storage takes the alignment interrupt.
-/// [CBE-Handbook p:253 s:9.5.8] An stmw, stswi, stswx, stwcx. or stdcx. operand in caching-inhibited storage takes the alignment interrupt, aligned or not.
-#[test]
-fn an_aligned_store_that_takes_alignment_in_inhibited_storage_keeps_its_r_and_c_writes() {
-    // Each operand starts at page 4's first byte, so none is misaligned.
-    // XER gives the stswx a count of 4 bytes.
-    let page = PAGE_RA | PTE_I | 0b10;
-    let insns = [
-        dcbz(0, 5),
-        stwcx(4, 5),
-        stdcx(4, 5),
-        stmw(30, 0, 5),
-        stswi(4, 5, 4),
-        stswx(4, 5),
-    ];
-    for insn in insns {
-        let mem = memory(&[insn], page, None);
-        let mut unit = kernel_unit();
-        unit.state_mut().set_xer(4);
-        let (r, effects) = run(&mut unit, &mem, 1);
-        let case = format!("insn {insn:#x}");
-        assert_eq!(vector(&r), Some(irq::VECTOR_ALIGNMENT), "{case}");
-        assert_eq!(
-            entry_byte_writes(&effects, PAGE, PTE_R_BYTE),
-            vec![r_byte(page)],
-            "{case}"
-        );
-        assert_eq!(
-            entry_byte_writes(&effects, PAGE, PTE_C_BYTE),
-            vec![c_byte(page)],
-            "{case}"
-        );
-        assert!(
-            table_reads(&effects).contains(&(entry(PAGE), GROUP)),
-            "{case}: {:x?}",
-            table_reads(&effects)
-        );
-    }
-}
-
 /// `stvlx vs,0,rb`, or `stvlxl` with `last`.
 fn stvlx(vs: u32, rb: u32, last: bool) -> u32 {
     let xo = if last { 903 } else { 647 };
@@ -355,8 +286,9 @@ fn stvlx(vs: u32, rb: u32, last: bool) -> u32 {
 /// [CBE-Handbook p:90 s:4.2.6.8] Each table lookup but that of a misaligned caching-inhibited store is nonspeculative, so it sets R whatever interrupt the access takes.
 /// [CBE-Handbook p:90 s:4.2.6.8] A store's lookup sets C = 0 to 1 unless the access takes a storage exception.
 /// [CBE-Handbook p:290 s:9.10] Table 9-39: a VSU store left or right that references caching-inhibited storage takes the alignment interrupt.
+/// [PPC-Book3 p:26 s:4.2.1] A storage exception is one that causes, among others, an Alignment interrupt.
 #[test]
-fn an_aligned_stvlx_that_takes_alignment_in_inhibited_storage_keeps_its_r_and_c_writes() {
+fn an_aligned_stvlx_that_takes_alignment_in_inhibited_storage_keeps_its_r_write_and_no_c_write() {
     // The operand starts at page 4's first byte, so it is quadword
     // aligned and its 16 bytes stay in page 4.
     let page = PAGE_RA | PTE_I | 0b10;
@@ -377,7 +309,7 @@ fn an_aligned_stvlx_that_takes_alignment_in_inhibited_storage_keeps_its_r_and_c_
         );
         assert_eq!(
             entry_byte_writes(&effects, PAGE, PTE_C_BYTE),
-            vec![c_byte(page)],
+            Vec::<u8>::new(),
             "{case}"
         );
     }

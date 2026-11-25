@@ -1,6 +1,6 @@
 //! What the timing model charges a translating thread's load or store
-//! whose bytes cross into a page that maps to a real page not next to
-//! the first page's.
+//! whose bytes cross into the next page. The next page can map to a real
+//! page that does not follow the real page of the first.
 //!
 //! [CBE-Handbook p:135 s:6.1] The L1 data cache has real-addressed tags.
 //!
@@ -16,16 +16,13 @@ use cellgov_event::UnitId;
 /// The page where each crossing access starts, and its real address.
 const PAGE_EA: u64 = 0xC000_4000;
 const PAGE_RA: u64 = 0x6000;
-/// The page after [`PAGE_EA`].
 const NEXT_EA: u64 = PAGE_EA + PAGE;
-/// The real page that follows [`PAGE_RA`]. The old pricing read the
-/// second line of a crossing access here.
 const ADJACENT_RA: u64 = PAGE_RA + PAGE;
 /// A real page that does not follow [`PAGE_RA`].
 const FAR_RA: u64 = 0x9000;
 /// A page that maps to [`ADJACENT_RA`] in every unit.
 const ALIAS_EA: u64 = 0xC000_6000;
-/// A page that maps to a real page no access of the tests reaches.
+/// A page over a real page that no crossing access reaches.
 const OTHER_EA: u64 = 0xC000_7000;
 const OTHER_RA: u64 = 0xB000;
 const PAGE: u64 = 0x1000;
@@ -55,6 +52,7 @@ fn unit(next_ra: u64) -> PpuExecutionUnit {
                 len: PAGE,
                 writable: true,
                 inhibited: false,
+                guarded: false,
                 changed: true,
             },
         );
@@ -190,10 +188,10 @@ fn a_crossing_ld_gets_a_tail_at_the_next_pages_real_address() {
     state.set_gpr(3, NEXT_EA - 4);
     let (mut ops, n) = classify(&ld(), &state);
     unit(FAR_RA).real_op_addresses(&mut ops[..n]);
-    let Kind::Load { ea, len, tail, .. } = ops[0].kind else {
+    let Kind::Load { ra, len, tail, .. } = ops[0].kind else {
         panic!("ld classifies as a load: {:?}", ops[0].kind);
     };
-    assert_eq!((ea, len), (ADJACENT_RA - 4, 8));
+    assert_eq!((ra, len), (ADJACENT_RA - 4, 8));
     assert_eq!(tail, Some(Tail { at: 4, ra: FAR_RA }));
 }
 
@@ -208,6 +206,18 @@ fn a_crossing_ld_whose_next_page_follows_in_real_storage_has_no_tail() {
         "{:?}",
         ops[0].kind
     );
+}
+
+#[test]
+fn an_ld_ending_on_the_last_byte_of_its_page_has_no_tail() {
+    let mut state = PpuState::new();
+    state.set_gpr(3, NEXT_EA - 8);
+    let (mut ops, n) = classify(&ld(), &state);
+    unit(FAR_RA).real_op_addresses(&mut ops[..n]);
+    let Kind::Load { ra, len, tail, .. } = ops[0].kind else {
+        panic!("ld classifies as a load: {:?}", ops[0].kind);
+    };
+    assert_eq!((ra, len, tail), (ADJACENT_RA - 8, 8, None));
 }
 
 #[test]

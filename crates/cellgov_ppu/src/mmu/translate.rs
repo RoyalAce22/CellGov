@@ -37,6 +37,10 @@ pub struct Translation {
     pub writable: bool,
     /// Whether the block is caching-inhibited storage.
     pub inhibited: bool,
+    /// Whether the PPE treats the block as guarded storage.
+    ///
+    /// A cacheable block is never guarded, whatever its entry's G bit.
+    pub guarded: bool,
     /// Whether the block's page table entry has its change bit set.
     ///
     /// A real mode block has no entry and holds `true`.
@@ -234,6 +238,7 @@ fn real_mode(ea: u64, access: Access, sup: &SupervisorState) -> Result<Translati
         len,
         writable: true,
         inhibited: false,
+        guarded: false,
         changed: true,
     })
 }
@@ -301,12 +306,15 @@ fn entry_translation(
     // [PPC-Book3 p:38 s:4.5.3] RA is RPN bits 0:61-p followed by EA bits 64-p:63.
     // [CBE-Handbook p:79 s:4.2.1] Table 4-1: the PPE does not implement RA bits 2:21 and treats them as 0.
     let page_mask = (1u64 << p) - 1;
+    // [CBE-Handbook p:90 s:4.2.6.7] Table 4-4: the PPE implements each cacheable WIMG setting as 0010, so a cacheable access is nonguarded.
+    let inhibited = d1 & PTE_I != 0;
     Ok(Translation {
         ea: ea & !page_mask,
         ra: d1 & PPE_PTE_RPN & !page_mask,
         len: 1 << p,
         writable: allowed == Authority::ReadWrite,
-        inhibited: d1 & PTE_I != 0,
+        inhibited,
+        guarded: inhibited && d1 & PTE_G != 0,
         changed: d1 & PTE_C != 0,
     })
 }

@@ -842,6 +842,7 @@ fn a_store_across_two_pages_has_a_real_piece_in_each() {
                 len: 0x1000,
                 writable: true,
                 inhibited: false,
+                guarded: false,
                 changed: false,
             },
         );
@@ -1171,14 +1172,17 @@ fn a_search_after_ptesync_sees_the_page_table_entry_the_thread_stored() {
 }
 
 /// [CBE-Handbook p:135 s:6.1] The L1 data cache has real-addressed tags, so two effective aliases of one real line are one line.
+///
+/// The two aliases agree in effective address bit 12, so both pick one
+/// L1 set.
 #[test]
 fn a_load_through_a_second_alias_of_a_line_costs_what_a_load_through_the_first_costs() {
-    // lwz r4 from page 1 at DATA_RA, then lwz r6 through r7: page 6, a
+    // lwz r4 from page 1 at DATA_RA, then lwz r6 through r7: page 7, a
     // second alias of DATA_RA, or page 1 again. The addi waits for r6.
     let addi_r8_r6 = (14 << 26) | (8 << 21) | (6 << 16) | 1;
     let cost = |second_ea: u64| {
         let mut mem = memory(&[lwz(4, 0, 5), lwz(6, 0, 7), addi_r8_r6]);
-        map_page(&mut mem, 6, DATA_RA, 0b10);
+        map_page(&mut mem, 7, DATA_RA, 0b10);
         let mut unit = kernel_unit(MSR_SF | MSR_IR | MSR_DR);
         unit.state_mut().set_gpr(5, DATA_EA);
         unit.state_mut().set_gpr(7, second_ea);
@@ -1192,7 +1196,7 @@ fn a_load_through_a_second_alias_of_a_line_costs_what_a_load_through_the_first_c
         assert_eq!(unit.state().gpr[6], 0xDEAD_BEEF);
         r.consumed_cost.raw()
     };
-    assert_eq!(cost(SEGMENT + 0x6000), cost(DATA_EA));
+    assert_eq!(cost(SEGMENT + 0x7000), cost(DATA_EA));
 }
 
 /// `sth rs,d(ra)`.

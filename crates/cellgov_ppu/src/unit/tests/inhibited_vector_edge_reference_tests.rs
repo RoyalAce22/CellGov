@@ -1,7 +1,6 @@
 //! A vector left or right load or store that takes the alignment
 //! interrupt in caching-inhibited storage keeps the R write and the group
-//! read of its table search at any alignment, and a store keeps its C
-//! write too.
+//! read of its table search at any alignment. A store drops its C write.
 
 use crate::mmu::Partition;
 use crate::supervisor::{SlbEntry, SupervisorState};
@@ -32,7 +31,7 @@ const PAGE_D1: u64 = PAGE_RA | PTE_I | 0b10;
 /// Bytes in a group of page table entries.
 const GROUP: u64 = 128;
 
-/// An X-form vector access `vt,0,6` with extended opcode `xo`.
+/// An X-form vector access `v4,0,r6` with extended opcode `xo`.
 fn vx(xo: u32) -> u32 {
     (31 << 26) | (4 << 21) | (6 << 11) | (xo << 1)
 }
@@ -65,19 +64,28 @@ fn map_page(mem: &mut GuestMemory, index: u64, d1: u64) {
 }
 
 /// 512 KB of memory with `insn` at the start of page 0 and page 4 mapped
-/// with [`PAGE_D1`].
-fn memory(insn: u32) -> GuestMemory {
+/// with doubleword 1 `page`.
+fn memory(insn: u32, page: u64) -> GuestMemory {
     let mut mem = GuestMemory::new(0x8_0000);
     map_page(&mut mem, 0, CODE_RA | 0b10);
-    map_page(&mut mem, PAGE, PAGE_D1);
+    map_page(&mut mem, PAGE, page);
     put(&mut mem, CODE_RA, &insn.to_be_bytes());
     mem
 }
 
-/// One batch of one instruction, by a unit at the segment's first word
-/// with relocation, MSR\[VXU\] and MSR\[ME\] on, and r6 at `ea`.
+/// [`run_in`] with page 4 mapped with [`PAGE_D1`].
 fn run_at(insn: u32, ea: u64) -> (ExecutionStepResult, Vec<Effect>) {
-    let mem = memory(insn);
+    run_in(insn, ea, PAGE_D1)
+}
+
+/// One batch of one instruction by a unit with:
+///
+/// - the PC at the segment's first word;
+/// - relocation, MSR\[VXU\] and MSR\[ME\] on;
+/// - r6 at `ea`;
+/// - page 4 mapped with doubleword 1 `page`.
+fn run_in(insn: u32, ea: u64, page: u64) -> (ExecutionStepResult, Vec<Effect>) {
+    let mem = memory(insn, page);
     let mut sup = SupervisorState::new(MSR_SF | MSR_IR | MSR_DR | MSR_ME | MSR_VXU);
     sup.slb[0] = SlbEntry {
         esid_v: SEGMENT | SLB_VALID,
@@ -124,16 +132,20 @@ fn r_byte() -> u8 {
     (PAGE_D1 | PTE_R).to_be_bytes()[PTE_R_BYTE - 8]
 }
 
-/// Byte 15 of page 4's entry after a search writes C.
+/// Byte 15 of page 4's entry with doubleword 1 `page`, after a search
+/// writes C.
 ///
 /// [PPC-Book3 p:2 s:1.3.2] When the processor writes a table field, no other defined field changes.
-fn c_byte() -> u8 {
-    (PAGE_D1 | PTE_C).to_be_bytes()[PTE_C_BYTE - 8]
+fn c_byte(page: u64) -> u8 {
+    (page | PTE_C).to_be_bytes()[PTE_C_BYTE - 8]
 }
 
-/// Asserts that a store at `ea` takes the alignment interrupt and keeps
-/// the R and C writes and the group read of its search.
-fn assert_store_keeps_search(xo: u32, ea: u64) {
+/// Asserts these facts for a store at `ea`:
+/// - in caching-inhibited storage, the store takes the alignment
+///   interrupt, keeps the R write and the group read of its search, and
+///   keeps no C write;
+/// - in cacheable storage, the store retires and keeps its C write.
+fn assert_store_keeps_r_and_drops_c(xo: u32, ea: u64) {
     let (r, effects) = run_at(vx(xo), ea);
     let case = format!("xo {xo} ea {ea:#x}");
     assert_eq!(
@@ -148,30 +160,40 @@ fn assert_store_keeps_search(xo: u32, ea: u64) {
     );
     assert_eq!(
         entry_byte_writes(&effects, PTE_C_BYTE),
-        vec![c_byte()],
+        Vec::<u8>::new(),
         "{case}"
     );
     assert!(reads_group(&effects), "{case}");
+    let cacheable = PAGE_D1 & !PTE_I;
+    let (r, effects) = run_in(vx(xo), ea, cacheable);
+    assert_eq!(r.local_diagnostics.interrupt, None, "{case}: cacheable");
+    assert_eq!(
+        entry_byte_writes(&effects, PTE_C_BYTE),
+        vec![c_byte(cacheable)],
+        "{case}: cacheable"
+    );
 }
 
 /// [CBE-Handbook p:290 s:9.10] Table 9-39: a VSU store left or right that references caching-inhibited storage takes the alignment interrupt.
 /// [CBE-Handbook p:90 s:4.2.6.8] Each table lookup but that of a misaligned caching-inhibited store is nonspeculative, so it sets R whatever interrupt the access takes.
 /// [CBE-Handbook p:90 s:4.2.6.8] A store's lookup sets C = 0 to 1 unless the access takes a storage exception.
+/// [PPC-Book3 p:26 s:4.2.1] A storage exception is one that causes, among others, an Alignment interrupt.
 #[test]
-fn a_stvrx_with_a_nonzero_byte_count_keeps_its_r_and_c_writes_in_inhibited_storage() {
-    // EA 4 bytes into the quadword gives 4 bytes at page 4's first byte.
+fn a_stvrx_with_a_nonzero_byte_count_keeps_its_r_write_and_no_c_write_in_inhibited_storage() {
+    // An EA 4 bytes into the quadword gives 4 bytes at page 4's first byte.
     for xo in [STVRX, STVRXL] {
-        assert_store_keeps_search(xo, PAGE_EA + 4);
+        assert_store_keeps_r_and_drops_c(xo, PAGE_EA + 4);
     }
 }
 
 /// [CBE-Handbook p:290 s:9.10] Table 9-39: a VSU store left or right that references caching-inhibited storage takes the alignment interrupt.
 /// [CBE-Handbook p:90 s:4.2.6.8] Each table lookup but that of a misaligned caching-inhibited store is nonspeculative, so it sets R whatever interrupt the access takes.
 /// [CBE-Handbook p:90 s:4.2.6.8] A store's lookup sets C = 0 to 1 unless the access takes a storage exception.
+/// [PPC-Book3 p:26 s:4.2.1] A storage exception is one that causes, among others, an Alignment interrupt.
 #[test]
-fn a_stvlx_off_a_quadword_boundary_keeps_its_r_and_c_writes_in_inhibited_storage() {
+fn a_stvlx_off_a_quadword_boundary_keeps_its_r_write_and_no_c_write_in_inhibited_storage() {
     for xo in [STVLX, STVLXL] {
-        assert_store_keeps_search(xo, PAGE_EA + 4);
+        assert_store_keeps_r_and_drops_c(xo, PAGE_EA + 4);
     }
 }
 

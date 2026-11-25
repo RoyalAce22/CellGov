@@ -1,0 +1,20 @@
+[test]
+name = "ppu_issue_touch_reload"
+
+# A hardware probe of a second dcbt of a line, sent after eight touches
+# of other lines in its L1 set push the first touch's copy out of the L1
+# and while the first touch still brings the line from memory, timed
+# with mftb before a load of the line. The console capture is the
+# answer; ppu/main.c's header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 96 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 96 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

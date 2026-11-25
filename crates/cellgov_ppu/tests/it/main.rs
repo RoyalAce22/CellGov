@@ -83,6 +83,7 @@ mod console_ppu_issue_store_queue_full;
 mod console_ppu_issue_timing;
 mod console_ppu_issue_touch_flush;
 mod console_ppu_issue_touch_forms;
+mod console_ppu_issue_touch_reload;
 mod console_ppu_issue_units;
 mod console_ppu_issue_viq_depth;
 mod console_ppu_issue_viq_layout;

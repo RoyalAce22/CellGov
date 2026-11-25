@@ -9,6 +9,11 @@
 
 use super::op::Tail;
 use cellgov_ps3_abi::hw::ppu_issue as k;
+use cellgov_ps3_abi::hw::ppu_mmu::SMALL_PAGE_LOG2;
+
+#[cfg(test)]
+#[path = "tests/cancelled_touch_tests.rs"]
+mod cancelled_touch_tests;
 
 /// Where a load found its line. A later variant is farther from the core.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -16,6 +21,51 @@ pub(crate) enum Level {
     L1,
     L2,
     Memory,
+}
+
+/// The `len` bytes a load or store reaches from effective address `ea`
+/// and real address `ra`.
+///
+/// When `tail` is `Some`, the bytes from its offset on are at its real
+/// address. Their effective addresses follow `ea` without a gap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Operand {
+    pub(crate) ea: u64,
+    pub(crate) ra: u64,
+    pub(crate) len: u8,
+    pub(crate) tail: Option<Tail>,
+}
+
+#[cfg(test)]
+impl Operand {
+    /// The `len` bytes at `ea` on a thread that does not translate.
+    pub(crate) const fn untranslated(ea: u64, len: u8) -> Self {
+        Self {
+            ea,
+            ra: ea,
+            len,
+            tail: None,
+        }
+    }
+}
+
+/// One line an access reaches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Line {
+    /// The line number of the effective address, which picks the L1 set.
+    index: u64,
+    /// The line number of the real address, which tags the line in both
+    /// caches and picks its L2 set.
+    real: u64,
+}
+
+impl Line {
+    fn of(ea: u64, ra: u64) -> Self {
+        Self {
+            index: ea / k::PPU_CACHE_LINE_BYTES,
+            real: ra / k::PPU_CACHE_LINE_BYTES,
+        }
+    }
 }
 
 /// A set-associative tag array with tree pseudo-LRU replacement.
@@ -62,11 +112,13 @@ impl<const SETS: usize, const WAYS: usize> Tags<SETS, WAYS> {
         self.valid[set] >> way & 1 != 0
     }
 
+    fn way_of(&self, set: usize, line: u64) -> Option<usize> {
+        (0..WAYS).find(|&w| self.holds(set, w) && self.lines[set][w] == line)
+    }
+
     fn find(&self, line: u64) -> Option<(usize, usize)> {
         let set = Self::set_of(line);
-        (0..WAYS)
-            .find(|&w| self.holds(set, w) && self.lines[set][w] == line)
-            .map(|w| (set, w))
+        self.way_of(set, line).map(|w| (set, w))
     }
 
     /// Point the set's tree away from `way`.
@@ -95,10 +147,10 @@ impl<const SETS: usize, const WAYS: usize> Tags<SETS, WAYS> {
         way
     }
 
-    /// Whether `line` is present; a hit updates the tree.
-    fn lookup(&mut self, line: u64) -> bool {
-        match self.find(line) {
-            Some((set, way)) => {
+    /// Whether `set` holds `line`; a hit updates the tree.
+    fn lookup_in(&mut self, set: usize, line: u64) -> bool {
+        match self.way_of(set, line) {
+            Some(way) => {
                 self.touch(set, way);
                 true
             }
@@ -106,9 +158,13 @@ impl<const SETS: usize, const WAYS: usize> Tags<SETS, WAYS> {
         }
     }
 
-    /// Place `line`, and return the line it evicted.
-    fn fill(&mut self, line: u64) -> Option<u64> {
-        let set = Self::set_of(line);
+    /// Whether `line` is present; a hit updates the tree.
+    fn lookup(&mut self, line: u64) -> bool {
+        self.lookup_in(Self::set_of(line), line)
+    }
+
+    /// Place `line` in `set`, and return the line it evicted.
+    fn fill_in(&mut self, set: usize, line: u64) -> Option<u64> {
         let empty = (!self.valid[set]).trailing_zeros() as usize;
         let way = if empty < WAYS {
             empty
@@ -123,10 +179,19 @@ impl<const SETS: usize, const WAYS: usize> Tags<SETS, WAYS> {
         old
     }
 
+    /// Place `line`, and return the line it evicted.
+    fn fill(&mut self, line: u64) -> Option<u64> {
+        self.fill_in(Self::set_of(line), line)
+    }
+
+    fn drop_way(&mut self, set: usize, way: usize) {
+        self.valid[set] &= !(1 << way);
+        self.modified[set][way] = false;
+    }
+
     fn invalidate(&mut self, line: u64) {
         if let Some((set, way)) = self.find(line) {
-            self.valid[set] &= !(1 << way);
-            self.modified[set][way] = false;
+            self.drop_way(set, way);
         }
     }
 
@@ -148,6 +213,84 @@ impl<const SETS: usize, const WAYS: usize> Tags<SETS, WAYS> {
     fn is_modified(&self, line: u64) -> bool {
         self.find(line)
             .is_some_and(|(set, way)| self.modified[set][way])
+    }
+}
+
+/// The lines of a small page.
+const PAGE_LINES: usize = (1 << SMALL_PAGE_LOG2) / k::PPU_CACHE_LINE_BYTES as usize;
+
+/// The L1 data cache: the effective line picks the set, and the real line
+/// is the tag.
+///
+/// [CBE-Handbook p:137 s:6.1.3.9] The L1 data cache is indexed with effective addresses.
+///
+/// An effective address and its real address agree in the offset of a
+/// small page. So a real line can sit only in the sets that agree with
+/// it in the line bits of that offset: two of the 64 sets. The L1 holds
+/// at most one copy of a real line.
+///
+/// [CBE-Handbook p:137 s:6.1.3.10] Data that two effective addresses alias can be in any of four ways at each of two congruence classes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct L1 {
+    tags: Tags<{ k::PPU_L1D_SETS }, { k::PPU_L1D_WAYS }>,
+}
+
+impl L1 {
+    fn new() -> Self {
+        const {
+            assert!(
+                k::PPU_L1D_SETS.is_multiple_of(PAGE_LINES),
+                "a page offset's line bits pick the low bits of a set"
+            )
+        };
+        Self { tags: Tags::new() }
+    }
+
+    /// The set that the effective line of `line` picks.
+    fn set_of(line: Line) -> usize {
+        (line.index % k::PPU_L1D_SETS as u64) as usize
+    }
+
+    /// The set and the way that hold real line `real`, in any set that
+    /// can hold it.
+    fn find(&self, real: u64) -> Option<(usize, usize)> {
+        let low = (real % PAGE_LINES as u64) as usize;
+        (low..k::PPU_L1D_SETS)
+            .step_by(PAGE_LINES)
+            .find_map(|set| self.tags.way_of(set, real).map(|way| (set, way)))
+    }
+
+    /// Whether the set of `line`'s effective line holds its real line; a
+    /// hit updates the tree. A copy in another set is no hit.
+    fn lookup(&mut self, line: Line) -> bool {
+        self.tags.lookup_in(Self::set_of(line), line.real)
+    }
+
+    /// Place `line` in the set of its effective line.
+    ///
+    /// The L1 first drops the copy of its real line that another set holds.
+    ///
+    /// [CBE-Handbook p:138 s:6.1.3.10] A line found at the other congruence class is invalidated, and the data from the L2 is placed at the congruence class of the effective address.
+    fn fill(&mut self, line: Line) {
+        self.invalidate(line.real);
+        self.tags.fill_in(Self::set_of(line), line.real);
+    }
+
+    /// Drop real line `real` from the set that holds it.
+    fn invalidate(&mut self, real: u64) {
+        if let Some((set, way)) = self.find(real) {
+            self.tags.drop_way(set, way);
+        }
+    }
+
+    /// Drop the copy of `line`'s real line that a set other than its
+    /// effective line's set holds.
+    fn drop_alias(&mut self, line: Line) {
+        if let Some((set, way)) = self.find(line.real) {
+            if set != Self::set_of(line) {
+                self.tags.drop_way(set, way);
+            }
+        }
     }
 }
 
@@ -235,20 +378,20 @@ impl LineCycles {
 /// The L1 data cache and the L2, by 128-byte line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Caches {
-    l1: Tags<{ k::PPU_L1D_SETS }, { k::PPU_L1D_WAYS }>,
+    l1: L1,
     l2: Tags<{ k::PPU_L2_SETS }, { k::PPU_L2_WAYS }>,
-    /// The cycle each touched line arrives.
+    /// The cycle each touched real line arrives.
     touched: LineCycles,
     /// The first cycle the next touch can send its request.
     touch_free: u64,
-    /// The cycle each flush or store-back finishes with its line.
+    /// The cycle each flush or store-back finishes with its real line.
     busy: LineCycles,
 }
 
 impl Caches {
     pub(crate) fn new() -> Self {
         Self {
-            l1: Tags::new(),
+            l1: L1::new(),
             l2: Tags::new(),
             touched: LineCycles::new(),
             touch_free: 0,
@@ -256,48 +399,61 @@ impl Caches {
         }
     }
 
-    fn line(ea: u64) -> u64 {
-        ea / k::PPU_CACHE_LINE_BYTES
+    fn line(ra: u64) -> u64 {
+        ra / k::PPU_CACHE_LINE_BYTES
     }
 
-    /// The line of the first byte and the line of the last byte of the
-    /// `len` bytes at `ea`.
+    /// The line of the first byte and the line of the last byte of `at`.
     ///
-    /// When `tail` is `Some`, the last byte is the tail's last byte, at its
-    /// own real address. An access of no bytes covers the line at `ea`. In
-    /// the `ppu_issue_line_cross_waits` capture, an `lswx` with a byte
+    /// When `at.tail` is `Some`, the last byte's real address is on the
+    /// tail's page. An access of no bytes covers the line at its address.
+    /// In the `ppu_issue_line_cross_waits` capture, an `lswx` with a byte
     /// count of 0 brings the line at its address into the L1.
     ///
     /// [CBE-Handbook p:135 s:6.1] The L1 data cache has real-addressed tags.
     ///
     /// [CBE-Handbook p:140 s:6.1.5.1] The L2 has a real-address index and real-address tags.
-    fn lines(ea: u64, len: u8, tail: Option<Tail>) -> (u64, u64) {
-        let (from, n) = match tail {
-            Some(t) => (t.ra, len.saturating_sub(t.at)),
-            None => (ea, len),
+    fn lines(at: Operand) -> (Line, Line) {
+        let span = u64::from(at.len.max(1)) - 1;
+        let (last_ea, last_ra) = match at.tail {
+            Some(t) => (
+                at.ea.wrapping_add(span),
+                t.ra.saturating_add(span.saturating_sub(u64::from(t.at))),
+            ),
+            None => {
+                // The real address stops at 2^64, and the effective address
+                // stops with it. On a thread that does not translate, the
+                // last byte's effective line then equals its real line.
+                let span = span.min(u64::MAX - at.ra);
+                (at.ea.wrapping_add(span), at.ra + span)
+            }
         };
-        let last = from.saturating_add(u64::from(n.max(1)) - 1);
-        (Self::line(ea), Self::line(last))
+        (Line::of(at.ea, at.ra), Line::of(last_ea, last_ra))
     }
 
-    /// Allocate `line` in the L2, and drop from the L1 the line that the
-    /// L2 evicts.
-    fn fill_l2(&mut self, line: u64) {
-        if let Some(evicted) = self.l2.fill(line) {
+    /// Allocate real line `real` in the L2, and drop from the L1 the line
+    /// that the L2 evicts.
+    ///
+    /// [CBE-Handbook p:140 s:6.1.5.1] The L2 includes all of the L1 data cache contents.
+    ///
+    /// The documents do not say how the L2 finds the L1 set of the line
+    /// it evicts. The inclusion fixes the result: the line leaves the set
+    /// that holds it.
+    fn fill_l2(&mut self, real: u64) {
+        if let Some(evicted) = self.l2.fill(real) {
             self.l1.invalidate(evicted);
         }
     }
 
-    /// A load of `len` bytes at `ea` with tail `tail`, and the level of
-    /// the farthest line it reads. `skip_l1` misses the L1 and leaves it
-    /// as it was.
+    /// A load of the bytes of `at`, and the level of the farthest line it
+    /// reads. `skip_l1` misses the L1 and leaves it as it was.
     ///
     /// In the `ppu_issue_line_cross` capture, an `ld` or `lmw` whose bytes
     /// reach a flushed line waits for that line from memory. With the
     /// second line in the L1, an `lmw` across two lines costs what it
     /// costs on one line.
-    pub(crate) fn load(&mut self, ea: u64, len: u8, tail: Option<Tail>, skip_l1: bool) -> Level {
-        let (first, last) = Self::lines(ea, len, tail);
+    pub(crate) fn load(&mut self, at: Operand, skip_l1: bool) -> Level {
+        let (first, last) = Self::lines(at);
         let level = self.load_line(first, skip_l1);
         if last == first {
             level
@@ -306,17 +462,20 @@ impl Caches {
         }
     }
 
-    fn load_line(&mut self, line: u64, skip_l1: bool) -> Level {
+    /// A load of `line`. A copy of the line in the L1 set of another
+    /// effective line is no hit. The L2 then gives the line, because it
+    /// includes the L1.
+    fn load_line(&mut self, line: Line, skip_l1: bool) -> Level {
         if !skip_l1 && self.l1.lookup(line) {
             return Level::L1;
         }
-        let level = if self.l2.lookup(line) {
+        let level = if self.l2.lookup(line.real) {
             Level::L2
         } else {
-            self.fill_l2(line);
+            self.fill_l2(line.real);
             // [CBE-Handbook p:146 s:6.1.6.3] the L2 ends a prefetch when a
             // demand load of the same address is ahead of it.
-            self.touched.forget(line);
+            self.touched.forget(line.real);
             Level::Memory
         };
         if !skip_l1 {
@@ -325,30 +484,42 @@ impl Caches {
         level
     }
 
-    /// A store of `len` bytes at `ea` with tail `tail`: the L1 keeps its
-    /// copy of each line current, and the L2 allocates each line it
-    /// misses.
-    pub(crate) fn store(&mut self, ea: u64, len: u8, tail: Option<Tail>) {
-        let (first, last) = Self::lines(ea, len, tail);
+    /// A store of the bytes of `at`: the L1 keeps its copy of each line
+    /// current, and the L2 allocates each line it misses.
+    pub(crate) fn store(&mut self, at: Operand) {
+        let (first, last) = Self::lines(at);
         self.store_line(first);
         if last != first {
             self.store_line(last);
         }
     }
 
-    fn store_line(&mut self, line: u64) {
-        if !self.l2.lookup(line) {
-            self.fill_l2(line);
+    /// A store to `line`. The L1 drops a copy of the line in the set of
+    /// another effective line, and places no line.
+    ///
+    /// [CBE-Handbook p:135 s:6.1.3.1] The L1 data cache does not allocate on a write.
+    ///
+    /// The documents do not say what a store does with that copy.
+    /// [CBE-Handbook p:138 s:6.1.3.10] invalidates the copy in the other
+    /// congruence class on an access. CellGov applies that rule to a store,
+    /// without the reload.
+    fn store_line(&mut self, line: Line) {
+        self.l1.drop_alias(line);
+        if !self.l2.lookup(line.real) {
+            self.fill_l2(line.real);
         }
-        self.l2.modify(line);
+        self.l2.modify(line.real);
     }
 
-    /// `dcbz`: drop the line from the L1 and allocate it in the L2.
+    /// `dcbz`: drop the line at real address `ra` from the L1 and allocate
+    /// it in the L2.
     ///
     /// [CBE-Handbook p:723 s:A.1.2] `dcbz` invalidates the L1 line on its
     /// way to the L2; allocation and zeroing occur at the L2.
-    pub(crate) fn zero(&mut self, ea: u64) {
-        let line = Self::line(ea);
+    ///
+    /// [CBE-Handbook p:147 s:6.1.6.4] When the line that `dcbz` addresses is present in the L1, the L1 invalidates it before the operation goes to the L2.
+    pub(crate) fn zero(&mut self, ra: u64) {
+        let line = Self::line(ra);
         self.l1.invalidate(line);
         if !self.l2.lookup(line) {
             self.fill_l2(line);
@@ -356,56 +527,70 @@ impl Caches {
         self.l2.modify(line);
     }
 
-    /// A `dcbt` or `dcbtst` at cycle `t`: reload the line at `ea` into the
-    /// L2 and the L1, and remember the cycle it arrives.
+    /// A `dcbt` or `dcbtst` at cycle `t`: reload the line at real address
+    /// `ra` into the L2, and into the L1 set of effective address `ea`.
+    /// Remember the cycle it arrives.
+    ///
+    /// A cancelled touch (`ra` is `None`) changes nothing:
+    /// - it fills no L1 or L2 line;
+    /// - it sends no request, so the next touch can send its request as
+    ///   early as before;
+    /// - it records no arrival.
     ///
     /// [CBE-Handbook p:145 s:6.1.6.2] a touch acts like a load from the
     /// viewpoint of the cache hierarchy; with TH = '0000' the L1 is
     /// reloaded as well as the L2.
     ///
+    /// [CBE-Handbook p:145 s:6.1.6.2] A touch that the PPE cancels does not reload the cache.
+    ///
     /// [CBE-Handbook p:146 s:6.1.6.2] one cache line is requested at a
     /// time, from the L2 or from memory.
-    pub(crate) fn touch(&mut self, t: u64, ea: u64) {
-        let line = Self::line(ea);
+    pub(crate) fn touch(&mut self, t: u64, ea: u64, ra: Option<u64>) {
+        let Some(ra) = ra else {
+            return;
+        };
+        let line = Line::of(ea, ra);
         if self.l1.lookup(line) {
             return;
         }
         let sent = t.max(self.touch_free);
-        let (interval, trip) = if self.l2.lookup(line) {
+        let (interval, trip) = if self.l2.lookup(line.real) {
             (k::PPU_TOUCH_L2_INTERVAL_CYCLES, k::PPU_L2_LOAD_USE_CYCLES)
         } else {
-            self.fill_l2(line);
+            self.fill_l2(line.real);
             (k::PPU_TOUCH_INTERVAL_CYCLES, k::PPU_MEMORY_LOAD_USE_CYCLES)
         };
         self.touch_free = sent + interval;
-        let arrival = sent + trip;
+        // [CBE-Handbook p:138 s:6.1.3.10] A copy in the other congruence class is reloaded from the L2, so it arrives no earlier than an earlier touch brings the line there.
+        let arrival = (sent + trip).max(self.touched.after(t, line.real));
         self.l1.fill(line);
-        self.touched.record(t, line, arrival);
+        self.touched.record(t, line.real, arrival);
     }
 
-    /// The latest cycle a touched line of the `len` bytes at `ea` with
-    /// tail `tail` arrives.
+    /// The latest cycle a touched line of the bytes of `at` arrives.
     ///
     /// The result is 0 when no touch of those lines is on its way at
     /// cycle `t`. A result at or before `t` means the lines are present.
-    pub(crate) fn arrival(&self, t: u64, ea: u64, len: u8, tail: Option<Tail>) -> u64 {
-        let (first, last) = Self::lines(ea, len, tail);
+    pub(crate) fn arrival(&self, t: u64, at: Operand) -> u64 {
+        let (first, last) = Self::lines(at);
         self.touched
-            .after(t, first)
-            .max(self.touched.after(t, last))
+            .after(t, first.real)
+            .max(self.touched.after(t, last.real))
     }
 
     /// The latest cycle a flush or store-back finishes with a line of the
-    /// `len` bytes at `ea` with tail `tail`.
+    /// bytes of `at`.
     ///
     /// The result is 0 when no flush or store-back of those lines is under
     /// way at cycle `t`. A result at or before `t` means the lines are free.
     ///
     /// [CBE-Handbook p:147 s:6.1.6.5] `dcbf` and `dcbst` can complete
     /// before the operation they cause completes.
-    pub(crate) fn busy(&self, t: u64, ea: u64, len: u8, tail: Option<Tail>) -> u64 {
-        let (first, last) = Self::lines(ea, len, tail);
-        self.busy.after(t, first).max(self.busy.after(t, last))
+    pub(crate) fn busy(&self, t: u64, at: Operand) -> u64 {
+        let (first, last) = Self::lines(at);
+        self.busy
+            .after(t, first.real)
+            .max(self.busy.after(t, last.real))
     }
 
     /// Delays each touched line's arrival later than `began` by
@@ -414,13 +599,13 @@ impl Caches {
         self.touched.stretch(began, stalled);
     }
 
-    /// A `dcbf` at cycle `t`: drop the line at `ea` from the L1 and the
-    /// L2.
+    /// A `dcbf` at cycle `t`: drop the line at real address `ra` from the
+    /// L1 and the L2.
     ///
     /// [CBE-Handbook p:147 s:6.1.6.5] `dcbf` writes a modified line back
     /// and invalidates it in all caches.
-    pub(crate) fn flush(&mut self, t: u64, ea: u64) {
-        let line = Self::line(ea);
+    pub(crate) fn flush(&mut self, t: u64, ra: u64) {
+        let line = Self::line(ra);
         let cycles = if self.l2.is_modified(line) {
             k::PPU_DCBF_MODIFIED_LINE_BUSY_CYCLES
         } else {
@@ -432,17 +617,35 @@ impl Caches {
         self.busy.record(t, line, t + cycles);
     }
 
-    /// A `dcbst` at cycle `t`: the line at `ea` stays valid.
+    /// A `dcbst` at cycle `t`: the line at real address `ra` stays valid.
     ///
     /// [CBE-Handbook p:147 s:6.1.6.5] `dcbst` writes a modified line back
     /// and leaves it valid.
-    pub(crate) fn store_back(&mut self, t: u64, ea: u64) {
-        let line = Self::line(ea);
+    ///
+    /// [CBE-Handbook p:138 s:6.1.3.11] The L1 data cache never holds modified data, so a `dcbst` leaves the L1 as it was.
+    pub(crate) fn store_back(&mut self, t: u64, ra: u64) {
+        let line = Self::line(ra);
         let cycles = if self.l2.write_back(line) {
             k::PPU_DCBST_MODIFIED_LINE_BUSY_CYCLES
         } else {
             k::PPU_DCBST_LINE_BUSY_CYCLES
         };
         self.busy.record(t, line, t + cycles);
+    }
+}
+
+#[cfg(test)]
+impl Caches {
+    /// Whether the L1 set of `ea`'s line holds the real line of `ra`, and
+    /// whether the L2 holds that real line. The query moves no tree.
+    pub(crate) fn holds(&self, ea: u64, ra: u64) -> (bool, bool) {
+        let line = Line::of(ea, ra);
+        let l1 = self.l1.tags.way_of(L1::set_of(line), line.real).is_some();
+        (l1, self.l2.find(line.real).is_some())
+    }
+
+    /// The first cycle the next touch can send its request.
+    pub(crate) fn touch_free(&self) -> u64 {
+        self.touch_free
     }
 }

@@ -89,6 +89,7 @@ fn real_mode_reaches_ea_bits_2_to_63_plus_the_offset_for_either_high_bit_pattern
             len: 1 << 28,
             writable: true,
             inhibited: false,
+            guarded: false,
             changed: true,
         }
     );
@@ -208,6 +209,7 @@ fn a_small_page_in_its_primary_group_translates_to_its_rpn_and_offset() {
             len: 4096,
             writable: true,
             inhibited: false,
+            guarded: false,
             changed: false,
         }
     );

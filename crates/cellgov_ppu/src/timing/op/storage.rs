@@ -18,18 +18,24 @@ pub(super) fn ea_x(state: &PpuState, ra: u8, rb: u8) -> u64 {
     base.wrapping_add(state.gpr[rb as usize])
 }
 
+/// A load of `len` bytes at `ea`. Its real address is `ea` until
+/// [`Op::map_storage`] replaces it.
 pub(super) fn load(units: u8, ea: u64, len: u8, class: LoadClass) -> Op {
     Op::on(units).kind(Kind::Load {
         ea,
+        ra: ea,
         len,
         class,
         tail: None,
     })
 }
 
+/// A store of `len` bytes at `ea`. Its real address is `ea` until
+/// [`Op::map_storage`] replaces it.
 pub(super) fn store(units: u8, ea: u64, len: u8) -> Op {
     Op::on(units).kind(Kind::Store {
         ea,
+        ra: ea,
         len,
         conditional: false,
         tail: None,

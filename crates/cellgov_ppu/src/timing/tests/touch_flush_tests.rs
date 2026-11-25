@@ -1,7 +1,7 @@
 //! What the caches remember about a touched, flushed or stored-back line,
 //! and how long a later load of it waits.
 
-use super::cache::{Caches, Level};
+use super::cache::{Caches, Level, Operand};
 use super::{classify, PpeTiming};
 use crate::instruction::PpuInstruction as I;
 use crate::state::PpuState;
@@ -22,22 +22,36 @@ fn a_pending_flush_survives_more_later_store_backs_than_the_table_holds() {
     }
     caches.store_back(10, LINE_A + OVERFILL * k::PPU_CACHE_LINE_BYTES);
     assert_eq!(
-        caches.busy(10, LINE_A, 8, None),
+        caches.busy(10, Operand::untranslated(LINE_A, 8)),
         k::PPU_DCBF_LINE_BUSY_CYCLES
+    );
+}
+
+/// [CBE-Handbook p:147 s:6.1.6.5] `dcbst` can complete before the write-back it causes completes.
+#[test]
+fn a_store_back_of_an_unmodified_line_holds_it_for_the_dcbst_busy_cycles() {
+    let mut caches = Caches::new();
+    caches.store_back(10, LINE_A);
+    assert_eq!(
+        caches.busy(11, Operand::untranslated(LINE_A, 8)),
+        10 + k::PPU_DCBST_LINE_BUSY_CYCLES
     );
 }
 
 #[test]
 fn a_demand_reload_from_memory_ends_the_touch_of_its_line() {
     let mut caches = Caches::new();
-    caches.touch(0, LINE_A);
+    caches.touch(0, LINE_A, Some(LINE_A));
     // Lines that share the touched line's L2 set push it out of both caches.
     let stride = k::PPU_L2_SETS as u64 * k::PPU_CACHE_LINE_BYTES;
     for j in 1..=2 * k::PPU_L2_WAYS as u64 {
-        caches.load(LINE_A + j * stride, 8, None, false);
+        caches.load(Operand::untranslated(LINE_A + j * stride, 8), false);
     }
-    assert_eq!(caches.load(LINE_A, 8, None, false), Level::Memory);
-    assert_eq!(caches.arrival(100, LINE_A, 8, None), 0);
+    assert_eq!(
+        caches.load(Operand::untranslated(LINE_A, 8), false),
+        Level::Memory
+    );
+    assert_eq!(caches.arrival(100, Operand::untranslated(LINE_A, 8)), 0);
 }
 
 #[test]

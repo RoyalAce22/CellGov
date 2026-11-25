@@ -3,6 +3,7 @@
 use super::decode::CodeBytes;
 use super::exit::{FaultExit, Retry};
 use super::regions::RegionTable;
+use super::touch::TouchStep;
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::tap::PpuTap;
 use crate::unit::ppu_unit::PpuExecutionUnit;
@@ -147,6 +148,10 @@ impl PpuExecutionUnit {
             }
             let (mut ops, n_ops) = crate::timing::classify(&insn, &self.state);
             if translating {
+                let touches = self.look_up_touches(mem, &mut regions, &mut ops[..n_ops]);
+                if let TouchStep::EndBatch = touches {
+                    return self.touch_yield(&entry, effects, step_pc, cur.last_retired);
+                }
                 self.real_op_addresses(&mut ops[..n_ops]);
             }
             let ops = &ops[..n_ops];
@@ -264,6 +269,24 @@ impl PpuExecutionUnit {
             return self.supervisor_sc_yield(entry, effects, step_pc, lev);
         }
         self.syscall_yield(entry, effects, step_pc, lev)
+    }
+
+    /// Ends the batch ahead of the touch at `step_pc`, whose table lookup
+    /// waits for a buffered store. The next batch runs the touch again.
+    #[inline(always)]
+    fn touch_yield(
+        &mut self,
+        entry: &BatchEntry,
+        effects: &mut Vec<Effect>,
+        step_pc: u64,
+        last_retired: u64,
+    ) -> ExecutionStepResult {
+        // The next batch visits this pc again, so the unit hands back a
+        // skip it spent at the top of this iteration.
+        if self.break_pc == Some(step_pc) {
+            self.break_skip += 1;
+        }
+        self.budget_yield(entry, effects, last_retired)
     }
 
     /// Yields at the store at `step_pc` that found the store buffer full.

@@ -11,6 +11,7 @@ fn block(ea: u64, ra: u64, len: u64) -> Translation {
         len,
         writable: true,
         inhibited: false,
+        guarded: false,
         changed: false,
     }
 }

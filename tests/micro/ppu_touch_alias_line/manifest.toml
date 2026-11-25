@@ -1,0 +1,23 @@
+[test]
+name = "ppu_touch_alias_line"
+
+# A hardware probe: one shared segment mapped at X and Y, and a load of a
+# line through X after dcbf drops it and after no touch, a dcbt through
+# X, or a dcbt or dcbtst through Y, timed with mftb. The console capture
+# is the answer; ppu/main.c's header lists the cases and the payload
+# layout.
+
+[observe]
+# 20 big-endian u32 words (80 bytes), as ppu/main.c lists: the failed
+# step and its code, REPS, LINES, X, Y, the smallest and the largest
+# time base ticks a run of each of the four cases, four teardown return
+# codes, whether every timed load read its word, and the end mark.
+memory_regions = [
+  { name = "result", addr = 0, size = 80 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

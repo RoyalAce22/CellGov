@@ -1,0 +1,26 @@
+[test]
+name = "ppu_touch_inhibited"
+
+# A hardware probe: whether a dcbt or dcbtst of a line in RSX local
+# memory, which is caching-inhibited for a game process, places a line in
+# an L1 set that four cacheable lines fill, against a dcbt of a fifth
+# cacheable line, a dcbt of page 0, which no page holds, and no touch,
+# timed with mftb. The console capture is the answer; ppu/main.c's
+# header lists the cases and the payload layout.
+
+[observe]
+# 20 big-endian u64 (160 bytes): DONE or PROG, the step a progress
+# record names, rsxInit rc, the local memory address, the smallest and
+# the largest time base ticks a run of each of the five cases, REPS,
+# ITER, the touched local memory line T, the touched page 0 line U,
+# whether every chase ended where it should, and the word an lwz of T
+# read.
+memory_regions = [
+  { name = "result", addr = 0, size = 160 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000
