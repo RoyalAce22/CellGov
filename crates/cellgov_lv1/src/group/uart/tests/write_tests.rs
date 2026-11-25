@@ -240,27 +240,32 @@ fn a_write_of_0_bytes_to_a_service_port_writes_no_byte_and_carries_no_change() {
 }
 
 /// A buffer that ends at its region's end passes the check of the r5 bytes
-/// from r4 to the end [OFW-4.93 lv1 a:0x2F2CB0-0x2F2CC0].
+/// from r4 to the end [OFW-4.93 lv1 a:0x2F2CB0-0x2F2CC0]. The storage
+/// holds 0 bytes, so a 16-byte write is a header that counts 0 payload
+/// bytes.
 #[test]
-fn a_write_of_bytes_to_the_system_manager_s_port_is_a_refusal() {
+fn a_write_of_bytes_to_the_system_manager_s_port_passes_lv1_s_region_checks() {
     let end = FIRST.lpar_address + FIRST.size;
+    let unheld = "a virtual UART write buffer whose bytes CellGov's storage does not hold";
+    let mut answer = HypercallAnswer::lv1_status(0, [16, 0, 0, 0, 0, 0, 0]);
+    answer.push_change(UartChange::RequestBytesSent(PendingRequest::empty(
+        SYSTEM_MANAGER_PORT,
+    )));
+    let r = |address, size| request(SYSTEM_MANAGER_PORT, address, size);
     let cases = [
-        (BUFFER, 1),
-        (BUFFER, 16),
-        (BUFFER, 0x800),
-        (RM_SIZE - 16, 16),
-        (end - 16, 16),
+        (
+            r(BUFFER, 1),
+            refused(&r(BUFFER, 1), system_manager::HEADER_SPLIT_REFUSAL),
+        ),
+        (r(BUFFER, 16), HypercallDisposition::Answered(answer)),
+        (
+            r(BUFFER, 0x800),
+            refused(&r(BUFFER, 0x800), system_manager::OVERRUN_REFUSAL),
+        ),
+        (r(RM_SIZE - 16, 16), refused(&r(RM_SIZE - 16, 16), unheld)),
+        (r(end - 16, 16), refused(&r(end - 16, 16), unheld)),
     ];
-    for (address, size) in cases {
-        let r = request(SYSTEM_MANAGER_PORT, address, size);
-        assert_eq!(
-            at_4_93(&r),
-            refused(
-                &r,
-                "a virtual UART write to the system manager's port, whose requests CellGov does \
-                 not decode"
-            ),
-            "{address:#x} {size}"
-        );
+    for (call, expected) in cases {
+        assert_eq!(at_4_93(&call), expected, "{:#x} {}", call.r(4), call.r(5));
     }
 }

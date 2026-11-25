@@ -1,11 +1,12 @@
-//! The bytes that the partition sent of a request on the dispatcher
-//! manager's port, while they do not hold the whole request.
+//! The bytes that the partition sent of a request on a service port,
+//! while they do not hold the whole request.
 //!
-//! The dispatcher manager reads a header and the request bytes that the
-//! header counts, and only then replies; see
-//! [`cellgov_ps3_abi::lv1::uart`]. The hypervisor keeps the bytes of the
-//! request that is not complete, so that it knows which write completes
-//! it.
+//! The service reads a header and the bytes that the header counts, and
+//! only then replies; see [`cellgov_ps3_abi::lv1::uart`]. The hypervisor
+//! keeps the bytes of the request that is not complete, so that it knows
+//! which write completes it. The methods that decode the header read the
+//! dispatcher manager's header. The system manager's header has the same
+//! size and other fields; see `super::system_manager`.
 
 use cellgov_mem::lanes::{LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::uart::{

@@ -15,7 +15,10 @@
 //!   bytes that their receive buffers hold at the GameOS kernel's first
 //!   read;
 //! - the request header that the dispatcher manager reads, the GameOS
-//!   kernel's first request, and the reply to it.
+//!   kernel's first request, and the reply to it;
+//! - the request header that the system manager reads, the bytes that it
+//!   reads before a request handler runs, and the GameOS kernel's first
+//!   request to it.
 //!
 //! The facts come from the 4.93 `lv1.self`, decrypted offline and read
 //! with `cellgov dev disasm`. The repository holds no byte of lv1, only
@@ -437,6 +440,70 @@
 //! sends a request, unless a shutdown or an external event comes first.
 //! CellGov models neither. The system manager keeps the peer's descriptor
 //! open until the teardown.
+//!
+//! ## The system manager's requests
+//!
+//! The image `sysmgr_ss.fself` is fake-signed, and its two segments are
+//! plaintext in lv1's image. Its SCE header gives a header size of 0x480
+//! [OFW-4.93 lv1 a:0x4218C0-0x4218D4]. Its ELF program headers place the
+//! segments at these addresses [OFW-4.93 lv1 a:0x421990-0x4219FC]:
+//! - the code, at vaddr 0x80000000, at a:0x431D40;
+//! - the data, at vaddr 0xC0000000, at a:0x471D40, with 0xCE88 bytes in the
+//!   file of 0xDD58 bytes in memory.
+//!
+//! The entry descriptor gives the TOC 0xC0012F40
+//! [OFW-4.93 lv1 a:0x472FF0-0x472FFC].
+//!
+//! The receive function [OFW-4.93 lv1 a:0x44CD54] does these steps in
+//! this order:
+//! 1. It fills a header with the version 1, the size 16 and 0 in each
+//!    other field [OFW-4.93 lv1 a:0x44CD60-0x44CD7C]
+//!    [OFW-4.93 lv1 a:0x44BA78-0x44BAA8].
+//! 2. It reads [`SYSTEM_MANAGER_HEADER_BYTES`] bytes over the header with
+//!    one read, process system call 9
+//!    [OFW-4.93 lv1 a:0x44CD80-0x44CD94] [OFW-4.93 lv1 a:0x468DB0-0x468DBC].
+//!    A read that returns another count ends the function with no handler
+//!    [OFW-4.93 lv1 a:0x44CDB0-0x44CDB4].
+//! 3. It reads the payload bytes that
+//!    [`system_manager_payload_read`] gives, in a loop of reads
+//!    [OFW-4.93 lv1 a:0x44CDDC-0x44CE10].
+//! 4. It calls the request handler of [`system_manager_handler_index`]
+//!    through the table [OFW-4.93 lv1 a:0x44CE14-0x44CE44]. The handler
+//!    gets the payload and the tag; see [`system_manager_header_tag`].
+//!
+//! The table at TOC slot r2 - 29520 holds vaddr 0x8003E020, which is
+//! a:0x46FD60 [OFW-4.93 lv1 a:0x47D930-0x47D934]. So no handler runs, and
+//! no reply comes, until the partition sends the header and the payload
+//! bytes that the receive function reads.
+//!
+//! The 4.93 kernel's function [OFW-4.93 lv2_kernel a:0x80000000002646d8]
+//! sends a request of service id 9 with 8 payload bytes in one write of
+//! 24 bytes [OFW-4.93 lv2_kernel a:0x80000000002646e0-0x800000000026471c].
+//! It stores 1 in payload byte 0 and its r4 in payload byte 1. It stores
+//! no other payload byte. In CellGov's boot, this request is the kernel's
+//! first write to port 2, and its r4 is 2; see
+//! [`GAME_OS_FIRST_SYSTEM_MANAGER_SERVICE`].
+//!
+//! Entry 9 of the table [OFW-4.93 lv1 a:0x46FDA8-0x46FDAC] holds the
+//! descriptor of the handler [OFW-4.93 lv1 a:0x44DE84]
+//! [OFW-4.93 lv1 a:0x477760-0x47776C]. The handler reads payload byte 1
+//! [OFW-4.93 lv1 a:0x44DEA0-0x44DEC4]. For the value 2, it replies with
+//! service id 0x0B and 16 payload bytes
+//! [OFW-4.93 lv1 a:0x44DF0C-0x44DF24] [OFW-4.93 lv1 a:0x44BAF4-0x44BB14].
+//! The reply holds these fields:
+//! - byte 0 is 2;
+//! - bytes 1 and 2 are bytes 2 and 3 at vaddr 0xC000D35B
+//!   [OFW-4.93 lv1 a:0x45242C-0x452440] [OFW-4.93 lv1 a:0x47E1B8-0x47E1BC];
+//! - bytes 4 to 7 are the word at vaddr 0xC000D2D8
+//!   [OFW-4.93 lv1 a:0x44DEF4] [OFW-4.93 lv1 a:0x44DF08]
+//!   [OFW-4.93 lv1 a:0x47DA48-0x47DA4C];
+//! - bytes 8 to 15 are the doubleword at +96 of the current partition's
+//!   state object, or 0 with no such object
+//!   [OFW-4.93 lv1 a:0x44DEE0-0x44DEF0] [OFW-4.93 lv1 a:0x44F780-0x44F7A0].
+//!
+//! Both vaddrs are past the 0xCE88 file bytes of the data segment. So the
+//! system manager sets them while it runs, and no image read gives their
+//! values. CellGov holds none of the three inputs of this reply.
 //!
 //! ## The dispatcher manager
 //!
@@ -1429,6 +1496,109 @@ pub fn game_os_dispatcher_reply(
         .find(|row| row.firmware == firmware && row.service == service && row.request == request)
 }
 
+/// The bytes of the header of a request that the system manager reads
+/// from its port first, with one read
+/// [OFW-4.93 lv1 a:0x44CD84-0x44CD94].
+pub const SYSTEM_MANAGER_HEADER_BYTES: u64 = 16;
+
+/// The count of payload bytes that the system manager's request header
+/// `header` gives: its big-endian word at +4.
+///
+/// The receive function loads that word for the payload read
+/// [OFW-4.93 lv1 a:0x44CDB8]. Linux `struct ps3_sys_manager_header` names
+/// it `payload_size`.
+pub const fn system_manager_header_payload_bytes(
+    header: &[u8; SYSTEM_MANAGER_HEADER_BYTES as usize],
+) -> u32 {
+    u32::from_be_bytes([header[4], header[5], header[6], header[7]])
+}
+
+/// The service id that the system manager's request header `header`
+/// gives: its big-endian halfword at +8.
+///
+/// The receive function loads that halfword for its log call
+/// [OFW-4.93 lv1 a:0x44CD9C]. Linux `struct ps3_sys_manager_header` names
+/// it `service_id`.
+pub const fn system_manager_header_service(
+    header: &[u8; SYSTEM_MANAGER_HEADER_BYTES as usize],
+) -> u16 {
+    u16::from_be_bytes([header[8], header[9]])
+}
+
+/// The tag of the system manager's request header `header`: its
+/// big-endian word at +12.
+///
+/// The receive function gives that word to the request handler in r4
+/// [OFW-4.93 lv1 a:0x44CE30]. Linux `struct ps3_sys_manager_header` names
+/// it `request_tag`.
+pub const fn system_manager_header_tag(header: &[u8; SYSTEM_MANAGER_HEADER_BYTES as usize]) -> u32 {
+    u32::from_be_bytes([header[12], header[13], header[14], header[15]])
+}
+
+/// The largest count of payload bytes that the system manager's receive
+/// function reads after one header [OFW-4.93 lv1 a:0x44CDBC-0x44CDC4].
+pub const SYSTEM_MANAGER_PAYLOAD_MAX: u32 = 2048;
+
+/// The count of payload bytes that the system manager's receive function
+/// reads after a header that counts `payload_bytes`.
+///
+/// The function compares the count as a signed word
+/// [OFW-4.93 lv1 a:0x44CDB8-0x44CDD8]. The value is one of these:
+/// - `None` for 0: the function ends with no handler and no reply;
+/// - 0 for a negative count: the read loop reads no byte, and the handler
+///   runs [OFW-4.93 lv1 a:0x44CDFC-0x44CE10];
+/// - [`SYSTEM_MANAGER_PAYLOAD_MAX`] for a count above it. The port keeps
+///   the other bytes, and the next call reads them as a header;
+/// - the count for each other value.
+pub const fn system_manager_payload_read(payload_bytes: u32) -> Option<u32> {
+    let count = payload_bytes as i32;
+    if count == 0 {
+        None
+    } else if count < 0 {
+        Some(0)
+    } else if payload_bytes > SYSTEM_MANAGER_PAYLOAD_MAX {
+        Some(SYSTEM_MANAGER_PAYLOAD_MAX)
+    } else {
+        Some(payload_bytes)
+    }
+}
+
+/// The largest index of the system manager's request handler table. The
+/// table holds 62 entries [OFW-4.93 lv1 a:0x46FD60-0x46FF4C].
+pub const SYSTEM_MANAGER_HANDLER_INDEX_MAX: u8 = 0x3D;
+
+/// The index that the system manager's receive function takes for a
+/// service id whose low byte is above [`SYSTEM_MANAGER_HANDLER_INDEX_MAX`]
+/// [OFW-4.93 lv1 a:0x44CE18-0x44CE20].
+///
+/// Linux names service id 6 `PS3_SM_SERVICE_ID_REQUEST_ERROR`.
+pub const SYSTEM_MANAGER_REQUEST_ERROR_INDEX: u8 = 6;
+
+/// The index of the request handler that the system manager's receive
+/// function calls for the service id `service`.
+///
+/// The function loads only the low byte of the service id, header byte 9
+/// [OFW-4.93 lv1 a:0x44CE14]. A byte above
+/// [`SYSTEM_MANAGER_HANDLER_INDEX_MAX`] becomes
+/// [`SYSTEM_MANAGER_REQUEST_ERROR_INDEX`] [OFW-4.93 lv1 a:0x44CE18-0x44CE20].
+pub const fn system_manager_handler_index(service: u16) -> u8 {
+    let low = service.to_be_bytes()[1];
+    if low > SYSTEM_MANAGER_HANDLER_INDEX_MAX {
+        SYSTEM_MANAGER_REQUEST_ERROR_INDEX
+    } else {
+        low
+    }
+}
+
+/// The service id of the 4.93 GameOS kernel's first request to the
+/// system manager in CellGov's boot.
+///
+/// The kernel's function stores it at +8 of the header
+/// [OFW-4.93 lv2_kernel a:0x80000000002646fc]
+/// [OFW-4.93 lv2_kernel a:0x800000000026470c]. Entry 9 of the receive
+/// function's table holds its handler; see [`crate::lv1::uart`].
+pub const GAME_OS_FIRST_SYSTEM_MANAGER_SERVICE: u16 = 9;
+
 #[cfg(test)]
 #[path = "tests/uart_tests.rs"]
 mod tests;
@@ -1480,3 +1650,7 @@ mod reply_console_tests;
 #[cfg(test)]
 #[path = "tests/uart_shadow_tests.rs"]
 mod shadow_tests;
+
+#[cfg(test)]
+#[path = "tests/uart_system_manager_tests.rs"]
+mod system_manager_tests;

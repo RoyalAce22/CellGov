@@ -10,7 +10,9 @@
 //! - a write to the dispatcher manager's port whose bytes complete no
 //!   request;
 //! - a write to the dispatcher manager's port whose bytes complete a
-//!   request whose reply a source gives.
+//!   request whose reply a source gives;
+//! - a write to the system manager's port that the module
+//!   [`super::system_manager`] answers.
 //!
 //! The answer to a write of one or more bytes carries the bytes of the
 //! request that is not complete, and the hypervisor keeps them. The answer
@@ -32,8 +34,9 @@ use super::receive::ReceivedBytes;
 use super::reply;
 use super::request::PendingRequest;
 use super::shadow::{self, StatusInput};
+use super::system_manager;
 use super::{UartChange, UartState};
-use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
+use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal, UnmodelledError};
 use crate::group::hypercall::Hypercall;
 use crate::group::interrupt::raise::RaiseState;
 use crate::group::interrupt::InterruptGroupState;
@@ -88,7 +91,7 @@ impl WriteInput<'_> {
     }
 }
 
-fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDisposition {
+pub(super) fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDisposition {
     HypercallDisposition::Refused(HypercallRefusal::UnmodelledInput {
         number: request.number,
         unit: request.unit,
@@ -103,7 +106,7 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 }
 
 /// lv1's r3 = 0, with `written` bytes in r4 and r5 to r10 cleared.
-fn written_answer(written: u64) -> HypercallAnswer {
+pub(super) fn written_answer(written: u64) -> HypercallAnswer {
     HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), [written])
 }
 
@@ -126,8 +129,9 @@ fn written_answer(written: u64) -> HypercallAnswer {
 /// Each service port has a peer with a reference: the capture gives it a
 /// transmit buffer size other than 0. So it passes lv1's peer check. A call
 /// with r5 = 0 that passes the checks on a service port gets r3 = 0 and
-/// r4 = 0. A write of one or more bytes to the dispatcher manager's port
-/// gets the answer that [`dispatcher_write`] gives.
+/// r4 = 0. A write of one or more bytes to a service port gets the answer
+/// that [`dispatcher_write`] or [`system_manager::write`] gives, after the
+/// checks of [`sent_request`].
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
@@ -136,9 +140,7 @@ fn written_answer(written: u64) -> HypercallAnswer {
 /// - r4 is in the real mode region, and no source gives the real mode
 ///   size for `firmware`;
 /// - the call passes the checks for a port that is not a service port,
-///   because no source gives the port's peer;
-/// - the call writes one or more bytes to the system manager's port,
-///   because CellGov does not decode the system manager's requests.
+///   because no source gives the port's peer.
 pub(crate) fn write(request: &HypercallRequest, input: &WriteInput<'_>) -> HypercallDisposition {
     let Some(firmware) = input
         .firmware
@@ -188,19 +190,21 @@ pub(crate) fn write(request: &HypercallRequest, input: &WriteInput<'_>) -> Hyper
     if size == 0 {
         return HypercallDisposition::Answered(written_answer(0));
     }
+    let buffer = Buffer {
+        address,
+        size,
+        region,
+    };
+    let sent = match sent_request(input, row, &buffer) {
+        Ok(sent) => sent,
+        Err(error) => return error.refusal(request),
+    };
     match service.service {
-        VirtualUartService::SystemManager => refuse(
-            request,
-            "a virtual UART write to the system manager's port, whose requests CellGov does not \
-             decode",
-        ),
+        VirtualUartService::SystemManager => {
+            system_manager::write(request, input, firmware, row, &sent)
+        }
         VirtualUartService::DispatcherManager => {
-            let bytes = Buffer {
-                address,
-                size,
-                region,
-            };
-            dispatcher_write(request, input, firmware, row, &bytes)
+            dispatcher_write(request, input, firmware, row, &sent)
         }
     }
 }
@@ -215,57 +219,63 @@ struct Buffer {
     region: BufferRegion,
 }
 
-/// The answer to a write of `buffer` to the dispatcher manager's port
-/// `row`.
+/// The bytes of a write to a service port, and the request that they add
+/// to.
+pub(super) struct SentRequest {
+    /// The bytes that the partition sent of the port's request before the
+    /// write.
+    pub(super) pending: PendingRequest,
+    /// The bytes of the write, of which there is one or more.
+    pub(super) bytes: Vec<u8>,
+}
+
+/// The bytes of a write of `buffer` to the service port `row`.
 ///
-/// The answer is r3 = 0 with `buffer.size` bytes written in r4. It
-/// carries the bytes of the request that is not complete. The call is a
-/// refusal in these cases, in this order:
+/// # Errors
+///
+/// Returns the [`UnmodelledError`] in these cases, in this order:
 /// - The bytes can be more than the free bytes of the peer's receive
-///   buffer. The dispatcher manager reads the bytes at a time that no image
-///   read gives. So the peer's buffer holds at most the bytes of the
-///   request that is not complete, and lv1 writes all the bytes when that
-///   count and `buffer.size` fit in the buffer.
+///   buffer. The service reads the bytes at a time that no image read
+///   gives. So the peer's buffer holds at most the bytes of the request
+///   that is not complete. lv1 writes all the bytes when that count and
+///   `buffer.size` fit in the buffer.
 /// - CellGov's storage does not hold the bytes.
-/// - The status step after the write refuses; see
-///   [`shadow::status_step`]. The write leaves the port's receive buffer
-///   as it is, so the step changes no bit.
-///
-/// A write whose bytes complete a request gets the answer that
-/// [`completing_write`] gives.
-fn dispatcher_write(
-    request: &HypercallRequest,
+fn sent_request(
     input: &WriteInput<'_>,
-    firmware: &str,
     row: &GameOsVirtualUartPort,
     buffer: &Buffer,
-) -> HypercallDisposition {
+) -> Result<SentRequest, UnmodelledError> {
     let pending = input.uart.pending_request(row.port);
     let fits = pending
         .sent
         .checked_add(buffer.size)
         .is_some_and(|count| count <= row.tx_buffer_size);
     if !fits {
-        return refuse(
-            request,
+        return Err(UnmodelledError::new(
             "a virtual UART write whose bytes can be more than the free bytes of the peer's \
              receive buffer",
-        );
+        ));
     }
-    let Some(bytes) = sent_bytes(input, buffer) else {
-        return refuse(
-            request,
-            "a virtual UART write buffer whose bytes CellGov's storage does not hold",
-        );
-    };
-    let next = pending.with(&bytes);
-    if next.is_complete() {
-        return completing_write(request, input, firmware, row, &pending, &bytes);
-    }
+    let bytes = sent_bytes(input, buffer).ok_or(UnmodelledError::new(
+        "a virtual UART write buffer whose bytes CellGov's storage does not hold",
+    ))?;
+    Ok(SentRequest { pending, bytes })
+}
+
+/// The disposition of `answer` after the status step of port `row` for a
+/// receive buffer of `received` bytes.
+///
+/// The call is a refusal when the status step refuses; see
+/// [`shadow::status_step`].
+pub(super) fn after_status_step(
+    request: &HypercallRequest,
+    input: &WriteInput<'_>,
+    firmware: &str,
+    row: &GameOsVirtualUartPort,
+    mut answer: HypercallAnswer,
+    received: u64,
+) -> HypercallDisposition {
     let params = input.uart.port_params(row.port);
-    let received = input.uart.received(row.port).len() as u64;
-    let mut answer = written_answer(buffer.size);
-    answer.push_change(UartChange::RequestBytesSent(next));
     let step = shadow::status_step(
         request,
         firmware,
@@ -278,6 +288,33 @@ fn dispatcher_write(
         return error.refusal(request);
     }
     HypercallDisposition::Answered(answer)
+}
+
+/// The answer to a write of `sent` to the dispatcher manager's port
+/// `row`.
+///
+/// The answer is r3 = 0 with the bytes written in r4. It carries the
+/// bytes of the request that is not complete. The call is a refusal when
+/// the status step after the write refuses. The write leaves the port's
+/// receive buffer as it is, so the step changes no bit.
+///
+/// A write whose bytes complete a request gets the answer that
+/// [`completing_write`] gives.
+fn dispatcher_write(
+    request: &HypercallRequest,
+    input: &WriteInput<'_>,
+    firmware: &str,
+    row: &GameOsVirtualUartPort,
+    sent: &SentRequest,
+) -> HypercallDisposition {
+    let next = sent.pending.with(&sent.bytes);
+    if next.is_complete() {
+        return completing_write(request, input, firmware, row, &sent.pending, &sent.bytes);
+    }
+    let mut answer = written_answer(sent.bytes.len() as u64);
+    answer.push_change(UartChange::RequestBytesSent(next));
+    let received = input.uart.received(row.port).len() as u64;
+    after_status_step(request, input, firmware, row, answer, received)
 }
 
 /// The answer to a write of `bytes` that completes the request `pending`
@@ -322,7 +359,6 @@ fn completing_write(
              buffer",
         );
     }
-    let params = input.uart.port_params(row.port);
     let count = queued.len() as u64;
     let mut answer = written_answer(bytes.len() as u64);
     answer.push_change(UartChange::RequestBytesSent(PendingRequest::empty(
@@ -332,18 +368,7 @@ fn completing_write(
         port: row.port,
         bytes: queued,
     }));
-    let step = shadow::status_step(
-        request,
-        firmware,
-        &input.status(),
-        &params,
-        count,
-        &mut answer,
-    );
-    if let Err(error) = step {
-        return error.refusal(request);
-    }
-    HypercallDisposition::Answered(answer)
+    after_status_step(request, input, firmware, row, answer, count)
 }
 
 /// The bytes of `buffer`, read from the storage of its region, or `None`

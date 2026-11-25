@@ -281,6 +281,21 @@ pub enum HypercallRefusal {
         /// The link register at the `sc`.
         lr: u64,
     },
+    /// A `write_virtual_uart` call completes a request on the system
+    /// manager's port, and CellGov does not hold each input of the reply.
+    #[error(
+        "hypercall {} from {unit:?} at pc 0x{pc:016x}: CellGov does not hold the inputs of the \
+         system manager's reply to a request of service id 0x{service:04x}",
+        cellgov_ps3_abi::lv1::call::WRITE_VIRTUAL_UART
+    )]
+    SystemManagerRequest {
+        /// The unit that made the call.
+        unit: UnitId,
+        /// The address of its `sc`.
+        pc: u64,
+        /// The service id that the request header gives.
+        service: u16,
+    },
     /// A thread took a mediated external interrupt in a case where lv1's
     /// handler enters no vector, or enters it with other registers.
     #[error(
@@ -307,6 +322,9 @@ impl HypercallRefusal {
             | Self::UnmodelledInput { number, .. } => Some(*number),
             Self::RepositoryNode { .. } | Self::RepositorySecondValueUnobserved { .. } => {
                 Some(cellgov_ps3_abi::lv1::call::READ_REPOSITORY_NODE)
+            }
+            Self::SystemManagerRequest { .. } => {
+                Some(cellgov_ps3_abi::lv1::call::WRITE_VIRTUAL_UART)
             }
             Self::MediatedExternal { .. } => None,
         }

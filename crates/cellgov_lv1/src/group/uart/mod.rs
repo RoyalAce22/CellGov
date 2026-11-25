@@ -20,6 +20,7 @@ mod request;
 mod set_param;
 mod shadow;
 mod status;
+mod system_manager;
 mod write;
 
 pub use irq::VirtualUartIrq;
