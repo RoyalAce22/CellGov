@@ -26,6 +26,14 @@ mod tests;
 mod pressure_tests;
 
 #[cfg(test)]
+#[path = "tests/divide_queue_tests.rs"]
+mod divide_queue_tests;
+
+#[cfg(test)]
+#[path = "tests/viq_stage_tests.rs"]
+mod viq_stage_tests;
+
+#[cfg(test)]
 #[path = "tests/priority_tests.rs"]
 mod priority_tests;
 

@@ -16,15 +16,15 @@
       "class": "absent"
     },
     "event_port_ipc_connect_attempts": {
-      "value": 7698,
+      "value": 7692,
       "class": "at-least"
     },
     "event_port_ipc_connect_bound": {
-      "value": 7698,
+      "value": 7692,
       "class": "at-least"
     },
     "event_port_keyed_queues": {
-      "value": 13,
+      "value": 12,
       "class": "at-least"
     },
     "host_invariant_breaks": {
@@ -32,11 +32,11 @@
       "class": "exact"
     },
     "ldarx": {
-      "value": 36162,
+      "value": 36151,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 66983,
+      "value": 66954,
       "class": "at-least"
     },
     "lwmutex_acquires": {
@@ -108,11 +108,11 @@
       "class": "at-least"
     },
     "stdcx": {
-      "value": 36162,
+      "value": 36151,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 66982,
+      "value": 66953,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {
@@ -164,7 +164,7 @@
       "class": "absent"
     },
     "timer_sleeps": {
-      "value": 3874,
+      "value": 3872,
       "class": "at-least"
     },
     "uart_cids_distinct": {
@@ -227,7 +227,7 @@
     },
     "635": {
       "hits": 1,
-      "first_hit": 2185776271
+      "first_hit": 2185776269
     },
     "650": {
       "hits": 1,
@@ -251,7 +251,7 @@
     },
     "867": {
       "hits": 1,
-      "first_hit": 2185540855
+      "first_hit": 2185540853
     },
     "873": {
       "hits": 3,

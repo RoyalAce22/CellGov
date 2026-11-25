@@ -6,6 +6,8 @@ fn the_larger_of_two_pressures_takes_each_field_from_either() {
         cycles: 1,
         vsu_cycles: 4,
         multiply_cycles: 5,
+        divide_cycles: 1,
+        divide_fraction: 200,
         multiply_hold_share: 0,
         vscr_cycles: 2,
         drain_cycles: 1,
@@ -18,6 +20,8 @@ fn the_larger_of_two_pressures_takes_each_field_from_either() {
         cycles: 3,
         vsu_cycles: 2,
         multiply_cycles: 2,
+        divide_cycles: 2,
+        divide_fraction: 16,
         multiply_hold_share: 128,
         vscr_cycles: 9,
         drain_cycles: 4,
@@ -30,6 +34,10 @@ fn the_larger_of_two_pressures_takes_each_field_from_either() {
         cycles: 3,
         vsu_cycles: 4,
         multiply_cycles: 5,
+        // The divide stall comes whole from b: 2 + 16/256 cycles, more than
+        // a's 1 + 200/256.
+        divide_cycles: 2,
+        divide_fraction: 16,
         multiply_hold_share: 128,
         vscr_cycles: 9,
         drain_cycles: 4,
@@ -41,4 +49,11 @@ fn the_larger_of_two_pressures_takes_each_field_from_either() {
     assert_eq!(a.max(b), want);
     assert_eq!(b.max(a), want);
     assert_eq!(a.max(PpeIssuePressure::NONE), a);
+    // On the same whole cycles the larger fraction is the larger stall.
+    let c = PpeIssuePressure {
+        divide_fraction: 200,
+        ..b
+    };
+    assert_eq!(b.max(c), c);
+    assert_eq!(c.max(b), c);
 }

@@ -32,11 +32,11 @@
       "class": "exact"
     },
     "ldarx": {
-      "value": 28167,
+      "value": 28146,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 70890,
+      "value": 70785,
       "class": "at-least"
     },
     "lwmutex_acquires": {
@@ -108,11 +108,11 @@
       "class": "at-least"
     },
     "stdcx": {
-      "value": 28167,
+      "value": 28146,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 70889,
+      "value": 70784,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {
@@ -164,7 +164,7 @@
       "class": "absent"
     },
     "timer_sleeps": {
-      "value": 10687,
+      "value": 10666,
       "class": "at-least"
     },
     "uart_cids_distinct": {
@@ -199,7 +199,7 @@
   "unsupported_syscalls": {
     "45": {
       "hits": 2,
-      "first_hit": 2112217168
+      "first_hit": 2112217095
     },
     "133": {
       "hits": 4,
@@ -223,7 +223,7 @@
     },
     "398": {
       "hits": 1,
-      "first_hit": 65952577617
+      "first_hit": 65952577544
     },
     "465": {
       "hits": 1,
@@ -235,15 +235,15 @@
     },
     "610": {
       "hits": 21,
-      "first_hit": 2112177468
+      "first_hit": 2112177395
     },
     "612": {
       "hits": 1,
-      "first_hit": 2112028594
+      "first_hit": 2112028521
     },
     "635": {
       "hits": 1,
-      "first_hit": 2192780935
+      "first_hit": 2192780774
     },
     "650": {
       "hits": 1,
@@ -255,7 +255,7 @@
     },
     "811": {
       "hits": 3,
-      "first_hit": 2112537855
+      "first_hit": 2112537609
     },
     "817": {
       "hits": 10,
@@ -267,11 +267,11 @@
     },
     "867": {
       "hits": 4,
-      "first_hit": 2192518399
+      "first_hit": 2192518238
     },
     "873": {
       "hits": 3,
-      "first_hit": 2112472586
+      "first_hit": 2112472340
     },
     "956": {
       "hits": 1,

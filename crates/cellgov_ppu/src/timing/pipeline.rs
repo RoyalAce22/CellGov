@@ -74,8 +74,14 @@ struct Scheduled {
     sibling: u64,
     /// The sibling's stall alone.
     stalled: u64,
+    /// The sibling's hold alone: the wait for its dispatch group.
+    held: u64,
     /// The cycle the sibling's stall began at.
     began: u64,
+    /// The VSU issue queue holds the op past IS2 for a divide in progress.
+    behind_divide: bool,
+    /// [`Core::divide_carry`] after the op.
+    divide_carry: u32,
 }
 
 /// The older instruction of an open dispatch group.
@@ -125,6 +131,16 @@ pub(crate) struct Core {
     /// the queue holds an op. A drain issues no earlier than one cycle
     /// after it.
     vsu_queue: u64,
+    /// The cycle the last divide or square root on the VSU completes.
+    divide_done: u64,
+    /// The cycle each of the last [`k::PPU_VIQ_HELD_OPS`] stages of the VSU
+    /// issue queue behind a divide leaves it, a ring in issue order.
+    viq: [u64; k::PPU_VIQ_HELD_OPS],
+    /// The ring index of the oldest stage in [`Core::viq`], which the next
+    /// stage takes.
+    viq_next: usize,
+    /// The cycle the youngest stage in [`Core::viq`] leaves.
+    viq_tail: u64,
     /// The cycle the last floating-point store's data reaches the store
     /// queue. A drain that uses the VSU, other than an `mffs`, issues no
     /// earlier.
@@ -173,6 +189,16 @@ pub(crate) struct Core {
     /// spent on divides and square roots. Each instruction weighs by its
     /// cycles, over a window of [`PRESSURE_WINDOW_CYCLES`].
     divide_share: u32,
+    /// The share of this thread's recent dispatch cycles, out of
+    /// [`SHARE_ONE`], in which its divides stall the shared issue point.
+    ///
+    /// It averages over a window of [`STALL_WINDOW_CYCLES`]. Dispatch
+    /// cycles are the thread's own cycles and its holds for the sibling's
+    /// dispatch group.
+    stall_share: u32,
+    /// The fraction of a cycle, out of 256, of the sibling's divide stalls
+    /// this thread has yet to wait ([`PpeIssuePressure::divide_fraction`]).
+    divide_carry: u32,
     /// The share of this thread's recent cycles spent on the other
     /// instructions that issue alone for long (`issues_alone_for_long`),
     /// weighed as [`Core::divide_share`] is.
@@ -241,6 +267,11 @@ const SHARE_ONE: u32 = 1 << 16;
 /// The cycles [`Core::divide_share`] and [`Core::alone_share`]
 /// average over.
 const PRESSURE_WINDOW_CYCLES: u64 = 64;
+
+/// The cycles [`Core::stall_share`] averages over: about a sibling's round
+/// of divides and the work between them, as in the `ppu_issue_viq_depth`
+/// capture's rounds of 300 to 1250 cycles.
+const STALL_WINDOW_CYCLES: u64 = 1024;
 
 /// The cycles [`Core::kernel_share`] averages over: long enough to span an
 /// LV2 call and the instructions between two calls.
@@ -410,6 +441,10 @@ impl PpeTiming {
                 unit_free: [0; 5],
                 vsu_fence: 0,
                 vsu_queue: 0,
+                divide_done: 0,
+                viq: [0; k::PPU_VIQ_HELD_OPS],
+                viq_next: 0,
+                viq_tail: 0,
                 fp_store_data: 0,
                 fp_store_done: 0,
                 fp_store_read: 0,
@@ -424,6 +459,8 @@ impl PpeTiming {
                 vscr_hold: 0,
                 in_order_writes: 0,
                 divide_share: 0,
+                stall_share: 0,
+                divide_carry: 0,
                 alone_share: 0,
                 vscr_share: 0,
                 drain_share: 0,
@@ -449,13 +486,17 @@ impl PpeTiming {
         }
     }
 
-    /// Set the number of other PPE threads runnable, and the field by
-    /// field largest [`PpeTiming::pressure`] among them, for the
-    /// instructions retired from here on.
+    /// Set the number of other PPE threads runnable, and the largest
+    /// [`PpeTiming::pressure`] among them as [`PpeIssuePressure::max`]
+    /// gives it, for the instructions retired from here on.
     pub(crate) fn set_siblings(&mut self, siblings: u32, pressure: PpeIssuePressure) {
         if siblings == 0 {
             self.hold = 0;
             self.shared_stall = PpeIssuePressure::NONE;
+            // [CBE-Handbook p:301 s:10.2.3.1] a stall at IS2 stalls both
+            // threads. With no sibling, no divide stall reaches this thread,
+            // so the thread drops the fraction of a cycle it carries.
+            self.core.divide_carry = 0;
         } else {
             self.hold = k::PPU_SMT_SIBLING_HOLD_CYCLES;
             self.shared_stall = pressure;
@@ -479,7 +520,16 @@ impl PpeTiming {
         let wait = |(num, den): (u64, u64)| u64::from(c.operand_wait) * num / den;
         let whole = |sum: u64, cap: u64| ((sum + 128) >> 8).min(cap) as u32;
         let cap = k::PPU_SMT_SHARED_STALL_CYCLES;
-        let divide = share(cap, c.divide_share);
+        // This thread stalls the shared issue point for a share f of its
+        // cycles. That stretches the own cycles of each sibling instruction
+        // (`PPU_SMT_OWN_ISSUE_CYCLES`) by f / (1 - f).
+        let rest = u64::from(SHARE_ONE.saturating_sub(c.stall_share)).max(1);
+        let divide =
+            (k::PPU_SMT_OWN_ISSUE_CYCLES * 256 * u64::from(c.stall_share) / rest).min(cap * 256);
+        // The sibling carries the part past a whole cycle
+        // (`divide_fraction`).
+        let fraction = divide % 256;
+        let divide = divide - fraction;
         let long = divide + share(k::PPU_SMT_MICROCODE_STALL_CYCLES, c.alone_share);
         let all = (long + wait(k::PPU_SMT_DEPENDENT_STALL_SHARE)).min(cap * 256);
         let (num, den) = k::PPU_SMT_VSU_STALL_SHARE;
@@ -495,6 +545,8 @@ impl PpeTiming {
                     + wait(k::PPU_SMT_MULTIPLY_DEPENDENT_STALL_SHARE),
                 cap,
             ),
+            divide_cycles: whole(divide, cap),
+            divide_fraction: fraction as u32,
             multiply_hold_share: (c.divide_share * 256 + SHARE_ONE / 2) / SHARE_ONE,
             vscr_cycles: whole(
                 share(k::PPU_SMT_MTVSCR_STALL_CYCLES, c.vscr_share),
@@ -569,8 +621,9 @@ impl PpeTiming {
         // `PPU_MFVSCR_YOUNGER_HOLD_CYCLES` after it.
         let mut t = floor.max(fetched).max(c.vscr_hold);
         let mut queued = 0;
+        let mut operands = 0;
         for (r, after) in op.reads() {
-            t = t.max(c.ready[r as usize].saturating_sub(after));
+            operands = operands.max(c.ready[r as usize].saturating_sub(after));
         }
         for &r in &op.addr {
             if r != NO_REG {
@@ -583,10 +636,27 @@ impl PpeTiming {
         // In the `ppu_issue_mfvscr_younger` capture 32 `li` to one register
         // take 33 cycles an iteration, as 32 `li` to eight registers do.
         for r in op.writes() {
-            t = t.max(c.miss[r as usize]);
+            operands = operands.max(c.miss[r as usize]);
             if c.in_order_writes & (1 << r) == 0 {
-                t = t.max(c.ready[r as usize]);
+                operands = operands.max(c.ready[r as usize]);
             }
+        }
+        let vsu = unit::VSU1 | unit::VSU2;
+        let vsu_busy = unit_slots(op.units & vsu)
+            .map(|u| c.unit_free[u])
+            .max()
+            .unwrap_or(0);
+        // [CBE-Handbook p:320 s:10.7.2.9] the FPU recycles a divide or
+        // square root in its issue queue. [CBE-Handbook p:756 s:A.6.2] the
+        // queue holds a VSU instruction at VQ8 until it can run, past IS2.
+        // So a VSU instruction that waits for a divide in progress waits in
+        // the queue, and the instructions after it continue to issue.
+        let behind_divide = waits_in_queue(op) && {
+            let wait = operands.max(vsu_busy);
+            wait > t && wait <= c.divide_done
+        };
+        if !behind_divide {
+            t = t.max(operands);
         }
         // [CBE-Handbook p:756 s:A.6.2] a VSU instruction leaves IS2 for the
         // VSU issue queue and waits at VQ8. So the fence holds the op past
@@ -596,8 +666,8 @@ impl PpeTiming {
         // the fence holds waits in the queue for its VSU unit too, and the
         // queue releases the ops it holds in order, one a cycle.
         let fenced = uses_vsu(op) && op.kind != Kind::VscrWrite;
-        let queued_units = if fenced && c.vsu_fence > floor {
-            op.units & (unit::VSU1 | unit::VSU2)
+        let queued_units = if behind_divide || (fenced && c.vsu_fence > floor) {
+            op.units & vsu
         } else {
             0
         };
@@ -611,6 +681,17 @@ impl PpeTiming {
         };
         for u in unit_slots(queued_units) {
             fence = fence.max(c.unit_free[u]);
+        }
+        if behind_divide {
+            fence = fence.max(operands);
+        }
+        // [CBE-Handbook p:320 s:10.7.2.9] the recycle's stall can reach
+        // dispatch. [CBE-Handbook p:301 s:10.2.3.1] the queue's 2-stage
+        // buffer takes up to four more instructions while VQ8 stalls. A VSU
+        // instruction issues once the queue has room behind the divide
+        // (`PPU_VIQ_HELD_OPS`).
+        if uses_vsu(op) {
+            t = t.max(c.viq[c.viq_next]);
         }
         if matches!(
             op.kind,
@@ -664,11 +745,27 @@ impl PpeTiming {
         let own_vscr = op.kind == Kind::VscrWrite || (fenced && c.vsu_fence > c.floor);
         let own_wait = t.saturating_sub(floor.max(fetched));
         let stalled = sibling_stall(op, s, own_vscr, own_wait);
+        // The fractions of a cycle the sibling's divide stalls leave carry
+        // from one instruction to the next. A carried whole cycle adds to
+        // the stall only below the shared stall's cap.
+        let carry = c.divide_carry + s.divide_fraction;
+        let (stalled, divide, divide_carry) =
+            if carry >= 256 && stalled < k::PPU_SMT_SHARED_STALL_CYCLES {
+                (stalled + 1, u64::from(s.divide_cycles) + 1, carry - 256)
+            } else {
+                (stalled, u64::from(s.divide_cycles), carry.min(255))
+            };
         // A new dispatch group: the sibling's group issues between. The
         // sibling's stall covers the hold, and so does any wait of this
-        // thread's own; only the rest of the hold is the sibling's.
+        // thread's own; only the rest of the hold is the sibling's. A stall
+        // behind the sibling's divides stops the sibling too, so it covers
+        // none of the hold, up to the shared stall's cap on the two together.
+        let past_hold = divide
+            .min(stalled)
+            .min(k::PPU_SMT_SHARED_STALL_CYCLES.saturating_sub(self.hold));
+        let covers = stalled - past_hold;
         let held = if opens_group {
-            let opener = (c.floor + self.hold).saturating_sub(stalled);
+            let opener = (c.floor + self.hold).saturating_sub(covers);
             let held = opener.saturating_sub(t);
             t = t.max(opener);
             held
@@ -733,7 +830,10 @@ impl PpeTiming {
             queued,
             sibling: held + stalled + gated,
             stalled,
+            held,
             began,
+            behind_divide,
+            divide_carry,
         }
     }
 
@@ -776,12 +876,16 @@ impl PpeTiming {
             queued,
             sibling,
             stalled,
+            held,
             began,
+            behind_divide,
+            divide_carry,
         } = self.schedule(pc, op);
         let (fetched, opens) = self.fetch(pc);
         let outranked = u64::from(self.shared_stall.issue_interval);
         let c = &mut self.core;
         c.gate = c.gate.max(t.saturating_mul(256)).saturating_add(outranked);
+        c.divide_carry = divide_carry;
         stretch_pending(c, &mut self.tables, began, stalled);
         let before = c.floor;
         if opens {
@@ -808,6 +912,7 @@ impl PpeTiming {
             c,
             op,
             (c.floor - before).saturating_sub(sibling),
+            held,
             queued,
             head,
         );
@@ -821,6 +926,26 @@ impl PpeTiming {
 
         if exec > t {
             c.vsu_queue = exec + 1;
+        }
+        // [CBE-Handbook p:757 s:A.6.2] an issue cycle with no VSU
+        // instruction sends a bubble down the queue, and the queue does not
+        // compress bubbles. So while the queue holds an op behind a divide,
+        // each instruction that does not use the VSU takes a stage too. That
+        // stage leaves with the stage ahead of it.
+        let stage = if behind_divide {
+            Some(exec)
+        } else {
+            (!uses_vsu(op) && c.viq_tail > t).then_some(c.viq_tail)
+        };
+        if let Some(leaves) = stage {
+            c.viq[c.viq_next] = leaves;
+            c.viq_next = (c.viq_next + 1) % k::PPU_VIQ_HELD_OPS;
+            c.viq_tail = leaves;
+        }
+        if divides(op) && uses_vsu(op) {
+            if let Kind::Unpipelined(cycles) = op.kind {
+                c.divide_done = exec + u64::from(cycles);
+            }
         }
         mark_destinations(c, op, exec);
         if let Some(done) = vsu_completion(op, exec, k::PPU_MFFS_VSU_COMPLETE_CYCLES) {
@@ -1221,6 +1346,16 @@ fn issues_alone_for_long(op: &Op) -> bool {
 fn issues_to_vsu(op: &Op) -> bool {
     let vsu = unit::VSU1 | unit::VSU2;
     op.units != 0 && op.units & !vsu == 0
+}
+
+/// Whether the VSU issue queue can hold `op` for a divide in progress,
+/// past IS2: a pipelined or unpipelined FP or VMX instruction that issues
+/// to the VSU alone and runs no microcode.
+///
+/// [CBE-Handbook p:756 s:A.6.2] the queue checks the dependencies of the
+/// VSU instructions apart from IS2.
+fn waits_in_queue(op: &Op) -> bool {
+    issues_to_vsu(op) && op.words == 0 && matches!(op.kind, Kind::Plain | Kind::Unpipelined(_))
 }
 
 /// Whether `op` uses the VSU at all: an FP or VMX instruction, a VMX or
@@ -1652,11 +1787,12 @@ fn queue_store(tables: &mut Tables, t: u64, op: &Op, ea: u64, len: u8) {
 
 /// Add an instruction to the averages [`PpeTiming::pressure`] reads.
 ///
-/// The instruction took `own` cycles of this thread's own. A drain spent
-/// `queued` of them on the ops the VSU issue queue held. The instruction's
+/// The instruction took `own` cycles of this thread's own, and waited
+/// `held` more for the sibling's dispatch group. A drain spent `queued` of
+/// the `own` cycles on the ops the VSU issue queue held. The instruction's
 /// VSU work held the head of that queue `head.0` cycles, `head.1` of them
 /// at the fence.
-fn note_pressure(c: &mut Core, op: &Op, own: u64, queued: u64, head: (u64, u64)) {
+fn note_pressure(c: &mut Core, op: &Op, own: u64, held: u64, queued: u64, head: (u64, u64)) {
     let n = PRESSURE_WINDOW_INSTRUCTIONS;
     let mean = |mean: u32, w: u64| {
         let w = w.saturating_mul(256).min(u64::from(u32::MAX));
@@ -1669,6 +1805,10 @@ fn note_pressure(c: &mut Core, op: &Op, own: u64, queued: u64, head: (u64, u64))
     let divide = divides(op);
     let alone = issues_alone_for_long(op);
     c.divide_share = weigh(c.divide_share, own, divide);
+    // The stalls stop the sibling for their whole length, so their share
+    // is of the cycles this thread dispatches in, its holds for the
+    // sibling's dispatch group included.
+    c.stall_share = weigh_over(c.stall_share, own + held, divide, STALL_WINDOW_CYCLES);
     c.alone_share = weigh(c.alone_share, own, alone);
     c.kernel_share = weigh_over(c.kernel_share, own, false, KERNEL_WINDOW_CYCLES);
     // An `mtvscr` that drains its own thread's held vector work leaves the

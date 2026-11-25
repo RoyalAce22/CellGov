@@ -860,6 +860,41 @@ pub const PPU_FP_STORE_DATA_CYCLES: u64 = 13;
 /// after an `std`. An `mfvscr` takes 13 more.
 pub const PPU_FP_STORE_COMPLETE_CYCLES: u64 = 24;
 
+/// The own cycles a thread takes for each instruction beside a runnable
+/// sibling; the sibling's divides stretch them.
+///
+/// [CBE-Handbook p:300 s:10.2.3] the threads take turns at dispatch, so a
+/// thread beside a busy sibling dispatches every other cycle.
+pub const PPU_SMT_OWN_ISSUE_CYCLES: u64 = 2;
+
+/// The stages the VSU issue queue holds past IS2 behind a divide in
+/// progress.
+///
+/// A stage holds one of:
+/// - a VSU instruction that waits for the divide;
+/// - the bubble of an instruction that does not use the VSU.
+///
+/// A VSU instruction past that count issues once the oldest stage leaves
+/// the queue.
+///
+/// In the `ppu_issue_viq_depth` capture a sibling runs N dependent `fdiv`
+/// and then 256 independent `addi` each round. Beside it a loop of 16
+/// independent `addi` takes 34.5 to 35.5 cycles an iteration for N from 1
+/// to 7, 40.1 for N = 8, 48.2 for 10 and 75.8 for 16. Past 7 each divide
+/// adds about one divide latency to the sibling's round. One divide runs
+/// and six wait in the queue. In the `ppu_issue_viq_spaced` capture an
+/// `addi` after each `fdiv` takes a stage. The loop then slows from N = 5,
+/// at 39.25 cycles an iteration, and by about 4.5 cycles for each divide
+/// more.
+///
+/// [CBE-Handbook p:301 s:10.2.3.1] a stall at the VSU issue queue stalls
+/// both threads only when it also stalls IS2. The queue's 2-stage buffer
+/// takes up to four more instructions while VQ8 stalls.
+///
+/// [CBE-Handbook p:757 s:A.6.2] an issue cycle with no VSU instruction
+/// sends a bubble down the queue, and the queue does not compress bubbles.
+pub const PPU_VIQ_HELD_OPS: usize = 6;
+
 /// The cycles a double-precision divide takes and holds the
 /// floating-point unit.
 ///

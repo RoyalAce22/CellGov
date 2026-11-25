@@ -154,7 +154,7 @@ fn four_passes(w: &mut Vec<u32>, class: Class) {
 fn tail(w: &mut Vec<u32>) {
     w.push(LWZ_STOP);
     w.push(CMPWI_R0_0);
-    let exit = w.len() + 6;
+    let exit = w.len() + 5;
     w.push(bne(w.len(), exit));
     w.extend(COUNT_ROUND);
     w.push(b(w.len(), 0));
@@ -406,29 +406,28 @@ fn beside_a_steady_fdiv_sibling_the_model_times_the_loop_short_of_this_console_c
     }
 }
 
+/// The share of the console's mean the loop beside a sibling of `fdiv`
+/// and then `addi` may lie from it. The console's runs there spread 0.4%.
+const FDIV_THEN_ADDI_BAND: f64 = 0.03;
+
 #[test]
-fn beside_a_sibling_of_fdiv_then_addi_the_model_charges_more_than_the_console() {
-    // An accepted gap. A sibling of 8 dependent `fdiv` and then 256
-    // independent `addi` a round costs the loop 13% over a steady `addi`
-    // sibling on the console: the sibling's `addi` issue while its
-    // divides run. The model's sibling waits for each `fdiv` in order at
-    // issue and stalls the loop through it: about 80% over at the
-    // runtime's step.
+fn beside_a_sibling_of_fdiv_then_addi_the_model_times_the_loop_near_the_console() {
+    // A sibling of 8 dependent `fdiv` and then 256 independent `addi` a
+    // round costs the loop 13% over a steady `addi` sibling on the
+    // console. The VSU issue queue holds the divides while the sibling's
+    // `addi` issue, and only the divide past the queue's room stalls the
+    // loop.
     let w = console_words();
     let n = half_iterations(&w);
-    let (mixed, addi) = std::thread::scope(|scope| {
-        let addi = scope.spawn(|| replay(STEADY_ADDI, n, runtime_step()));
-        let mixed = replay(FDIV_THEN_ADDI, n, runtime_step());
-        (mixed, addi.join().expect("the steady addi replay"))
-    });
+    let (one, step) = both_steps(FDIV_THEN_ADDI, n);
     for h in 0..2 {
-        let console =
-            mean(&console_runs(&w, FDIV_THEN_ADDI, h)) / mean(&console_runs(&w, STEADY_ADDI, h));
-        let cellgov = mixed[h] / addi[h];
-        assert!(
-            console < 1.25 && cellgov > 1.5,
-            "half {h}: the mixed sibling costs {console:.2} times a steady addi sibling on \
-             the console, {cellgov:.2} in CellGov",
-        );
+        let console = mean(&console_runs(&w, FDIV_THEN_ADDI, h));
+        for (at, cellgov) in [("one instruction", one[h]), ("the runtime's", step[h])] {
+            assert!(
+                (cellgov - console).abs() / console <= FDIV_THEN_ADDI_BAND,
+                "half {h} at {at} step: CellGov {cellgov:.2} cycles an iteration, the \
+                 console {console:.2}",
+            );
+        }
     }
 }

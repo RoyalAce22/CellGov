@@ -32,6 +32,8 @@ fn pressure(
         cycles: cycles as u32,
         vsu_cycles: vsu_cycles as u32,
         multiply_cycles: multiply_cycles as u32,
+        divide_cycles: 0,
+        divide_fraction: 0,
         multiply_hold_share,
         vscr_cycles: 0,
         drain_cycles: 0,
@@ -51,11 +53,14 @@ fn stalls(timing: &PpeTiming) -> PpeIssuePressure {
     }
 }
 
-/// A sibling of divides: the shared stall, and a multiply's whole hold
-/// again.
+/// A sibling of divides: the shared stall, all of it behind the divides,
+/// and a multiply's whole hold again.
 fn divide_sibling() -> PpeIssuePressure {
     let all = PPU_SMT_SHARED_STALL_CYCLES;
-    pressure(all, all, all, 256)
+    PpeIssuePressure {
+        divide_cycles: all as u32,
+        ..pressure(all, all, all, 256)
+    }
 }
 
 /// A sibling of microcoded loads: the microcode stall, half of it for a
@@ -125,7 +130,7 @@ fn state() -> PpuState {
 #[test]
 fn a_thread_of_dependent_divides_presses_a_sibling_by_the_shared_stalls() {
     let mut timing = PpeTiming::new();
-    run(&mut timing, &state(), &[divd(); 8], 4);
+    run(&mut timing, &state(), &[divd(); 8], 64);
     // Every cycle of the run is a divide's, so the whole hold repeats.
     assert_eq!(stalls(&timing), divide_sibling());
 }
@@ -158,7 +163,7 @@ fn a_divide_sibling_presses_harder_than_a_microcode_one_except_on_a_multiply() {
     let mut s = state();
     s.set_gpr(29, 0x2000);
     let mut divides = PpeTiming::new();
-    run(&mut divides, &state(), &[divd(); 8], 4);
+    run(&mut divides, &state(), &[divd(); 8], 64);
     let mut microcode = PpeTiming::new();
     run(
         &mut microcode,

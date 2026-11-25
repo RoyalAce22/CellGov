@@ -15,6 +15,8 @@ const DIVIDES: PpeIssuePressure = PpeIssuePressure {
     cycles: 13,
     vsu_cycles: 13,
     multiply_cycles: 13,
+    divide_cycles: 13,
+    divide_fraction: 0,
     multiply_hold_share: 256,
     vscr_cycles: 0,
     drain_cycles: 0,

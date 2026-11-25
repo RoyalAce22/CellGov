@@ -76,6 +76,8 @@ mod console_ppu_issue_timing;
 mod console_ppu_issue_touch_flush;
 mod console_ppu_issue_touch_forms;
 mod console_ppu_issue_units;
+mod console_ppu_issue_viq_depth;
+mod console_ppu_issue_viq_spaced;
 mod console_ppu_issue_vscr;
 mod console_ppu_issue_vscr_elem;
 mod console_ppu_issue_vscr_fdiv;

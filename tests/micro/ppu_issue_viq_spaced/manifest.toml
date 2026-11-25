@@ -1,0 +1,21 @@
+[test]
+name = "ppu_issue_viq_spaced"
+
+# A hardware probe of whether fixed-point work between dependent fdiv
+# changes how many of them the VSU issue queue holds behind a running
+# divide: a loop of sixteen independent addi beside a sibling whose
+# rounds run N dependent fdiv, K independent addi after each, and then 256
+# independent addi. The console capture is the answer; ppu/main.c's
+# header lists the phases and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 6584 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 6584 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 180000

@@ -59,6 +59,19 @@ pub struct PpeIssuePressure {
     pub vsu_cycles: u32,
     /// Added to each multiply.
     pub multiply_cycles: u32,
+    /// The whole cycles of the thread's stalls behind its divides.
+    ///
+    /// They are part of [`Self::cycles`], [`Self::vsu_cycles`] and
+    /// [`Self::multiply_cycles`]. Such a stall stops both threads for its
+    /// whole length, so the receiving thread waits it on top of its hold
+    /// for the sibling's dispatch group.
+    pub divide_cycles: u32,
+    /// The fraction of a cycle, out of 256, the divide stalls add past
+    /// [`Self::divide_cycles`].
+    ///
+    /// The receiving thread carries it from one instruction to the next,
+    /// and waits one cycle more each time the carry reaches a whole cycle.
+    pub divide_fraction: u32,
     /// The share, out of 256, of a multiply's own unit hold that the
     /// multiply waits again on top of [`Self::multiply_cycles`].
     pub multiply_hold_share: u32,
@@ -107,6 +120,8 @@ impl PpeIssuePressure {
         cycles: 0,
         vsu_cycles: 0,
         multiply_cycles: 0,
+        divide_cycles: 0,
+        divide_fraction: 0,
         multiply_hold_share: 0,
         vscr_cycles: 0,
         drain_cycles: 0,
@@ -116,13 +131,27 @@ impl PpeIssuePressure {
         issue_interval: 0,
     };
 
-    /// The larger of each field.
+    /// The larger of each field, with the divide stall taken whole.
+    ///
+    /// [`Self::divide_cycles`] and [`Self::divide_fraction`] are one stall,
+    /// so the two come from the pressure whose divide stall is the larger.
     #[must_use]
     pub fn max(self, other: Self) -> Self {
+        // The producer splits one divide stall, in 1/256 cycle, into whole
+        // cycles and the rest. A whole cycle from one sibling and a fraction
+        // from another would make a stall longer than either sibling's.
+        let divide = |p: &Self| (u64::from(p.divide_cycles) << 8) + u64::from(p.divide_fraction);
+        let divides = if divide(&other) > divide(&self) {
+            other
+        } else {
+            self
+        };
         Self {
             cycles: self.cycles.max(other.cycles),
             vsu_cycles: self.vsu_cycles.max(other.vsu_cycles),
             multiply_cycles: self.multiply_cycles.max(other.multiply_cycles),
+            divide_cycles: divides.divide_cycles,
+            divide_fraction: divides.divide_fraction,
             multiply_hold_share: self.multiply_hold_share.max(other.multiply_hold_share),
             vscr_cycles: self.vscr_cycles.max(other.vscr_cycles),
             drain_cycles: self.drain_cycles.max(other.drain_cycles),
