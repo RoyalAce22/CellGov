@@ -10,6 +10,7 @@ use cellgov_ps3_abi::lv1::device_bus::{opens_storage_bus, STORAGE_BUS};
 use super::close;
 use super::dma_map::{self, DmaMapping};
 use super::dma_region::{self, DmaRegion};
+use super::dma_unmap;
 use super::mmio_map::{self, MmioMapping};
 use super::mmio_unmap;
 use super::open::{self, OpenDevice, StorageBusOpen, StorageDeviceOpen};
@@ -24,6 +25,7 @@ pub(crate) const GROUP: Group = Group {
         close::HYPERCALLS,
         dma_region::HYPERCALLS,
         dma_map::HYPERCALLS,
+        dma_unmap::HYPERCALLS,
         mmio_map::HYPERCALLS,
         mmio_unmap::HYPERCALLS,
     ],
@@ -275,6 +277,9 @@ impl DeviceBusState {
             DeviceBusChange::DmaRegionMapped(mapping) => {
                 self.mappings.insert(mapping);
             }
+            DeviceBusChange::DmaRegionUnmapped(mapping) => {
+                self.mappings.remove(&mapping);
+            }
             DeviceBusChange::StorageBusOpened(open) => {
                 self.storage_bus = Some(open);
             }
@@ -395,6 +400,8 @@ pub enum DeviceBusChange {
     DmaRegionAllocated(DmaRegion),
     /// lv1 made this DMA mapping for the partition.
     DmaRegionMapped(DmaMapping),
+    /// lv1 removed this DMA mapping of the partition.
+    DmaRegionUnmapped(DmaMapping),
     /// The call opened the storage bus.
     StorageBusOpened(StorageBusOpen),
     /// The call connected the event receive port with this id to the

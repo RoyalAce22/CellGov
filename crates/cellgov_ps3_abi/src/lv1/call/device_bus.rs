@@ -62,3 +62,13 @@ pub const ALLOCATE_DEVICE_DMA_REGION: u64 = 174;
 /// The lv1 handler [OFW-4.93 lv1 a:0x306770] reads the inputs in this
 /// form; see [`crate::lv1::device_bus`].
 pub const MAP_DEVICE_DMA_REGION: u64 = 176;
+
+/// `unmap_device_dma_region`: four inputs and no output.
+/// - r3 is the id of a bus.
+/// - r4 is the id of a device on that bus.
+/// - r5 is the bus address of a DMA mapping of the device.
+/// - r6 is the length in bytes.
+///
+/// The lv1 handler [OFW-4.93 lv1 a:0x30660C] reads the inputs in this
+/// form; see [`crate::lv1::device_bus`].
+pub const UNMAP_DEVICE_DMA_REGION: u64 = 177;
