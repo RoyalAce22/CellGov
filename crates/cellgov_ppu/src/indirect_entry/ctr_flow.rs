@@ -7,7 +7,7 @@ use cellgov_ps3_abi::hw::ppc_isa::PPC_BO_BIT2;
 
 use super::constants::{never_falls_through, GprStep, Step, Value};
 use super::toc::FunctionSteps;
-use crate::caller_census::written_gprs;
+use crate::caller_census::surely_written_gprs;
 use crate::hypercall_cfg::{branch_target, Code, CodeSegment};
 use crate::instruction::PpuInstruction;
 use crate::local_cfg::falls_through;
@@ -246,8 +246,10 @@ impl CtrState {
     /// - a load at a constant offset from r1, from the slots that hold a
     ///   copy there.
     ///
-    /// Each other word that surely writes a GPR removes its copy. A store
-    /// at a constant offset from r1 writes its slot, as
+    /// Each other word that surely writes a GPR removes its copy. A word
+    /// that copies into a GPR that it does not surely write, such as an
+    /// invalid form of a load, joins the copy into the copy of the GPR. A
+    /// store at a constant offset from r1 writes its slot, as
     /// [`store_into`] gives. A word that moves r1 by a constant moves
     /// each slot, and each other word that surely writes r1 removes each
     /// slot.
@@ -280,7 +282,12 @@ impl CtrState {
         let mut copies = self.copies.clone();
         copies.retain(|&gpr, _| written >> gpr & 1 == 0);
         for (gpr, copy) in copied {
-            if copy != Ctr::default() {
+            if copy == Ctr::default() {
+                continue;
+            }
+            if written >> gpr & 1 == 0 {
+                copies.entry(gpr).or_default().join(&copy);
+            } else {
                 copies.insert(gpr, copy);
             }
         }
@@ -484,36 +491,6 @@ impl StackAccess {
                 .collect(),
             moves_r1: None,
         })
-    }
-}
-
-/// The GPRs that the word `decoded` writes on each run, as a mask with
-/// bit `n` set for GPR `n`.
-///
-/// The mask holds no GPR for these words, which [`written_gprs`] takes to
-/// write GPRs that they can leave unchanged:
-/// - `sc`, whose handler can return each GPR unchanged;
-/// - `lswx`, which loads no byte and leaves RT undefined when its byte
-///   count in XER is 0;
-/// - a divide, which leaves RT undefined when its divisor is 0 or its
-///   quotient overflows;
-/// - an illegal word, whose error handler need not emulate it;
-/// - a fused pair, which decode does not produce.
-///
-/// [PPC-Book1 p:48 s:3.3.6] `lswx` loads the number of bytes that XER\[57:63\] gives, and with a count of 0 the contents of RT are undefined.
-/// [PPC-Book1 p:58] For `divd` and `divw`, a divisor of 0 or a quotient that overflows leaves the contents of RT undefined.
-/// [PPC-Book1 p:59] For `divdu` and `divwu`, a divisor of 0 leaves the contents of RT undefined.
-fn surely_written_gprs(decoded: &PpuInstruction) -> u32 {
-    match decoded {
-        PpuInstruction::Sc { .. }
-        | PpuInstruction::Lswx { .. }
-        | PpuInstruction::Divw { .. }
-        | PpuInstruction::Divwu { .. }
-        | PpuInstruction::Divd { .. }
-        | PpuInstruction::Divdu { .. }
-        | PpuInstruction::PpeIllegal { .. }
-        | PpuInstruction::Fused(_) => 0,
-        _ => written_gprs(decoded),
     }
 }
 

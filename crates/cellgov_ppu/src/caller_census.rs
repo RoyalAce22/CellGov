@@ -701,6 +701,60 @@ pub(crate) fn written_gprs(decoded: &PpuInstruction) -> u32 {
     }
 }
 
+/// The GPRs that the word `decoded` writes on each run, as a mask with
+/// bit `n` set for GPR `n`.
+///
+/// The mask holds no GPR for these words, which [`written_gprs`] takes to
+/// write GPRs that they can leave unchanged:
+/// - `sc`, whose handler can return each GPR unchanged;
+/// - `lswx`, which loads no byte and leaves RT undefined when its byte
+///   count in XER is 0;
+/// - a divide, which leaves RT undefined when its divisor is 0 or its
+///   quotient overflows;
+/// - an illegal word, whose error handler need not emulate it;
+/// - a fused pair, which decode does not produce.
+///
+/// An invalid form of a load or a store also takes the illegal-instruction
+/// program interrupt. Its mask holds only the GPRs that the PPE loads
+/// before the collision.
+///
+/// [PPC-Book1 p:48 s:3.3.6] `lswx` loads the number of bytes that XER\[57:63\] gives, and with a count of 0 the contents of RT are undefined.
+/// [PPC-Book1 p:58] For `divd` and `divw`, a divisor of 0 or a quotient that overflows leaves the contents of RT undefined.
+/// [PPC-Book1 p:59] For `divdu` and `divwu`, a divisor of 0 leaves the contents of RT undefined.
+/// [CBE-Handbook p:254 s:9.5.9] For an invalid form whose RA is in the range, the PPE completes the loads up to the collision and takes the interrupt there.
+pub(crate) fn surely_written_gprs(decoded: &PpuInstruction) -> u32 {
+    use PpuInstruction as I;
+    match *decoded {
+        I::Sc { .. }
+        | I::Lswx { .. }
+        | I::Divw { .. }
+        | I::Divwu { .. }
+        | I::Divd { .. }
+        | I::Divdu { .. }
+        | I::PpeIllegal { .. }
+        | I::Fused(_) => 0,
+        _ => match crate::exec::invalid_form(decoded) {
+            Some(form) => loaded_before_collision(decoded, form),
+            None => written_gprs(decoded),
+        },
+    }
+}
+
+/// The GPRs that the invalid form `form` of `decoded` loads before the
+/// collision, as a mask.
+///
+/// [PPC-Book1 p:46 s:3.3.5] `lmw` loads GPRs from RT up.
+/// [PPC-Book1 p:48 s:3.3.6] `lswi` loads GPRs from RT up, four bytes to each GPR, with GPR 0 after GPR 31.
+fn loaded_before_collision(decoded: &PpuInstruction, form: crate::exec::InvalidForm) -> u32 {
+    match *decoded {
+        PpuInstruction::Lmw { rt, .. } | PpuInstruction::Lswi { rt, .. } => {
+            let gprs = u32::try_from(form.ahead.div_ceil(4)).unwrap_or(u32::MAX);
+            gpr_run(rt, gprs)
+        }
+        _ => 0,
+    }
+}
+
 /// The GPRs that the privileged word `raw` writes, as a mask.
 ///
 /// [PPC-Book3 p:23 s:3.4] `mfmsr` places the MSR into RT.
@@ -824,3 +878,7 @@ mod hypercall_real_alias_named_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_constant_join_tests.rs"]
 mod hypercall_constant_join_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_invalid_form_tests.rs"]
+mod invalid_form_tests;

@@ -84,6 +84,31 @@ pub(super) enum Scalar {
     Store(Ea, Width, Src, Update),
 }
 
+impl Scalar {
+    /// The mnemonic of an update form that the PPE refuses as an invalid
+    /// form, or `None` for a valid form.
+    ///
+    /// [PPC-Book1 p:33 s:3.3.2] Fixed-point load with update: invalid form when RA=0 or RA=RT.
+    /// [PPC-Book1 p:104 s:4.6.2] Floating-point load with update: the only invalid form is RA=0.
+    /// [PPC-Book1 p:40 s:3.3.3] Store with update: invalid form when RA=0.
+    pub(super) fn invalid_update(self) -> Option<&'static str> {
+        let (ra, name, invalid) = match self {
+            Scalar::Load(ea, _, dest, Update::Ra(name)) => {
+                let ra = ea.ra();
+                let invalid = match dest {
+                    Dest::Zero(rt) | Dest::Sign(rt) | Dest::Reversed(rt) => ra == rt,
+                    // FRT indexes a different register file, so RA=FRT is a valid encoding.
+                    Dest::Fpr(_) => false,
+                };
+                (ra, name, invalid)
+            }
+            Scalar::Store(ea, _, _, Update::Ra(name)) => (ea.ra(), name, false),
+            Scalar::Load(.., Update::No) | Scalar::Store(.., Update::No) => return None,
+        };
+        (ra == 0 || invalid).then_some(name)
+    }
+}
+
 /// Decode the scalar load / store forms; `None` for every other
 /// memory instruction.
 #[inline]
@@ -235,18 +260,8 @@ pub(super) fn load(
     dest: Dest,
     update: Update,
 ) -> ExecuteVerdict {
-    if let Update::Ra(insn) = update {
-        let ra = ea.ra();
-        let invalid = match dest {
-            // [PPC-Book1 p:33 s:3.3.2] Fixed-point load with update: invalid form when RA=0 or RA=RT.
-            Dest::Zero(rt) | Dest::Sign(rt) | Dest::Reversed(rt) => ra == 0 || ra == rt,
-            // [PPC-Book1 p:104 s:4.6.2] Floating-point load with update: the only invalid form is RA=0.
-            // FRT indexes a different register file, so RA=FRT is a valid encoding.
-            Dest::Fpr(_) => ra == 0,
-        };
-        if invalid {
-            return ExecuteVerdict::Fault(PpuFault::illegal(insn));
-        }
+    if let Some(insn) = Scalar::Load(ea, width, dest, update).invalid_update() {
+        return ExecuteVerdict::Fault(PpuFault::illegal(insn));
     }
     let addr = ea.resolve(state);
     if matches!(dest, Dest::Fpr(_)) && !word_aligned(addr) {
@@ -302,11 +317,8 @@ pub(super) fn store(
     src: Src,
     update: Update,
 ) -> ExecuteVerdict {
-    if let Update::Ra(insn) = update {
-        // [PPC-Book1 p:40 s:3.3.3] Store with update: invalid form when RA=0.
-        if ea.ra() == 0 {
-            return ExecuteVerdict::Fault(PpuFault::illegal(insn));
-        }
+    if let Some(insn) = Scalar::Store(ea, width, src, update).invalid_update() {
+        return ExecuteVerdict::Fault(PpuFault::illegal(insn));
     }
     let addr = ea.resolve(state);
     if matches!(src, Src::Fpr(_) | Src::FprBits(_)) && !word_aligned(addr) {

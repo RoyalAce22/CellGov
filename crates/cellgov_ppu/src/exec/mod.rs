@@ -58,6 +58,7 @@ pub use dispatch::execute;
 pub use fault::{PpuFault, PpuInterrupt, ProgramCause};
 pub(crate) use mem::d_form_load;
 pub(crate) use mem::string_loads_into;
+pub(crate) use mem::{invalid_form, InvalidForm};
 pub(crate) use memory_helpers::{caching_inhibited, view_holding_all};
 pub(crate) use vec::vx_executes;
 pub use verdict::ExecuteVerdict;

@@ -9,7 +9,7 @@ use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_BIT1, MSR_IR, MSR_PR, MSR_SF};
 
 use super::real_mode::{fetch_address, MsrWord, Switch};
 use super::toc::FunctionToc;
-use crate::caller_census::written_gprs;
+use crate::caller_census::{surely_written_gprs, written_gprs};
 use crate::instruction::PpuInstruction;
 use crate::local_cfg::falls_through;
 
@@ -231,14 +231,16 @@ impl Constants {
     }
 
     /// Forgets the constant in each GPR that `decoded` writes.
+    ///
+    /// A GPR that the word does not surely write can keep a constant that
+    /// the scan dropped, so it keeps its mark.
     fn forget_written(&mut self, decoded: &PpuInstruction) {
-        let written = written_gprs(decoded);
-        let mut bits = written;
+        let mut bits = written_gprs(decoded);
         while bits != 0 {
             self.gprs[bits.trailing_zeros() as usize] = None;
             bits &= bits - 1;
         }
-        self.lost_gprs &= !written;
+        self.lost_gprs &= !surely_written_gprs(decoded);
     }
 
     /// Whether `gpr` can also hold a constant that the scan dropped.

@@ -24,6 +24,49 @@ use super::helpers::{holds_reservation_for, read_aligned_16};
 use super::scalar::{load, scalar, store, Scalar};
 use super::string::{bytes_before_collision, string_load, string_loads_into, string_store};
 
+/// An invalid form of a load or a store that the PPE refuses with the
+/// illegal-instruction program interrupt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct InvalidForm {
+    /// The mnemonic that the fault names.
+    pub(crate) name: &'static str,
+    /// The bytes that the PPE loads before the collision, from RT up and
+    /// four to each GPR.
+    pub(crate) ahead: u64,
+}
+
+/// The invalid form of `insn`, or `None` for a valid form.
+///
+/// An `lswx` reads its byte count from XER, so the rule leaves its form to
+/// the caller and gives `None`, also for an RT=RA or RT=RB form.
+///
+/// [CBE-Handbook p:254 s:9.5.9] The PPE takes the illegal-instruction interrupt for an invalid form of a load or store with update, a load multiple or a load string.
+/// [CBE-Handbook p:254 s:9.5.9] A load multiple is an invalid form when RA is in the range of registers to be loaded or when RA = 0.
+/// [PPC-Book1 p:46 s:3.3.5] `lmw` is invalid when RA is in the range of registers to be loaded, including the case RA=0.
+/// [PPC-Book1 p:48 s:3.3.6] `lswi` is invalid when RA is in the range of registers to be loaded, including the case RA=0.
+/// [PPC-Book1 p:48 s:3.3.6] An `lswx` with RT=RA or RT=RB is an invalid form whatever its byte count.
+pub(crate) fn invalid_form(insn: &PpuInstruction) -> Option<InvalidForm> {
+    if let Some(form) = scalar(insn) {
+        return form
+            .invalid_update()
+            .map(|name| InvalidForm { name, ahead: 0 });
+    }
+    match *insn {
+        PpuInstruction::Lmw { rt, ra, .. } => (ra == 0 || ra >= rt).then(|| InvalidForm {
+            name: "lmw",
+            ahead: if ra >= rt { 4 * u64::from(ra - rt) } else { 0 },
+        }),
+        PpuInstruction::Lswi { rt, ra, nb } => {
+            let n = if nb == 0 { 32usize } else { nb as usize };
+            string_loads_into(rt, n, ra).then(|| InvalidForm {
+                name: "lswi",
+                ahead: bytes_before_collision(rt, n, &[ra]),
+            })
+        }
+        _ => None,
+    }
+}
+
 pub(crate) fn execute(
     insn: &PpuInstruction,
     state: &mut PpuState,
@@ -51,8 +94,7 @@ pub(crate) fn execute(
             // [CBE-Handbook p:254 s:9.5.9] For an RA in the range, the PPE completes the loads up to the colliding register, then takes the illegal-instruction interrupt.
             // A word ahead of RA that no view holds takes the data storage
             // interrupt first. The interrupt discards the loaded registers.
-            if ra == 0 || ra >= rt {
-                let ahead = if ra >= rt { 4 * u64::from(ra - rt) } else { 0 };
+            if let Some(InvalidForm { name, ahead }) = invalid_form(insn) {
                 // [CBE-Handbook p:290 s:9.10] An lmw alignment interrupt outranks a page-fault data storage interrupt, which outranks a caching-inhibited alignment interrupt.
                 // The loads ahead of RA take both alignment interrupts as a
                 // valid lmw does.
@@ -65,7 +107,7 @@ pub(crate) fn execute(
                 if let Some(e) = load_refusal(region_views, ea, ahead) {
                     return ExecuteVerdict::MemFault(e);
                 }
-                return ExecuteVerdict::Fault(PpuFault::illegal("lmw"));
+                return ExecuteVerdict::Fault(PpuFault::illegal(name));
             }
             // [CBE-Handbook p:253 s:9.5.8] An lmw or stmw operand that is not word-aligned takes the alignment interrupt.
             if ea & 3 != 0 {
@@ -126,8 +168,8 @@ pub(crate) fn execute(
             let n = if nb == 0 { 32usize } else { nb as usize };
             // [PPC-Book1 p:15 s:1.12.2] In 32-bit mode only the low 32 bits of an address sum address storage.
             let base = effective_address(state.ra_or_zero(ra));
-            if string_loads_into(rt, n, ra) {
-                return invalid_string_load(region_views, base, rt, n, &[ra], "lswi");
+            if let Some(InvalidForm { name, ahead }) = invalid_form(insn) {
+                return invalid_string_load(region_views, base, ahead, name);
             }
             if caching_inhibited(region_views, base, n as u64) {
                 return inhibited_load(region_views, base, base, n as u64);
@@ -140,7 +182,8 @@ pub(crate) fn execute(
             let base = state.ea_x_form(ra, rb);
             if rt == ra || rt == rb || string_loads_into(rt, n, ra) || string_loads_into(rt, n, rb)
             {
-                return invalid_string_load(region_views, base, rt, n, &[ra, rb], "lswx");
+                let ahead = bytes_before_collision(rt, n, &[ra, rb]);
+                return invalid_string_load(region_views, base, ahead, "lswx");
             }
             // [PPC-Book1 p:48 s:3.3.6] With a zero count the contents of RT are undefined.
             // The reference console loads one byte, as a count of 1 does, and an
@@ -420,20 +463,16 @@ pub(crate) fn execute(
     }
 }
 
-/// The verdict of an invalid-form load string `name` of `n` bytes from
-/// `base` into `rt`, whose registers include one of `collide` or start at
-/// it.
+/// The verdict of an invalid-form load string `name` from `base`, which
+/// loads `ahead` bytes before the collision.
 ///
 /// The interrupt discards the loaded registers.
 fn invalid_string_load(
     region_views: &[cellgov_mem::RegionView<'_>],
     base: u64,
-    rt: u8,
-    n: usize,
-    collide: &[u8],
+    ahead: u64,
     name: &'static str,
 ) -> ExecuteVerdict {
-    let ahead = bytes_before_collision(rt, n, collide);
     // [CBE-Handbook p:253 s:9.5.8] An lswi or lswx operand in caching-inhibited storage takes the alignment interrupt.
     if caching_inhibited(region_views, base, ahead) {
         return inhibited_load(region_views, base, base, ahead);

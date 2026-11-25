@@ -69,7 +69,7 @@ fn addi(rt: u8, ra: u8, imm: i16) -> u32 {
     word(PpuInstruction::Addi { rt, ra, imm })
 }
 
-fn mtctr(rs: u8) -> u32 {
+pub(super) fn mtctr(rs: u8) -> u32 {
     word(PpuInstruction::Mtctr { rs })
 }
 
@@ -77,11 +77,11 @@ fn mtlr(rs: u8) -> u32 {
     word(PpuInstruction::Mtlr { rs })
 }
 
-fn mflr(rt: u8) -> u32 {
+pub(super) fn mflr(rt: u8) -> u32 {
     word(PpuInstruction::Mflr { rt })
 }
 
-fn bctr() -> u32 {
+pub(super) fn bctr() -> u32 {
     word(PpuInstruction::Bcctr {
         bo: 0b10100,
         bi: 0,
@@ -99,7 +99,7 @@ fn b(offset: i32) -> u32 {
 }
 
 /// The ordinals with the window, the second window and `words` at `at`.
-fn sites(at: u64, words: &[u32]) -> Vec<(u64, Option<u16>)> {
+pub(super) fn sites(at: u64, words: &[u32]) -> Vec<(u64, Option<u16>)> {
     let segments: [Segment; 3] = [code(at, words), window(&[]), quiet()];
     ordinals(0, &segments)
 }
@@ -187,7 +187,7 @@ fn a_virtual_mode_bctr_of_a_gpr_stepped_after_a_join_enters_the_step_of_each_con
 
 /// The ordinals when an indirect branch can reach an address that the
 /// scan does not know.
-const EVERY_UNRESOLVED: [(u64, Option<u16>); 2] = [(SC, None), (QUIET_SC, None)];
+pub(super) const EVERY_UNRESOLVED: [(u64, Option<u16>); 2] = [(SC, None), (QUIET_SC, None)];
 
 /// `lis r3,0; ori r3,r3,start; loop: addi r3,r3,0x10; blt loop`, with
 /// the window's `nop` in r3 after the twentieth pass.
@@ -224,10 +224,10 @@ fn a_blr_of_a_gpr_that_a_loop_steps_past_the_join_limit_leaves_every_site_unreso
 }
 
 /// The most constants that the join keeps in one register.
-const JOIN_LIMIT: u16 = 16;
+pub(super) const JOIN_LIMIT: u16 = 16;
 
 /// The ordinals when no indirect branch reaches the window's `nop`.
-const WINDOW_RESOLVED: [(u64, Option<u16>); 2] = [(SC, Some(75)), (QUIET_SC, Some(77))];
+pub(super) const WINDOW_RESOLVED: [(u64, Option<u16>); 2] = [(SC, Some(75)), (QUIET_SC, Some(77))];
 
 /// `writers` builds of r3, each of its own constant, with `tail` after
 /// each build and then a `beq` to the word after the last `beq`.
@@ -247,7 +247,7 @@ fn writers(writers: u16, tail: &[u32]) -> Vec<u32> {
 
 /// `writers` `mtlr` words that each write their own constant into LR,
 /// with a `beq` after each to the word after the last `beq`.
-fn lr_writers(count: u16) -> Vec<u32> {
+pub(super) fn lr_writers(count: u16) -> Vec<u32> {
     writers(count, &[mtlr(3)])
 }
 
