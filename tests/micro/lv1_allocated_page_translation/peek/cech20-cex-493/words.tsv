@@ -1,0 +1,4 @@
+address	role	reads	agree	value
+0x0000000000347bc8	translate_method_descriptor	2	yes	0x00000000002ddf98
+0x0000000000358090	toc_slot_allocated_region_class	2	yes	0x00000000003621d0
+0x00000000003621e8	allocated_region_class_entry_24	2	yes	0x0000000000347bc8
