@@ -142,8 +142,9 @@ fn each_failed_bus_check_gets_its_marked_status_for_any_device() {
 
 #[test]
 fn an_open_of_another_device_on_a_bus_that_passes_the_checks_is_a_refusal() {
-    let what = "an open of a device other than devices 0, 1 and 2 of bus 1, which lv1 finds \
-                through state that CellGov does not model";
+    let what = "an open of a device other than devices 0, 1 and 2 of bus 1 and the storage bus, \
+                which lv1 finds through state that CellGov does not model or, above device 6 \
+                of bus 4, finds absent with an answer that CellGov does not give";
     let cases = [
         (1, 3),
         (1, 4),

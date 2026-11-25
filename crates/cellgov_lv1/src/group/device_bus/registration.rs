@@ -8,7 +8,7 @@ use cellgov_mem::scheme::{HashedSurface, Stamp};
 
 use super::dma_map::{self, DmaMapping};
 use super::dma_region::{self, DmaRegion};
-use super::open::{self, OpenDevice};
+use super::open::{self, OpenDevice, StorageBusOpen};
 use crate::group::state::StateChange;
 use crate::group::table::Group;
 
@@ -30,12 +30,17 @@ pub(crate) const GROUP: Group = Group {
         HashedSurface {
             name: "the DMA regions that the partition allocated",
             source: Some(DMA_REGION_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(32),
         },
         HashedSurface {
             name: "the DMA mappings that lv1 made for the partition",
             source: Some(DMA_MAPPING_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(32),
+        },
+        HashedSurface {
+            name: "the storage bus open that the partition holds",
+            source: Some(STORAGE_BUS_OPEN_SOURCE),
+            stamp: Stamp::Version(32),
         },
     ],
 };
@@ -52,20 +57,31 @@ pub(crate) const DMA_REGION_SOURCE: u8 = 177;
 /// keyed by its index in bus, device and bus address order.
 pub(crate) const DMA_MAPPING_SOURCE: u8 = 178;
 
+/// The lane source of the storage bus open: object 0 while the partition
+/// holds the storage bus open.
+pub(crate) const STORAGE_BUS_OPEN_SOURCE: u8 = 179;
+
 /// The device bus group's state.
 ///
 /// The state holds these values:
 /// - each device that the partition opened;
 /// - each DMA region that lv1 gave the partition;
-/// - each mapping that lv1 made in those regions.
+/// - each mapping that lv1 made in those regions;
+/// - the storage bus open that the partition holds.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeviceBusState {
     open: BTreeSet<OpenDevice>,
     regions: BTreeSet<DmaRegion>,
     mappings: BTreeSet<DmaMapping>,
+    storage_bus: Option<StorageBusOpen>,
 }
 
 impl DeviceBusState {
+    /// The storage bus open that the partition holds, if any.
+    pub fn storage_bus_open(&self) -> Option<StorageBusOpen> {
+        self.storage_bus
+    }
+
     /// Each open device, in bus and device order.
     pub fn open_devices(&self) -> impl Iterator<Item = OpenDevice> + '_ {
         self.open.iter().copied()
@@ -110,11 +126,15 @@ impl DeviceBusState {
             DeviceBusChange::DmaRegionMapped(mapping) => {
                 self.mappings.insert(mapping);
             }
+            DeviceBusChange::StorageBusOpened(open) => {
+                self.storage_bus = Some(open);
+            }
         }
     }
 
-    /// The sync-state terms of the open devices, the DMA regions and the
-    /// DMA mappings. A state that holds none of them adds no term.
+    /// The sum of the sync-state terms of the group's hashed surfaces.
+    ///
+    /// A state that holds no value adds no term.
     pub fn sync_term(&self) -> u128 {
         let open = (0u64..)
             .zip(self.open_devices())
@@ -126,11 +146,14 @@ impl DeviceBusState {
             .fold(open, |sum, (index, region)| {
                 sum.wrapping_add(lanes::value_term(DMA_REGION_SOURCE, index, &region))
             });
-        (0u64..)
+        let mappings = (0u64..)
             .zip(self.dma_mappings())
             .fold(regions, |sum, (index, mapping)| {
                 sum.wrapping_add(lanes::value_term(DMA_MAPPING_SOURCE, index, &mapping))
-            })
+            });
+        self.storage_bus.map_or(mappings, |open| {
+            mappings.wrapping_add(lanes::value_term(STORAGE_BUS_OPEN_SOURCE, 0, &open))
+        })
     }
 }
 
@@ -143,6 +166,8 @@ pub enum DeviceBusChange {
     DmaRegionAllocated(DmaRegion),
     /// lv1 made this DMA mapping for the partition.
     DmaRegionMapped(DmaMapping),
+    /// The call opened the storage bus.
+    StorageBusOpened(StorageBusOpen),
 }
 
 impl From<DeviceBusChange> for StateChange {
@@ -162,3 +187,7 @@ mod dma_region_hash_tests;
 #[cfg(test)]
 #[path = "tests/dma_map_hash_tests.rs"]
 mod dma_map_hash_tests;
+
+#[cfg(test)]
+#[path = "tests/storage_bus_open_hash_tests.rs"]
+mod storage_bus_open_hash_tests;

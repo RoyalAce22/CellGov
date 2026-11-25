@@ -61,7 +61,9 @@ pub use answer::{
     PageTableLoad, ReturnPath, ThreadInterrupt, ThreadResume,
 };
 pub use cost::cost;
-pub use group::device_bus::{DeviceBusChange, DeviceBusState, DmaMapping, DmaRegion, OpenDevice};
+pub use group::device_bus::{
+    DeviceBusChange, DeviceBusState, DmaMapping, DmaRegion, OpenDevice, StorageBusOpen,
+};
 pub use group::gpu::{GpuChange, GpuState};
 pub use group::interrupt::bitmap::{
     IrqStateBitmapKey, IrqStateBitmapRegistration, IrqStateBitmapState, StatusShadowWrite,

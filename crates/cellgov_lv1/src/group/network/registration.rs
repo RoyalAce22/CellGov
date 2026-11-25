@@ -22,17 +22,17 @@ pub(crate) const GROUP: Group = Group {
         HashedSurface {
             name: "the network device's interrupt status indicator",
             source: Some(STATUS_INDICATOR_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(32),
         },
         HashedSurface {
             name: "the event receive port of the network device's interrupt",
             source: Some(INTERRUPT_PORT_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(32),
         },
         HashedSurface {
             name: "the network device's interrupt mask",
             source: Some(INTERRUPT_MASK_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(32),
         },
     ],
 };
