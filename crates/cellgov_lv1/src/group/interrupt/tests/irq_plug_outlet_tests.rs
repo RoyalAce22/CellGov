@@ -3,7 +3,9 @@
 
 use super::*;
 use crate::IrqStateBitmapRegistration;
+use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
+use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_ps3_abi::lv1::call::CONNECT_IRQ_PLUG_EXT;
 use cellgov_ps3_abi::lv1::spe::game_os_spe_call;
 use cellgov_time::GuestTicks;

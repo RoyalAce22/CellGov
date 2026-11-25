@@ -9,20 +9,20 @@
 //! lv1 constructs an outlet with the port constructor, so an outlet
 //! passes each check that a port passes; see [`cellgov_ps3_abi::lv1::spe`].
 
-use cellgov_effects::{Effect, WritePayload};
-use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
+use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::lv1::call::CONNECT_IRQ_PLUG_EXT;
 use cellgov_ps3_abi::lv1::interrupt::THREADS_PER_LOGICAL_PPE;
 use cellgov_ps3_abi::lv1::irq_plug::{
-    irq_plug_handler, plug_status_bit, IRQ_PLUGS_PER_THREAD, IRQ_PLUG_IN_USE_R3, IRQ_PLUG_PLUG_R3,
+    irq_plug_handler, IRQ_PLUGS_PER_THREAD, IRQ_PLUG_IN_USE_R3, IRQ_PLUG_PLUG_R3,
     IRQ_PLUG_PORT_CONNECTED_R3, IRQ_PLUG_PORT_R3, IRQ_PLUG_PPE_ID_R3, IRQ_PLUG_R7_R3,
     IRQ_PLUG_THREAD_R3,
 };
 use cellgov_ps3_abi::lv1::ppe::game_os_logical_ppe_id;
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
-use super::bitmap::{IrqStateBitmapKey, IrqStateBitmapState, StatusShadowWrite};
+use super::bitmap::{IrqStateBitmapKey, IrqStateBitmapState};
 use super::event_port::{EventReceivePort, EventReceivePortState};
+use super::raise;
 use super::InterruptChange;
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
@@ -50,9 +50,6 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
         )
     },
 }];
-
-/// The bytes of the status doubleword that a connect step writes.
-const STATUS_DOUBLEWORD_BYTES: u64 = std::mem::size_of::<u64>() as u64;
 
 fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDisposition {
     HypercallDisposition::Refused(HypercallRefusal::UnmodelledInput {
@@ -173,56 +170,23 @@ pub(crate) fn connect_plug(
             "an IRQ plug call for a port with a pending event, which lv1 raises on the plug",
         );
     }
-    let Some(mut answer) = clear_path_answer(request, state.bitmaps, state.storage, key, plug)
-    else {
-        return refuse(
-            request,
-            "an IRQ plug whose status doubleword CellGov holds no storage for",
-        );
-    };
+    let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []);
+    if let Err(error) = raise::clear(
+        request,
+        state.bitmaps,
+        state.storage,
+        key,
+        plug,
+        &mut answer,
+    ) {
+        return error.refusal(request);
+    }
     answer.push_change(change(EventReceivePort {
         connection: Some(key),
         plug,
         ..port
     }));
     HypercallDisposition::Answered(answer)
-}
-
-/// lv1's success answer on the clear path, as [`connect_plug`] gives it.
-///
-/// Returns `None` when no storage holds the status doubleword.
-fn clear_path_answer(
-    request: &HypercallRequest,
-    bitmaps: &IrqStateBitmapState,
-    storage: &GuestMemory,
-    key: IrqStateBitmapKey,
-    plug: u8,
-) -> Option<HypercallAnswer> {
-    let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []);
-    let (doubleword, bit) = plug_status_bit(plug);
-    let index = doubleword as u8;
-    let shadow = bitmaps.shadow(key)[usize::from(index)];
-    let cleared = shadow & !bit;
-    if let Some(bitmap) = bitmaps.bitmap(key) {
-        let range = bitmap
-            .checked_add(doubleword * STATUS_DOUBLEWORD_BYTES)
-            .and_then(|address| ByteRange::new(GuestAddr::new(address), STATUS_DOUBLEWORD_BYTES))
-            .filter(|range| storage.holds(range.start().raw(), range.length()))?;
-        answer.effects.push(Effect::SharedWriteIntent {
-            range,
-            bytes: WritePayload::new(cleared.to_be_bytes().to_vec()),
-            source: request.unit,
-            source_time: request.tick,
-        });
-    }
-    if cleared != shadow {
-        answer.push_change(InterruptChange::StatusShadow(StatusShadowWrite {
-            key,
-            index,
-            value: cleared,
-        }));
-    }
-    Some(answer)
 }
 
 #[cfg(test)]

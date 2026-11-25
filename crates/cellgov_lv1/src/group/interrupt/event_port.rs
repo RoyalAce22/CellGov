@@ -15,8 +15,10 @@
 //! keeps the outlets, apart from the ports, and hashes them.
 //!
 //! `send_event_locally` sets the pending byte of a port, and a later call
-//! reads it; see [`cellgov_ps3_abi::lv1::send_event`]. So the state keeps
-//! the ports with a pending event, and hashes them.
+//! reads it; see [`cellgov_ps3_abi::lv1::send_event`].
+//! `end_of_interrupt_ext` clears it; see
+//! [`cellgov_ps3_abi::lv1::end_of_interrupt`]. So the state keeps the
+//! ports with a pending event, and hashes them.
 //!
 //! Console captures give the port id of each call of the GameOS kernel's
 //! boot, by the call's hardware thread and its `sc` address. So
@@ -179,6 +181,11 @@ impl EventReceivePortState {
     /// Sets the pending byte of the port with the id `id`.
     pub(crate) fn set_pending(&mut self, id: u64) {
         self.pending.insert(id);
+    }
+
+    /// Clears the pending byte of the port with the id `id`.
+    pub(crate) fn clear_pending(&mut self, id: u64) {
+        self.pending.remove(&id);
     }
 
     /// The sync-state terms of the ports, the irq outlets and the pending

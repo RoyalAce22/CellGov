@@ -6,7 +6,7 @@ use cellgov_mem::scheme::{HashedSurface, Stamp};
 use super::bitmap::{self, IrqStateBitmapRegistration, IrqStateBitmapState, StatusShadowWrite};
 use super::event_port::{self, EventReceivePort, EventReceivePortState};
 use super::pause::{self, PausedThread, PausedThreadState};
-use super::{irq_plug, mask, send_event};
+use super::{end_of_interrupt, irq_plug, mask, send_event};
 use crate::group::state::StateChange;
 use crate::group::table::Group;
 
@@ -15,6 +15,7 @@ pub(crate) const GROUP: Group = Group {
     name: "interrupt",
     hypercalls: &[
         bitmap::HYPERCALLS,
+        end_of_interrupt::HYPERCALLS,
         event_port::HYPERCALLS,
         irq_plug::HYPERCALLS,
         mask::HYPERCALLS,
@@ -135,9 +136,21 @@ impl InterruptGroupState {
             InterruptChange::OutletPlugConnect(outlet) => self.ports.connect_outlet(outlet),
             InterruptChange::ThreadPaused(paused) => self.paused.pause(paused),
             InterruptChange::EventPending(id) => self.ports.set_pending(id),
+            InterruptChange::EventCleared(id) => self.ports.clear_pending(id),
             InterruptChange::StatusShadow(write) => self.bitmaps.write_shadow(write),
             InterruptChange::ThreadWoken(thread) => self.paused.wake(thread),
         }
+    }
+
+    /// The state after the interrupt changes in `changes`, in order.
+    pub(crate) fn after(&self, changes: &[StateChange]) -> Self {
+        let mut after = self.clone();
+        for change in changes {
+            if let StateChange::Interrupt(change) = change {
+                after.apply(**change);
+            }
+        }
+        after
     }
 
     /// The sync-state terms of the bitmaps, the ports, the irq outlets and
@@ -171,6 +184,9 @@ pub enum InterruptChange {
     /// The call set the pending byte of the port or irq outlet with this
     /// id.
     EventPending(u64),
+    /// The call cleared the pending byte of the port or irq outlet with
+    /// this id.
+    EventCleared(u64),
     /// The call left this doubleword in a thread's status shadow.
     StatusShadow(StatusShadowWrite),
     /// lv1 cleared the pause flag of this paused hardware thread, which

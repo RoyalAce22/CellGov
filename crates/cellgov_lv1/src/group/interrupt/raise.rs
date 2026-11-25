@@ -152,6 +152,58 @@ pub(crate) fn raise(
     Ok(())
 }
 
+/// Adds lv1's clear of the plug `plug` of the thread `key` to `answer`.
+///
+/// The clear function [OFW-4.93 lv1 a:0x2C3794] does these steps:
+/// 1. It clears the plug's bit in the shadow
+///    [OFW-4.93 lv1 a:0x2C37C0-0x2C37D4]. The answer carries the cleared
+///    doubleword when the bit was set.
+/// 2. It stores the shadow doubleword through +1728 of the thread's
+///    context [OFW-4.93 lv1 a:0x2C37D8]. The answer writes it to the
+///    thread's registered bitmap. For a thread with no bitmap, lv1 stores
+///    it in its own doublewords, and the answer writes nothing.
+///
+/// # Errors
+///
+/// Returns the refusal text, and changes nothing, when CellGov holds no
+/// storage for the status doubleword of the thread's bitmap.
+pub(crate) fn clear(
+    request: &HypercallRequest,
+    bitmaps: &IrqStateBitmapState,
+    storage: &GuestMemory,
+    key: IrqStateBitmapKey,
+    plug: u8,
+    answer: &mut HypercallAnswer,
+) -> Result<(), UnmodelledError> {
+    let (doubleword, bit) = plug_status_bit(plug);
+    let index = doubleword as u8;
+    let shadow = bitmaps.shadow(key)[usize::from(index)];
+    let cleared = shadow & !bit;
+    if let Some(bitmap) = bitmaps.bitmap(key) {
+        let range = bitmap
+            .checked_add(doubleword * DOUBLEWORD_BYTES)
+            .and_then(|address| ByteRange::new(GuestAddr::new(address), DOUBLEWORD_BYTES))
+            .filter(|range| storage.holds(range.start().raw(), range.length()))
+            .ok_or(UnmodelledError::new(
+                "an IRQ plug whose status doubleword CellGov holds no storage for",
+            ))?;
+        answer.effects.push(Effect::SharedWriteIntent {
+            range,
+            bytes: WritePayload::new(cleared.to_be_bytes().to_vec()),
+            source: request.unit,
+            source_time: request.tick,
+        });
+    }
+    if cleared != shadow {
+        answer.push_change(InterruptChange::StatusShadow(StatusShadowWrite {
+            key,
+            index,
+            value: cleared,
+        }));
+    }
+    Ok(())
+}
+
 /// Whether the status shadow of the thread `key` holds a bit that the
 /// thread's mask holds: the test of lv1's return
 /// [OFW-4.93 lv1 a:0x0FC4-0x1010], of its pause step

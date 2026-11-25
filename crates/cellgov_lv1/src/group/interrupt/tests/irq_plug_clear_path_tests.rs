@@ -1,6 +1,10 @@
 use super::*;
+use crate::answer::UnmodelledError;
+use crate::group::interrupt::bitmap::StatusShadowWrite;
 use crate::IrqStateBitmapRegistration;
+use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
+use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_time::GuestTicks;
 
 /// Thread 0 of the logical PPE 1.
@@ -44,6 +48,20 @@ fn shadowed() -> IrqStateBitmapState {
     bitmaps
 }
 
+/// lv1's success answer after the connect step's clear of `plug`, or the
+/// clear's refusal.
+fn clear_path_answer(
+    request: &HypercallRequest,
+    bitmaps: &IrqStateBitmapState,
+    storage: &GuestMemory,
+    key: IrqStateBitmapKey,
+    plug: u8,
+) -> Result<HypercallAnswer, UnmodelledError> {
+    let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []);
+    raise::clear(request, bitmaps, storage, key, plug, &mut answer)?;
+    Ok(answer)
+}
+
 /// lv1's success answer, with the shadow change that clears the bit of
 /// plug 70 [OFW-4.93 lv1 a:0x2C37C0-0x2C37D8].
 fn cleared_answer() -> HypercallAnswer {
@@ -61,7 +79,7 @@ fn a_set_plug_bit_with_no_bitmap_clears_the_shadow_and_writes_nothing() {
     let storage = GuestMemory::new(0x2000);
     assert_eq!(
         clear_path_answer(&request(), &shadowed(), &storage, KEY, PLUG),
-        Some(cleared_answer())
+        Ok(cleared_answer())
     );
 }
 
@@ -82,6 +100,6 @@ fn a_set_plug_bit_with_a_bitmap_stores_the_cleared_doubleword_in_it() {
     });
     assert_eq!(
         clear_path_answer(&request(), &bitmaps, &storage, KEY, PLUG),
-        Some(expected)
+        Ok(expected)
     );
 }

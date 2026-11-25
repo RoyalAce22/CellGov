@@ -2,7 +2,9 @@ use super::*;
 use crate::group::spe::LogicalSpe;
 use crate::IrqStateBitmapRegistration;
 use crate::{AddressSpace, AddressSpaceChange};
+use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
+use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_ps3_abi::lv1::call::CONNECT_IRQ_PLUG_EXT;
 use cellgov_time::GuestTicks;
 

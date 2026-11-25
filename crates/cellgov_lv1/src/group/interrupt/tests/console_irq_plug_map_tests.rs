@@ -14,9 +14,11 @@
 
 use super::*;
 use crate::{Hypervisor, StateChange};
+use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::call::{CONFIGURE_IRQ_STATE_BITMAP, CONNECT_IRQ_PLUG_EXT};
 use cellgov_ps3_abi::lv1::interrupt::IRQ_STATUS_BYTES;
+use cellgov_ps3_abi::lv1::irq_plug::plug_status_bit;
 use cellgov_time::GuestTicks;
 
 const PROBE: &str = "lv2_irq_plug_map";

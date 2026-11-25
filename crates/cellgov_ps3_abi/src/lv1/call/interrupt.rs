@@ -48,6 +48,16 @@ pub const CONSTRUCT_EVENT_RECEIVE_PORT: u64 = 18;
 /// form; see [`crate::lv1::send_event`].
 pub const SEND_EVENT_LOCALLY: u64 = 24;
 
+/// `end_of_interrupt_ext`: three inputs and no output.
+/// - r3 is the logical PPE id.
+/// - r4 is the hardware thread.
+/// - r5 is the plug.
+///
+/// Linux `arch/powerpc/platforms/ps3/interrupt.c`, `ps3_chip_eoi`, makes
+/// the call in this form. The lv1 handler [OFW-4.93 lv1 a:0x2E9710] reads
+/// the inputs in this form; see [`crate::lv1::end_of_interrupt`].
+pub const END_OF_INTERRUPT_EXT: u64 = 30;
+
 /// `did_update_interrupt_mask`: two inputs and no output.
 /// - r3 is the logical PPE id.
 /// - r4 is the hardware thread whose interrupt mask changed.

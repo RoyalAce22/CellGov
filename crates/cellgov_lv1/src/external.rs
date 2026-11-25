@@ -50,7 +50,7 @@ pub(crate) fn returns(
         return HypercallDisposition::Answered(answer);
     };
     let test = ReturnTest {
-        after: interrupt_after(groups, &answer),
+        after: groups.interrupt().after(&answer.changes),
         ppe_id,
         storage,
         msrs,
@@ -115,17 +115,6 @@ impl ReturnTest<'_> {
             .collect::<Result<Vec<_>, UnmodelledError>>()?;
         Ok((external, resumed))
     }
-}
-
-/// The interrupt group's state after the changes that `answer` carries.
-fn interrupt_after(groups: &GroupStates, answer: &HypercallAnswer) -> InterruptGroupState {
-    let mut after = groups.interrupt().clone();
-    for change in &answer.changes {
-        if let StateChange::Interrupt(change) = change {
-            after.apply(**change);
-        }
-    }
-    after
 }
 
 /// The thread that `change` wakes, or `None`.
