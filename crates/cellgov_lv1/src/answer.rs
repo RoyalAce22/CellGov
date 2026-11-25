@@ -296,6 +296,27 @@ pub enum HypercallRefusal {
         /// The service id that the request header gives.
         service: u16,
     },
+    /// A `write_virtual_uart` call completes a request on the dispatcher
+    /// manager's port, and no source gives a part of the reply.
+    #[error(
+        "hypercall {} from {unit:?} at pc 0x{pc:016x}: CellGov does not model the reply to {} of \
+         service 0x{service:x} on the dispatcher manager's port: no source gives {part}",
+        cellgov_ps3_abi::lv1::call::WRITE_VIRTUAL_UART,
+        RequestId(*request)
+    )]
+    DispatcherRequest {
+        /// The unit that made the call.
+        unit: UnitId,
+        /// The address of its `sc`.
+        pc: u64,
+        /// The service id that the request header gives.
+        service: u32,
+        /// The request id that the request bytes start with. The value is
+        /// `None` when the header counts fewer than 8 request bytes.
+        request: Option<u64>,
+        /// The part of the reply that no source gives.
+        part: &'static str,
+    },
     /// A thread took a mediated external interrupt in a case where lv1's
     /// handler enters no vector, or enters it with other registers.
     #[error(
@@ -323,10 +344,22 @@ impl HypercallRefusal {
             Self::RepositoryNode { .. } | Self::RepositorySecondValueUnobserved { .. } => {
                 Some(cellgov_ps3_abi::lv1::call::READ_REPOSITORY_NODE)
             }
-            Self::SystemManagerRequest { .. } => {
+            Self::SystemManagerRequest { .. } | Self::DispatcherRequest { .. } => {
                 Some(cellgov_ps3_abi::lv1::call::WRITE_VIRTUAL_UART)
             }
             Self::MediatedExternal { .. } => None,
+        }
+    }
+}
+
+/// The request that a [`HypercallRefusal::DispatcherRequest`] names.
+struct RequestId(Option<u64>);
+
+impl std::fmt::Display for RequestId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            Some(id) => write!(f, "request 0x{id:x}"),
+            None => f.write_str("a request with no request id"),
         }
     }
 }

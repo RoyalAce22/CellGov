@@ -678,6 +678,48 @@
 //! The kernel keeps the status and the data bytes in a cache object. The
 //! capture [`DISPATCHER_REPLY_CAPTURE`] reads that object on the console;
 //! see [`GAME_OS_DISPATCHER_REPLIES`].
+//!
+//! ## The kernel's request for random bytes
+//!
+//! In CellGov's boot, the kernel's second request to the dispatcher
+//! manager is request 0x5003 of service 0x5000; see
+//! [`GAME_OS_RANDOM_DISPATCHER_REQUESTS`]. The kernel uses its reply in
+//! this way:
+//! - The request object's constructor puts the request id at +8 and the
+//!   service id at +16
+//!   [OFW-4.93 lv2_kernel a:0x8000000000227fa4-0x8000000000227fdc].
+//! - The class unmarshal copies the 24 reply bytes at +40 to the caller's
+//!   buffer [OFW-4.93 lv2_kernel a:0x8000000000227fe0-0x80000000002280dc].
+//! - The caller keeps the first 20 bytes as the seed of the kernel's
+//!   random number generator
+//!   [OFW-4.93 lv2_kernel a:0x8000000000228424-0x800000000022858c]
+//!   [OFW-4.93 lv2_kernel a:0x8000000000228600-0x8000000000228718]
+//!   [OFW-4.93 lv2_kernel a:0x8000000000228788-0x80000000002287d0].
+//!
+//! The dispatcher manager's map gives service 0x5000 the socket address
+//! 0x23 [OFW-4.93 lv1 a:0x5D70D0-0x5D70DC]. A process of lv1 binds a
+//! socket to that address [OFW-4.93 lv1 a:0x4EA9AC-0x4EA9C8]. Its class
+//! for request 0x5003 [OFW-4.93 lv1 a:0x506C10-0x506C3C] answers in this
+//! order:
+//! 1. The class keeps the address of the 24 bytes at +40 of the request
+//!    buffer [OFW-4.93 lv1 a:0x5076A4-0x5076E8] [OFW-4.93 lv1 a:0x5279C4].
+//! 2. The handler stores its worker's return value as the status
+//!    [OFW-4.93 lv1 a:0x508D60-0x508D84].
+//! 3. The worker writes the 24 bytes at that address
+//!    [OFW-4.93 lv1 a:0x50B490-0x50B550].
+//!
+//! The worker gets the bytes from one of two sources:
+//! - A generator that it seeds from the time base, when process system
+//!   call 0x100C1 gives 1 for the keys `ss`, `fw`, `dummy` and `rnd`
+//!   [OFW-4.93 lv1 a:0x50BB98-0x50BC44] [OFW-4.93 lv1 a:0x529864-0x5298A0]
+//!   [OFW-4.93 lv1 a:0x50B4BC-0x50B50C].
+//! - Otherwise, the isolated SPU module `sb_iso_spu_module.self`
+//!   [OFW-4.93 lv1 a:0x51D674-0x51D718] [OFW-4.93 lv1 a:0x51DAD0-0x51DAE8]
+//!   [OFW-4.93 lv1 a:0x53F6F8-0x53F70C]. The function that takes the 24
+//!   bytes from the module's result logs as `sbm_get_rnd`
+//!   [OFW-4.93 lv1 a:0x51DA00-0x51DA84] [OFW-4.93 lv1 a:0x53F6A8-0x53F6F4].
+//!
+//! So no image read gives the 24 bytes.
 
 use crate::hw::ppu_mmu::SMALL_PAGE_LOG2;
 
@@ -1504,6 +1546,56 @@ pub fn game_os_dispatcher_reply(
         .find(|row| row.firmware == firmware && row.service == service && row.request == request)
 }
 
+/// The bytes of random data in the reply to a request of
+/// [`GAME_OS_RANDOM_DISPATCHER_REQUESTS`], at
+/// [`DISPATCHER_REPLY_DATA_OFFSET`]
+/// [OFW-4.93 lv2_kernel a:0x8000000000227fe0-0x80000000002280dc]
+/// [OFW-4.93 lv1 a:0x50B54C].
+pub const DISPATCHER_RANDOM_DATA_BYTES: usize = 24;
+
+/// A request of the GameOS kernel whose reply holds random bytes that lv1
+/// draws, at one firmware.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameOsRandomDispatcherRequest {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The service id that the request header gives.
+    pub service: u32,
+    /// The request id that the request bytes start with.
+    pub request: u64,
+    /// The count of request bytes and the count of reply bytes that the
+    /// request header gives.
+    pub bytes: u32,
+}
+
+/// Each request whose reply data an lv1 image read shows to be random;
+/// see [`crate::lv1::uart`].
+///
+/// The 4.93 kernel's class gives 0x40 as both counts
+/// [OFW-4.93 lv2_kernel a:0x8000000000228178]. It sets the request id
+/// 0x5003 and the service id 0x5000
+/// [OFW-4.93 lv2_kernel a:0x8000000000227fb0-0x8000000000227fc0].
+pub const GAME_OS_RANDOM_DISPATCHER_REQUESTS: &[GameOsRandomDispatcherRequest] =
+    &[GameOsRandomDispatcherRequest {
+        firmware: "4.93",
+        service: 0x5000,
+        request: 0x5003,
+        bytes: 0x40,
+    }];
+
+/// The request `request` of service `service` at the firmware version
+/// `firmware`, or `None` when no image read shows its reply data to be
+/// random.
+pub fn game_os_random_dispatcher_request(
+    firmware: &str,
+    service: u32,
+    request: u64,
+) -> Option<&'static GameOsRandomDispatcherRequest> {
+    GAME_OS_RANDOM_DISPATCHER_REQUESTS
+        .iter()
+        .find(|row| row.firmware == firmware && row.service == service && row.request == request)
+}
+
 /// The bytes of the header of a request that the system manager reads
 /// from its port first, with one read
 /// [OFW-4.93 lv1 a:0x44CD84-0x44CD94].
@@ -1848,6 +1940,10 @@ mod reply_tests;
 #[cfg(test)]
 #[path = "tests/uart_reply_console_tests.rs"]
 mod reply_console_tests;
+
+#[cfg(test)]
+#[path = "tests/uart_random_request_tests.rs"]
+mod random_request_tests;
 
 #[cfg(test)]
 #[path = "tests/uart_shadow_tests.rs"]

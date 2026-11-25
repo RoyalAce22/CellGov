@@ -137,7 +137,11 @@ fn counts_other_than_the_reply_s_are_a_refusal() {
                 &after_header(header(0, 0x19000, request, reply)),
                 &bytes
             ),
-            Err(NoReply::Size),
+            Err(NoReply::Unsourced(Unsourced {
+                service: 0x19000,
+                request: Some(0x19002),
+                part: SIZE_PART,
+            })),
             "{request:#x} {reply:#x}"
         );
     }
@@ -146,18 +150,22 @@ fn counts_other_than_the_reply_s_are_a_refusal() {
 #[test]
 fn a_request_with_no_source_for_its_reply_gets_the_reason_for_its_service() {
     let cases = [
-        ("4.93", 0x19000, 0x19005, NoReply::ServiceRequest),
-        ("4.92", 0x19000, 0x19002, NoReply::ServiceRequest),
-        ("4.93", 0x9000, 0x19002, NoReply::Request),
+        ("4.93", 0x19000, 0x19005, SERVICE_REQUEST_PART),
+        ("4.92", 0x19000, 0x19002, SERVICE_REQUEST_PART),
+        ("4.93", 0x9000, 0x19002, REQUEST_PART),
     ];
-    for (firmware, service, id, what) in cases {
+    for (firmware, service, id, part) in cases {
         assert_eq!(
             dispatcher_reply(
                 firmware,
                 &after_header(header(0, service, 0x38, 0x38)),
                 &body(id, 0)
             ),
-            Err(what),
+            Err(NoReply::Unsourced(Unsourced {
+                service,
+                request: Some(id),
+                part,
+            })),
             "{firmware} {service:#x} {id:#x}"
         );
     }

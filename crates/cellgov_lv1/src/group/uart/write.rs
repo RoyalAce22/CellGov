@@ -349,7 +349,7 @@ fn completing_write(
 ) -> HypercallDisposition {
     let reply = match reply::dispatcher_reply(firmware, pending, bytes) {
         Ok(reply) => reply,
-        Err(no_reply) => return refuse(request, no_reply.what()),
+        Err(no_reply) => return no_reply.refusal(request),
     };
     let queued = [input.uart.received(row.port), &reply].concat();
     if queued.len() as u64 > row.rx_buffer_size {

@@ -189,6 +189,23 @@ fn refused(r: &HypercallRequest, what: &'static str) -> HypercallDisposition {
     })
 }
 
+/// The refusal of `r` for a complete request of `service` with the
+/// request id `id`, for whose reply no source gives `part`.
+fn unsourced(
+    r: &HypercallRequest,
+    service: u32,
+    id: Option<u64>,
+    part: &'static str,
+) -> HypercallDisposition {
+    HypercallDisposition::Refused(HypercallRefusal::DispatcherRequest {
+        unit: r.unit,
+        pc: r.pc,
+        service,
+        request: id,
+        part,
+    })
+}
+
 /// The request after the first `bytes.len()` bytes, which are at most 24,
 /// built without `PendingRequest::with`.
 fn sent(bytes: &[u8]) -> PendingRequest {
@@ -229,21 +246,25 @@ fn a_complete_request_with_no_reply_gets_the_refusal_for_its_service() {
         (
             header(0x19000, 0x38),
             request_bytes(0x19003, 0x19000),
-            reply::SERVICE_REQUEST_REFUSAL,
+            0x19000,
+            0x19003,
+            reply::SERVICE_REQUEST_PART,
         ),
         (
             header(0x9000, 0x38),
             request_bytes(0x19002, 0x19000),
-            reply::REQUEST_REFUSAL,
+            0x9000,
+            0x19002,
+            reply::REQUEST_PART,
         ),
     ];
-    for (header, bytes, what) in cases {
+    for (header, bytes, service, id, part) in cases {
         let r = request(REQUEST_ADDRESS, 0x38);
         let storage = storage(&[(REQUEST_ADDRESS, &bytes)]);
         let uart = with_pending(header_sent(header));
         assert_eq!(
             write_with(&r, &uart, &boot_regions(), &storage),
-            refused(&r, what),
+            unsourced(&r, service, Some(id), part),
             "{header:02x?}"
         );
     }
@@ -255,7 +276,7 @@ fn a_header_that_counts_0_request_bytes_completes_with_its_last_byte() {
     let storage = storage(&[(REQUEST_ADDRESS, &header(0x19000, 0))]);
     assert_eq!(
         write_with(&r, &UartState::default(), &boot_regions(), &storage),
-        refused(&r, reply::SERVICE_REQUEST_REFUSAL)
+        unsourced(&r, 0x19000, None, reply::SERVICE_REQUEST_PART)
     );
 }
 

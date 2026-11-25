@@ -523,6 +523,7 @@ fn traced_disposition(disposition: &HypercallDisposition) -> TracedHypercallDisp
             | HypercallRefusal::RepositoryNode { .. }
             | HypercallRefusal::RepositorySecondValueUnobserved { .. }
             | HypercallRefusal::SystemManagerRequest { .. }
+            | HypercallRefusal::DispatcherRequest { .. }
             | HypercallRefusal::MediatedExternal { .. },
         ) => TracedHypercallDisposition::Refused,
     }

@@ -10,31 +10,36 @@
 use cellgov_ps3_abi::lv1::uart::{
     dispatcher_header_reply_bytes, dispatcher_header_request_bytes, dispatcher_header_service,
     dispatcher_header_tag, dispatcher_reply_header, game_os_dispatcher_reply,
-    DISPATCHER_HEADER_BYTES, DISPATCHER_REPLY_DATA_BYTES, DISPATCHER_REPLY_DATA_OFFSET,
-    DISPATCHER_REPLY_STATUS_OFFSET, GAME_OS_FIRST_DISPATCHER_SERVICE,
+    game_os_random_dispatcher_request, DISPATCHER_HEADER_BYTES, DISPATCHER_REPLY_DATA_BYTES,
+    DISPATCHER_REPLY_DATA_OFFSET, DISPATCHER_REPLY_STATUS_OFFSET, GAME_OS_FIRST_DISPATCHER_SERVICE,
 };
 
 use super::request::{PendingRequest, REQUEST_PREFIX_BYTES};
+use super::write::refuse;
+use crate::answer::{HypercallDisposition, HypercallRefusal};
+use crate::request::HypercallRequest;
 
 const HEADER: usize = DISPATCHER_HEADER_BYTES as usize;
 
-/// The refusal of a complete request of service 0x19000 that no source
-/// gives the reply to.
-pub(super) const SERVICE_REQUEST_REFUSAL: &str =
-    "the reply to a request of service 0x19000 other than request 0x19002 on the dispatcher \
-     manager's port, which a service of lv1 gives";
+/// The part of the reply to a request of service 0x19000 that no source
+/// gives, for a request id that no source gives a reply of.
+pub(super) const SERVICE_REQUEST_PART: &str =
+    "a reply of this request, which a service of lv1 gives";
 
-/// The refusal of a complete request of a service that no source gives a
-/// reply of.
-pub(super) const REQUEST_REFUSAL: &str = "the reply to a complete request on the dispatcher \
-                                          manager's port, which the dispatcher manager relays \
-                                          from a service or gives from its own state";
+/// The part of the reply to a request of a service that no source gives
+/// a reply of.
+pub(super) const REQUEST_PART: &str = "a reply of this service, which the dispatcher manager \
+                                       relays from the service or gives from its own state";
 
-/// The refusal of a complete request whose sizes are not the sizes of
+/// The part of the reply to a request whose sizes are not the sizes of
 /// the reply that a source gives.
-pub(super) const SIZE_REFUSAL: &str = "the reply to request 0x19002 of service 0x19000 on the \
-                                       dispatcher manager's port, for request or reply sizes \
-                                       other than 0x38";
+pub(super) const SIZE_PART: &str = "a reply with these request and reply sizes";
+
+/// The part of the reply to a request of
+/// [`cellgov_ps3_abi::lv1::uart::GAME_OS_RANDOM_DISPATCHER_REQUESTS`].
+/// The two sources of the bytes are in [`cellgov_ps3_abi::lv1::uart`].
+pub(super) const RANDOM_PART: &str = "its random data bytes, which lv1 draws from an isolated SPU \
+                                      module or from a generator that it seeds from the time base";
 
 /// The refusal of a complete request whose bytes the hypervisor did not
 /// keep.
@@ -63,25 +68,41 @@ pub(super) enum NoReply {
     Incomplete,
     /// The last write holds bytes past the end of the request.
     Overrun,
-    /// No source gives the reply to the request of service 0x19000.
-    ServiceRequest,
-    /// No source gives a reply of the request's service.
-    Request,
-    /// The header's counts are not the counts of the reply.
-    Size,
+    /// No source gives a part of the reply to the complete request.
+    Unsourced(Unsourced),
+}
+
+/// A complete request, and the part of its reply that no source gives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Unsourced {
+    /// The service id that the request header gives.
+    pub(super) service: u32,
+    /// The request id that the request bytes start with, or `None` when
+    /// the header counts fewer than 8 request bytes.
+    pub(super) request: Option<u64>,
+    /// The part of the reply that no source gives.
+    pub(super) part: &'static str,
 }
 
 impl NoReply {
-    /// The inputs that the refusal names.
-    pub(super) const fn what(self) -> &'static str {
-        match self {
+    /// The refusal of the write `request` that sent the request's last
+    /// bytes.
+    pub(super) fn refusal(self, request: &HypercallRequest) -> HypercallDisposition {
+        let what = match self {
             Self::Unkept => UNKEPT_REFUSAL,
             Self::Incomplete => INCOMPLETE_REFUSAL,
             Self::Overrun => OVERRUN_REFUSAL,
-            Self::ServiceRequest => SERVICE_REQUEST_REFUSAL,
-            Self::Request => REQUEST_REFUSAL,
-            Self::Size => SIZE_REFUSAL,
-        }
+            Self::Unsourced(unsourced) => {
+                return HypercallDisposition::Refused(HypercallRefusal::DispatcherRequest {
+                    unit: request.unit,
+                    pc: request.pc,
+                    service: unsourced.service,
+                    request: unsourced.request,
+                    part: unsourced.part,
+                })
+            }
+        };
+        refuse(request, what)
     }
 }
 
@@ -95,6 +116,8 @@ impl NoReply {
 ///   does not hold each request byte that the reply echoes;
 /// - `pending` and `last` do not complete the request;
 /// - `last` holds bytes past the end of the request;
+/// - an lv1 image read shows the data of the reply to be random bytes,
+///   or the header's counts are not the counts of that request;
 /// - no source gives the reply of the header's service and the request
 ///   id at `firmware`;
 /// - the header's counts are not the counts of that reply.
@@ -123,28 +146,47 @@ pub(super) fn dispatcher_reply(
         std::cmp::Ordering::Equal => {}
     }
     let service = dispatcher_header_service(&header);
-    let reply = pending
-        .with(last)
-        .first_doubleword()
-        .and_then(|request| game_os_dispatcher_reply(firmware, service, request))
-        .ok_or(if service == GAME_OS_FIRST_DISPATCHER_SERVICE {
-            NoReply::ServiceRequest
-        } else {
-            NoReply::Request
-        })?;
+    let id = pending.with(last).first_doubleword();
+    let unsourced = |part| {
+        NoReply::Unsourced(Unsourced {
+            service,
+            request: id,
+            part,
+        })
+    };
     let reply_bytes = dispatcher_header_reply_bytes(&header);
+    let random = id.and_then(|id| game_os_random_dispatcher_request(firmware, service, id));
+    if let Some(random) = random {
+        // The row gives the random data only for the counts that it
+        // gives; other counts get the refusal of their sizes.
+        let counts_match = request_bytes == random.bytes as usize && reply_bytes == random.bytes;
+        return Err(unsourced(if counts_match {
+            RANDOM_PART
+        } else {
+            SIZE_PART
+        }));
+    }
+    let reply = id
+        .and_then(|id| game_os_dispatcher_reply(firmware, service, id))
+        .ok_or_else(|| {
+            unsourced(if service == GAME_OS_FIRST_DISPATCHER_SERVICE {
+                SERVICE_REQUEST_PART
+            } else {
+                REQUEST_PART
+            })
+        })?;
     if request_bytes != reply.bytes as usize || reply_bytes != reply.bytes {
-        return Err(NoReply::Size);
+        return Err(unsourced(SIZE_PART));
     }
     let mut body = bytes[HEADER..].to_vec();
     let status = DISPATCHER_REPLY_STATUS_OFFSET..DISPATCHER_REPLY_STATUS_OFFSET + 4;
     let data =
         DISPATCHER_REPLY_DATA_OFFSET..DISPATCHER_REPLY_DATA_OFFSET + DISPATCHER_REPLY_DATA_BYTES;
     body.get_mut(status)
-        .ok_or(NoReply::Size)?
+        .ok_or_else(|| unsourced(SIZE_PART))?
         .copy_from_slice(&reply.status.to_be_bytes());
     body.get_mut(data)
-        .ok_or(NoReply::Size)?
+        .ok_or_else(|| unsourced(SIZE_PART))?
         .copy_from_slice(&reply.data);
     let tag = dispatcher_header_tag(&header);
     Ok([&dispatcher_reply_header(tag, reply_bytes)[..], &body].concat())
@@ -153,3 +195,7 @@ pub(super) fn dispatcher_reply(
 #[cfg(test)]
 #[path = "tests/reply_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/reply_unsourced_tests.rs"]
+mod unsourced_tests;

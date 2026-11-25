@@ -311,7 +311,16 @@ fn a_completing_write_with_no_reply_gets_the_refusal_that_names_its_reason() {
     sized.apply(UartChange::RequestBytesSent(
         PendingRequest::empty(PORT).with(&header),
     ));
-    assert_eq!(write_after(&sized, &request), refused(reply::SIZE_REFUSAL));
+    assert_eq!(
+        write_after(&sized, &request),
+        HypercallDisposition::Refused(HypercallRefusal::DispatcherRequest {
+            unit: UnitId::new(1),
+            pc: KERNEL_SC,
+            service: 0x19000,
+            request: Some(0x19002),
+            part: reply::SIZE_PART,
+        })
+    );
 }
 
 #[test]
