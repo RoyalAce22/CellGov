@@ -13,13 +13,16 @@ mod buffer;
 pub(crate) mod irq;
 mod param;
 mod read;
+mod receive;
 mod registration;
+mod reply;
 mod request;
 mod set_param;
 mod status;
 mod write;
 
 pub use irq::VirtualUartIrq;
+pub use receive::ReceivedBytes;
 pub(crate) use registration::GROUP;
 pub use registration::{UartChange, UartState};
 pub use request::PendingRequest;

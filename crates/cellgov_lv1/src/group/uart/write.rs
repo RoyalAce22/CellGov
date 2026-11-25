@@ -8,22 +8,28 @@
 //! - a call that fails a check;
 //! - a call that writes no byte;
 //! - a write to the dispatcher manager's port whose bytes complete no
-//!   request.
+//!   request;
+//! - a write to the dispatcher manager's port whose bytes complete a
+//!   request whose reply a source gives.
 //!
 //! The answer to a write of one or more bytes carries the bytes of the
-//! request that is not complete, and the hypervisor keeps them.
+//! request that is not complete, and the hypervisor keeps them. The answer
+//! to a write that completes a request puts the reply in the port's
+//! receive buffer.
 
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_ps3_abi::lv1::call::WRITE_VIRTUAL_UART;
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 use cellgov_ps3_abi::lv1::uart::{
     game_os_service_port, game_os_virtual_uart_port, virtual_uart_write_handler,
-    GameOsVirtualUartPort, VirtualUartService, GAME_OS_FIRST_DISPATCHER_REQUEST,
-    GAME_OS_FIRST_DISPATCHER_SERVICE, VIRTUAL_UART_PORT_MAX, VIRTUAL_UART_WRITE_ADDRESS_MAX,
-    WRITE_VIRTUAL_UART_NO_PORT_R3, WRITE_VIRTUAL_UART_NO_REGION_R3, WRITE_VIRTUAL_UART_REGION_R3,
+    GameOsVirtualUartPort, VirtualUartService, VIRTUAL_UART_PORT_MAX,
+    VIRTUAL_UART_WRITE_ADDRESS_MAX, WRITE_VIRTUAL_UART_NO_PORT_R3, WRITE_VIRTUAL_UART_NO_REGION_R3,
+    WRITE_VIRTUAL_UART_REGION_R3,
 };
 
 use super::buffer::{self, BufferCheck, BufferRegion};
+use super::receive::ReceivedBytes;
+use super::reply;
 use super::request::PendingRequest;
 use super::status;
 use super::{UartChange, UartState};
@@ -61,17 +67,6 @@ pub(crate) struct WriteInput<'a> {
     /// The caller's real address space, which holds the bytes to send.
     pub(crate) storage: &'a GuestMemory,
 }
-
-/// The refusal of a write that completes a request whose service no source
-/// names.
-const REQUEST_REFUSAL: &str = "the reply to a complete request on the dispatcher manager's port, \
-                               which the dispatcher manager relays from a service or gives from \
-                               its own state";
-
-/// The refusal of a write that completes the 4.93 kernel's first request.
-const FIRST_REQUEST_REFUSAL: &str = "the reply to request 0x19002 of service 0x19000 on the \
-                                     dispatcher manager's port, which the dispatcher manager \
-                                     relays from a service or gives from its own state";
 
 fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDisposition {
     HypercallDisposition::Refused(HypercallRefusal::UnmodelledInput {
@@ -215,9 +210,9 @@ struct Buffer {
 /// - The port's interrupt mask can raise the port's interrupt when lv1
 ///   computes the status after the write; see [`status::mask_refusal`].
 ///   CellGov delivers no such interrupt.
-/// - The bytes complete a request. The dispatcher manager then replies, and
-///   no image read gives the reply. The refusal names the request when it
-///   is the 4.93 kernel's first request.
+///
+/// A write whose bytes complete a request gets the answer that
+/// [`completing_write`] gives.
 fn dispatcher_write(
     request: &HypercallRequest,
     input: &WriteInput<'_>,
@@ -243,46 +238,77 @@ fn dispatcher_write(
             "a virtual UART write buffer whose bytes CellGov's storage does not hold",
         );
     };
-    if let Some(what) = status::mask_refusal(firmware, &input.uart.port_params(row.port)) {
+    let params = input.uart.port_params(row.port);
+    let received = input.uart.received(row.port);
+    if let Some(what) = status::mask_refusal(firmware, &params, received.len() as u64) {
         return refuse(request, what);
     }
     let next = pending.with(&bytes);
     if next.is_complete() {
-        return refuse(request, request_refusal(&next));
+        return completing_write(request, input, firmware, row, &pending, &bytes);
     }
     let mut answer = written_answer(buffer.size);
     answer.push_change(UartChange::RequestBytesSent(next));
     HypercallDisposition::Answered(answer)
 }
 
-/// The bytes of `buffer`, read from the storage of its region, or `None`
-/// when the storage does not hold them.
+/// The answer to a write of `bytes` that completes the request `pending`
+/// on the dispatcher manager's port `row`.
 ///
-/// The real mode region lies at real address 0 of the storage. Each
-/// allocated region with storage lies at the real address that the memory
-/// group gives it.
-fn sent_bytes(input: &WriteInput<'_>, buffer: &Buffer) -> Option<Vec<u8>> {
-    let real = match buffer.region {
-        BufferRegion::RealMode => buffer.address,
-        BufferRegion::Allocated(index) => {
-            let region = input.memory.regions().get(index)?;
-            let storage = input.memory.storage_real(index as u64)?;
-            storage.checked_add(buffer.address - region.lpar_address)?
-        }
+/// The dispatcher manager writes its reply to the port after the service
+/// answers, at a time that no image read gives. CellGov puts the reply in
+/// the port's receive buffer at this write. The answer is r3 = 0 with the
+/// bytes written in r4. It carries these changes:
+/// - the port holds no request that is not complete;
+/// - the port's receive buffer holds the reply after its earlier bytes.
+///
+/// The call is a refusal in these cases, in this order:
+/// - [`reply::dispatcher_reply`] gives no reply;
+/// - the reply is more than the free bytes of the port's receive buffer;
+/// - the port's mask can raise the port's interrupt when lv1 computes the
+///   status after the reply; see [`status::reply_refusal`]. CellGov
+///   delivers no such interrupt.
+fn completing_write(
+    request: &HypercallRequest,
+    input: &WriteInput<'_>,
+    firmware: &str,
+    row: &GameOsVirtualUartPort,
+    pending: &PendingRequest,
+    bytes: &[u8],
+) -> HypercallDisposition {
+    let reply = match reply::dispatcher_reply(firmware, pending, bytes) {
+        Ok(reply) => reply,
+        Err(no_reply) => return refuse(request, no_reply.what()),
     };
-    let range = ByteRange::new(GuestAddr::new(real), buffer.size)?;
-    input.storage.read(range).map(|bytes| bytes.into_owned())
+    let queued = [input.uart.received(row.port), &reply].concat();
+    if queued.len() as u64 > row.rx_buffer_size {
+        return refuse(
+            request,
+            "a dispatcher manager reply that is more than the free bytes of the port's receive \
+             buffer",
+        );
+    }
+    let params = input.uart.port_params(row.port);
+    if let Some(what) = status::reply_refusal(firmware, &params, queued.len() as u64) {
+        return refuse(request, what);
+    }
+    let mut answer = written_answer(bytes.len() as u64);
+    answer.push_change(UartChange::RequestBytesSent(PendingRequest::empty(
+        row.port,
+    )));
+    answer.push_change(UartChange::ReceiveBufferSet(ReceivedBytes {
+        port: row.port,
+        bytes: queued,
+    }));
+    HypercallDisposition::Answered(answer)
 }
 
-/// The refusal for the complete request `request`.
-fn request_refusal(request: &PendingRequest) -> &'static str {
-    let first = request.service() == Some(GAME_OS_FIRST_DISPATCHER_SERVICE)
-        && request.first_doubleword() == Some(GAME_OS_FIRST_DISPATCHER_REQUEST);
-    if first {
-        FIRST_REQUEST_REFUSAL
-    } else {
-        REQUEST_REFUSAL
-    }
+/// The bytes of `buffer`, read from the storage of its region, or `None`
+/// when the storage does not hold them.
+fn sent_bytes(input: &WriteInput<'_>, buffer: &Buffer) -> Option<Vec<u8>> {
+    let real = buffer::real_address(input.memory, buffer.region, buffer.address)?;
+    let range = ByteRange::new(GuestAddr::new(real), buffer.size)?;
+    input.storage.read(range).map(|bytes| bytes.into_owned())
 }
 
 #[cfg(test)]
@@ -292,3 +318,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/write_dispatcher_tests.rs"]
 mod dispatcher_tests;
+
+#[cfg(test)]
+#[path = "tests/write_reply_tests.rs"]
+mod reply_tests;

@@ -82,7 +82,7 @@ pub use group::spe::{
 pub use group::state::{GroupStates, StateChange};
 pub use group::storage::{StorageChange, StorageState};
 pub use group::uart::{
-    PendingRequest, UartChange, UartState, VirtualUartIrq, VirtualUartPortParams,
+    PendingRequest, ReceivedBytes, UartChange, UartState, VirtualUartIrq, VirtualUartPortParams,
 };
 pub use handlers::{answer, answered_numbers, answers};
 pub use request::HypercallRequest;

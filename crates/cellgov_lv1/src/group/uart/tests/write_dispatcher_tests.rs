@@ -1,20 +1,15 @@
 use super::*;
+use crate::allocated_storage;
 use crate::group::memory::region::MemoryRegion;
 use crate::group::uart::VirtualUartPortParams;
-use crate::{allocated_storage, Hypervisor};
 use cellgov_event::UnitId;
 use cellgov_mem::{PageSize, Region};
-use cellgov_ps3_abi::lv1::call::READ_VIRTUAL_UART;
 use cellgov_ps3_abi::lv1::uart::VIRTUAL_UART_PORT_CAPTURE;
 use cellgov_time::GuestTicks;
 
 /// The `sc` of the 4.93 kernel's write
 /// [OFW-4.93 lv2_kernel a:0x8000000000016fd8].
 const KERNEL_SC: u64 = 0x8000_0000_0001_6fd8;
-
-/// The `sc` of the 4.93 kernel's read
-/// [OFW-4.93 lv2_kernel a:0x8000000000016b7c].
-const KERNEL_READ_SC: u64 = 0x8000_0000_0001_6b7c;
 
 /// The dispatcher manager's port [OFW-4.93 lv1 a:0x5B7E7C-0x5B7E80].
 const PORT: u64 = 10;
@@ -227,30 +222,26 @@ fn the_kernel_s_header_write_writes_16_bytes_and_keeps_the_header() {
 }
 
 #[test]
-fn the_kernel_s_request_bytes_complete_its_first_request_and_get_a_refusal_that_names_it() {
-    let bytes = request_bytes(0x19002, 0x19000);
-    let r = request(REQUEST_ADDRESS, 0x38);
-    let storage = storage(&[(REQUEST_ADDRESS, &bytes)]);
-    let uart = with_pending(header_sent(KERNEL_HEADER));
-    assert_eq!(
-        write_with(&r, &uart, &boot_regions(), &storage),
-        refused(&r, FIRST_REQUEST_REFUSAL)
-    );
-}
-
-#[test]
-fn a_complete_request_that_is_not_the_kernel_s_first_gets_the_refusal_that_names_no_request() {
+fn a_complete_request_with_no_reply_gets_the_refusal_for_its_service() {
     let cases = [
-        (header(0x19000, 0x38), request_bytes(0x19003, 0x19000)),
-        (header(0x9000, 0x38), request_bytes(0x19002, 0x19000)),
+        (
+            header(0x19000, 0x38),
+            request_bytes(0x19003, 0x19000),
+            reply::SERVICE_REQUEST_REFUSAL,
+        ),
+        (
+            header(0x9000, 0x38),
+            request_bytes(0x19002, 0x19000),
+            reply::REQUEST_REFUSAL,
+        ),
     ];
-    for (header, bytes) in cases {
+    for (header, bytes, what) in cases {
         let r = request(REQUEST_ADDRESS, 0x38);
         let storage = storage(&[(REQUEST_ADDRESS, &bytes)]);
         let uart = with_pending(header_sent(header));
         assert_eq!(
             write_with(&r, &uart, &boot_regions(), &storage),
-            refused(&r, REQUEST_REFUSAL),
+            refused(&r, what),
             "{header:02x?}"
         );
     }
@@ -262,7 +253,7 @@ fn a_header_that_counts_0_request_bytes_completes_with_its_last_byte() {
     let storage = storage(&[(REQUEST_ADDRESS, &header(0x19000, 0))]);
     assert_eq!(
         write_with(&r, &UartState::default(), &boot_regions(), &storage),
-        refused(&r, REQUEST_REFUSAL)
+        refused(&r, reply::SERVICE_REQUEST_REFUSAL)
     );
 }
 
@@ -394,43 +385,5 @@ fn a_write_of_0_bytes_is_answered_under_a_kept_mask_with_the_transmit_bit() {
     assert_eq!(
         write_with(&r, &uart, &boot_regions(), &storage(&[])),
         HypercallDisposition::Answered(HypercallAnswer::lv1_status(0, [0; 7]))
-    );
-}
-
-#[test]
-fn the_hypervisor_keeps_the_header_reads_0_bytes_after_it_and_refuses_the_request_bytes() {
-    let mut hv = Hypervisor::new();
-    hv.set_firmware("4.93");
-    let header_at = 0x0036_0070;
-    let bytes = request_bytes(0x19002, 0x19000);
-    let storage = storage(&[(header_at, &KERNEL_HEADER), (REQUEST_ADDRESS, &bytes)]);
-    let HypercallDisposition::Answered(answer) =
-        hv.dispatch_with(&request(header_at, 16), &storage)
-    else {
-        panic!("the header write is answered");
-    };
-    assert_eq!(
-        (answer.r3, answer.outputs()),
-        (0, Some([16, 0, 0, 0, 0, 0, 0]))
-    );
-    assert_eq!(
-        hv.groups().uart().pending_request(PORT),
-        header_sent(KERNEL_HEADER)
-    );
-    let mut read = request(header_at, 16);
-    read.number = READ_VIRTUAL_UART;
-    read.pc = KERNEL_READ_SC;
-    assert_eq!(
-        hv.dispatch_with(&read, &storage),
-        HypercallDisposition::Answered(HypercallAnswer::lv1_status(0, [0; 7]))
-    );
-    let r = request(REQUEST_ADDRESS, 0x38);
-    assert_eq!(
-        hv.dispatch_with(&r, &storage),
-        refused(&r, FIRST_REQUEST_REFUSAL)
-    );
-    assert_eq!(
-        hv.groups().uart().pending_request(PORT),
-        header_sent(KERNEL_HEADER)
     );
 }

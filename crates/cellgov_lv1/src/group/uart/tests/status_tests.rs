@@ -102,14 +102,14 @@ fn mask_2_on_an_empty_service_port_raises_only_once_the_receive_trigger_reaches_
     for (port, size) in SERVICE_PORTS {
         for rx in [0, 1, size - 1] {
             assert_eq!(
-                mask_refusal("4.93", &params(port, 0, rx, 2)),
+                mask_refusal("4.93", &params(port, 0, rx, 2), 0),
                 None,
                 "port {port} rx {rx:#x}"
             );
         }
         for rx in [size, size + 1, u64::MAX] {
             assert_eq!(
-                mask_refusal("4.93", &params(port, 0, rx, 2)),
+                mask_refusal("4.93", &params(port, 0, rx, 2), 0),
                 Some(RX_RAISE),
                 "port {port} rx {rx:#x}"
             );
@@ -125,7 +125,7 @@ fn the_transmit_bit_on_a_service_port_raises_for_each_transmit_trigger() {
         for mask in [1, 3, 5, 7] {
             for tx in [0, size - 1, u64::MAX] {
                 assert_eq!(
-                    mask_refusal("4.93", &params(port, tx, size - 1, mask)),
+                    mask_refusal("4.93", &params(port, tx, size - 1, mask), 0),
                     Some(TX_RAISE),
                     "port {port} mask {mask} tx {tx:#x}"
                 );
@@ -141,7 +141,7 @@ fn the_disconnect_bit_on_a_service_port_raises_nothing() {
     for (port, size) in SERVICE_PORTS {
         for mask in [4, 6] {
             assert_eq!(
-                mask_refusal("4.93", &params(port, 0, size - 1, mask)),
+                mask_refusal("4.93", &params(port, 0, size - 1, mask), 0),
                 None,
                 "port {port} mask {mask}"
             );
@@ -154,7 +154,7 @@ fn a_mask_of_0_raises_nothing_on_any_port_for_any_trigger() {
     for port in [0, 2, 10] {
         for trigger in [0, u64::MAX] {
             assert_eq!(
-                mask_refusal("4.93", &params(port, trigger, trigger, 0)),
+                mask_refusal("4.93", &params(port, trigger, trigger, 0), 0),
                 None,
                 "port {port} trigger {trigger:#x}"
             );
@@ -166,7 +166,7 @@ fn a_mask_of_0_raises_nothing_on_any_port_for_any_trigger() {
 #[test]
 fn mask_2_on_a_service_port_at_a_firmware_with_no_port_rows_is_a_traffic_refusal() {
     assert_eq!(
-        mask_refusal("4.92", &params(10, 0, 0xfff, 2)),
+        mask_refusal("4.92", &params(10, 0, 0xfff, 2), 0),
         Some(RX_UNKNOWN)
     );
 }

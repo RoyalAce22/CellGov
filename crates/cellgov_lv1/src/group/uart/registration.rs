@@ -9,6 +9,7 @@ use cellgov_mem::scheme::{HashedSurface, Stamp};
 use super::irq::{self, VirtualUartIrq};
 use super::param;
 use super::read;
+use super::receive::ReceivedBytes;
 use super::request::PendingRequest;
 use super::set_param::{self, VirtualUartPortParams};
 use super::write;
@@ -44,6 +45,11 @@ pub(crate) const GROUP: Group = Group {
             source: Some(VIRTUAL_UART_REQUEST_SOURCE),
             stamp: Stamp::Version(29),
         },
+        HashedSurface {
+            name: "the bytes in the receive buffer of each service port of the virtual UART",
+            source: Some(VIRTUAL_UART_RECEIVED_SOURCE),
+            stamp: Stamp::Pending,
+        },
     ],
 };
 
@@ -60,15 +66,21 @@ pub(crate) const VIRTUAL_UART_PORT_PARAMS_SOURCE: u8 = 241;
 /// each port with such a request, keyed by its index in port order.
 pub(crate) const VIRTUAL_UART_REQUEST_SOURCE: u8 = 242;
 
+/// The lane source of the receive buffers that hold bytes: one object for
+/// each port with such a buffer, keyed by its index in port order.
+pub(crate) const VIRTUAL_UART_RECEIVED_SOURCE: u8 = 243;
+
 /// The virtual UART group's state:
 /// - the interrupt configuration of the partition's virtual UART;
 /// - the triggers and the interrupt mask of each port;
-/// - the bytes of the request that is not complete on each port.
+/// - the bytes of the request that is not complete on each port;
+/// - the bytes in the receive buffer of each port.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UartState {
     irq: Option<VirtualUartIrq>,
     ports: BTreeMap<u64, VirtualUartPortParams>,
     requests: BTreeMap<u64, PendingRequest>,
+    received: BTreeMap<u64, ReceivedBytes>,
 }
 
 impl UartState {
@@ -103,6 +115,17 @@ impl UartState {
             .unwrap_or(PendingRequest::empty(port))
     }
 
+    /// The bytes in the receive buffer of port `port`, first byte to read
+    /// first.
+    ///
+    /// A port with no entry holds no byte. A buffer with no byte removes
+    /// the entry.
+    pub fn received(&self, port: u64) -> &[u8] {
+        self.received
+            .get(&port)
+            .map_or(&[], |received| received.bytes.as_slice())
+    }
+
     pub(crate) fn apply(&mut self, change: UartChange) {
         match change {
             UartChange::IrqConfigured(irq) => self.irq = Some(irq),
@@ -120,12 +143,19 @@ impl UartState {
                     self.requests.insert(request.port, request);
                 }
             }
+            UartChange::ReceiveBufferSet(received) => {
+                if received.bytes.is_empty() {
+                    self.received.remove(&received.port);
+                } else {
+                    self.received.insert(received.port, received);
+                }
+            }
         }
     }
 
     /// The sync-state terms of the interrupt configuration, the ports'
-    /// values and the requests that are not complete. An empty state adds
-    /// no term.
+    /// values, the requests that are not complete and the receive buffers.
+    /// An empty state adds no term.
     pub fn sync_term(&self) -> u128 {
         let irq = self
             .irq
@@ -139,13 +169,22 @@ impl UartState {
                     params,
                 ))
             });
-        (0u64..)
+        let requests = (0u64..)
             .zip(self.requests.values())
             .fold(ports, |sum, (index, request)| {
                 sum.wrapping_add(lanes::value_term(
                     VIRTUAL_UART_REQUEST_SOURCE,
                     index,
                     request,
+                ))
+            });
+        (0u64..)
+            .zip(self.received.values())
+            .fold(requests, |sum, (index, received)| {
+                sum.wrapping_add(lanes::value_term(
+                    VIRTUAL_UART_RECEIVED_SOURCE,
+                    index,
+                    received,
                 ))
             })
     }
@@ -160,6 +199,8 @@ pub enum UartChange {
     PortParamsSet(VirtualUartPortParams),
     /// The call sent these bytes of a request that is not complete.
     RequestBytesSent(PendingRequest),
+    /// The call left these bytes in a port's receive buffer.
+    ReceiveBufferSet(ReceivedBytes),
 }
 
 impl From<UartChange> for StateChange {

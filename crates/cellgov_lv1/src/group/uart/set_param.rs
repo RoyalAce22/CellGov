@@ -105,8 +105,8 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// - no lv1 image read shows the handler for `firmware`;
 /// - no source gives the port r3 at `firmware`;
 /// - the call leaves a mask other than 0 with which lv1 can raise the
-///   port's interrupt. The refusal names the mask bit; see
-///   [`status::mask_refusal`].
+///   port's interrupt, for the bytes in the port's receive buffer. The
+///   refusal names the mask bit; see [`status::mask_refusal`].
 pub(crate) fn set_param(
     request: &HypercallRequest,
     firmware: Option<&str>,
@@ -138,7 +138,8 @@ pub(crate) fn set_param(
         VIRTUAL_UART_PARAM_INTERRUPT_MASK => params.interrupt_mask = value,
         _ => return lv1_answer(SET_VIRTUAL_UART_PARAM_NO_PARAM_R3),
     }
-    if let Some(what) = status::mask_refusal(firmware, &params) {
+    let received = uart.received(port).len() as u64;
+    if let Some(what) = status::mask_refusal(firmware, &params, received) {
         return refuse(request, what);
     }
     let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []);

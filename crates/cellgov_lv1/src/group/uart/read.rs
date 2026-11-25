@@ -5,23 +5,30 @@
 //! the buffer. lv1's services write those bytes; see
 //! [`cellgov_ps3_abi::lv1::uart`]. CellGov answers these calls:
 //! - a call that fails a check;
-//! - a read of a service port, whose receive buffer holds no byte while no
-//!   request that the partition sent to the port is complete.
+//! - a read of a service port. The hypervisor holds the bytes of the
+//!   port's receive buffer: the replies to the requests that the
+//!   partition completed and did not read.
 //!
-//! The answer reads only the memory regions that the hypervisor holds, and
-//! carries no change.
+//! The answer to a read of one or more bytes writes them to the caller's
+//! buffer, and carries the bytes that the receive buffer still holds.
 
+use cellgov_effects::{Effect, WritePayload};
+use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_ps3_abi::lv1::call::READ_VIRTUAL_UART;
+use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 use cellgov_ps3_abi::lv1::uart::{
     game_os_service_port, game_os_virtual_uart_port, virtual_uart_read_handler,
     READ_VIRTUAL_UART_NO_PORT_R3, READ_VIRTUAL_UART_NO_REGION_R3, READ_VIRTUAL_UART_REGION_R3,
     VIRTUAL_UART_PORT_MAX, VIRTUAL_UART_READ_ADDRESS_MAX,
 };
 
-use super::buffer::{self, BufferCheck};
+use super::buffer::{self, BufferCheck, BufferRegion};
+use super::receive::ReceivedBytes;
+use super::status;
+use super::{UartChange, UartState};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
-use crate::group::memory::region::MemoryRegion;
+use crate::group::memory::region::{MemoryRegion, MemoryState};
 use crate::request::HypercallRequest;
 
 /// The hypercalls this module answers.
@@ -30,13 +37,29 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
     name: "read_virtual_uart",
     cost: None,
     handler: |request, input| {
-        read(
+        read_port(
             request,
-            input.firmware,
-            input.groups.memory().regions().regions(),
+            &ReadInput {
+                firmware: input.firmware,
+                memory: input.groups.memory().regions(),
+                uart: input.groups.uart(),
+                storage: input.storage,
+            },
         )
     },
 }];
+
+/// What the handler reads besides the request.
+pub(crate) struct ReadInput<'a> {
+    /// The firmware version the hypervisor answers for.
+    pub(crate) firmware: Option<&'a str>,
+    /// The partition's memory regions and their storage.
+    pub(crate) memory: &'a MemoryState,
+    /// The virtual UART group's state.
+    pub(crate) uart: &'a UartState,
+    /// The caller's real address space, which holds the caller's buffer.
+    pub(crate) storage: &'a GuestMemory,
+}
 
 fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDisposition {
     HypercallDisposition::Refused(HypercallRefusal::UnmodelledInput {
@@ -50,6 +73,15 @@ fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDispositio
 /// lv1's own r3 with r4 to r10 cleared.
 fn lv1_answer(r3: u64) -> HypercallDisposition {
     HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, []))
+}
+
+/// A call that passes lv1's checks.
+struct Checked<'a> {
+    firmware: &'a str,
+    port: u64,
+    address: u64,
+    size: u64,
+    region: BufferRegion,
 }
 
 /// Hypercall 162: reads up to r5 bytes of port r3 into the buffer at r4.
@@ -77,64 +109,181 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// - the call passes the checks for a port that is not a service port,
 ///   because no source gives the bytes in that port's receive buffer.
 ///
-/// A call that passes the checks for a service port gets r3 = 0 and
-/// r4 = 0:
-/// - The port's service writes nothing to the port before the partition
-///   sends a complete request; see [`cellgov_ps3_abi::lv1::uart`].
-/// - CellGov answers a `write_virtual_uart` only when the partition's bytes
-///   on the port hold no complete request. So the port's receive buffer is
-///   empty.
-/// - lv1's read function reads 0 bytes from an empty buffer with a live
-///   peer [OFW-4.93 lv1 a:0x2F09F8-0x2F0A64]. The handler stores the sum,
-///   0, in r4 [OFW-4.93 lv1 a:0x2F452C-0x2F4538].
+/// This function answers a call whose port's receive buffer holds no
+/// byte. A call that passes the checks for a service port gets r3 = 0 and
+/// r4 = 0. lv1's read function reads 0 bytes from an empty buffer with a
+/// live peer [OFW-4.93 lv1 a:0x2F09F8-0x2F0A64]. The handler stores the
+/// sum, 0, in r4 [OFW-4.93 lv1 a:0x2F452C-0x2F4538].
 pub(crate) fn read(
     request: &HypercallRequest,
     firmware: Option<&str>,
     regions: &[MemoryRegion],
 ) -> HypercallDisposition {
+    match check(request, firmware, regions) {
+        Ok(checked) => empty_read(request, &checked),
+        Err(failed) => failed.answer(request),
+    }
+}
+
+/// Hypercall 162 for the receive buffers that `input.uart` holds.
+///
+/// A call whose port's receive buffer holds no byte gets the answer of
+/// [`read`]. A call that passes the checks for a service port whose
+/// buffer holds bytes gets the answer of [`received_read`].
+pub(crate) fn read_port(request: &HypercallRequest, input: &ReadInput<'_>) -> HypercallDisposition {
+    let regions = input.memory.regions();
+    let held = input.uart.received(request.r(3));
+    if held.is_empty() {
+        return read(request, input.firmware, regions);
+    }
+    match check(request, input.firmware, regions) {
+        Ok(checked) => received_read(request, input, &checked, held),
+        Err(failed) => failed.answer(request),
+    }
+}
+
+/// A call that fails one of lv1's checks, or that CellGov refuses before
+/// the checks end.
+enum Failed {
+    /// lv1 returns this r3, with r4 to r10 cleared.
+    Lv1(u64),
+    /// CellGov does not model these inputs.
+    Refused(&'static str),
+}
+
+impl Failed {
+    fn answer(self, request: &HypercallRequest) -> HypercallDisposition {
+        match self {
+            Self::Lv1(r3) => lv1_answer(r3),
+            Self::Refused(what) => refuse(request, what),
+        }
+    }
+}
+
+/// lv1's checks on `request`, or the failure of a call that fails one.
+fn check<'a>(
+    request: &HypercallRequest,
+    firmware: Option<&'a str>,
+    regions: &[MemoryRegion],
+) -> Result<Checked<'a>, Failed> {
     let Some(firmware) = firmware.filter(|fw| virtual_uart_read_handler(fw).is_some()) else {
-        return refuse(
-            request,
+        return Err(Failed::Refused(
             "a virtual UART read at a firmware whose lv1 handler is not read",
-        );
+        ));
     };
     let (port, address, size) = (request.r(3), request.r(4), request.r(5));
     if port > VIRTUAL_UART_PORT_MAX {
-        return lv1_answer(READ_VIRTUAL_UART_NO_PORT_R3);
+        return Err(Failed::Lv1(READ_VIRTUAL_UART_NO_PORT_R3));
     }
     if address > VIRTUAL_UART_READ_ADDRESS_MAX {
-        return lv1_answer(READ_VIRTUAL_UART_NO_REGION_R3);
+        return Err(Failed::Lv1(READ_VIRTUAL_UART_NO_REGION_R3));
     }
     if game_os_virtual_uart_port(firmware, port).is_none() {
-        return refuse(
-            request,
+        return Err(Failed::Refused(
             "a virtual UART port that no source shows lv1 holds or lacks",
-        );
+        ));
     }
-    match buffer::check(firmware, regions, address, size) {
-        BufferCheck::Held(_) => {}
-        BufferCheck::NoRegion => return lv1_answer(READ_VIRTUAL_UART_NO_REGION_R3),
-        BufferCheck::TooFewBytes => return lv1_answer(READ_VIRTUAL_UART_REGION_R3),
+    let region = match buffer::check(firmware, regions, address, size) {
+        BufferCheck::Held(region) => region,
+        BufferCheck::NoRegion => return Err(Failed::Lv1(READ_VIRTUAL_UART_NO_REGION_R3)),
+        BufferCheck::TooFewBytes => return Err(Failed::Lv1(READ_VIRTUAL_UART_REGION_R3)),
         BufferCheck::RealModeSizeUnknown => {
-            return refuse(
-                request,
+            return Err(Failed::Refused(
                 "a virtual UART read buffer at a firmware whose real mode size no source gives",
-            );
+            ));
         }
         BufferCheck::RegionNotHeld => {
-            return refuse(
-                request,
+            return Err(Failed::Refused(
                 "a virtual UART read buffer in a memory region that CellGov does not hold",
-            );
+            ));
         }
-    }
-    if game_os_service_port(firmware, port).is_some() {
+    };
+    Ok(Checked {
+        firmware,
+        port,
+        address,
+        size,
+        region,
+    })
+}
+
+/// The answer to a call that passes the checks for a port whose receive
+/// buffer holds no byte.
+fn empty_read(request: &HypercallRequest, checked: &Checked<'_>) -> HypercallDisposition {
+    if game_os_service_port(checked.firmware, checked.port).is_some() {
         return lv1_answer(0);
     }
     refuse(
         request,
         "a virtual UART read of a port whose receive buffer an lv1 service fills",
     )
+}
+
+/// The answer to a call that passes the checks for a service port whose
+/// receive buffer holds the bytes `held`.
+///
+/// lv1's read function copies the lesser of the bytes asked for and the
+/// bytes in the buffer, in the order that they came
+/// [OFW-4.93 lv1 a:0x2F0750-0x2F07F0]. The handler stores the sum in r4
+/// [OFW-4.93 lv1 a:0x2F452C-0x2F4538]. A call with r5 = 0 still gives one
+/// page with 0 bytes to the read function
+/// [OFW-4.93 lv1 a:0x2F447C-0x2F4528]. The read function copies no byte
+/// [OFW-4.93 lv1 a:0x2F0798]. It then takes the path of an empty buffer,
+/// which returns 0 for a port with a live peer
+/// [OFW-4.93 lv1 a:0x2F07F4-0x2F07F8] [OFW-4.93 lv1 a:0x2F09F8-0x2F0A64],
+/// and it calls no listener [OFW-4.93 lv1 a:0x2F0830]. So the call gets
+/// r3 = 0 and r4 = 0, and the buffer keeps its bytes.
+///
+/// The answer to a read of one or more bytes writes them to the caller's
+/// buffer, and carries the bytes that the receive buffer still holds. The
+/// call is a refusal in these cases:
+/// - CellGov's storage does not hold the caller's buffer;
+/// - the port's mask can raise the port's interrupt when lv1 computes the
+///   status after the copy of a page [OFW-4.93 lv1 a:0x2F0830-0x2F0940];
+///   see [`status::mask_refusal`]. CellGov delivers no such interrupt.
+///   The check uses the bytes left after the read. Before the read, the
+///   status and the mask share no bit, because each change to the mask,
+///   the triggers or the buffer checks them. Each copy only adds free
+///   bytes, so the status after each page shares no bit either.
+fn received_read(
+    request: &HypercallRequest,
+    input: &ReadInput<'_>,
+    checked: &Checked<'_>,
+    held: &[u8],
+) -> HypercallDisposition {
+    if game_os_service_port(checked.firmware, checked.port).is_none() {
+        return empty_read(request, checked);
+    }
+    let count = usize::try_from(checked.size).map_or(held.len(), |size| size.min(held.len()));
+    if count == 0 {
+        return lv1_answer(0);
+    }
+    let Some(range) = buffer::real_address(input.memory, checked.region, checked.address)
+        .and_then(|real| ByteRange::new(GuestAddr::new(real), count as u64))
+        .filter(|range| input.storage.holds(range.start().raw(), range.length()))
+    else {
+        return refuse(
+            request,
+            "a virtual UART read buffer whose bytes CellGov's storage does not hold",
+        );
+    };
+    let rest = &held[count..];
+    let params = input.uart.port_params(checked.port);
+    if let Some(what) = status::mask_refusal(checked.firmware, &params, rest.len() as u64) {
+        return refuse(request, what);
+    }
+    let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), [count as u64]);
+    answer.effects.push(Effect::SharedWriteIntent {
+        range,
+        bytes: WritePayload::new(held[..count].to_vec()),
+        source: request.unit,
+        source_time: request.tick,
+    });
+    answer.push_change(UartChange::ReceiveBufferSet(ReceivedBytes {
+        port: checked.port,
+        bytes: rest.to_vec(),
+    }));
+    HypercallDisposition::Answered(answer)
 }
 
 #[cfg(test)]
@@ -144,3 +293,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/read_service_port_tests.rs"]
 mod service_port_tests;
+
+#[cfg(test)]
+#[path = "tests/read_reply_tests.rs"]
+mod reply_tests;

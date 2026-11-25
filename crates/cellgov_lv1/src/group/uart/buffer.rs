@@ -7,7 +7,7 @@
 
 use cellgov_ps3_abi::lv1::interrupt::region_lookup_base;
 
-use crate::group::memory::region::{self as memory, MemoryRegion};
+use crate::group::memory::region::{self as memory, MemoryRegion, MemoryState};
 
 /// The memory region that holds a buffer that passes the checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +72,28 @@ pub(super) fn check(
         return BufferCheck::TooFewBytes;
     }
     BufferCheck::Held(region)
+}
+
+/// The real address in CellGov's storage of the logical partition address
+/// `address` in `region`, or `None` when the storage does not hold the
+/// region.
+///
+/// The real mode region lies at real address 0 of the storage. Each
+/// allocated region with storage lies at the real address that the memory
+/// group gives it.
+pub(super) fn real_address(
+    memory: &MemoryState,
+    region: BufferRegion,
+    address: u64,
+) -> Option<u64> {
+    match region {
+        BufferRegion::RealMode => Some(address),
+        BufferRegion::Allocated(index) => {
+            let region = memory.regions().get(index)?;
+            let storage = memory.storage_real(index as u64)?;
+            storage.checked_add(address.checked_sub(region.lpar_address)?)
+        }
+    }
 }
 
 /// The creation index and the region that `allocate_memory` created at `base`.

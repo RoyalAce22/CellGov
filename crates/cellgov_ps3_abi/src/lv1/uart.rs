@@ -14,8 +14,8 @@
 //! - the ports of lv1's system manager and dispatcher manager, and the
 //!   bytes that their receive buffers hold at the GameOS kernel's first
 //!   read;
-//! - the request header that the dispatcher manager reads, and the
-//!   GameOS kernel's first request.
+//! - the request header that the dispatcher manager reads, the GameOS
+//!   kernel's first request, and the reply to it.
 //!
 //! The facts come from the 4.93 `lv1.self`, decrypted offline and read
 //! with `cellgov dev disasm`. The repository holds no byte of lv1, only
@@ -493,7 +493,8 @@
 //! writes nothing to port 10 until the partition sends the header and each
 //! request byte that it counts. The reply then comes from the service, or
 //! has a return value that depends on the dispatcher manager's own state
-//! [OFW-4.93 lv1 a:0x5BD948-0x5BD97C]. No image read gives the reply.
+//! [OFW-4.93 lv1 a:0x5BD948-0x5BD97C]. The section on the reply to the
+//! kernel's first request gives the one reply that CellGov holds.
 //!
 //! ## The kernel's reads
 //!
@@ -551,6 +552,56 @@
 //!
 //! So the client's first request has a header with tag 0, service
 //! 0x19000, 0x38 request bytes and 0x38 reply bytes.
+//!
+//! ## The reply to the kernel's first request
+//!
+//! The dispatcher manager's map gives service 0x19000 the socket address
+//! 0x24 [OFW-4.93 lv1 a:0x5D7100-0x5D710C]. The builder of the map reads
+//! that table [OFW-4.93 lv1 a:0x5BECDC-0x5BED50]. `ss_server2.fself` binds
+//! a socket to that address and listens on it
+//! [OFW-4.93 lv1 a:0x56C484-0x56C4A0] [OFW-4.93 lv1 a:0x58CF48-0x58CFBC].
+//!
+//! `ss_server2` answers a request on one buffer, in this order:
+//! 1. The request class reads the request bytes from the buffer
+//!    [OFW-4.93 lv1 a:0x58DF7C-0x58DFB4].
+//! 2. The class runs its handler [OFW-4.93 lv1 a:0x58DFB8-0x58DFD4].
+//! 3. The class writes its reply fields to the same buffer
+//!    [OFW-4.93 lv1 a:0x58E044-0x58E07C].
+//!
+//! For request 0x19002, the handler stores its worker's return value as
+//! the status [OFW-4.93 lv1 a:0x56CC5C-0x56CC6C]. The worker builds the
+//! 16 data bytes with the isolated SPU module `aim_spu_module.self`
+//! [OFW-4.93 lv1 a:0x593850] [OFW-4.93 lv1 a:0x56E5C8-0x56E5E4]. The
+//! module reads data of the console that another request gives
+//! [OFW-4.93 lv1 a:0x56E454-0x56E46C]. So no image read gives the data
+//! bytes.
+//!
+//! The class writes two fields of the reply:
+//! - the status word, at [`DISPATCHER_REPLY_STATUS_OFFSET`]
+//!   [OFW-4.93 lv1 a:0x58D67C-0x58D6A8];
+//! - the 16 data bytes, at [`DISPATCHER_REPLY_DATA_OFFSET`]
+//!   [OFW-4.93 lv1 a:0x56D234-0x56D248].
+//!
+//! Each other byte of the reply is the request byte at the same offset.
+//!
+//! The dispatcher manager keeps the tag and the reply size of the
+//! request's header [OFW-4.93 lv1 a:0x5BDC08-0x5BDC18]
+//! [OFW-4.93 lv1 a:0x5BC98C-0x5BC9A8]. When the service replies, it
+//! writes a header to the port, and then the reply bytes that the header
+//! counts [OFW-4.93 lv1 a:0x5BD4FC-0x5BD540]; see
+//! [`dispatcher_reply_header`].
+//!
+//! The kernel reads these fields of the reply:
+//! - The request id at +0. The base unmarshal refuses a reply with
+//!   another id [OFW-4.93 lv2_kernel a:0x8000000000212d18-0x8000000000212d40].
+//! - The status word at +16, which it keeps at +24 of the request object
+//!   [OFW-4.93 lv2_kernel a:0x8000000000212d44-0x8000000000212d6c].
+//! - The 16 data bytes at +40
+//!   [OFW-4.93 lv2_kernel a:0x8000000000229ab0-0x8000000000229b38].
+//!
+//! The kernel keeps the status and the data bytes in a cache object. The
+//! capture [`DISPATCHER_REPLY_CAPTURE`] reads that object on the console;
+//! see [`GAME_OS_DISPATCHER_REPLIES`].
 
 use crate::hw::ppu_mmu::SMALL_PAGE_LOG2;
 
@@ -1250,6 +1301,108 @@ pub const GAME_OS_FIRST_DISPATCHER_SERVICE: u32 = 0x19000;
 /// big-endian doubleword.
 pub const GAME_OS_FIRST_DISPATCHER_REQUEST: u64 = 0x19002;
 
+/// The tag of the request header `header`: its big-endian word at +0.
+///
+/// The port function keeps the tag for the reply
+/// [OFW-4.93 lv1 a:0x5BDC0C] [OFW-4.93 lv1 a:0x5BC9A4].
+pub const fn dispatcher_header_tag(header: &[u8; DISPATCHER_HEADER_BYTES as usize]) -> u32 {
+    u32::from_be_bytes([header[0], header[1], header[2], header[3]])
+}
+
+/// The count of reply bytes that the request header `header` gives: its
+/// big-endian word at +12.
+///
+/// The port function keeps the count for the reply
+/// [OFW-4.93 lv1 a:0x5BDC08] [OFW-4.93 lv1 a:0x5BC990].
+pub const fn dispatcher_header_reply_bytes(header: &[u8; DISPATCHER_HEADER_BYTES as usize]) -> u32 {
+    u32::from_be_bytes([header[12], header[13], header[14], header[15]])
+}
+
+/// The header that the dispatcher manager writes to its port before a
+/// service's reply to a request with the tag `tag` and `reply_bytes`
+/// reply bytes.
+///
+/// The service function puts the tag in the word at +0, 0 in the words at
+/// +4 and +8, and the count in the word at +12
+/// [OFW-4.93 lv1 a:0x5BD4FC-0x5BD520]. It takes that path only when its
+/// receive call returns 0 in r31 [OFW-4.93 lv1 a:0x5BD464-0x5BD474].
+pub const fn dispatcher_reply_header(
+    tag: u32,
+    reply_bytes: u32,
+) -> [u8; DISPATCHER_HEADER_BYTES as usize] {
+    let t = tag.to_be_bytes();
+    let n = reply_bytes.to_be_bytes();
+    [
+        t[0], t[1], t[2], t[3], 0, 0, 0, 0, 0, 0, 0, 0, n[0], n[1], n[2], n[3],
+    ]
+}
+
+/// The offset of the 4-byte status word in the reply bytes of a request
+/// that `ss_server2.fself` answers [OFW-4.93 lv1 a:0x58D684-0x58D6A8].
+pub const DISPATCHER_REPLY_STATUS_OFFSET: usize = 16;
+
+/// The offset of the 16 data bytes in the reply bytes of request 0x19002
+/// [OFW-4.93 lv1 a:0x58D59C] [OFW-4.93 lv1 a:0x56D234-0x56D248].
+pub const DISPATCHER_REPLY_DATA_OFFSET: usize = 40;
+
+/// The bytes of the data field of the reply to request 0x19002
+/// [OFW-4.93 lv1 a:0x56D244].
+pub const DISPATCHER_REPLY_DATA_BYTES: usize = 16;
+
+/// The console capture of the reply that the 4.93 kernel kept from its
+/// first dispatcher manager request.
+///
+/// The path is relative to the workspace root. Its README gives the
+/// method and the kernel addresses.
+pub const DISPATCHER_REPLY_CAPTURE: &str = "tests/micro/lv2_aim_device_type";
+
+/// The reply of a service of lv1 to one request of the GameOS kernel, at
+/// one firmware.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameOsDispatcherReply {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The service id that the request header gives.
+    pub service: u32,
+    /// The request id that the request bytes start with.
+    pub request: u64,
+    /// The count of request bytes and the count of reply bytes that the
+    /// request header gives.
+    pub bytes: u32,
+    /// The status word at [`DISPATCHER_REPLY_STATUS_OFFSET`].
+    pub status: u32,
+    /// The data bytes at [`DISPATCHER_REPLY_DATA_OFFSET`].
+    pub data: [u8; DISPATCHER_REPLY_DATA_BYTES],
+}
+
+/// Each reply that a source gives.
+///
+/// The 4.93 kernel's first request has 0x38 request bytes and 0x38 reply
+/// bytes; see [`GAME_OS_FIRST_DISPATCHER_REQUEST`]. The capture
+/// [`DISPATCHER_REPLY_CAPTURE`] gives its status and data bytes. The data
+/// bytes are the value of the reference console's class. No image read
+/// gives them; see [`crate::lv1::uart`].
+pub const GAME_OS_DISPATCHER_REPLIES: &[GameOsDispatcherReply] = &[GameOsDispatcherReply {
+    firmware: "4.93",
+    service: GAME_OS_FIRST_DISPATCHER_SERVICE,
+    request: GAME_OS_FIRST_DISPATCHER_REQUEST,
+    bytes: 0x38,
+    status: 0,
+    data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x84],
+}];
+
+/// The reply to request `request` of service `service` at the firmware
+/// version `firmware`, or `None` when no source gives it.
+pub fn game_os_dispatcher_reply(
+    firmware: &str,
+    service: u32,
+    request: u64,
+) -> Option<&'static GameOsDispatcherReply> {
+    GAME_OS_DISPATCHER_REPLIES
+        .iter()
+        .find(|row| row.firmware == firmware && row.service == service && row.request == request)
+}
+
 #[cfg(test)]
 #[path = "tests/uart_tests.rs"]
 mod tests;
@@ -1289,3 +1442,11 @@ mod service_port_tests;
 #[cfg(test)]
 #[path = "tests/uart_write_tests.rs"]
 mod write_tests;
+
+#[cfg(test)]
+#[path = "tests/uart_reply_tests.rs"]
+mod reply_tests;
+
+#[cfg(test)]
+#[path = "tests/uart_reply_console_tests.rs"]
+mod reply_console_tests;
