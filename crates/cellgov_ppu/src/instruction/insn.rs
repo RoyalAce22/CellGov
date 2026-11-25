@@ -67,7 +67,7 @@ pub enum PpuInstruction {
     /// Load multiple word. Loads `32 - rt` words starting at EA into
     /// `gpr[rt..=31]`, each zero-extended into 64 bits.
     ///
-    /// [PPC-Book1 p:54 s:3.3 Fixed-Point Load Multiple Instruction] lmw D-form; EA word-aligned.
+    /// [PPC-Book1 p:46 s:3.3.5 Fixed-Point Load and Store Multiple Instructions] lmw D-form; EA word-aligned.
     Lmw {
         rt: u8,
         ra: u8,
@@ -152,7 +152,7 @@ pub enum PpuInstruction {
     /// Store multiple word. Stores the low 32 bits of
     /// `gpr[rs..=31]` into successive words at EA.
     ///
-    /// [PPC-Book1 p:54 s:3.3 Fixed-Point Store Multiple Instruction] stmw D-form; EA word-aligned.
+    /// [PPC-Book1 p:46 s:3.3.5 Fixed-Point Load and Store Multiple Instructions] stmw D-form; EA word-aligned.
     Stmw {
         rs: u8,
         ra: u8,
@@ -916,7 +916,7 @@ pub enum PpuInstruction {
     },
 
     // -- Load / store string (X-form, primary 31) --
-    // [PPC-Book1 p:55 s:3.3.5 Fixed-Point Load and Store String Instructions]
+    // [PPC-Book1 p:48 s:3.3.6 Fixed-Point Move Assist Instructions]
     // String moves transfer N bytes between memory and an aligned
     // sequence of GPRs, packed left-justified four bytes per
     // register and wrapping at r31 -> r0.
