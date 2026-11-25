@@ -89,7 +89,7 @@ fn bus_port_id() -> u64 {
     captured(STORAGE_PORT_CAPTURE, "port.tsv", port + ID_OFFSET)
 }
 
-/// The id of the port that lv1 connects to each storage device for the
+/// The ids of the ports that lv1 connects to the storage devices for the
 /// game OS partition on the reference console, in ascending order: the
 /// order in which lv1 gives the ids.
 fn device_port_ids() -> Vec<u64> {

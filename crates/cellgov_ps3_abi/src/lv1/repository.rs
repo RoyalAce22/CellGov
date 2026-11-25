@@ -870,6 +870,44 @@ pub fn lookup(key: &RepositoryKey, firmware: &str) -> Option<&'static Repository
 /// [OFW-4.93 lv1 a:0x2E53A4-0x2E53B8].
 pub const NO_NODE_R3: u64 = 0x0000_001E_FFFF_FFFA;
 
+/// A walk of the whole repository list of a partition, and the buses whose
+/// nodes its capture keeps.
+///
+/// The capture keeps every node of the buses from `first_bus` to
+/// `last_bus` of `lpar`. So a key of those buses that the capture does
+/// not hold names no node. The capture shows nothing about any other key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RepositoryWalk {
+    /// The capture directory of the walk, relative to the workspace root.
+    pub capture: &'static str,
+    /// The partition whose repository the walk read.
+    pub lpar: u64,
+    /// The lowest bus index whose nodes the capture keeps.
+    pub first_bus: u64,
+    /// The highest bus index whose nodes the capture keeps.
+    pub last_bus: u64,
+}
+
+impl RepositoryWalk {
+    /// Whether `key` is a key of `lpar` whose first key word is `bus`
+    /// with an index from `first_bus` to `last_bus`.
+    pub fn covers(&self, key: &RepositoryKey) -> bool {
+        let bus = key.n1.wrapping_sub(first_field(b"bus", 0));
+        key.lpar == self.lpar && (self.first_bus..=self.last_bus).contains(&bus)
+    }
+}
+
+/// The walk of [`BUS_CAPTURE`].
+///
+/// The walk went from the first dummy node of lpar 1's list to the list's
+/// last node, and the capture keeps every node of buses 0 to 3.
+pub const BUS_WALK: RepositoryWalk = RepositoryWalk {
+    capture: BUS_CAPTURE,
+    lpar: LPAR_ID_PME,
+    first_bus: 0,
+    last_bus: 3,
+};
+
 /// A key that a walk of the whole repository of a partition found no node
 /// for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -879,12 +917,13 @@ pub struct AbsentNode {
     /// The firmware versions whose read CellGov answers with
     /// [`NO_NODE_R3`], ascending.
     pub firmware: &'static [&'static str],
-    /// The capture directory of the walk, relative to the workspace root.
-    pub capture: &'static str,
+    /// The walk whose capture shows that the key names no node. The walk
+    /// must cover the key.
+    pub walk: RepositoryWalk,
 }
 
 /// A key of lpar 1's bus `bus` whose last three key words are `n`, which
-/// the walk of [`BUS_CAPTURE`] found no node for.
+/// [`BUS_WALK`] found no node for.
 const fn absent_bus_node(bus: u64, n: [u64; 3]) -> AbsentNode {
     AbsentNode {
         key: RepositoryKey {
@@ -895,17 +934,15 @@ const fn absent_bus_node(bus: u64, n: [u64; 3]) -> AbsentNode {
             n4: n[2],
         },
         firmware: CAPTURE_FIRMWARE,
-        capture: BUS_CAPTURE,
+        walk: BUS_WALK,
     }
 }
 
 /// Each key that a logged kernel boot reads and that a walk of the whole
 /// repository found no node for, ascending by key.
 ///
-/// The walk of [`BUS_CAPTURE`] went from the first dummy node to the
-/// list's last node, and the capture keeps every node of buses 0 to 3.
-/// A key of those buses that the capture does not hold therefore names no
-/// node on the reference console.
+/// Each key is a key of a bus that [`BUS_WALK`] covers, and the capture
+/// does not hold it. So the key names no node on the reference console.
 pub const ABSENT_NODES: &[AbsentNode] = &[
     // `bus.1.dev.1.intr.2`: the read after the last interrupt node of
     // device 1 ends the handler's interrupt loop
@@ -983,3 +1020,7 @@ mod bus_device_tests;
 #[cfg(test)]
 #[path = "tests/repository_device_1_tests.rs"]
 mod device_1_tests;
+
+#[cfg(test)]
+#[path = "tests/repository_walk_tests.rs"]
+mod walk_tests;

@@ -175,6 +175,9 @@ from any other site is a refusal. These cases fail the generator:
 
 - a row that names a firmware whose logged boot does not read the node;
 - an absent key for a firmware whose logged boot does not read it;
+- an absent key of a bus or a partition whose nodes the walk's capture
+  does not keep;
+- an absent key that lv1's storage registration writes;
 - a logged read that the table no longer agrees with;
 - a logged refusal of a node that the hypervisor answers only at the
   read sites it lists: the read's site is not one of them, or the log is

@@ -243,8 +243,8 @@ const fn call(thread: u8, sc: u64, id: u64) -> GameOsPortCall {
 ///
 /// The rows key only the thread and the address. The rows of one thread
 /// and address are in the order of the calls, so their ids ascend. The
-/// hypervisor gives a call the first of those ids that it does not hold:
-/// the lowest free id among them. The rows of the storage `sc` are true
+/// hypervisor gives each call the lowest of those ids that is still
+/// free. The rows of the storage `sc` are true
 /// only while the storage bus function and the five storage device opens
 /// make the calls there on thread 0. A later call there finds each id
 /// held, and the hypervisor refuses it.

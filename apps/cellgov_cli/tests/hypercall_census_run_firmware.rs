@@ -8,8 +8,8 @@
 //! - a site that the census does not find is a miss;
 //! - a site that the census resolves to another number is a wrong
 //!   resolve;
-//! - a site that the census leaves unresolved is printed with the
-//!   numbers that the run gave there, and is never a resolve.
+//! - a site that the census leaves unresolved is never a resolve. The
+//!   test prints it with the numbers that the run gave there.
 //!
 //! Requires:
 //! - the `installed-firmware-tests` feature;
@@ -115,7 +115,9 @@ fn observed_sites(run: &KernelRun) -> BTreeMap<u64, BTreeSet<u64>> {
 ///
 /// # Panics
 ///
-/// When the scan refuses the image, or two sites have one real address.
+/// Panics in these cases:
+/// - the scan refuses the image;
+/// - two sites have one real address.
 fn census_sites(fw: &str, elf: &[u8]) -> BTreeMap<u64, Option<u16>> {
     let sites = scan_hypercalls(elf).unwrap_or_else(|e| panic!("firmware {fw}: {e}"));
     let mut census = BTreeMap::new();

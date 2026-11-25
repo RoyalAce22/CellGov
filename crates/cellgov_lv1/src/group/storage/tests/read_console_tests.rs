@@ -1,7 +1,9 @@
-//! The 4.93 hypervisor's answers to the kernel's notification reads, held
-//! to the `lv1_storage_registration` capture of the game OS record and the
-//! bus table, and to the `lv1_storage_notify_request` capture that names
-//! the record's partition and event mask.
+//! The 4.93 hypervisor's answers to the kernel's notification reads.
+//!
+//! The tests hold the answers to two console captures:
+//! - `lv1_storage_registration`, of the game OS record and the bus table;
+//! - `lv1_storage_notify_request`, which names the record's partition and
+//!   event mask.
 
 use super::*;
 use crate::Hypervisor;
@@ -78,7 +80,11 @@ const KERNEL_MASK: u64 = 2;
 const MAX_READS: usize = 16;
 
 /// The doubleword at `address` in the file `name` of the peek directory
-/// `dir`. Panics unless both reads of the doubleword agree.
+/// `dir`.
+///
+/// # Panics
+///
+/// Panics unless both reads of the doubleword agree.
 fn captured(dir: &str, name: &str, address: u64) -> u64 {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")

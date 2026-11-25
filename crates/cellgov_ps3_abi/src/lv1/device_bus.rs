@@ -267,7 +267,8 @@
 //! check passed for each open. A second open of the game OS partition
 //! finds its own slot, and gets -9.
 //!
-//! The 4.93 kernel's device object opens device +152 of bus +144 with
+//! The 4.93 kernel's device object opens the device whose id is at +152
+//! of the object, on the bus whose id is at +144, with
 //! r5 = 0x8000000000000000
 //! [OFW-4.93 lv2_kernel a:0x80000000000ac0fc-0x80000000000ac120]. The
 //! object's constructor copies the bus id and the device id from +0 and
@@ -762,8 +763,8 @@
 //! [OFW-4.93 lv1 a:0x225F7C-0x225F84] [OFW-4.93 lv1 a:0x225FE4-0x225FF4]
 //! and a range that overlaps a mapping of the region
 //! [OFW-4.93 lv1 a:0x225FF8-0x226048]. So a mapping of lv1's own in the
-//! region does not stop the call. The function keeps r9
-//! in the byte at +64 of the mapping [OFW-4.93 lv1 a:0x225E9C]. When its
+//! region does not stop the call. The function keeps r9 in the byte at
+//! +64 of the mapping [OFW-4.93 lv1 a:0x225E9C]. When its
 //! 96-byte allocation fails [OFW-4.93 lv1 a:0x225E60-0x225E74], the map
 //! function frees the logical partition address and returns
 //! `LV1_RESOURCE_SHORTAGE` (-2) [OFW-4.93 lv1 a:0x228DC4]
@@ -927,7 +928,7 @@ pub const STORAGE_DEVICE_OPEN_CAPTURE: &str = "tests/micro/lv1_storage_device_op
 /// Whether `open_device` of device `device` on bus `bus` at the firmware
 /// version `firmware` opens a storage device whose open path CellGov read.
 ///
-/// These devices are the devices of the bus table of [`registration`] at
+/// The read covers each device of the bus table of [`registration`] at
 /// `firmware`. [`STORAGE_DEVICE_OPEN_CAPTURE`] reads the device object of
 /// each 4.93 device.
 pub fn opens_storage_device(firmware: &str, bus: u64, device: u64) -> bool {
@@ -1478,7 +1479,12 @@ pub fn mmio_map_handler(firmware: &str) -> Option<&'static MmioMapHandler> {
 /// [`OPEN_DEVICE_BUS_MAX`]: `LV1_ILLEGAL_PARAMETER_VALUE` (-17), with r3
 /// marked in the high word [OFW-4.93 lv1 a:0x306ED8-0x306EE4].
 ///
-/// Bit 32 marks r3, bit 33 r4, bit 34 r5, bit 35 r6 and bit 36 r7.
+/// The high-word bits mark the inputs:
+/// - bit 32 marks r3;
+/// - bit 33 marks r4;
+/// - bit 34 marks r5;
+/// - bit 35 marks r6;
+/// - bit 36 marks r7.
 pub const MMIO_MAP_BUS_RANGE_R3: u64 = 0x0000_0001_FFFF_FFEF;
 
 /// The r3 for bus id 0: `LV1_NO_ENTRY` (-6), with r3 marked
@@ -1613,9 +1619,9 @@ pub struct GameOsMmioMapping {
 /// Each MMIO mapping of a kernel's boot call, by firmware.
 ///
 /// The 4.93 row is the one game OS mapping of the region in slot 1 of
-/// device 1. The
-/// capture [`MMIO_MAP_CAPTURE`] finds it in the region's list, with the
-/// partition 2 at +8, the address at +48 and +80 and the length at +56.
+/// device 1. The capture [`MMIO_MAP_CAPTURE`] finds it in the region's
+/// list, with partition 2 at +8, the address at +48 and +80 and the
+/// length at +56.
 /// The page shift is the one that the kernel's wrapper sends
 /// [OFW-4.93 lv2_kernel a:0x800000000007D8B0].
 pub const GAME_OS_MMIO_MAPPINGS: &[GameOsMmioMapping] = &[GameOsMmioMapping {

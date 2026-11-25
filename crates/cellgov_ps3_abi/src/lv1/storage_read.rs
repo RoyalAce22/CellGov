@@ -4,8 +4,7 @@
 //! The facts come from the 4.93 `lv1.self`, decrypted offline and read
 //! with `cellgov dev disasm`, and from the console capture
 //! [`super::storage_registration::REGISTRATION_CAPTURE`]. The repository
-//! holds no byte of lv1, only
-//! these facts. The path of a read:
+//! holds no byte of lv1, only these facts. The path of a read:
 //! 1. The handler, at [OFW-4.93 lv1 a:0x308B88] in the live table,
 //!    zeroes the return slot of r4, HSPRG0 - 0x6A38
 //!    [OFW-4.93 lv1 a:0x308C58]. It calls the read core with the caller's
@@ -141,8 +140,10 @@ pub fn storage_read_handler(firmware: &str) -> Option<&'static StorageReadHandle
 pub const STORAGE_READ_NO_DEVICE_STATUS: i64 = LV1_NO_ENTRY;
 
 /// The status of a read of a device that is not ready: `LV1_WRONG_STATE`
-/// (-11). The read core returns it at [OFW-4.93 lv1 a:0x251580] when
-/// slot 6 of the device's virtual table answers false.
+/// (-11).
+///
+/// The read core returns it at [OFW-4.93 lv1 a:0x251580] when slot 6 of
+/// the device's virtual table answers false.
 pub const STORAGE_READ_NOT_READY_STATUS: i64 = LV1_WRONG_STATE;
 
 /// The start sector that the notification read method accepts.

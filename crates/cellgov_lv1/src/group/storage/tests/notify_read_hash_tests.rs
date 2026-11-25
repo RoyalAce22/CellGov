@@ -64,9 +64,12 @@ fn each_report_and_each_waiting_read_moves_the_term() {
     assert_ne!(other_buffer, waiting);
 }
 
-/// The list holds every nonzero lane of a state that holds a request, an
-/// event mask, a registered device, two reports and a waiting read at
-/// once.
+/// The list holds every nonzero lane of a state that holds all of these:
+/// - a request;
+/// - an event mask;
+/// - a registered device;
+/// - two reports;
+/// - a waiting read.
 #[test]
 fn every_storage_surface_adds_its_lanes_to_one_term() {
     let lane = |source, object, field, value| {

@@ -76,8 +76,9 @@ fn kernel_memory() -> GuestMemory {
     memory
 }
 
-/// The port is connected after the write, so the write's event leaves
-/// it idle and the report's event is the first one on it.
+/// The test connects the port after the write, so the write's event
+/// leaves the port idle. The report's event is then the first event on
+/// the port.
 #[test]
 fn a_device_report_sends_an_event_on_the_connected_storage_port() {
     let memory = kernel_memory();

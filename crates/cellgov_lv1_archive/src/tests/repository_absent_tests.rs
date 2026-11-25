@@ -1,4 +1,4 @@
-use cellgov_ps3_abi::lv1::repository::{field, first_field, AbsentNode, RepositoryKey};
+use cellgov_ps3_abi::lv1::repository::{field, first_field, AbsentNode, RepositoryKey, BUS_WALK};
 
 use super::*;
 
@@ -31,7 +31,7 @@ fn absent_at(firmware: &'static [&'static str]) -> AbsentNode {
     AbsentNode {
         key: region_2(),
         firmware,
-        capture: "tests/micro/lv1_repository_bus/peek/cech20-cex-493",
+        walk: BUS_WALK,
     }
 }
 

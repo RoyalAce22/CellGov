@@ -44,8 +44,8 @@ pub(crate) fn register_device(
 /// The two values of the node `key` that lv1's registrations wrote, or
 /// `None` when no registration of `storage` wrote the key.
 ///
-/// The answer is `None` while lv1 registered no device, or at a firmware
-/// whose registration no source gives.
+/// The answer is also `None` at a firmware whose registration no source
+/// gives.
 pub(crate) fn registered_node(
     storage: &StorageState,
     firmware: Option<&str>,

@@ -73,9 +73,9 @@ const DEVICE_OBJECT: UnmodelledError = UnmodelledError::new(
 
 /// The notification read whose buffer CellGov holds no storage for.
 ///
-/// The refusal covers the buffers that the storage write refuses for
-/// this reason, and a buffer whose bytes the caller's memory does not
-/// hold in full.
+/// The refusal covers these buffers:
+/// - each buffer that the storage write refuses for this reason;
+/// - a buffer whose bytes the caller's memory does not hold in full.
 const BUFFER: UnmodelledError = UnmodelledError::new(
     "a notification storage_read whose 512-byte buffer CellGov holds no storage for",
 );

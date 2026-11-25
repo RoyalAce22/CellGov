@@ -24,7 +24,8 @@
 //! boot, by the call's hardware thread, its `sc` address and its place
 //! among the calls there. So the handler reads
 //! [`HypercallRequest::thread`], [`HypercallRequest::pc`] and the ports
-//! it holds, although lv1 reads neither the thread nor the address.
+//! that the hypervisor holds, although lv1 reads neither the thread nor
+//! the address.
 
 use std::collections::{BTreeMap, BTreeSet};
 

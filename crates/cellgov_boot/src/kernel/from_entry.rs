@@ -493,9 +493,8 @@ fn hypercall_of(result: &ExecutionStepResult, step: usize) -> Option<KernelHyper
 /// - the storage of CellGov's hypervisor for the pages of the regions
 ///   that `allocate_memory` creates.
 ///
-/// `rm_size` is the partition's real mode size. The region ends at the
-/// partition's real mode limit, so each real-mode access that the limit
-/// admits finds memory.
+/// `rm_size` is the partition's real mode size, so each real-mode access
+/// that the partition admits finds memory.
 ///
 /// The caller has mapped `elf` with `map_kernel`, which checks the
 /// segments and bounds their span by

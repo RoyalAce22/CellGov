@@ -1,8 +1,8 @@
 //! Hypercall 172, `map_device_mmio_region`: lv1 maps an MMIO region of a
 //! device at a logical partition address of the calling partition.
 //!
-//! The handler answers the call for the devices of bus 1 that the
-//! partition holds open, as far as a source gives lv1's path; see
+//! The handler answers the call for devices 0, 1 and 2 of bus 1, as far
+//! as a source gives lv1's path; see
 //! [`cellgov_ps3_abi::lv1::device_bus`]. The state holds each mapping
 //! that lv1 made for the partition.
 

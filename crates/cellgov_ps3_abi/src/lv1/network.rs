@@ -770,7 +770,7 @@ pub const STORAGE_PORT_ID_LIMIT: u64 = 64;
 /// Whether CellGov read the path of a storage device's interrupt port for
 /// device `device` of bus 4 at the firmware version `firmware`.
 ///
-/// These devices are the devices of the bus table of [`registration`] at
+/// The read covers each device of the bus table of [`registration`] at
 /// `firmware`. The capture
 /// [`super::device_bus::STORAGE_DEVICE_OPEN_CAPTURE`] reads the method
 /// table of each 4.93 device.

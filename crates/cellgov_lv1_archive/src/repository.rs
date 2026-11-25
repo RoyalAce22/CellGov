@@ -83,6 +83,27 @@ pub enum RepositoryTableError {
         /// The firmware the entry names.
         fw: String,
     },
+    /// The absent-key table holds a key that its walk does not cover, so
+    /// the walk's capture does not show that the key names no node.
+    #[error("the absent-key table holds {key}, which the walk of {capture} does not cover")]
+    AbsentKeyOutsideWalk {
+        /// The key.
+        key: RepositoryKey,
+        /// The capture directory of the walk that the entry names.
+        capture: &'static str,
+    },
+    /// The absent-key table holds a key that lv1's storage registration
+    /// writes at a firmware that the entry names.
+    #[error(
+        "the absent-key table holds {key} for firmware {fw}, where lv1's storage registration \
+         writes it"
+    )]
+    RegisteredAbsentKey {
+        /// The key.
+        key: RepositoryKey,
+        /// The firmware whose registration writes the key.
+        fw: String,
+    },
     /// A logged read's state disagrees with the node table: the log is
     /// stale.
     #[error(
@@ -185,6 +206,38 @@ fn registered_values(fw: &str, key: &RepositoryKey) -> Option<(u64, u64)> {
     registration.node(registration.devices.iter().map(|device| device.id), key)
 }
 
+/// Checks each entry of `absent` against its walk and the storage
+/// registration.
+///
+/// # Errors
+///
+/// Returns the first [`RepositoryTableError`]:
+/// - [`RepositoryTableError::AbsentKeyOutsideWalk`] for a key that the
+///   entry's walk does not cover;
+/// - [`RepositoryTableError::RegisteredAbsentKey`] for a key that the
+///   storage registration writes at a firmware of the entry.
+fn check_absent(absent: &[AbsentNode]) -> Result<(), RepositoryTableError> {
+    for entry in absent {
+        if !entry.walk.covers(&entry.key) {
+            return Err(RepositoryTableError::AbsentKeyOutsideWalk {
+                key: entry.key,
+                capture: entry.walk.capture,
+            });
+        }
+        let registered = entry
+            .firmware
+            .iter()
+            .find(|fw| registered_values(fw, &entry.key).is_some());
+        if let Some(fw) = registered {
+            return Err(RepositoryTableError::RegisteredAbsentKey {
+                key: entry.key,
+                fw: (*fw).to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// One row per node of `nodes`, and one row per node that a storage
 /// registration writes and a read answered. The rows are ascending by key
 /// and then by firmware.
@@ -193,14 +246,17 @@ fn registered_values(fw: &str, key: &RepositoryKey) -> Option<(u64, u64)> {
 /// an answered read of that key needs no row of `nodes`.
 ///
 /// The hypervisor answers a key that neither `nodes` nor `absent` lists
-/// only after lv1's storage registration wrote it. So a read of that key
-/// can be answered only when the registration of the read's firmware
-/// writes the key, and the row takes the registration's values. A refused
-/// read of that key is a read before the registration.
+/// only after lv1's storage registration wrote it. So the hypervisor
+/// answers a read of that key only when the registration of the read's
+/// firmware writes the key, and the row takes the registration's values.
+/// A refused read of that key is a read before the registration.
 ///
 /// # Errors
 ///
 /// Returns the first [`RepositoryTableError`]:
+/// - an absent key that its walk does not cover;
+/// - an absent key that the storage registration writes at a firmware of
+///   the entry;
 /// - a read row that names a PUP `pups` does not hold;
 /// - a read whose state disagrees with `nodes`, `absent` and the storage
 ///   registration at the read's firmware;
@@ -213,6 +269,7 @@ pub fn repository_rows(
     reads: &[RepositoryReadRow],
     pups: &[PupRow],
 ) -> Result<Vec<RepositoryRow>, RepositoryTableError> {
+    check_absent(absent)?;
     let fw_of: BTreeMap<&str, &str> = pups
         .iter()
         .map(|row| (row.pup_sha256.as_str(), row.fw.as_str()))
@@ -308,9 +365,11 @@ pub fn repository_rows(
     Ok(rows)
 }
 
-/// Whether a read's answer disagrees with the state of its key. A key
-/// that `nodes` or `absent` lists is always answered. A key that neither
-/// lists is answered only when the storage registration wrote it.
+/// Whether a read's answer disagrees with the state of its key.
+///
+/// The hypervisor answers each key that `nodes` or `absent` lists. It
+/// answers a key that neither lists only when the storage registration
+/// wrote it.
 fn is_stale(listed: bool, answered: bool, written: Option<(u64, u64)>) -> bool {
     if listed {
         !answered
@@ -453,3 +512,7 @@ mod absent_tests;
 #[cfg(test)]
 #[path = "tests/repository_registration_tests.rs"]
 mod registration_tests;
+
+#[cfg(test)]
+#[path = "tests/repository_absent_scope_tests.rs"]
+mod absent_scope_tests;

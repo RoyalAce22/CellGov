@@ -362,8 +362,9 @@ const fn node(key: RepositoryKey, v1: u64, v2: u64) -> WrittenNode {
     WrittenNode { key, v1, v2 }
 }
 
-/// The three bus nodes that the registration and the initializer write,
-/// with `num_dev` as v1 of `bus.4.num_dev`. Both call the entry
+/// The three bus nodes that the registration and the initializer write.
+///
+/// `num_dev` is v1 of `bus.4.num_dev`. Both writers call the entry
 /// 0x2380B8. It moves the bus id, the type and `num_dev` into place with
 /// v2 = 0, and then branches to the writer
 /// [OFW-4.93 lv1 a:0x2380B8-0x2380C4] [OFW-4.93 lv1 a:0x237E8C-0x2380B4].

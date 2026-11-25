@@ -1,5 +1,6 @@
 use super::*;
 use crate::lv1::status::{zero_extended, LV1_NO_ENTRY};
+use crate::lv1::storage_registration::registration;
 
 /// The key of lpar 1's device 1 of bus 1, with the last two key words `n`.
 fn device_1(n: [u64; 2]) -> RepositoryKey {
@@ -27,7 +28,7 @@ fn bus_capture(address: u64) -> NodeSource {
 }
 
 /// The keys of every row of the bus capture's file `name`.
-fn capture_keys(name: &str) -> Vec<RepositoryKey> {
+pub(super) fn capture_keys(name: &str) -> Vec<RepositoryKey> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join(BUS_CAPTURE)
@@ -173,22 +174,32 @@ fn the_absent_keys_are_the_loop_ends_of_devices_1_and_2_and_region_0_of_device_3
     );
     for absent in ABSENT_NODES {
         assert_eq!(absent.firmware, ["4.93"], "{}", absent.key);
-        assert_eq!(absent.capture, BUS_CAPTURE, "{}", absent.key);
+        assert_eq!(absent.walk, BUS_WALK, "{}", absent.key);
     }
 }
 
-/// The walk kept every node of buses 0 to 3 in `node.tsv` or
+/// [`BUS_WALK`] keeps every node of its buses in `node.tsv` or
 /// `unread_node.tsv`, so an absent key of those buses is in neither file.
 #[test]
-fn no_absent_key_is_a_node_of_the_bus_capture_or_a_served_node() {
+fn each_absent_key_is_in_its_walks_scope_and_no_captured_served_or_registered_node() {
     let mut walked = capture_keys("node.tsv");
     walked.extend(capture_keys("unread_node.tsv"));
     assert!(walked.len() > 30, "{} walked rows", walked.len());
     assert_eq!(ABSENT_NODES.len(), 5);
     for absent in ABSENT_NODES {
+        assert_eq!(absent.walk.capture, BUS_CAPTURE, "{}", absent.key);
+        assert!(
+            absent.walk.covers(&absent.key),
+            "{} is unwalked",
+            absent.key
+        );
         assert!(!walked.contains(&absent.key), "{} is walked", absent.key);
         for fw in absent.firmware {
             assert_eq!(lookup(&absent.key, fw), None, "{} is served", absent.key);
+            let written = registration(fw).and_then(|registration| {
+                registration.node(registration.devices.iter().map(|d| d.id), &absent.key)
+            });
+            assert_eq!(written, None, "{} is registered at {fw}", absent.key);
         }
     }
 }

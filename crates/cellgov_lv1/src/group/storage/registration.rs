@@ -69,7 +69,7 @@ pub(crate) const WAITING_READ_SOURCE: u8 = 212;
 pub struct WaitingRead {
     /// The real address of CellGov's storage of the read's buffer. lv1
     /// stores its own real address of the buffer at +72 of the
-    /// partition's open record. The two are equal for a real mode buffer;
+    /// partition's open record. The two are equal for a real mode buffer.
     /// CellGov keeps an allocated region's pages in one range of storage.
     pub buffer: u64,
     /// The tag of the read's request, at +80 of the open record.

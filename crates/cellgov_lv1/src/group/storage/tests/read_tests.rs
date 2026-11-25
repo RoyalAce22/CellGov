@@ -85,9 +85,10 @@ fn status(status: i64) -> HypercallDisposition {
     HypercallDisposition::Answered(HypercallAnswer::lv1_status(zero_extended(status), []))
 }
 
-/// A 4.93 hypervisor after the kernel's open of the storage bus, its
-/// notification write with `mask`, and the status call that takes the
-/// write's request, so tag 1 is free again.
+/// A 4.93 hypervisor after these kernel calls:
+/// - the open of the storage bus;
+/// - the notification write with `mask`;
+/// - the status call that takes the write's request, so tag 1 is free.
 fn after_write(mask: u64, memory: &GuestMemory) -> Hypervisor {
     let mut hv = Hypervisor::new();
     hv.set_firmware("4.93");
@@ -353,8 +354,6 @@ fn a_buffer_that_the_memory_does_not_hold_is_a_refusal() {
 const REGION_SIZE: u64 = 0x10_0000;
 const REGION_PAGE_SIZE_EXP: u64 = 20;
 
-/// The tag stays held after lv1's translation refuses the buffer, so the
-/// next read takes the tag after it.
 #[test]
 fn a_buffer_that_ends_past_its_allocated_region_gets_no_privilege_and_keeps_its_tag() {
     let mut memory = GuestMemory::from_regions(vec![

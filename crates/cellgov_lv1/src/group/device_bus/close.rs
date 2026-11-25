@@ -78,8 +78,8 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 ///
 /// The close of a device removes the device's DMA mappings, frees its
 /// DMA regions and removes its MMIO mappings. The close of device 0 also
-/// carries the teardown of the
-/// network device, which [`NetworkChange::TornDown`] describes.
+/// carries the teardown of the network device, which
+/// [`NetworkChange::TornDown`] describes.
 ///
 /// The model makes these assumptions about device 0:
 /// - The open hook gave the global object its object at +16, as the
