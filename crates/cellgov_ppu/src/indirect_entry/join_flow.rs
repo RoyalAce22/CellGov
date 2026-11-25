@@ -8,17 +8,18 @@ use super::toc::WordTocs;
 use crate::hypercall_cfg::{branch_target, Code};
 use crate::instruction::PpuInstruction;
 
-/// Most constants that the flow keeps for one GPR, or for LR, at a join
-/// word.
+/// The largest number of constants that the flow keeps for one GPR, or
+/// for LR, at a join word.
 ///
-/// When the paths to a join word bring more constants in a register, the
-/// join keeps the constants it holds and marks the register as one that
-/// can also hold a constant the flow dropped. So a loop that steps a
-/// constant adds a finite number of constants, and the flow ends.
+/// When the paths to a join word bring more constants than this in a
+/// register, the join keeps the constants that it holds. It marks the
+/// register as lost: the register can also hold a constant that the flow
+/// dropped. So a loop that steps a constant adds a finite number of
+/// constants, and the flow ends.
 ///
 /// A dropped constant can be the address that a later `bcctr` or `bclr`
-/// reaches. So a CTR copied from a marked GPR, and a marked LR at a
-/// `bclr`, can reach an address that the scan does not know.
+/// reaches. So a CTR copied from a lost GPR, and a lost LR at a `bclr`,
+/// can reach an address that the scan does not know.
 const JOIN_LIMIT: usize = 16;
 
 /// What the paths to one join word bring in the GPRs and in LR.
@@ -55,7 +56,7 @@ impl Brought {
     ///
     /// A join that would leave more than [`JOIN_LIMIT`] constants in a
     /// register keeps the constants of the register and marks it as lost.
-    /// A register that the path marks as lost is marked here too.
+    /// The join also marks each register that the path marks as lost.
     fn join(&mut self, path: &Constants) -> bool {
         let mut changed = false;
         let mut lost_gprs = self.lost_gprs | path.lost_gprs;
@@ -115,7 +116,7 @@ enum Joined {
     /// The register took the new constants.
     Grew,
     /// The register kept its constants, because the join would leave
-    /// more than [`JOIN_LIMIT`].
+    /// more than [`JOIN_LIMIT`] constants.
     Overflowed,
 }
 
@@ -136,7 +137,7 @@ fn join_limited(own: &mut Value, value: &Value) -> Joined {
 /// `JOIN_LIMIT + 1` when it holds more than [`JOIN_LIMIT`].
 ///
 /// The count does not build the join, so a join that overflows costs no
-/// allocation, and it stops when the join overflows.
+/// allocation. The count stops when the join overflows.
 fn joined_len(own: &Value, value: &Value) -> usize {
     let over = JOIN_LIMIT + 1;
     let room = over.saturating_sub(own.constants().len());
@@ -153,9 +154,9 @@ fn joined_len(own: &Value, value: &Value) -> usize {
 /// that brings the GPRs and LR to its target unchanged.
 ///
 /// The flow does not follow a call into its routine, so the routine gets
-/// no constant of the caller. A `b` or a
-/// `bc` that links to the next word writes LR on the taken path too, so
-/// its fall-through brings its constants there.
+/// no constant of the caller. A `b` or a `bc` that links to the next word
+/// writes LR on the taken path too. Its target is the next word, so its
+/// fall-through brings the constants there.
 ///
 /// [PPC-Book1 p:24 s:2.4] `b` and `bc` reach CIA + EXTS(displacement), or EXTS(displacement) when AA = 1.
 /// [PPC-Book1 p:24 s:2.4] A branch alters only CTR and LR, so r2 at the target is r2 at the branch.

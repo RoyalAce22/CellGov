@@ -285,9 +285,11 @@ impl Bound<'_> {
         }
     }
 
-    /// Names each constant that the code of `segment` builds in a GPR,
-    /// keeps the target of each `bclr` whose LR it builds, and keeps each
-    /// constant that an `mtctr` copies.
+    /// Does these steps for the code of `segment`:
+    /// - names each constant that the code builds in a GPR;
+    /// - keeps the target of each `bclr` whose LR the code builds;
+    /// - keeps each constant that an `mtctr` copies;
+    /// - enters each word that an `rfid` can enter with MSR\[IR\] at 1.
     ///
     /// `index` is the index of `segment` in the code. `tocs` holds the
     /// TOC of each word of `segment`, as [`FunctionWords`] gives it.
@@ -298,6 +300,7 @@ impl Bound<'_> {
     /// `joins`, each join word starts with what [`JoinFlow`] gives it.
     ///
     /// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00, and `bcctr` reaches CTR0:61 || 0b00.
+    /// [PPC-Book3 p:13 s:2.3] `rfid` fetches from SRR0 0:61 || 0b00 when SF = 1 in the new MSR, and from 32 zeros || SRR0 32:61 || 0b00 when SF = 0.
     pub(super) fn code_constants(
         &mut self,
         index: usize,
@@ -334,6 +337,9 @@ impl Bound<'_> {
                 if constants.is_lost(rs) {
                     self.lost_ctr_writes.insert((index, address));
                 }
+            }
+            for target in constants.translated_rfid_targets(raw) {
+                self.enter(target);
             }
             for &constant in constants
                 .step(address, raw)

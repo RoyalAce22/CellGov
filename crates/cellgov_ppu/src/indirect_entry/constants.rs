@@ -141,7 +141,7 @@ impl Constants {
         None
     }
 
-    /// Puts the TOCs of a word with the TOC `toc` in r2.
+    /// Adds to r2 the TOCs that `toc` gives a word.
     ///
     /// `every` holds each TOC that a descriptor gives.
     pub(super) fn enter_toc(&mut self, toc: FunctionToc, every: &Value) {
@@ -175,15 +175,7 @@ impl Constants {
         let Some((msr, next, sets_sf)) = self.msr_write(address, raw) else {
             return Switch::None;
         };
-        let kinds: BTreeSet<u64> = match msr {
-            Some(msr) => msr
-                .constants()
-                .iter()
-                .filter(|&&msr| msr & (MSR_IR | MSR_PR) == 0)
-                .map(|&msr| msr & (MSR_SF | MSR_BIT1))
-                .collect(),
-            None => BTreeSet::from([0, MSR_SF]),
-        };
+        let kinds = fetch_kinds(msr, false);
         if kinds.is_empty() {
             return Switch::None;
         }
@@ -204,6 +196,30 @@ impl Constants {
                 })
                 .collect(),
         )
+    }
+
+    /// The words that the word `raw` can enter with MSR\[IR\] at 1, when it
+    /// is an `rfid` and the scan knows SRR0.
+    ///
+    /// The fetch address depends on MSR\[SF\] of the new MSR, which `rfid`
+    /// sets from SRR1 bits 0 and 1. So the set holds the address of each
+    /// SRR0 constant under each MSR\[SF\] that SRR1 can give. An SRR1 that
+    /// the scan does not know can set IR with SF at 0 or at 1.
+    ///
+    /// [PPC-Book3 p:13 s:2.3] `rfid` places the OR of SRR1 bits 0 and 1 into MSR\[SF\].
+    /// [PPC-Book3 p:13 s:2.3] `rfid` fetches from SRR0 0:61 || 0b00 when SF = 1 in the new MSR, and from 32 zeros || SRR0 32:61 || 0b00 when SF = 0.
+    pub(super) fn translated_rfid_targets(&self, raw: u32) -> BTreeSet<u64> {
+        let (Some(MsrWord::Rfid), Some(srr0)) = (MsrWord::of(raw), &self.srr0) else {
+            return BTreeSet::new();
+        };
+        fetch_kinds(self.srr1.as_ref(), true)
+            .into_iter()
+            .flat_map(|msr| {
+                srr0.constants()
+                    .iter()
+                    .map(move |&srr0| fetch_address(srr0 & !0b11, msr))
+            })
+            .collect()
     }
 
     /// What the word `raw` at `address` does to MSR and to the next fetch.
@@ -325,9 +341,30 @@ impl Constants {
     }
 }
 
-/// Whether the word `raw` ends each path through it: a word that does not
-/// decode, or a word that never falls through, as [`Constants::step`]
-/// takes them.
+/// The MSR\[SF\] and MSR bit 1 of each MSR constant of `msr` that sets
+/// MSR\[IR\] to `ir`.
+///
+/// An MSR value that the scan does not know can set IR to 0 or to 1, with
+/// SF at 0 or at 1.
+///
+/// [PPC-Book3 p:13 s:2.3] `rfid` sets MSR\[IR\] to SRR1\[IR\] | SRR1\[PR\] and fetches the next instruction from SRR0 under the new MSR.
+fn fetch_kinds(msr: Option<&Value>, ir: bool) -> BTreeSet<u64> {
+    match msr {
+        Some(msr) => msr
+            .constants()
+            .iter()
+            .filter(|&&msr| (msr & (MSR_IR | MSR_PR) != 0) == ir)
+            .map(|&msr| msr & (MSR_SF | MSR_BIT1))
+            .collect(),
+        None => BTreeSet::from([0, MSR_SF]),
+    }
+}
+
+/// Whether the word `raw` ends each path through it.
+///
+/// These words end a path, as in [`Constants::step`]:
+/// - a word that does not decode;
+/// - a word that never falls through.
 pub(super) fn ends_path(raw: u32) -> bool {
     match crate::decode::decode(raw) {
         Err(_) => true,

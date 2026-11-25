@@ -131,18 +131,32 @@ const FAR: u64 = KERNEL + 0x6000;
 /// The `bdnz` branches off the path, so the `bctr` runs only when the
 /// `bdnz` falls through with CTR at 0. With no word at real address 0,
 /// the `bctr` enters no window. With [`into_window`] at real address 0,
-/// the `bctr` enters the window after its `li r11`. The stub builds
-/// [`NOWHERE`], so its constant names no word at its real address.
+/// the `bctr` enters the window after its `li r11`.
+///
+/// The code at [`VECTOR`] builds [`NOWHERE`] with one `li`, so no
+/// constant that the code builds names a word at real address 0.
 ///
 /// [PPC-Book1 p:20 s:2.4.1] BO 1a00t decrements CTR, then branches if CTR M:63 is not 0, with M = 0 in 64-bit mode and M = 32 in 32-bit mode.
 /// [PPC-Book1 p:20 s:2.4.1] In 32-bit mode a branch sets the high-order 32 bits of its target address to 0.
+/// [PPC-Book1 p:51 s:3.3.8] `addi` adds EXTS(SI) to RA, or to 0 when RA is 0.
 #[test]
 fn a_real_mode_bctr_after_a_bdnz_to_a_later_word_off_the_path_reaches_address_zero() {
-    let offset = i16::try_from(FAR - (VECTOR + 12)).expect("a near branch");
+    let offset = i16::try_from(FAR - (VECTOR + 8)).expect("a near branch");
+    let li_nowhere = word(PpuInstruction::Addi {
+        rt: 3,
+        ra: 0,
+        imm: i16::try_from(NOWHERE).expect("NOWHERE fits li"),
+    });
+    let vector = [
+        li_nowhere,
+        word(PpuInstruction::Mtctr { rs: 3 }),
+        bc(0b10000, offset),
+        bctr(),
+    ];
     let scanned = |at_zero: Option<Segment>| {
         let mut segments: Vec<Segment> = at_zero.into_iter().collect();
         segments.extend([
-            stub(VECTOR, NOWHERE, &[bc(0b10000, offset)]),
+            code(VECTOR, &vector),
             window(&into_window()),
             quiet(),
             code(FAR, &[PPC_BLR]),

@@ -68,6 +68,48 @@ fn a_valid_load_with_update_surely_writes_rt_and_ra() {
     assert_eq!(surely_written_gprs(&decoded(lwzu(3, 4))), mask(&[3, 4]));
 }
 
+/// [PPC-Book1 p:104 s:4.6.2] `lfsu` is an invalid form only when RA is 0, and places EA into RA.
+/// [PPC-Book1 p:42 s:3.3.3] `stwu` is an invalid form only when RA is 0, and places EA into RA.
+/// [CBE-Handbook p:254 s:9.5.9] The PPE refuses a floating-point load or store with update only when RA is 0.
+#[test]
+fn a_valid_floating_point_load_or_store_with_update_surely_writes_ra() {
+    let lfsu = PpuInstruction::Lfsu {
+        frt: 4,
+        ra: 4,
+        imm: 8,
+    };
+    let stwu = PpuInstruction::Stwu {
+        rs: 3,
+        ra: 4,
+        imm: 8,
+    };
+    assert_eq!(surely_written_gprs(&decoded(lfsu)), mask(&[4]));
+    assert_eq!(surely_written_gprs(&decoded(stwu)), mask(&[4]));
+}
+
+/// [PPC-Book1 p:48 s:3.3.6] `lswx` loads the number of bytes that XER\[57:63\] gives, and with a count of 0 the contents of RT are undefined.
+/// [PPC-Book1 p:58] For `divd` and `divw`, a divisor of 0 or a quotient that overflows leaves the contents of RT undefined.
+/// [PPC-Book1 p:59] For `divdu` and `divwu`, a divisor of 0 leaves the contents of RT undefined.
+/// [PPC-Book3 p:73 s:5.5.13] A System Call interrupt sets SRR0, SRR1 and MSR, and execution resumes at EA 0xC00.
+#[test]
+fn an_sc_an_lswx_or_a_divide_surely_writes_no_gpr() {
+    let (rt, ra, rb, oe, rc) = (3, 4, 5, false, false);
+    let words = [
+        PpuInstruction::Sc { lev: 0 },
+        PpuInstruction::Lswx { rt, ra, rb },
+        PpuInstruction::Divw { rt, ra, rb, oe, rc },
+        PpuInstruction::Divwu { rt, ra, rb, oe, rc },
+        PpuInstruction::Divd { rt, ra, rb, oe, rc },
+        PpuInstruction::Divdu { rt, ra, rb, oe, rc },
+    ];
+    for instruction in words {
+        let decoded = decoded(instruction);
+        assert_eq!(decoded, instruction);
+        assert_ne!(written_gprs(&decoded), 0, "{instruction:?}");
+        assert_eq!(surely_written_gprs(&decoded), 0, "{instruction:?}");
+    }
+}
+
 /// [CBE-Handbook p:254 s:9.5.9] For an invalid form whose RA is in the range, the PPE completes the loads up to the collision and takes the interrupt there.
 /// [PPC-Book1 p:46 s:3.3.5] `lmw` loads GPRs RT through 31.
 #[test]
@@ -97,6 +139,7 @@ fn an_lswi_surely_writes_only_the_gprs_before_ra_when_ra_is_in_its_range() {
 /// refuses the `lwzu r3,0(r3)`, so r3 can still hold the copy.
 ///
 /// [PPC-Book1 p:33 s:3.3.2] A load with update is an invalid form when RA is 0 or RT.
+/// [CBE-Handbook p:254 s:9.5.9] The PPE takes the illegal-instruction interrupt for a load with update whose RA is 0 or RT.
 #[test]
 fn a_copy_of_ctr_after_a_call_that_crosses_an_invalid_lwzu_leaves_every_site_unresolved() {
     let between = [call(), mfctr(3), word(lwzu(3, 3)), mtctr(3)];
@@ -113,14 +156,16 @@ fn a_valid_lwzu_over_a_copy_of_ctr_after_a_call_keeps_each_site_resolved() {
     assert_eq!(sites(vec![copy_stub(&between)]), RESOLVED);
 }
 
-/// `lmw r29,0(r30)` loads r29 before the collision at r30, so the copy
-/// in r30 can survive, and the copy in r29 does not.
+/// `lmw r29,0(r30)` loads r29 before the collision at r30, so the copies
+/// in r30 and r31 can survive, and the copy in r29 does not.
 ///
 /// [CBE-Handbook p:254 s:9.5.9] For an invalid form whose RA is in the range, the PPE completes the loads up to the collision and takes the interrupt there.
 #[test]
 fn an_invalid_lmw_keeps_a_copy_of_ctr_at_and_after_ra_and_removes_it_before_ra() {
     let at_ra = [call(), mfctr(30), word(lmw(29, 30)), mtctr(30)];
     assert_eq!(sites(vec![copy_stub(&at_ra)]), UNRESOLVED);
+    let after_ra = [call(), mfctr(31), word(lmw(29, 30)), mtctr(31)];
+    assert_eq!(sites(vec![copy_stub(&after_ra)]), UNRESOLVED);
     let before_ra = [call(), mfctr(29), word(lmw(29, 30)), mtctr(29)];
     assert_eq!(sites(vec![copy_stub(&before_ra)]), RESOLVED);
 }
@@ -161,6 +206,7 @@ fn an_invalid_lmw_joins_a_slot_copy_into_a_gpr_past_ra_that_holds_a_copy() {
 /// `lwzu r5,0(r5)`, so r5 keeps that mark.
 ///
 /// [PPC-Book1 p:33 s:3.3.2] A load with update is an invalid form when RA is 0 or RT.
+/// [CBE-Handbook p:254 s:9.5.9] The PPE takes the illegal-instruction interrupt for a load with update whose RA is 0 or RT.
 #[test]
 fn a_bctr_of_an_mflr_copy_of_a_lost_lr_across_an_invalid_lwzu_leaves_every_site_unresolved() {
     let mut words = lr_writers(JOIN_LIMIT + 1);

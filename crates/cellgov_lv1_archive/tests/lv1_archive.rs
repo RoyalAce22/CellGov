@@ -512,6 +512,12 @@ fn hypercall_site_rows_are_well_formed() {
             Vec::<String>::new(),
             "answered hypercall {number} has no resolved or unresolved site in these kernels"
         );
+        // An unresolved site carries no number, so at least one kernel
+        // must prove a call of the number.
+        assert!(
+            sites.iter().any(|row| row.number == number),
+            "answered hypercall {number} has no resolved site in any scanned kernel"
+        );
     }
     // The rule names a kernel that drops an answered number's resolved
     // sites and records no unresolved site.
@@ -524,6 +530,12 @@ fn hypercall_site_rows_are_well_formed() {
         .collect();
     let mut without_unresolved = unresolved.clone();
     without_unresolved[0].sites.clear();
+    // The resolved sites alone keep the kernel, so the drop above removes
+    // a site that the rule reads.
+    assert_eq!(
+        missing(number, &sites, &without_unresolved),
+        Vec::<String>::new()
+    );
     assert_eq!(
         missing(number, &without_number, &without_unresolved),
         vec![lost.clone()]

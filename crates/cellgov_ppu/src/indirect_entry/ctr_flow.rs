@@ -181,9 +181,10 @@ impl Ctr {
 /// bytes.
 type Slot = (i64, u8);
 
-/// The offsets from r1 that a displacement can reach. A move of r1 drops
-/// each slot that it takes out of this range, so a loop that moves r1
-/// keeps a finite set of slots.
+/// The offsets from r1 that a displacement can reach.
+///
+/// A move of r1 drops each slot that it takes out of this range, so a
+/// loop that moves r1 keeps a finite set of slots.
 ///
 /// [PPC-Book1 p:37 s:3.3.2] `lwz` computes EA as (RA|0) + EXTS(D), with D a 16-bit field.
 const SLOT_REACH: std::ops::Range<i64> = -(1 << 15)..(1 << 15);
@@ -204,8 +205,8 @@ struct CtrState {
 }
 
 impl CtrState {
-    /// A state with no CTR and with a copy of a CTR that the scan cannot
-    /// prove in each GPR of `gprs` and in each slot of `slots`.
+    /// A state with no CTR, and a copy that the scan cannot prove in each
+    /// GPR of `gprs` and each slot of `slots`.
     ///
     /// `gprs` is a mask with bit `n` set for GPR `n`.
     fn lost_copies(gprs: u32, slots: &BTreeSet<Slot>) -> Self {
@@ -246,13 +247,12 @@ impl CtrState {
     /// - a load at a constant offset from r1, from the slots that hold a
     ///   copy there.
     ///
-    /// Each other word that surely writes a GPR removes its copy. A word
-    /// that copies into a GPR that it does not surely write, such as an
-    /// invalid form of a load, joins the copy into the copy of the GPR. A
-    /// store at a constant offset from r1 writes its slot, as
-    /// [`store_into`] gives. A word that moves r1 by a constant moves
-    /// each slot, and each other word that surely writes r1 removes each
-    /// slot.
+    /// Each other word that surely writes a GPR removes its copy. A word can
+    /// also copy into a GPR that it does not surely write, such as an
+    /// invalid form of a load. That word joins the copy into the copy of
+    /// the GPR. A store at a constant offset from r1 writes its slot, as
+    /// [`store_into`] gives. A word that moves r1 by a constant moves each
+    /// slot, and each other word that surely writes r1 removes each slot.
     ///
     /// [PPC-Book1 p:82 s:3.3.13] `mfctr`, a form of `mfspr`, copies CTR into RT.
     fn after(&self, decoded: &PpuInstruction) -> (BTreeMap<u8, Ctr>, BTreeMap<Slot, Ctr>) {
@@ -303,9 +303,9 @@ impl CtrState {
     /// The copy that a load of `slot` gets from the slots that hold a
     /// copy, and that `load` extends to 64 bits.
     ///
-    /// A load that the bytes of one slot hold gets the part of that copy.
-    /// A load that holds bytes of a slot and other bytes gets a value
-    /// that the scan cannot prove.
+    /// A load whose bytes all lie in one slot gets the part of the copy
+    /// there. A load that reads some bytes of a slot and some other bytes
+    /// gets a value that the scan cannot prove.
     ///
     /// [CBE-Handbook p:45 s:1.3.3] The CBE processor stores the most-significant byte at the lowest address.
     fn loaded(&self, (offset, width): Slot, load: Load) -> Ctr {
@@ -330,9 +330,9 @@ impl CtrState {
 /// Writes `slot` in `slots` with `copy`, or with a value that holds no
 /// copy when `copy` is `None`.
 ///
-/// The store removes each slot whose bytes it writes. A slot that it
-/// writes only some bytes of holds a value that the scan cannot prove.
-/// The new slot holds the low-order bytes of `copy`.
+/// The store removes each slot that it writes in full. A slot that it
+/// writes in part holds a value that the scan cannot prove. The new slot
+/// holds the low-order bytes of `copy`.
 ///
 /// [PPC-Book1 p:42 s:3.3.3] `stw` stores RS 32:63 into the word at EA.
 /// [PPC-Book1 p:43 s:3.3.3] `std` stores RS into the doubleword at EA.
@@ -521,11 +521,8 @@ impl StackAccess {
 /// `mtctr` of a GPR that holds a copy puts the copy back into CTR, so a
 /// CTR that the scan cannot prove stays so through the copy.
 ///
-/// The flow follows a copy through a stack slot at a constant offset from
-/// r1. A store there puts the copy in the slot, and a load of the slot
-/// puts it back in a GPR. The flow does not follow a copy through a store
-/// or a load that has another base or an index. After a word that writes
-/// r1 other than by a constant, the flow follows no slot.
+/// The flow also follows each copy through a stack slot at a constant
+/// offset from r1, as [`CtrState::after`] gives.
 ///
 /// The word after a call gets these copies:
 /// - each copy before the call, because its routine can return the GPR
@@ -533,9 +530,6 @@ impl StackAccess {
 /// - a copy of a CTR that the scan cannot prove, in each GPR and slot
 ///   that holds a copy at a `bclr`, because its routine can make that
 ///   copy.
-///
-/// The second kind keeps no constant, so the flow carries no constant
-/// of one routine to the return point of another.
 ///
 /// The flow joins the CTR of each path to a word, and continues until no
 /// word changes. Each state only grows, from finite sets of constants,

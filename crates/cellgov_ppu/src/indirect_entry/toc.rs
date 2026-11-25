@@ -56,7 +56,7 @@ impl FunctionToc {
     }
 
     /// The constants that r2 can hold on a word with this TOC, when the
-    /// straight-line path to the word leaves `path` in r2.
+    /// paths to the word leave `path` in r2.
     ///
     /// `every` holds each TOC that a descriptor gives.
     pub(super) fn in_r2(self, path: Option<Value>, every: &Value) -> Option<Value> {

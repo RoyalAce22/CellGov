@@ -30,15 +30,16 @@ use super::string::{bytes_before_collision, string_load, string_loads_into, stri
 pub(crate) struct InvalidForm {
     /// The mnemonic that the fault names.
     pub(crate) name: &'static str,
-    /// The bytes that the PPE loads before the collision, from RT up and
-    /// four to each GPR.
+    /// The number of bytes that the PPE loads before the collision, from
+    /// RT up and four to each GPR.
     pub(crate) ahead: u64,
 }
 
 /// The invalid form of `insn`, or `None` for a valid form.
 ///
-/// An `lswx` reads its byte count from XER, so the rule leaves its form to
-/// the caller and gives `None`, also for an RT=RA or RT=RB form.
+/// The caller decides the form of an `lswx`, because its byte count comes
+/// from XER. This function gives `None` for each `lswx`, also for an
+/// RT=RA or RT=RB form.
 ///
 /// [CBE-Handbook p:254 s:9.5.9] The PPE takes the illegal-instruction interrupt for an invalid form of a load or store with update, a load multiple or a load string.
 /// [CBE-Handbook p:254 s:9.5.9] A load multiple is an invalid form when RA is in the range of registers to be loaded or when RA = 0.

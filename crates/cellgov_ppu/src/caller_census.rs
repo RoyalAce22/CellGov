@@ -124,8 +124,8 @@ pub fn scan_syscalls(elf: &[u8]) -> Result<Vec<CallerSite>, CallerScanError> {
 /// - an `rfid` that can clear MSR\[IR\] at an SRR0 that the scan does not
 ///   know, to the word at the real address of each address that the
 ///   image names;
-/// - a `bcctr` or `bclr` that can reach an address that the scan does not know,
-///   which can enter any word.
+/// - a `bcctr` or `bclr` that can reach an address that the scan does not
+///   know, which can enter any word.
 ///
 /// The segments may lie anywhere in the 64-bit address space, as a
 /// kernel's do.
@@ -716,7 +716,7 @@ pub(crate) fn written_gprs(decoded: &PpuInstruction) -> u32 {
 ///
 /// An invalid form of a load or a store also takes the illegal-instruction
 /// program interrupt. Its mask holds only the GPRs that the PPE loads
-/// before the collision.
+/// before it takes the interrupt.
 ///
 /// [PPC-Book1 p:48 s:3.3.6] `lswx` loads the number of bytes that XER\[57:63\] gives, and with a count of 0 the contents of RT are undefined.
 /// [PPC-Book1 p:58] For `divd` and `divw`, a divisor of 0 or a quotient that overflows leaves the contents of RT undefined.
@@ -882,3 +882,7 @@ mod hypercall_constant_join_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_invalid_form_tests.rs"]
 mod invalid_form_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_rfid_low_word_tests.rs"]
+mod hypercall_rfid_low_word_tests;

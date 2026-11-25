@@ -20,12 +20,18 @@
 //! named address, the bound holds the word at the address with those
 //! bits at 0.
 //!
-//! Real mode also ignores EA bits 0 and 1. So for each doubleword of the
-//! file bytes and each constant that the code builds, the bound also
-//! keeps each word at its real address, which an indirect branch in real
-//! mode can reach. The bound keeps such a word also when no segment
-//! holds the address itself. A jump table entry names only the word at
-//! the address itself.
+//! An `rfid` with MSR\[SF\] at 0 in the new MSR fetches from the
+//! low-order 32 bits of SRR0. So for an `rfid` that can leave MSR\[IR\]
+//! at 1, the bound holds a word for each SRR0 constant that the scan
+//! knows. It holds the word that the `rfid` fetches under each MSR\[SF\]
+//! that SRR1 can give.
+//!
+//! Real mode also ignores EA bits 0 and 1. So an indirect branch in real
+//! mode can reach the word at the real address of a named address. For
+//! each doubleword of the file bytes and each constant that the code
+//! builds, the bound keeps that word. It keeps the word also when no
+//! segment holds the address itself. A jump table entry names only the
+//! word at the address itself.
 //!
 //! A function reaches each word that control can get to from its first
 //! word with r2 unchanged. On each word that a function reaches, r2 can
@@ -40,9 +46,10 @@
 //! - the target of each `bcctr` from each constant that a path to it
 //!   leaves in CTR;
 //! - each `bcctr` that a path reaches with a CTR that the scan cannot
-//!   prove: a CTR after a call, after a decrement of a constant that the
-//!   scan records, or from a GPR that can hold a constant the scan
-//!   dropped;
+//!   prove:
+//!   - a CTR after a call;
+//!   - a CTR after a decrement of a constant that the scan records;
+//!   - a CTR from a GPR that can hold a constant that the scan dropped;
 //! - each `bclr` that a path reaches with an LR that can hold a constant
 //!   the scan dropped.
 //!
@@ -54,9 +61,8 @@
 //!   When the paths bring more, it drops them and marks the register as
 //!   one that can hold a constant the scan dropped. The image does not
 //!   name a dropped constant. The mark moves only with a copy of the
-//!   register, so a dropped constant that a store and a load move, or
-//!   that a call takes into its routine, is a value that the scan does
-//!   not record.
+//!   register. So the scan does not record a dropped constant that a
+//!   store and a load move, or that a call takes into its routine.
 //!
 //! A second scan finds where an `rfid`, `mtmsr` or `mtmsrd` can put
 //! control into real mode. It forgets each constant at a word that
@@ -115,3 +121,7 @@ mod function_toc_tests;
 #[cfg(test)]
 #[path = "../tests/indirect_entry_toc_candidate_tests.rs"]
 mod toc_candidate_tests;
+
+#[cfg(test)]
+#[path = "../tests/indirect_entry_rfid_low_word_tests.rs"]
+mod rfid_low_word_tests;
