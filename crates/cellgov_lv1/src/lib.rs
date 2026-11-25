@@ -90,7 +90,7 @@ pub use group::spe::{
     SHADOW_STORAGE_BASE, SHADOW_STORAGE_PAGES,
 };
 pub use group::state::{GroupStates, StateChange};
-pub use group::storage::{StorageChange, StorageState};
+pub use group::storage::{NotifyRequest, StorageChange, StorageState};
 pub use group::uart::{
     PendingRequest, ReceivedBytes, UartChange, UartState, VirtualUartIrq, VirtualUartPortParams,
     VirtualUartShadowWrite, UART_SHADOW_DOUBLEWORDS,
