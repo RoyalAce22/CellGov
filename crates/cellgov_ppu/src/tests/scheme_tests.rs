@@ -6,7 +6,7 @@ use crate::multilinear::{scheme_id, KEYS, KEY_COUNT, SCHEME_ID, SCHEME_TAG};
 #[test]
 fn scheme_id_wire_format_golden() {
     assert_eq!(FNV1A_SCHEME_ID, 0x3cab_a2a8_eabe_81d0);
-    assert_eq!(SCHEME_ID, 0xfcef_1903_c679_c414);
+    assert_eq!(SCHEME_ID, 0x95e9_8052_fa18_99cb);
 }
 
 #[test]
@@ -33,7 +33,7 @@ fn a_swap_of_two_keys_moves_the_scheme_id() {
 
 #[test]
 fn a_new_tag_version_moves_the_scheme_id() {
-    assert_ne!(scheme_id(b"cellgov-ppu-multilinear/v3", &KEYS), SCHEME_ID);
+    assert_ne!(scheme_id(b"cellgov-ppu-multilinear/v4", &KEYS), SCHEME_ID);
 }
 
 /// The FNV-1a byte stream of the FNV-1a scheme: each GPR, LR, CTR and

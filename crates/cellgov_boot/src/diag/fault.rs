@@ -54,6 +54,7 @@ fn ppu_fault_line(
         format!("PROGRAM_INTERRUPT {reason} at SRR0={srr0} SRR1[43:47]={bits}")
     };
     match class {
+        C::MachineCheck => format!("MACHINE_CHECK at SRR0={srr0}"),
         C::InstructionStorage => {
             let bits = srr1_bits(33, 36);
             format!("INSTRUCTION_STORAGE at SRR0={srr0} SRR1[33:36]={bits}")
@@ -85,6 +86,8 @@ fn ppu_fault_line(
         }
         C::DebugBreak => format!("DEBUG_BREAK at PC={pc}"),
         C::Internal => format!("INTERNAL_STOP at PC={pc} (raw={raw})"),
+        C::Checkstop => format!("CHECKSTOP at PC={pc}"),
+        C::Unmodelled => format!("UNMODELLED_STATE at PC={pc} (raw={raw})"),
     }
 }
 

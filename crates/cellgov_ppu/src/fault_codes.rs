@@ -33,6 +33,12 @@ pub const FAULT_FP_UNAVAILABLE: u32 = 0x0112_0000;
 pub const FAULT_VXU_UNAVAILABLE: u32 = 0x0113_0000;
 /// CellGov stop: a state the interpreter's own invariants exclude.
 pub const FAULT_INTERNAL: u32 = 0x0114_0000;
+/// Machine check interrupt.
+pub const FAULT_MACHINE_CHECK: u32 = 0x0115_0000;
+/// CellGov stop: the processor entered the checkstop state.
+pub const FAULT_CHECKSTOP: u32 = 0x0116_0000;
+/// CellGov stop: a state the PPE runs that CellGov does not model.
+pub const FAULT_UNMODELLED: u32 = 0x0117_0000;
 
 /// The class half of a fault code.
 const CLASS_MASK: u32 = 0xFFFF_0000;
@@ -41,6 +47,8 @@ const CLASS_MASK: u32 = 0xFFFF_0000;
 /// interrupt split by its reason, or a CellGov stop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, VariantArray)]
 pub enum PpuFaultClass {
+    /// Machine check interrupt.
+    MachineCheck,
     /// Instruction storage interrupt.
     InstructionStorage,
     /// Instruction segment interrupt.
@@ -71,12 +79,17 @@ pub enum PpuFaultClass {
     DebugBreak,
     /// CellGov stop: a state the interpreter's invariants exclude.
     Internal,
+    /// CellGov stop: the processor entered the checkstop state.
+    Checkstop,
+    /// CellGov stop: a state the PPE runs that CellGov does not model.
+    Unmodelled,
 }
 
 impl PpuFaultClass {
     /// The class `code` names, or `None` for a code no PPU fault yields.
     pub fn of_code(code: u32) -> Option<Self> {
         let class = match code & CLASS_MASK {
+            FAULT_MACHINE_CHECK => Self::MachineCheck,
             FAULT_INSTRUCTION_STORAGE => Self::InstructionStorage,
             FAULT_INSTRUCTION_SEGMENT => Self::InstructionSegment,
             FAULT_DATA_STORAGE => Self::DataStorage,
@@ -89,6 +102,8 @@ impl PpuFaultClass {
             FAULT_UNIMPLEMENTED_INSN => Self::Unimplemented,
             FAULT_DEBUG_BREAK => Self::DebugBreak,
             FAULT_INTERNAL => Self::Internal,
+            FAULT_CHECKSTOP => Self::Checkstop,
+            FAULT_UNMODELLED => Self::Unmodelled,
             _ => return None,
         };
         Some(class)
@@ -99,7 +114,11 @@ impl PpuFaultClass {
     pub fn is_interrupt(self) -> bool {
         !matches!(
             self,
-            Self::Unimplemented | Self::DebugBreak | Self::Internal
+            Self::Unimplemented
+                | Self::DebugBreak
+                | Self::Internal
+                | Self::Checkstop
+                | Self::Unmodelled
         )
     }
 }

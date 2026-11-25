@@ -1,0 +1,20 @@
+[test]
+name = "ppu_issue_alias_line"
+
+# A hardware probe: a dependent load chase over 192 lines of one shared
+# segment mapped at X and Y, every line loaded once through X and once
+# through Y each lap, against the same chase all through X. The console
+# capture is the answer; ppu/main.c's header lists the rings and the
+# payload layout.
+
+[observe]
+# 22 big-endian u32 words (88 bytes), as ppu/main.c lists: the failed
+# step and its code, REPS, the timed loads a run, X, Y, five plain-ring
+# and five alias-ring time base tick counts, four teardown return codes,
+# and whether each chase ended where it began.
+memory_regions = [
+  { name = "result", addr = 0, size = 88 },
+]
+
+[expect]
+outcome = "completed"

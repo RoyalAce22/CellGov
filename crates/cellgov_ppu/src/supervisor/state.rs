@@ -2,9 +2,10 @@
 
 use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_PR, PPE_SLB_ENTRIES, SLB_VALID};
 
+use crate::mmu::Partition;
 use crate::multilinear::{supervisor_lane, SUPERVISOR_WORDS};
 
-const _: () = assert!(SUPERVISOR_WORDS == 11 + 2 * PPE_SLB_ENTRIES);
+const _: () = assert!(SUPERVISOR_WORDS == 11 + 2 * PPE_SLB_ENTRIES + 4);
 
 /// One SLB entry: the effective half `slbmte` takes from RB and the
 /// virtual half it takes from RS.
@@ -63,11 +64,15 @@ pub struct SupervisorState {
     pub sprg: [u64; 4],
     /// The segment lookaside buffer.
     pub slb: [SlbEntry; PPE_SLB_ENTRIES],
+    /// The translation resources the hypervisor set for the thread's
+    /// partition.
+    pub partition: Partition,
 }
 
 impl SupervisorState {
     /// The registers at the entry of supervisor code: `msr` as given,
-    /// every other register 0, and every SLB entry invalid.
+    /// every other register 0, every SLB entry invalid, and the
+    /// partition at [`Partition::INITIAL`].
     pub fn new(msr: u64) -> Self {
         Self {
             msr,
@@ -79,6 +84,7 @@ impl SupervisorState {
             dec_tb: 0,
             sprg: [0; 4],
             slb: [SlbEntry::default(); PPE_SLB_ENTRIES],
+            partition: Partition::INITIAL,
         }
     }
 
@@ -100,8 +106,15 @@ impl SupervisorState {
         supervisor_lane(&self.words())
     }
 
-    /// Every register as one 64-bit word, in declaration order, each SLB
-    /// entry as its effective half and then its virtual half.
+    /// Every register as one 64-bit word, in declaration order.
+    ///
+    /// Each SLB entry gives its effective half, then its virtual half. The
+    /// partition gives four words:
+    ///
+    /// 1. SDR1
+    /// 2. the real mode limit
+    /// 3. the real mode offset
+    /// 4. HID6\[LB\]
     pub fn words(&self) -> [u64; SUPERVISOR_WORDS] {
         let mut out = [0u64; SUPERVISOR_WORDS];
         let head = [
@@ -122,6 +135,9 @@ impl SupervisorState {
             out[head.len() + 2 * k] = e.esid_v;
             out[head.len() + 2 * k + 1] = e.vsid_flags;
         }
+        let p = &self.partition;
+        let tail = [p.sdr1(), p.rm_limit(), p.rm_offset(), u64::from(p.lb())];
+        out[SUPERVISOR_WORDS - tail.len()..].copy_from_slice(&tail);
         out
     }
 }

@@ -84,9 +84,17 @@ pub struct PpuExecutionUnit {
     /// [`FETCH_RUNS_MAX`](super::fetch::FETCH_RUNS_MAX) the block stops
     /// tracking them apart and reports one span covering every address
     /// it fetched, which is what a loop body would otherwise cost a run
-    /// per iteration.
+    /// per iteration. A translating thread keeps one span only inside
+    /// one fetch translation, and otherwise keeps each run once.
     pub(super) fetch_runs: Vec<(u64, u64)>,
     pub(super) store_buf: StoreBuffer,
+    /// The translations a thread with supervisor registers made. A
+    /// translation lives for one batch.
+    pub(super) translations: crate::mmu::TranslationCache,
+    /// The real ranges of the page table entry groups the block's
+    /// translation misses read, each once. They publish as read intents
+    /// at the block boundary.
+    pub(super) table_reads: Vec<cellgov_mem::ByteRange>,
     /// The issue model that prices each retired instruction in core
     /// cycles.
     pub(super) timing: Box<crate::timing::PpeTiming>,
@@ -126,6 +134,8 @@ impl PpuExecutionUnit {
             fetch_end: NO_FETCH_RUN,
             fetch_runs: Vec::new(),
             store_buf: StoreBuffer::new(),
+            translations: crate::mmu::TranslationCache::default(),
+            table_reads: Vec::new(),
             timing: Box::default(),
             profile_mode: false,
             profile_insns: std::collections::BTreeMap::new(),
@@ -254,6 +264,10 @@ impl PpuExecutionUnit {
             fetch_end: _,
             fetch_runs: _,
             store_buf: _,
+            table_reads: _,
+            // Translations of the page table in the memory before the
+            // restore.
+            translations,
             timing: unit_timing,
             // Profile instruments and the observer.
             profile_mode: _,
@@ -273,5 +287,6 @@ impl PpuExecutionUnit {
         per_step_full_states.clear();
         barriers.clear();
         code_events.clear();
+        translations.clear();
     }
 }

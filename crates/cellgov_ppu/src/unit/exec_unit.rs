@@ -63,6 +63,9 @@ impl ExecutionUnit for PpuExecutionUnit {
             fetch_end: _,
             fetch_runs: _,
             store_buf: _,
+            table_reads: _,
+            // A cache of translations: a hit and a miss give one result.
+            translations: _,
             timing,
             // Profile instruments and the observer.
             profile_mode: _,

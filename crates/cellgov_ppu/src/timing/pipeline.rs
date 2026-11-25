@@ -651,7 +651,7 @@ impl PpeTiming {
         let c = &self.core;
         let (fetched, opens) = self.fetch(pc);
         let (floor, opens_group) = match c.older {
-            Some(older) if !opens && pc == older.pc + 4 => {
+            Some(older) if !opens && pc == older.pc.wrapping_add(4) => {
                 let alone = issues_alone(&older.op)
                     || issues_alone(op)
                     || !pairs(&older.op, op)
@@ -954,7 +954,9 @@ impl PpeTiming {
         if opens {
             c.block_open = true;
             c.block_cycle = fetched;
-            c.block_end = (pc & !(k::PPU_FETCH_BYTES - 1)) + k::PPU_FETCH_BYTES;
+            // The last block of the effective space ends at 2^64, which
+            // wraps to 0 as `next_pc` past its last word does.
+            c.block_end = (pc & !(k::PPU_FETCH_BYTES - 1)).wrapping_add(k::PPU_FETCH_BYTES);
         }
         c.next_pc = pc.wrapping_add(4);
 

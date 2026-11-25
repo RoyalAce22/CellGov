@@ -2,7 +2,7 @@
 
 use crate::exec::memory_helpers::{
     buffer_conditional_store, buffer_store, caching_inhibited, check_block_translates, check_store,
-    inhibited_load, inhibited_store, load_refusal, load_ze, LoadPort, Width,
+    inhibited_load, inhibited_store, load_refusal, load_ze, real_address, LoadPort, Width,
 };
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::PpuInstruction;
@@ -384,14 +384,15 @@ pub(crate) fn execute(
         PpuInstruction::Dcbz { ra, rb } => {
             let target = state.ea_x_form(ra, rb);
             let ea = target & !(DCBZ_BLOCK_BYTES as u64 - 1);
-            // A block that no region holds faults as unmapped first. An
-            // untranslated page has no caching attribute.
+            // [CBE-Handbook p:147 s:6.1.6.4] A dcbz to caching-inhibited storage takes an alignment interrupt.
+            // `inhibited_store` orders it against a refusal. A block that
+            // no region holds faults as unmapped first: an untranslated
+            // page has no caching attribute.
+            if caching_inhibited(region_views, ea, DCBZ_BLOCK_BYTES as u64) {
+                return inhibited_store(region_views, target, ea, DCBZ_BLOCK_BYTES as u64);
+            }
             if let Err(e) = check_store(region_views, ea, DCBZ_BLOCK_BYTES as u64) {
                 return ExecuteVerdict::StoreFault(e);
-            }
-            // [CBE-Handbook p:147 s:6.1.6.4] A dcbz to caching-inhibited storage takes an alignment interrupt.
-            if caching_inhibited(region_views, ea, DCBZ_BLOCK_BYTES as u64) {
-                return ExecuteVerdict::Fault(PpuFault::alignment(target, true));
             }
             // Capacity pre-check prevents a partial block from
             // committing on `BufferFull` mid-loop.
@@ -472,7 +473,9 @@ fn load_reserve(
     match loaded {
         Ok(val) => {
             state.set_gpr(rt as usize, val);
-            let line = ReservedLine::containing(ea);
+            // The reservation is on the real granule, so two aliases of
+            // it name one reservation.
+            let line = ReservedLine::containing(real_address(region_views, ea));
             state.set_reservation(Some(line));
             effects.push(Effect::ReservationAcquire {
                 line_addr: line.addr(),
@@ -504,14 +507,14 @@ fn store_conditional(
     }
     // [CBE-Handbook p:249 s:9.5.3] The PPE raises the data storage
     // interrupt whether or not the store would update storage.
+    // `inhibited_store` orders it against the alignment interrupt.
+    if caching_inhibited(region_views, ea, u64::from(size)) {
+        return inhibited_store(region_views, ea, ea, u64::from(size));
+    }
     if let Err(e) = check_store(region_views, ea, u64::from(size)) {
         return ExecuteVerdict::StoreFault(e);
     }
-    // The alignment interrupt follows a refusal, as `inhibited_store` orders them.
-    if caching_inhibited(region_views, ea, u64::from(size)) {
-        return ExecuteVerdict::Fault(PpuFault::alignment(ea, true));
-    }
-    let success = holds_reservation_for(state, ea);
+    let success = holds_reservation_for(state, real_address(region_views, ea));
     // [PPC-Book2 p:25 s:3.3.2 Atomic Update Primitives] CR0 = 0b00 || n || XER[SO].
     let so = u8::from(state.xer_so());
     if success {

@@ -135,6 +135,15 @@ fn view_holding<'v, 'a>(views: &'v [RegionView<'a>], addr: u64) -> Option<&'v Re
         .find(|v| v.base <= addr && addr < v.base + v.bytes.len() as u64)
 }
 
+/// The real address that the view holding `ea` maps it to, or `ea` when
+/// no view holds it.
+///
+/// Only a translating thread's views map an address to another one.
+#[inline]
+pub(crate) fn real_address(views: &[RegionView<'_>], ea: u64) -> u64 {
+    view_holding(views, ea).map_or(ea, |view| view.real_of(ea))
+}
+
 /// The first byte at or after `ea` that no view holds, across views that
 /// sit end to end.
 #[inline]
@@ -375,12 +384,14 @@ pub(crate) fn inhibited_load(
 /// The verdict of a store of `[start, start + len)` that the PPE refuses
 /// in caching-inhibited storage, with `dar` the instruction's EA.
 ///
-/// A store that a region also refuses faults as that refusal. The PPE
-/// orders the two by the C bit of the page table entry. Problem state
-/// cannot read that bit, so CellGov takes the order the PPE gives when
-/// C is 0.
+/// A store that a region also refuses faults as that refusal. The one
+/// exception is a view with `store_alignment_first` set: a translating
+/// thread's read-only page whose page table entry has C = 1. There, the
+/// store faults on a byte that no view holds, at any place in the range,
+/// and otherwise takes the alignment interrupt.
 ///
-/// [CBE-Handbook p:290 s:9.10] A store's alignment interrupt in caching-inhibited storage follows the page-protection data storage interrupt when C is 0.
+/// [CBE-Handbook p:290 s:9.10] A store's alignment interrupt in caching-inhibited storage follows the page-protection data storage interrupt when C is 0, and precedes it when C is 1.
+/// [CBE-Handbook p:290 s:9.10] The page-fault data storage interrupt precedes both.
 #[inline]
 pub(crate) fn inhibited_store(
     views: &[RegionView<'_>],
@@ -388,7 +399,14 @@ pub(crate) fn inhibited_store(
     start: u64,
     len: u64,
 ) -> ExecuteVerdict {
+    let alignment_first = |addr| view_holding(views, addr).is_some_and(|v| v.store_alignment_first);
     match write_refusal(views, start, len) {
+        Some(cellgov_mem::MemError::ReservedWrite { addr, .. }) if alignment_first(addr) => {
+            match load_refusal(views, start, len) {
+                Some(e) => ExecuteVerdict::StoreFault(e),
+                None => ExecuteVerdict::Fault(PpuFault::alignment(dar, true)),
+            }
+        }
         Some(e) => ExecuteVerdict::StoreFault(e),
         None => ExecuteVerdict::Fault(PpuFault::alignment(dar, true)),
     }

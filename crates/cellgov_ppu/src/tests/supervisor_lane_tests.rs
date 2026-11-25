@@ -2,6 +2,7 @@
 //! of every supervisor register reaches the state hash.
 
 use super::*;
+use crate::mmu::Partition;
 use crate::state::PpuState;
 use crate::supervisor::SupervisorState;
 use cellgov_ps3_abi::hw::ppu_supervisor::PPE_SLB_ENTRIES;
@@ -51,8 +52,15 @@ fn no_two_supervisor_multiplier_keys_cancel_modulo_2_pow_65() {
     }
 }
 
-/// The block whose words, in [`SupervisorState::words`] order, are 1
-/// through [`SUPERVISOR_WORDS`].
+/// A partition with every field away from [`Partition::INITIAL`]: a
+/// 2^13-group page table at 16 MB, real mode over 256 MB at 256 MB, and
+/// large pages of 64 KB (LP = 0) and 1 MB (LP = 1).
+fn counting_partition() -> Partition {
+    Partition::new(0x0100_0002, 1 << 28, 1 << 28, 0b1001).expect("a valid partition")
+}
+
+/// The block whose register and SLB words, in [`SupervisorState::words`]
+/// order, are 1 through 139, with [`counting_partition`] after them.
 fn counting_block() -> SupervisorState {
     let mut s = SupervisorState::new(1);
     s.srr0 = 2;
@@ -66,12 +74,14 @@ fn counting_block() -> SupervisorState {
         e.esid_v = 12 + 2 * k as u64;
         e.vsid_flags = 13 + 2 * k as u64;
     }
+    s.partition = counting_partition();
     s
 }
 
 #[test]
 fn supervisor_lane_wire_format_golden() {
-    let counting: [u64; SUPERVISOR_WORDS] = std::array::from_fn(|i| i as u64 + 1);
+    let mut counting: [u64; SUPERVISOR_WORDS] = std::array::from_fn(|i| i as u64 + 1);
+    counting[SUPERVISOR_WORDS - 4..].copy_from_slice(&[0x0100_0002, 1 << 28, 1 << 28, 0b1001]);
     assert_eq!(
         counting_block().words(),
         counting,
@@ -79,19 +89,19 @@ fn supervisor_lane_wire_format_golden() {
     );
     assert_eq!(
         SupervisorState::new(0).digest(),
-        0x910A_2DEC_8902_5CC1,
+        0x71C5_E3B6_0FC3_EFA7,
         "written by hand in the same commit as the change that moves it"
     );
     assert_eq!(
         counting_block().digest(),
-        0xFCFB_A60A_3FA7_987C,
+        0xB2F6_D3E3_4E1A_948F,
         "written by hand in the same commit as the change that moves it"
     );
     let mut state = PpuState::new();
     state.set_supervisor(Some(counting_block()));
     assert_eq!(
         state.state_hash(),
-        0xEFE6_8CB5_B689_5653,
+        0x3FB6_7FDD_BBEF_58C8,
         "written by hand in the same commit as the change that moves it"
     );
 }
@@ -164,4 +174,36 @@ fn every_bit_of_every_supervisor_field_moves_the_state_hash() {
         n,
         "two single-bit supervisor states share a hash"
     );
+}
+
+#[test]
+fn each_partition_field_moves_the_state_hash() {
+    let initial = Partition::INITIAL;
+    let lb = initial.lb();
+    let changed = [
+        (
+            "sdr1",
+            Partition::new(0x0100_0000, initial.rm_limit(), 0, lb),
+        ),
+        ("rm_limit", Partition::new(0, 1 << 28, 0, lb)),
+        ("rm_offset", Partition::new(0, 1 << 28, 1 << 28, lb)),
+        ("lb", Partition::new(0, initial.rm_limit(), 0, 0b1001)),
+    ];
+    let mut state = PpuState::new();
+    state.set_supervisor(Some(SupervisorState::new(0)));
+    let base = state.state_hash();
+    let mut seen = vec![base];
+    for (name, partition) in changed {
+        let partition = partition.expect("a valid partition");
+        let mut moved = state.clone();
+        moved
+            .update_supervisor(|s| s.partition = partition)
+            .expect("the state holds supervisor registers");
+        assert!(moved.hash_is_current(), "{name}");
+        assert_ne!(moved.state_hash(), base, "{name}");
+        seen.push(moved.state_hash());
+    }
+    seen.sort_unstable();
+    seen.dedup();
+    assert_eq!(seen.len(), 5, "two partitions share a hash");
 }

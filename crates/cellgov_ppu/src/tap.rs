@@ -14,7 +14,7 @@ pub trait PpuTap {
     ///
     /// The unit calls this once per dispatch, before the instruction
     /// runs. The number of calls differs from the number of
-    /// retirements in four cases:
+    /// retirements in five cases:
     ///
     /// - A store finds the store buffer full: the unit calls again when
     ///   the store retries.
@@ -22,6 +22,14 @@ pub trait PpuTap {
     /// - A fused pair faults: the unit calls again when its first
     ///   instruction runs alone.
     /// - A step faults behind retired instructions: the unit calls again
-    ///   when the next batch runs it. The unit retracts no call.
+    ///   when the next batch runs it.
+    /// - A translating thread's access misses while the batch buffers a
+    ///   store, and the new translation reaches real bytes that another
+    ///   cached data translation also reaches. The batch ends, and the
+    ///   unit calls again when the next batch runs the instruction. A
+    ///   miss that runs the instruction again in the same batch makes
+    ///   no second call.
+    ///
+    /// The unit retracts no call.
     fn dispatch(&self, unit: UnitId, insn: &PpuInstruction, state: &PpuState);
 }

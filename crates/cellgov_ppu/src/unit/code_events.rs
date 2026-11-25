@@ -9,6 +9,7 @@
 
 use super::ppu_unit::PpuExecutionUnit;
 use crate::instruction::PpuInstruction;
+use crate::mmu::Access;
 use cellgov_exec::CodeEvent;
 use cellgov_ps3_abi::hw::ppu_issue::PPU_CACHE_LINE_BYTES;
 
@@ -41,40 +42,64 @@ fn is_atomic_unit(addr: u64, len: u8) -> bool {
     matches!(len, 4 | 8) && addr.is_multiple_of(u64::from(len))
 }
 
+/// The store event of the low `len` bytes of `value` at `addr`.
+fn store_event(addr: u64, len: u8, value: u128, atomic: bool) -> CodeEvent {
+    // An entry may keep register bits above its low `len` bytes.
+    let value = value & 1u128.checked_shl(8 * u32::from(len)).map_or(!0, |b| b - 1);
+    CodeEvent::Store {
+        addr,
+        len,
+        value,
+        atomic,
+    }
+}
+
 impl PpuExecutionUnit {
     /// Record the fetch at `pc` and the code events of `insn`, which
     /// retired with its stores staged from `stores_before` on.
     ///
     /// A fetch records nothing when the last event is a fetch from the
     /// same 128-byte line.
+    ///
+    /// Every address an event carries is real, as the code spans and
+    /// committed stores the runtime matches them against are. A thread
+    /// that translates records a store that crosses into another page
+    /// as one event per real piece.
     pub(super) fn note_code_events(
         &mut self,
         insn: &PpuInstruction,
         pc: u64,
         stores_before: usize,
     ) {
-        self.note_code_fetch(pc);
+        self.note_code_fetch(self.real_of(Access::Fetch, pc));
         let single = self.store_buf.len() == stores_before + 1 && !is_multiple_store(insn);
+        let translates = self.translates();
+        let mut stores = Vec::new();
         for (addr, len, value) in self.store_buf.values_from(stores_before) {
-            // An entry may keep register bits above its low `len` bytes.
-            let value = value & 1u128.checked_shl(8 * u32::from(len)).map_or(!0, |b| b - 1);
-            self.code_events.push(CodeEvent::Store {
-                addr,
-                len,
-                value,
-                atomic: single && is_atomic_unit(addr, len),
-            });
+            let atomic = single && is_atomic_unit(addr, len);
+            if !translates {
+                stores.push(store_event(addr, len, value, atomic));
+                continue;
+            }
+            let mut done = 0;
+            for (ra, n) in self.real_store_pieces(addr, len) {
+                // The first byte is the highest of the low `len` bytes.
+                let piece = value >> (8 * u32::from(len - done - n));
+                stores.push(store_event(ra, n, piece, atomic && n == len));
+                done += n;
+            }
         }
+        self.code_events.extend(stores);
         let event = match *insn {
             // [PPC-Book2 p:21 s:3.2.2] `dcbf` also writes a modified block
-            // to storage.
+            // to storage. The miss path translates the block as a load.
             PpuInstruction::Dcbst { ra, rb } | PpuInstruction::Dcbf { ra, rb, .. } => {
                 CodeEvent::Dcbst {
-                    addr: self.state.ea_x_form(ra, rb),
+                    addr: self.real_of(Access::Load, self.state.ea_x_form(ra, rb)),
                 }
             }
             PpuInstruction::Icbi { ra, rb } => CodeEvent::Icbi {
-                addr: self.state.ea_x_form(ra, rb),
+                addr: self.real_of(Access::Load, self.state.ea_x_form(ra, rb)),
             },
             PpuInstruction::Sync { l: 0 } => CodeEvent::Sync,
             PpuInstruction::Isync => CodeEvent::Isync,
@@ -86,7 +111,7 @@ impl PpuExecutionUnit {
     /// Record the fetch of an `sc` at `pc` and its context
     /// synchronization [PPC-Book3 p:4 s:1.6.1].
     pub(super) fn note_syscall_code_events(&mut self, pc: u64) {
-        self.note_code_fetch(pc);
+        self.note_code_fetch(self.real_of(Access::Fetch, pc));
         self.code_events.push(CodeEvent::ContextSync);
     }
 

@@ -69,6 +69,7 @@ pub fn classify_word(raw: u32) -> (PpuReferenceUnit, PpuWordFate) {
 /// The name a census writes for a refusal's fault class.
 pub fn refusal_name(class: PpuFaultClass) -> &'static str {
     match class {
+        PpuFaultClass::MachineCheck => "machine_check",
         PpuFaultClass::InstructionStorage => "instruction_storage",
         PpuFaultClass::InstructionSegment => "instruction_segment",
         PpuFaultClass::DataStorage => "data_storage",
@@ -84,6 +85,8 @@ pub fn refusal_name(class: PpuFaultClass) -> &'static str {
         PpuFaultClass::Unimplemented => "unimplemented",
         PpuFaultClass::DebugBreak => "debug_break",
         PpuFaultClass::Internal => "internal",
+        PpuFaultClass::Checkstop => "checkstop",
+        PpuFaultClass::Unmodelled => "unmodelled",
     }
 }
 

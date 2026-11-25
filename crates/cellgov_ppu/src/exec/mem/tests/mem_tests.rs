@@ -24,6 +24,8 @@ mod altivec;
 mod atomics;
 #[path = "mem_caching_inhibited_tests.rs"]
 mod caching_inhibited;
+#[path = "mem_change_bit_tests.rs"]
+mod change_bit;
 #[path = "mem_dcbz_console_tests.rs"]
 mod dcbz_console;
 #[path = "mem_dcbz_rsx_tests.rs"]

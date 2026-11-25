@@ -25,8 +25,15 @@ fn case(class: PpuFaultClass) -> (PpuFault, &'static str) {
     use PpuFaultClass as C;
     let interrupt = |i: PpuInterrupt| PpuFault::Interrupt(i);
     match class {
+        C::MachineCheck => (
+            interrupt(PpuInterrupt::MachineCheck),
+            "MACHINE_CHECK at SRR0=0x00000010",
+        ),
         C::InstructionStorage => (
-            interrupt(PpuInterrupt::InstructionStorage { no_execute: false }),
+            interrupt(PpuInterrupt::InstructionStorage {
+                no_execute: false,
+                protection: false,
+            }),
             "INSTRUCTION_STORAGE at SRR0=0x00000010 SRR1[33:36]=0b1000",
         ),
         C::InstructionSegment => (
@@ -91,6 +98,11 @@ fn case(class: PpuFaultClass) -> (PpuFault, &'static str) {
         C::Internal => (
             PpuFault::Internal(".consumed"),
             "INTERNAL_STOP at PC=0x00000010 (raw=0x7e800400)",
+        ),
+        C::Checkstop => (PpuFault::Checkstop, "CHECKSTOP at PC=0x00000010"),
+        C::Unmodelled => (
+            PpuFault::Unmodelled("32-bit mode in supervisor state"),
+            "UNMODELLED_STATE at PC=0x00000010 (raw=0x7e800400)",
         ),
     }
 }

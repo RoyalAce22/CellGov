@@ -1,0 +1,20 @@
+[test]
+name = "ppu_shm_alias"
+
+# A hardware probe: one 1 MiB shared-memory segment mapped at two
+# addresses, X and Y, and what a load, a store and a reservation through
+# one mapping show through the other. The console capture is the answer;
+# no emulator runs it.
+
+[observe]
+# 20 big-endian u32 words (80 bytes), as ppu/main.c lists: word 0 the
+# failed step (0 = none), word 1 its return code, word 2 TRIALS, words
+# 3..5 the area, X and Y, then for case c in ppu/main.c's order the two
+# counts at words 6 + 2c and 7 + 2c, and words 16..19 the unmap of X,
+# the unmap of Y, the segment free and the area free return codes.
+memory_regions = [
+  { name = "result", addr = 0, size = 80 },
+]
+
+[expect]
+outcome = "completed"

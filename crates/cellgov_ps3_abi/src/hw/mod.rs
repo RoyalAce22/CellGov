@@ -9,6 +9,7 @@ pub mod ppc_mnemonics;
 pub mod ppu;
 pub mod ppu_interrupt;
 pub mod ppu_issue;
+pub mod ppu_mmu;
 pub mod ppu_spr;
 pub mod ppu_status;
 pub mod ppu_supervisor;

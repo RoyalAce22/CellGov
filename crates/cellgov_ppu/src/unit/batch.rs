@@ -2,12 +2,14 @@
 
 use super::ppu_unit::PpuExecutionUnit;
 use crate::exec::{ExecuteVerdict, PpuFault, PpuInterrupt};
+use crate::mmu::Access;
 use crate::tap::PpuTap;
 use crate::{decode, exec, instruction, state};
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionStepResult, LocalDiagnostics, YieldReason};
 use cellgov_ps3_abi::hw::ppu::PPU_TIME_BASE_ORIGIN;
+use cellgov_ps3_abi::hw::ppu_supervisor::MSR_SF;
 use cellgov_time::{Budget, InstructionCost};
 
 /// What a batch rewinds to when a step inside it faults.
@@ -28,8 +30,19 @@ pub(super) struct BatchEntry {
     pub(super) timing: Option<crate::timing::Core>,
 }
 
+/// What a translating thread does after an access missed every view.
+enum MissStep {
+    /// The instruction stops with this fault.
+    Stop(FaultExit),
+    /// The batch ends before the instruction, which the next batch runs
+    /// again.
+    EndBatch,
+    /// The instruction runs again against the rebuilt views.
+    Rerun,
+}
+
 /// How an instruction faulted.
-enum FaultExit {
+pub(super) enum FaultExit {
     /// A fault the fetch, the decode or the instruction reported.
     Verdict(PpuFault),
     /// A memory fault the instruction reported, and whether its access
@@ -109,21 +122,32 @@ impl PpuExecutionUnit {
         // toward this batch, which runs after it returns.
         self.timing.charge_syscall();
 
-        let regions = RegionTable::new(ctx.memory().region_views());
-        let region_views = regions.as_slice();
+        // A thread that translates runs against views of its translations
+        // at their effective addresses. It decodes each fetch fresh: the
+        // shadow and the fused pairs key on addresses its translation can
+        // move.
+        let translating = self.translates();
+        let mut regions = self.batch_views(ctx.memory(), translating);
         // A window's bytes are another unit's state, which the runtime
         // updates only between batches. The batch ends at the instruction
         // that reaches a window, so the next instruction sees the update.
         let window_span = ctx.memory().window_span();
         if self.profile_mode {
-            self.load_profile
-                .note_layout(region_views.iter().map(|v| (v.base, v.bytes.len() as u64)));
+            self.load_profile.note_layout(
+                regions
+                    .as_slice()
+                    .iter()
+                    .map(|v| (v.base, v.bytes.len() as u64)),
+            );
         }
 
         // The pc of the last instruction the batch retired.
         let mut last_retired = self.state.pc;
         // A fused pair that faulted runs again split, at this pc.
         let mut force_split = None;
+        // An instruction that runs again after a translation miss, at
+        // this pc.
+        let mut rerun: Option<u64> = None;
         // The span of the buffered stores when the last `isync` retired.
         let mut synced_stores: Option<(u64, u64)> = None;
         // The fetchable span the last fetch read: its first byte and the
@@ -140,8 +164,13 @@ impl PpuExecutionUnit {
             // the next fetch of a stored-to instruction location sees the
             // new instruction. Fetch reads committed bytes, so the batch
             // ends before it fetches a word the buffer still holds, and the
-            // next batch fetches what was stored.
-            if synced_stores.is_some_and(|span| self.fetches_buffered_store(span, step_pc)) {
+            // next batch fetches what was stored. A translating thread's
+            // fetch and its stores carry effective addresses, and two of
+            // them can reach one real word [PPC-Book2 p:7 s:1.7], so it
+            // ends before any fetch while the buffer holds a synced store.
+            if synced_stores
+                .is_some_and(|span| translating || self.fetches_buffered_store(span, step_pc))
+            {
                 return self.budget_yield(&entry, effects, last_retired);
             }
 
@@ -162,15 +191,35 @@ impl PpuExecutionUnit {
             }
 
             let boundary = (effects.len(), self.store_buf.len());
+            // CellGov runs supervisor code in 64-bit mode only. An MSR move
+            // ends the batch, so a thread that clears SF stops at the first
+            // instruction of its next one.
+            if translating && self.state.supervisor().is_some_and(|s| s.msr & MSR_SF == 0) {
+                let exit =
+                    FaultExit::Verdict(PpuFault::Unmodelled("32-bit mode in supervisor state"));
+                return self.end_at_fault(&entry, effects, step_pc, last_retired, boundary, exit);
+            }
             let fetched = if holds_word(fetchable, step_pc) {
                 Ok(())
             } else {
-                fetch_window(ctx.memory(), step_pc).map(|(window, bytes)| {
+                let window = if translating {
+                    self.translated_fetch(ctx.memory(), step_pc)
+                } else {
+                    fetch_window(ctx.memory(), step_pc)
+                };
+                window.map(|(window, bytes)| {
                     fetchable = window;
                     code = bytes;
                 })
             };
-            let mut insn = match fetched.and_then(|()| self.fetch_decode(step_pc, code)) {
+            let decoded = fetched.and_then(|()| {
+                if translating {
+                    decode_stored(step_pc, code).map(|(_, insn)| insn)
+                } else {
+                    self.fetch_decode(step_pc, code)
+                }
+            });
+            let mut insn = match decoded {
                 Ok(insn) => insn,
                 Err(fault) => {
                     let exit = FaultExit::Verdict(fault);
@@ -237,28 +286,41 @@ impl PpuExecutionUnit {
             }
             let pair = insn.is_super_pair();
 
-            tap.dispatch(self.id, &insn, &self.state);
-            let (ops, n_ops) = crate::timing::classify(&insn, &self.state);
+            // A rerun after a translation miss is the same dispatch.
+            if rerun.take() != Some(step_pc) {
+                tap.dispatch(self.id, &insn, &self.state);
+            }
+            let (mut ops, n_ops) = crate::timing::classify(&insn, &self.state);
+            if translating {
+                self.real_op_addresses(&mut ops[..n_ops]);
+            }
             let ops = &ops[..n_ops];
             self.align_clock_read_to_issue(ctx, &entry, step_pc, &insn, ops);
             let (effects_before, stores_before) = (effects.len(), self.store_buf.len());
             // A pair that refuses runs again split, and
-            // `undo_fused_attempt` takes back its reads.
-            let reads_before = if pair {
+            // `undo_fused_attempt` takes back its reads. An instruction
+            // that runs again after a translation miss takes back its
+            // reads the same way.
+            let reads_before = if pair || translating {
                 ctx.memory().provisional_read_count()
             } else {
                 0
             };
             let load = if self.profile_mode {
-                self.probe_load(&insn, step_pc, region_views)
+                self.probe_load(&insn, step_pc, regions.as_slice())
             } else {
                 None
             };
-            let fault = match exec::execute(
+            // An `lwarx` or `ldarx` counts its execution before its access,
+            // so an attempt that misses in the translation cache gives its
+            // count back before the instruction runs again.
+            let witnesses =
+                translating.then_some((self.state.lwarx_executed, self.state.ldarx_executed));
+            let mut fault = match exec::execute(
                 &insn,
                 &mut self.state,
                 self.id,
-                region_views,
+                regions.as_slice(),
                 effects,
                 &mut self.store_buf,
             ) {
@@ -322,6 +384,46 @@ impl PpuExecutionUnit {
                     return self.budget_yield(&entry, effects, step_pc);
                 }
             };
+            // A translating thread's access that no view holds is a miss:
+            // the unit translates the address, and the instruction runs
+            // again against the new views. A translation that refuses
+            // the access is the instruction's interrupt. A fault at an
+            // address the cache translates already is no miss. The views
+            // hold each piece of storage the cached translations reach. So
+            // a held address refuses as unmapped only for an access that
+            // wraps the effective space. An address no view holds then has
+            // no storage at its real address. A hit and a miss of the
+            // cache then give one stop.
+            if let (true, Some(FaultExit::Mem(cellgov_mem::MemError::Unmapped(miss), store))) =
+                (translating, &fault)
+            {
+                let access = if *store { Access::Store } else { Access::Load };
+                let attempt = (effects_before, stores_before);
+                let mem = ctx.memory();
+                match self.translation_miss(
+                    mem,
+                    &insn,
+                    &mut regions,
+                    effects,
+                    attempt,
+                    (miss.addr, access),
+                ) {
+                    MissStep::Stop(exit) => fault = Some(exit),
+                    // The next batch runs the instruction again and logs
+                    // its reads then.
+                    MissStep::EndBatch => {
+                        self.retract_missed_attempt(mem, step_pc, reads_before, witnesses);
+                        return self.budget_yield(&entry, effects, last_retired);
+                    }
+                    // The rerun logs its own reads, as a run that hits the
+                    // cache logs them once.
+                    MissStep::Rerun => {
+                        self.retract_missed_attempt(mem, step_pc, reads_before, witnesses);
+                        rerun = Some(step_pc);
+                        continue;
+                    }
+                }
+            }
             if let Some(exit) = fault {
                 if pair {
                     let boundary = (effects_before, stores_before, reads_before);
@@ -331,6 +433,10 @@ impl PpuExecutionUnit {
                 }
                 let boundary = (effects_before, stores_before);
                 return self.end_at_fault(&entry, effects, step_pc, last_retired, boundary, exit);
+            }
+
+            if translating {
+                self.real_effects(effects, effects_before, Access::Load);
             }
 
             // The unit publishes a fetch once its instruction retires, so
@@ -374,18 +480,24 @@ impl PpuExecutionUnit {
 
             remaining = remaining.saturating_sub(if pair { 2 } else { 1 });
             let reached_window = window_span.is_some_and(|span| {
-                touches_window(
-                    span,
-                    ctx.memory(),
-                    effects.get(effects_before..).unwrap_or_default(),
-                    self.store_buf.stores_from(stores_before),
-                )
+                let new_effects = effects.get(effects_before..).unwrap_or_default();
+                let stores = self.store_buf.stores_from(stores_before);
+                if translating {
+                    let real = stores.flat_map(|(ea, len)| self.real_store_pieces(ea, len));
+                    touches_window(span, ctx.memory(), new_effects, real)
+                } else {
+                    touches_window(span, ctx.memory(), new_effects, stores)
+                }
             });
             last_retired = last_pc;
             if matches!(insn, instruction::PpuInstruction::Isync) {
                 synced_stores = self.store_buf.span();
             }
-            if remaining == 0 || reached_window || self.leads_sibling(ctx, &entry) {
+            if remaining == 0
+                || reached_window
+                || (translating && self.translation_ends_batch(&insn, stores_before))
+                || self.leads_sibling(ctx, &entry)
+            {
                 return self.budget_yield(&entry, effects, last_pc);
             }
         }
@@ -451,6 +563,131 @@ impl PpuExecutionUnit {
         // skip it spent at the top of this iteration.
         if self.break_pc == Some(step_pc) {
             self.break_skip += 1;
+        }
+    }
+
+    /// The views a batch runs against: a translating thread's
+    /// translations at their effective addresses, after it follows its
+    /// translation registers, or else the regions of `mem`.
+    #[inline]
+    fn batch_views<'m>(
+        &mut self,
+        mem: &'m cellgov_mem::GuestMemory,
+        translating: bool,
+    ) -> RegionTable<'m> {
+        if !translating {
+            return RegionTable::new(mem.region_views());
+        }
+        self.follow_translation();
+        RegionTable::new(self.translated_views(mem).into_iter())
+    }
+
+    /// Whether a translating thread's batch ends after `insn`, which
+    /// retired with the store buffer grown from `stores_before`.
+    #[inline]
+    fn translation_ends_batch(
+        &self,
+        insn: &instruction::PpuInstruction,
+        stores_before: usize,
+    ) -> bool {
+        // A move of the MSR, the SLB or the partition ends the batch: the
+        // next one runs against the translations it gives, and this one's
+        // buffered stores publish under the old ones.
+        let retranslates = matches!(insn, instruction::PpuInstruction::PpePrivileged { .. })
+            && self.translation_moved();
+        // A store to real bytes that a second cached translation also
+        // reaches ends the batch, so no later load reads them through the
+        // other alias while the store sits in the buffer.
+        let aliased =
+            self.store_buf.len() > stores_before && self.buffered_store_aliased(stores_before);
+        // [PPC-Book3 p:59 s:4.12] `ptesync` orders the page table stores before it ahead of the next table search.
+        // A search reads committed memory, so the batch ends and the next
+        // one searches after the stores commit.
+        let table_synced = matches!(insn, instruction::PpuInstruction::Sync { l: 2 });
+        retranslates || aliased || table_synced
+    }
+
+    /// What a translating thread's access at `ea` that no view held does
+    /// next: translate it and run again, end the batch, or stop.
+    ///
+    /// A miss truncates the attempt's effects and buffered stores to
+    /// `attempt` and refills the cache. A rerun finds `regions` rebuilt
+    /// from the new translations.
+    #[inline]
+    fn translation_miss<'m>(
+        &mut self,
+        mem: &'m cellgov_mem::GuestMemory,
+        insn: &instruction::PpuInstruction,
+        regions: &mut RegionTable<'m>,
+        effects: &mut Vec<Effect>,
+        (effects_before, stores_before): (usize, usize),
+        (ea, access): (u64, Access),
+    ) -> MissStep {
+        let refilled = if self.translations.lookup(access, ea).is_some() {
+            None
+        } else {
+            effects.truncate(effects_before);
+            self.store_buf.truncate(stores_before);
+            Some(self.refill_for(mem, ea, access))
+        };
+        let t = match refilled {
+            // A held address refuses as unmapped only when the access
+            // wraps past the end of the effective space.
+            None if views_hold(regions.as_slice(), ea) => {
+                return MissStep::Stop(FaultExit::Verdict(PpuFault::Unmodelled(
+                    "an access that wraps the effective address space",
+                )));
+            }
+            None => {
+                return MissStep::Stop(self.unbacked_access(
+                    insn,
+                    mem,
+                    regions.as_slice(),
+                    ea,
+                    access,
+                ));
+            }
+            Some(Err(refused)) => return MissStep::Stop(FaultExit::Verdict(refused)),
+            Some(Ok(t)) => t,
+        };
+        if self.alias_with_buffered_stores(&t) {
+            return MissStep::EndBatch;
+        }
+        *regions = RegionTable::new(self.translated_views(mem).into_iter());
+        if views_hold(regions.as_slice(), ea) {
+            return MissStep::Rerun;
+        }
+        // The access translates to a real address no storage holds.
+        MissStep::Stop(self.unbacked_access(insn, mem, regions.as_slice(), ea, access))
+    }
+
+    /// Takes back what an attempt whose access missed in the translation
+    /// cache did before the instruction runs again: its break skip, its
+    /// provisional reads and its reservation witnesses.
+    #[inline]
+    fn retract_missed_attempt(
+        &mut self,
+        mem: &cellgov_mem::GuestMemory,
+        step_pc: u64,
+        reads_before: u64,
+        witnesses: Option<(u64, u64)>,
+    ) {
+        if self.break_pc == Some(step_pc) {
+            self.break_skip += 1;
+        }
+        mem.rewind_provisional_reads(reads_before);
+        self.restore_witnesses(witnesses);
+    }
+
+    /// Puts back the `lwarx` and `ldarx` execution counts an attempt
+    /// changed before its access missed in the translation cache.
+    ///
+    /// The rerun counts the instruction, so a miss counts it once, as a
+    /// hit does.
+    fn restore_witnesses(&mut self, witnesses: Option<(u64, u64)>) {
+        if let Some((lwarx, ldarx)) = witnesses {
+            self.state.lwarx_executed = lwarx;
+            self.state.ldarx_executed = ldarx;
         }
     }
 
@@ -719,8 +956,16 @@ fn holds_word((start, last): (u64, u64), pc: u64) -> bool {
     start <= pc && pc <= last
 }
 
+/// Whether a view of `views` holds the byte at `ea`.
+#[inline]
+fn views_hold(views: &[cellgov_mem::RegionView<'_>], ea: u64) -> bool {
+    views
+        .iter()
+        .any(|v| v.base <= ea && ea - v.base < v.bytes.len() as u64)
+}
+
 /// The base guest address of a region and its bytes.
-type CodeBytes<'a> = (u64, &'a [u8]);
+pub(super) type CodeBytes<'a> = (u64, &'a [u8]);
 
 /// The fetchable span that holds the word at `pc`, and its region.
 ///
@@ -730,7 +975,7 @@ type CodeBytes<'a> = (u64, &'a [u8]);
 ///
 /// Returns `PpuInterrupt::InstructionStorage` if a byte of the word is
 /// not fetchable. The interrupt sets `no_execute` if that byte is mapped.
-fn fetch_window(
+pub(super) fn fetch_window(
     mem: &cellgov_mem::GuestMemory,
     pc: u64,
 ) -> Result<((u64, u64), CodeBytes<'_>), PpuFault> {
@@ -738,6 +983,7 @@ fn fetch_window(
     let refused = |r: FetchRefusal| {
         PpuFault::Interrupt(PpuInterrupt::InstructionStorage {
             no_execute: r == FetchRefusal::NoExecute,
+            protection: false,
         })
     };
     let code = mem.fetch_code(pc).map_err(refused)?;
@@ -767,6 +1013,7 @@ fn decode_stored(
         .and_then(|pc| mem.get(pc..pc.checked_add(4)?))
         .ok_or(PpuFault::Interrupt(PpuInterrupt::InstructionStorage {
             no_execute: false,
+            protection: false,
         }))?;
     let raw = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
     let insn = decode::decode(raw).map_err(|_| PpuFault::unrecognized_word())?;
@@ -840,3 +1087,7 @@ fn touches_window(
         _ => false,
     }) || new_stores.any(|(addr, len)| overlaps(addr, u64::from(len)))
 }
+
+#[cfg(test)]
+#[path = "tests/translation_hit_miss_tests.rs"]
+mod translation_hit_miss_tests;

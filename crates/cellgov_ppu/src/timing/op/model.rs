@@ -181,6 +181,19 @@ impl Op {
         }
     }
 
+    /// Replaces each storage address the op reads or writes with `to` of
+    /// it; `to` also takes whether the access stores.
+    pub(crate) fn map_storage(&mut self, to: impl Fn(u64, bool) -> u64) {
+        match &mut self.kind {
+            Kind::Load { ea, .. }
+            | Kind::Touch { ea }
+            | Kind::Flush { ea }
+            | Kind::StoreBack { ea } => *ea = to(*ea, false),
+            Kind::Store { ea, .. } | Kind::ZeroLine { ea } => *ea = to(*ea, true),
+            _ => {}
+        }
+    }
+
     /// Marks a divide whose back-to-back runs space a sibling's dispatch
     /// groups.
     ///

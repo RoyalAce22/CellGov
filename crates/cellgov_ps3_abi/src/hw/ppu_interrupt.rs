@@ -14,9 +14,14 @@ pub const fn word_bit(bit: u32) -> u32 {
     1 << (31 - bit)
 }
 
-/// Data storage interrupt vector.
+/// Machine check interrupt vector.
 ///
 /// [PPC-Book3 p:65 s:5.5] Figure 36 gives each interrupt vector's effective address.
+pub const VECTOR_MACHINE_CHECK: u64 = 0x200;
+
+/// Data storage interrupt vector.
+///
+/// [PPC-Book3 p:65 s:5.5] Figure 36.
 pub const VECTOR_DATA_STORAGE: u64 = 0x300;
 
 /// Data segment interrupt vector.

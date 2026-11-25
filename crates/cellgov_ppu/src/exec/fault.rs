@@ -7,10 +7,10 @@ use cellgov_exec::{DataAccessFault, InterruptRecord, LocalDiagnostics};
 use cellgov_ps3_abi::hw::ppu_interrupt as irq;
 
 use crate::fault_codes::{
-    kind_index, PpuFaultClass, FAULT_ALIGNMENT, FAULT_DATA_SEGMENT, FAULT_DATA_STORAGE,
-    FAULT_DEBUG_BREAK, FAULT_FP_UNAVAILABLE, FAULT_INSTRUCTION_SEGMENT, FAULT_INSTRUCTION_STORAGE,
-    FAULT_INTERNAL, FAULT_PROGRAM, FAULT_SYSTEM_CALL, FAULT_UNIMPLEMENTED_INSN,
-    FAULT_VXU_UNAVAILABLE,
+    kind_index, PpuFaultClass, FAULT_ALIGNMENT, FAULT_CHECKSTOP, FAULT_DATA_SEGMENT,
+    FAULT_DATA_STORAGE, FAULT_DEBUG_BREAK, FAULT_FP_UNAVAILABLE, FAULT_INSTRUCTION_SEGMENT,
+    FAULT_INSTRUCTION_STORAGE, FAULT_INTERNAL, FAULT_MACHINE_CHECK, FAULT_PROGRAM,
+    FAULT_SYSTEM_CALL, FAULT_UNIMPLEMENTED_INSN, FAULT_UNMODELLED, FAULT_VXU_UNAVAILABLE,
 };
 use crate::instruction::PpuInstructionKind;
 
@@ -36,18 +36,40 @@ pub enum PpuFault {
     /// names the invariant.
     #[error("PPU internal stop: {0}")]
     Internal(&'static str),
+    /// The processor enters the checkstop state: an access reaches a real
+    /// address no storage holds, and the access is not a caching-inhibited
+    /// load with MSR\[ME\] = 1.
+    ///
+    /// [PPC-Book3 p:66 s:5.5.2] With MSR\[ME\] = 0 a machine check enters the checkstop state, which suspends instruction processing, and an access to a storage location that does not exist may also enter it.
+    /// [CBE-Handbook p:247 s:9.5.2] The PPE's one machine check source is a data error on a caching-inhibited load.
+    #[error("PPU checkstop: an access reached a real address no storage holds")]
+    Checkstop,
+    /// A state the PPE runs that CellGov does not model. The payload
+    /// names it.
+    #[error("PPU state CellGov does not model: {0}")]
+    Unmodelled(&'static str),
 }
 
-/// A PPE interrupt that problem-state code causes, with its cause fields.
+/// A PPE interrupt that a PPU thread's instruction causes, with its cause
+/// fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum PpuInterrupt {
-    /// A load or store whose address no region holds, or that a region
-    /// refuses.
+    /// A caching-inhibited load, with MSR\[ME\] = 1, whose translation
+    /// reaches a real address no storage holds. Only a thread with
+    /// supervisor registers translates. Every other access to such an
+    /// address is a [`PpuFault::Checkstop`].
     ///
-    /// An address no region holds takes this interrupt with no
-    /// translation found. The console can take the data segment
-    /// interrupt there instead. That choice depends on LV2's segment
-    /// table, and CellGov does not model it.
+    /// [PPC-Book3 p:66 s:5.5.2] An access to a storage location that does not exist causes a machine check, or the checkstop state when MSR\[ME\] = 0.
+    /// [CBE-Handbook p:247 s:9.5.2] The PPE takes the machine check for a data error on a caching-inhibited load, such as one to a nonexistent memory address.
+    #[error("PPU machine check: the access reaches a real address no storage holds")]
+    MachineCheck,
+    /// A load or store whose address no region holds, that a region
+    /// refuses, or that translation refuses.
+    ///
+    /// On a thread with no supervisor registers, an address no region
+    /// holds takes this interrupt with no translation found. The console
+    /// can take the data segment interrupt there instead. That choice
+    /// depends on LV2's segment table, and CellGov does not model it.
     #[error("PPU data storage interrupt at EA 0x{ea:016x}")]
     DataStorage {
         /// The first byte of the refused access: the DAR.
@@ -58,8 +80,9 @@ pub enum PpuInterrupt {
         /// found no translation.
         protection: bool,
     },
-    /// An access whose segment has no entry. CellGov does not raise it:
-    /// see [`Self::DataStorage`].
+    /// An access whose segment has no SLB entry. Only a thread with
+    /// supervisor registers translates through the SLB; a thread
+    /// without them takes [`Self::DataStorage`] instead.
     #[error("PPU data segment interrupt at EA 0x{ea:016x}")]
     DataSegment {
         /// The first byte of the refused access: the DAR.
@@ -67,15 +90,22 @@ pub enum PpuInterrupt {
         /// The access was a store or `dcbz`.
         store: bool,
     },
-    /// A fetch from an address no region holds, or from a mapped
-    /// address that holds no code.
+    /// A fetch from an address no region holds, from a mapped address
+    /// that holds no code, or that translation refuses.
     #[error("PPU instruction storage interrupt")]
     InstructionStorage {
-        /// The address is mapped but holds no code; otherwise the
-        /// fetch found no translation.
+        /// The fetch address is in storage the PPE cannot run:
+        ///
+        /// - a mapped address that holds no code;
+        /// - a no-execute page or segment;
+        /// - a guarded page.
         no_execute: bool,
+        /// Storage protection refused the fetch. When neither field is
+        /// set, the fetch found no translation.
+        protection: bool,
     },
-    /// A fetch whose segment has no entry. CellGov does not raise it.
+    /// A fetch whose segment has no SLB entry. Only a thread with
+    /// supervisor registers translates through the SLB.
     #[error("PPU instruction segment interrupt")]
     InstructionSegment,
     /// An access the PPE refuses to perform at its address.
@@ -184,6 +214,7 @@ impl PpuInterrupt {
     /// The effective address of the interrupt vector.
     fn vector(&self) -> u64 {
         match self {
+            Self::MachineCheck => irq::VECTOR_MACHINE_CHECK,
             Self::DataStorage { .. } => irq::VECTOR_DATA_STORAGE,
             Self::DataSegment { .. } => irq::VECTOR_DATA_SEGMENT,
             Self::InstructionStorage { .. } => irq::VECTOR_INSTRUCTION_STORAGE,
@@ -199,10 +230,15 @@ impl PpuInterrupt {
     /// The SRR1 cause bits the interrupt sets.
     fn srr1(&self) -> u64 {
         match self {
-            // [PPC-Book3 p:68 s:5.5.5] No translation found sets SRR1 bit 33.
-            Self::InstructionStorage { no_execute: false } => irq::SRR1_FETCH_NOT_FOUND,
-            // [PPC-Book3 p:68 s:5.5.5] A fetch from no-execute storage sets SRR1 bit 35.
-            Self::InstructionStorage { no_execute: true } => irq::SRR1_FETCH_NO_EXECUTE,
+            // [PPC-Book3 p:68 s:5.5.5] No translation found sets SRR1 bit 33, a fetch from no-execute or guarded storage bit 35, and a fetch storage protection refuses bit 36.
+            Self::InstructionStorage {
+                no_execute,
+                protection,
+            } => match (no_execute, protection) {
+                (false, false) => irq::SRR1_FETCH_NOT_FOUND,
+                (true, _) => irq::SRR1_FETCH_NO_EXECUTE,
+                (false, true) => irq::SRR1_FETCH_PROTECTION,
+            },
             Self::Program(cause) => cause.srr1(),
             _ => 0,
         }
@@ -270,6 +306,7 @@ impl PpuInterrupt {
 
     fn class(&self) -> PpuFaultClass {
         match self {
+            Self::MachineCheck => PpuFaultClass::MachineCheck,
             Self::DataStorage { .. } => PpuFaultClass::DataStorage,
             Self::DataSegment { .. } => PpuFaultClass::DataSegment,
             Self::InstructionStorage { .. } => PpuFaultClass::InstructionStorage,
@@ -289,6 +326,7 @@ impl PpuInterrupt {
     fn guest_code(&self) -> u32 {
         let dsisr_high = |i: &Self| i.dsisr().map_or(0, |d| d >> 16);
         match *self {
+            Self::MachineCheck => FAULT_MACHINE_CHECK,
             Self::DataStorage { .. } => FAULT_DATA_STORAGE | dsisr_high(self),
             Self::DataSegment { .. } => FAULT_DATA_SEGMENT | dsisr_high(self),
             Self::InstructionStorage { .. } => {
@@ -367,6 +405,8 @@ impl PpuFault {
             Self::UnimplementedInstruction { .. } => PpuFaultClass::Unimplemented,
             Self::DebugBreak => PpuFaultClass::DebugBreak,
             Self::Internal(_) => PpuFaultClass::Internal,
+            Self::Checkstop => PpuFaultClass::Checkstop,
+            Self::Unmodelled(_) => PpuFaultClass::Unmodelled,
         }
     }
 
@@ -379,6 +419,8 @@ impl PpuFault {
             }
             Self::DebugBreak => FAULT_DEBUG_BREAK,
             Self::Internal(_) => FAULT_INTERNAL,
+            Self::Checkstop => FAULT_CHECKSTOP,
+            Self::Unmodelled(_) => FAULT_UNMODELLED,
         }
     }
 }

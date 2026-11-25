@@ -109,14 +109,20 @@ different paths:
   staged. The commit pipeline's `apply_commit` is region-aware, so
   stores to any mapped region land correctly.
 
-The region-view table is built at the top of `run_until_yield` from
-`GuestMemory::region_views()`. It has one `RegionView` per region,
-containing:
+The region-view table is built at the top of `run_until_yield`. A
+thread with no supervisor registers builds it from
+`GuestMemory::region_views()`, with one `RegionView` per region. A
+thread with supervisor registers builds it from the translations it
+made in the batch, with one `RegionView` per piece of a region a
+translation reaches, at its effective address; each translation miss
+rebuilds it. A `RegionView` contains:
 
-- the base;
+- the base, the address the unit's instructions use;
+- the real address of the base, which differs from the base only in a
+  translated view;
 - the bytes;
-- the memory that logs a read when the region is
-  `ReservedZeroReadable`.
+- the memory that logs a read, at its real address, when the region
+  is `ReservedZeroReadable`.
 
 The table is an eight-slot stack table that spills to the heap when
 a guest maps more regions.

@@ -337,8 +337,11 @@ impl Region {
 /// slice reads still reach [`GuestMemory::note_provisional_read`].
 #[derive(Debug, Clone, Copy)]
 pub struct RegionView<'a> {
-    /// Base guest address.
+    /// Base guest address: the address the unit's instructions use.
     pub base: u64,
+    /// The memory's own address of `base`. It differs from `base` only
+    /// in a view a translating unit builds at an effective address.
+    pub real: u64,
     /// Backing bytes.
     pub bytes: &'a [u8],
     /// Where a read of this view is logged, if it is provisional.
@@ -347,6 +350,10 @@ pub struct RegionView<'a> {
     pub write_refused_by: Option<&'static str>,
     /// Whether the region is caching-inhibited storage.
     pub caching_inhibited: bool,
+    /// Whether a caching-inhibited store's alignment interrupt precedes
+    /// the view's write refusal. A translating unit sets it on a view of
+    /// a read-only page whose page table entry has its change bit set.
+    pub store_alignment_first: bool,
 }
 
 impl<'a> RegionView<'a> {
@@ -355,19 +362,28 @@ impl<'a> RegionView<'a> {
     pub const fn plain(base: u64, bytes: &'a [u8]) -> Self {
         Self {
             base,
+            real: base,
             bytes,
             provisional: None,
             write_refused_by: None,
             caching_inhibited: false,
+            store_alignment_first: false,
         }
     }
 
-    /// Log a read of `len` bytes at `ea` if this view is provisional.
+    /// Log a read of `len` bytes at `ea` if this view is provisional. The
+    /// log holds the memory's own address.
     #[inline]
     pub fn note_read(&self, ea: u64, len: u32) {
         if let Some(mem) = self.provisional {
-            mem.note_provisional_read(ea, u64::from(len));
+            mem.note_provisional_read(self.real_of(ea), u64::from(len));
         }
+    }
+
+    /// The memory's own address of `ea`, a byte of this view.
+    #[inline]
+    pub fn real_of(&self, ea: u64) -> u64 {
+        self.real.wrapping_add(ea.wrapping_sub(self.base))
     }
 }
 
@@ -740,12 +756,15 @@ impl GuestMemory {
         self.regions.iter().filter_map(move |r| {
             let skip = usize::try_from(floor.saturating_sub(r.base())).ok()?;
             let bytes = r.bytes().get(skip..).filter(|b| !b.is_empty())?;
+            let base = r.base().max(floor);
             Some(RegionView {
-                base: r.base().max(floor),
+                base,
+                real: base,
                 bytes,
                 provisional: (r.access() == RegionAccess::ReservedZeroReadable).then_some(self),
                 write_refused_by: (r.access() != RegionAccess::ReadWrite).then_some(r.label()),
                 caching_inhibited: r.caching_inhibited,
+                store_alignment_first: false,
             })
         })
     }
@@ -1141,6 +1160,10 @@ mod region_span_tests;
 #[cfg(test)]
 #[path = "tests/provisional_rewind_tests.rs"]
 mod provisional_rewind_tests;
+
+#[cfg(test)]
+#[path = "tests/region_view_real_tests.rs"]
+mod region_view_real_tests;
 
 #[cfg(test)]
 #[path = "tests/spanning_read_tests.rs"]

@@ -1,5 +1,6 @@
-//! The PPU execution unit: its state, the batch loop, fetch-run
-//! tracking, fault rollback, and the `ExecutionUnit` impl.
+//! The PPU execution unit: its state, the batch loop, address
+//! translation, fetch-run tracking, fault rollback, and the
+//! `ExecutionUnit` impl.
 
 mod batch;
 mod code_events;
@@ -8,6 +9,7 @@ mod fault;
 mod fetch;
 mod load_probe;
 mod ppu_unit;
+mod translation;
 
 pub use ppu_unit::{PpuExecutionUnit, PpuSnapshot};
 
@@ -34,6 +36,14 @@ mod tap_tests;
 #[cfg(test)]
 #[path = "tests/clock_read_tests.rs"]
 mod clock_read_tests;
+
+#[cfg(test)]
+#[path = "tests/translation_tests.rs"]
+mod translation_tests;
+
+#[cfg(test)]
+#[path = "tests/translated_fetch_run_tests.rs"]
+mod translated_fetch_run_tests;
 
 #[cfg(test)]
 #[path = "tests/time_base_tests.rs"]

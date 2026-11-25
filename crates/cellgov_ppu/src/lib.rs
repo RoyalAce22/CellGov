@@ -33,6 +33,7 @@ pub mod lv2_gate;
 pub mod lv2_stub;
 pub mod lv2_subdispatch;
 pub mod lv2_table;
+pub mod mmu;
 pub mod multilinear;
 pub mod observation;
 pub mod prescan;
