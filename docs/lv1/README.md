@@ -158,17 +158,24 @@ re-extraction differs. `repository_rows_are_well_formed` checks the logged set, 
 text of each key, the order of each boot's reads and the source of each
 served node without reading external data.
 
-`tables/repository.tsv` has 22 rows, one per node that
+`tables/repository.tsv` has 39 rows, one per node that
 `cellgov_ps3_abi::lv1::repository::NODES` serves: its key, its two
 values, the firmware CellGov serves its values to and its source. The
 source can be of another firmware: the psdevwiki dump is of 3.41. A read at a
-firmware that no row of its key names is a refusal. `v2` reads
+firmware that no row of its key names is a refusal, except for a key of
+`cellgov_ps3_abi::lv1::repository::ABSENT_NODES`. A capture that walked the
+whole repository list shows that key has no node at that firmware, so the
+hypervisor answers it with lv1's no-node status (`NO_NODE_R3`) and no row
+names it. `tables/repository_read.tsv` calls such a read `answered`, the
+same word it uses for a served node; a read with no row in
+`tables/repository.tsv` is one of these. `v2` reads
 `unobserved` where the source does not observe the second
 value. The hypervisor answers such a node only at the read sites that a
 static analysis of the kernel shows discard the second value. A read
 from any other site is a refusal. These cases fail the generator:
 
 - a row that names a firmware whose logged boot does not read the node;
+- an absent key for a firmware whose logged boot does not read it;
 - a logged read that the table no longer agrees with;
 - a logged refusal of a node that the hypervisor answers only at the
   read sites it lists: the read's site is not one of them, or the log is
