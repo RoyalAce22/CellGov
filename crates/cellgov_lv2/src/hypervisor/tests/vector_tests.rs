@@ -156,7 +156,7 @@ fn an_entry_invalid_at_4_93_stops_the_run_at_another_firmware() {
 
 #[test]
 fn every_answered_number_has_a_handler_in_the_live_4_93_table() {
-    assert_eq!(ANSWERED.len(), 11);
+    assert_eq!(ANSWERED.len(), 12);
     for &number in ANSWERED {
         assert!(
             matches!(table_entry("4.93", number), Some(TableEntry::Handler(_))),

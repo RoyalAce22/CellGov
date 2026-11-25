@@ -2,7 +2,7 @@
 
 use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::lv1::call::{
-    ALLOCATE_MEMORY, CONSTRUCT_VIRTUAL_ADDRESS_SPACE, GET_LOGICAL_PARTITION_ID,
+    ALLOCATE_MEMORY, CONSTRUCT_VIRTUAL_ADDRESS_SPACE, GET_LOGICAL_PARTITION_ID, GET_LOGICAL_PPE_ID,
     LOGICAL_CONSOLE_CONSTRUCT, LOGICAL_CONSOLE_FLUSH, LOGICAL_CONSOLE_SEND, MAP_HTAB,
     READ_HTAB_ENTRIES, READ_REPOSITORY_NODE, SELECT_VIRTUAL_ADDRESS_SPACE, WRITE_HTAB_ENTRY,
 };
@@ -12,7 +12,7 @@ use super::address_space::AddressSpaceState;
 use super::answer::{HypercallAnswer, HypercallDisposition};
 use super::memory::MemoryState;
 use super::request::HypercallRequest;
-use super::{address_space, console, memory, page_table, repository, vector};
+use super::{address_space, console, memory, page_table, ppe, repository, vector};
 
 /// The numbers a handler answers, ascending. Every other number takes
 /// the null backend, unless lv1's vector answers it first.
@@ -21,6 +21,7 @@ pub const ANSWERED: &[u64] = &[
     WRITE_HTAB_ENTRY,
     CONSTRUCT_VIRTUAL_ADDRESS_SPACE,
     SELECT_VIRTUAL_ADDRESS_SPACE,
+    GET_LOGICAL_PPE_ID,
     GET_LOGICAL_PARTITION_ID,
     READ_REPOSITORY_NODE,
     READ_HTAB_ENTRIES,
@@ -60,6 +61,7 @@ pub fn answer(
         WRITE_HTAB_ENTRY => page_table::write_entry(request, firmware, spaces, storage),
         CONSTRUCT_VIRTUAL_ADDRESS_SPACE => address_space::construct(request, firmware, spaces),
         SELECT_VIRTUAL_ADDRESS_SPACE => address_space::select(request, firmware, spaces, storage),
+        GET_LOGICAL_PPE_ID => ppe::logical_ppe_id(request, firmware),
         GET_LOGICAL_PARTITION_ID => {
             HypercallDisposition::Answered(HypercallAnswer::success(vec![LPAR_ID_GAME_OS]))
         }

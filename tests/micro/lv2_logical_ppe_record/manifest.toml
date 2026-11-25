@@ -1,0 +1,17 @@
+[test]
+name = "lv2_logical_ppe_record"
+
+# A hardware probe: the logical PPE id the running kernel got from lv1 at boot,
+# read back from the kernel's two per-thread records through the CFW's lv2 peek.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# per read, the address and the doubleword there: 30 reads, 480 bytes. The reads are
+# the TOC word, the two TOC slots, the record count, then words 0 to 12 of each of the
+# two records. The logical PPE id is word 1 (+0x08) of each record.
+memory_regions = [
+  { name = "result", addr = 0, size = 480 },
+]
+
+[expect]
+outcome = "completed"

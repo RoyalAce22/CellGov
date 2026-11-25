@@ -31,6 +31,7 @@ mod cost;
 mod handlers;
 mod memory;
 mod page_table;
+mod ppe;
 mod repository;
 mod request;
 mod state;
