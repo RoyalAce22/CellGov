@@ -78,6 +78,7 @@ fn a_controller_of_another_firmware_takes_only_its_own_setup_word() {
 #[test]
 fn each_controller_rule_takes_the_setup_words_of_its_own_firmware() {
     assert_eq!(RULES.len(), EHCI_CONTROLLERS.len());
+    assert!(EHCI_CONTROLLERS.iter().any(|c| c.firmware == "4.93"));
     let at_4_93: Vec<_> = EHCI_SETUP_STORES
         .iter()
         .filter(|s| s.firmware == "4.93")

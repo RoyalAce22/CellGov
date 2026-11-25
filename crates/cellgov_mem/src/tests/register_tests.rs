@@ -158,6 +158,7 @@ fn a_refused_store_fails_validation_and_changes_no_word() {
     assert!(mem.register_store_accepted(WORD, 2, STORE));
     assert_eq!(mem.validate_commit(range(WORD), &[0, 0, 0, 1]), refused);
     assert_eq!(commit(&mut mem, WORD, &[0, 0, 0, 1]), refused);
+    assert_eq!(mem.apply_staged(range(WORD), &[0, 0, 0, 1]), refused);
     assert_eq!(mem.register_word(WORD), Some(RegisterWord::UNKNOWN));
     assert_eq!(mem.content_hash(), hash);
 }

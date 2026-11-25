@@ -73,15 +73,27 @@ fn a_mapping_that_overlaps_nothing_installs_each_view() {
     assert!(rt.spaces.shared.contains_key(KEY));
 }
 
-/// The boot view of each refused mapping, after a first view in S1, and
-/// any earlier boot view of the same mapping.
-fn refused_boot_views() -> [(u64, Option<u64>); 5] {
+/// The boot view of each refused mapping, after a first view in S1, any
+/// earlier boot view of the same mapping, and the error of the install.
+fn refused_boot_views() -> [(u64, Option<u64>, MemError); 5] {
+    let overflow = u64::MAX - 0x10;
     [
-        (u64::MAX - 0x10, None),
-        (BOOT_REGION.0 + BOOT_REGION.1 as u64 - 1, None),
-        (SPAN.0 - 0x10, None),
-        (SPAN.0 + SPAN.1 - 1, None),
-        (0x5020, Some(0x5000)),
+        (
+            overflow,
+            None,
+            MemError::RegionOverflow {
+                base: overflow,
+                size: SEG_SIZE,
+            },
+        ),
+        (
+            BOOT_REGION.0 + BOOT_REGION.1 as u64 - 1,
+            None,
+            MemError::OverlappingRegions,
+        ),
+        (SPAN.0 - 0x10, None, MemError::OverlappingRegions),
+        (SPAN.0 + SPAN.1 - 1, None, MemError::OverlappingRegions),
+        (0x5020, Some(0x5000), MemError::OverlappingRegions),
     ]
 }
 
@@ -89,7 +101,7 @@ fn refused_boot_views() -> [(u64, Option<u64>); 5] {
 fn the_mapping_refuses_each_view_with_the_error_of_the_install() {
     let cases = refused_boot_views();
     assert_eq!(cases.len(), 5);
-    for (base, earlier) in cases {
+    for (base, earlier, expected) in cases {
         let mut rt = runtime();
         let hash = rt.committed_memory_hash();
         let mut views = vec![(S1, CHILD_VIEW)];
@@ -105,6 +117,7 @@ fn the_mapping_refuses_each_view_with_the_error_of_the_install() {
         let reason = installed
             .install_region(base, SEG_SIZE as usize, "shared", PageSize::Page64K)
             .unwrap_err();
+        assert_eq!(reason, expected, "the install of 0x{base:x}");
 
         assert_eq!(
             rt.register_shared_mapping(KEY, SEG_SIZE, &views),

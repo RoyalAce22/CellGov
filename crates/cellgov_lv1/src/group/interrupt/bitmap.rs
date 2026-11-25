@@ -260,6 +260,17 @@ pub(crate) fn configure_bitmap(
     bitmaps: &IrqStateBitmapState,
     storage: &GuestMemory,
 ) -> HypercallDisposition {
+    configure_bitmap_with(request, firmware, bitmaps, storage, memory::real_mode_size)
+}
+
+/// The answer of [`configure_bitmap`], with `real_mode_size` as the source of the real mode size.
+fn configure_bitmap_with(
+    request: &HypercallRequest,
+    firmware: Option<&str>,
+    bitmaps: &IrqStateBitmapState,
+    storage: &GuestMemory,
+    real_mode_size: fn(&str) -> Option<u64>,
+) -> HypercallDisposition {
     let Some(firmware) = firmware.filter(|fw| irq_state_bitmap_handler(fw).is_some()) else {
         return refuse(
             request,
@@ -300,7 +311,7 @@ pub(crate) fn configure_bitmap(
             "an interrupt state bitmap outside the partition's real mode region",
         );
     }
-    let Some(rm_size) = memory::real_mode_size(firmware) else {
+    let Some(rm_size) = real_mode_size(firmware) else {
         return refuse(
             request,
             "an interrupt state bitmap at a firmware whose real mode size no source gives",
@@ -350,3 +361,7 @@ mod hash_tests;
 #[cfg(test)]
 #[path = "tests/interrupt_console_tests.rs"]
 mod console_tests;
+
+#[cfg(test)]
+#[path = "tests/interrupt_real_mode_size_tests.rs"]
+mod real_mode_size_tests;

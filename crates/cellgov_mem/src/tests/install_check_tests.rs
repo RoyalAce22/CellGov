@@ -43,13 +43,14 @@ fn refused() -> [((u64, usize), MemError); 6] {
 }
 
 /// Each range that the install accepts.
-fn accepted() -> [(u64, usize); 4] {
+fn accepted() -> [(u64, usize); 5] {
     let region_end = REGION.0 + REGION.1 as u64;
     [
         (REGION.0 - 0x40, 0x40),
         (region_end, 0x40),
         (SPAN.0 - 0x40, 0x40),
         (SPAN.0 + SPAN.1, 0x40),
+        (u64::MAX - 0x40, 0x40),
     ]
 }
 
@@ -78,7 +79,7 @@ fn the_check_and_the_install_refuse_each_range_for_the_same_reason() {
 #[test]
 fn the_check_accepts_each_range_that_the_install_accepts_and_installs_nothing() {
     let cases = accepted();
-    assert_eq!(cases.len(), 4);
+    assert_eq!(cases.len(), 5);
     for (base, size) in cases {
         let mut mem = memory();
         assert_eq!(mem.check_install_region(base, size, &[]), Ok(()));
@@ -89,6 +90,26 @@ fn the_check_accepts_each_range_that_the_install_accepts_and_installs_nothing() 
         );
         assert_eq!(mem.regions().count(), 2);
     }
+}
+
+#[test]
+fn a_range_over_the_end_of_the_higher_of_two_regions_is_refused() {
+    let higher = (0x4000, 0x100);
+    let mut mem = GuestMemory::from_regions(vec![
+        Region::new(REGION.0, REGION.1, "held", PageSize::Page4K),
+        Region::new(higher.0, higher.1, "higher", PageSize::Page4K),
+    ])
+    .unwrap();
+    let base = higher.0 + higher.1 as u64 - 0x10;
+    assert_eq!(
+        mem.check_install_region(base, 0x20, &[]),
+        Err(MemError::OverlappingRegions),
+    );
+    assert_eq!(
+        mem.install_region(base, 0x20, "new", PageSize::Page4K),
+        Err(MemError::OverlappingRegions),
+    );
+    assert_eq!(mem.regions().count(), 2);
 }
 
 #[test]

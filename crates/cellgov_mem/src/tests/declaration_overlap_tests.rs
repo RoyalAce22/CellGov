@@ -86,6 +86,18 @@ fn a_register_word_at_a_sourced_word_is_refused_as_sourced_before_its_value() {
 }
 
 #[test]
+fn a_register_word_at_the_higher_of_two_sourced_words_is_refused_as_sourced() {
+    let mut mem = memory();
+    mem.declare_sourced_word(WORD, 1, READER).unwrap();
+    mem.declare_sourced_word(WORD + 8, 2, READER).unwrap();
+    assert_eq!(
+        mem.declare_registers(&[(WORD + 8, RegisterWord::UNKNOWN)], keep_value),
+        Err(MemError::RegisterWordSourced { real: WORD + 8 })
+    );
+    assert_eq!(mem.register_word(WORD + 8), None);
+}
+
+#[test]
 fn sourced_words_and_register_words_at_adjacent_words_are_accepted() {
     let mut mem = memory();
     mem.declare_sourced_word(WORD, 1, READER).unwrap();
