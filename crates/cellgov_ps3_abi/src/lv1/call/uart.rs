@@ -1,5 +1,17 @@
 //! The numbers of the virtual UART hypercalls.
 
+/// `read_virtual_uart`: three inputs and one output.
+/// - r3 is the number of a port of the partition's virtual UART.
+/// - r4 is the logical partition address of the buffer that receives the
+///   bytes.
+/// - r5 is the largest number of bytes to read.
+/// - r4 returns the number of bytes that lv1 read.
+///
+/// Linux `drivers/ps3/ps3-vuart.c` makes the call in this form. The lv1
+/// handler [OFW-4.93 lv1 a:0x2F429C] reads the inputs in this form; see
+/// [`crate::lv1::uart`].
+pub const READ_VIRTUAL_UART: u64 = 162;
+
 /// `set_virtual_uart_param`: three inputs and no output.
 /// - r3 is the number of a port of the partition's virtual UART.
 /// - r4 is the id of the port's parameter.

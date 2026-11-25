@@ -6,7 +6,9 @@
 //! - the handler of `get_virtual_uart_param` (hypercall 165), its
 //!   checks, and the buffer sizes of the GameOS kernel's ports;
 //! - the handler of `set_virtual_uart_param` (hypercall 164), its checks,
-//!   and the interrupt status that lv1 computes after each call.
+//!   and the interrupt status that lv1 computes after each call;
+//! - the handler of `read_virtual_uart` (hypercall 162), its checks, and
+//!   the writers of a port's receive buffer.
 //!
 //! The facts come from the 4.93 `lv1.self`, decrypted offline and read
 //! with `cellgov dev disasm`. The repository holds no byte of lv1, only
@@ -243,6 +245,87 @@
 //! the doublewords at +120, which change with the port's traffic. The
 //! kernel sets such a mask on each of its ports; see
 //! [`VIRTUAL_UART_PORT_MASK_CAPTURE`].
+//!
+//! # Reading a port
+//!
+//! The handler of hypercall 162 [OFW-4.93 lv1 a:0x2F429C] keeps r3, r4
+//! and r5 [OFW-4.93 lv1 a:0x2F42B0] [OFW-4.93 lv1 a:0x2F42D8-0x2F42DC].
+//! It does these steps in this order:
+//! 1. It refuses r3 above [`VIRTUAL_UART_PORT_MAX`]
+//!    [OFW-4.93 lv1 a:0x2F433C-0x2F4340].
+//! 2. It refuses r4 above [`VIRTUAL_UART_READ_ADDRESS_MAX`].
+//! 3. It reads the port's endpoint from the slot of r3 in the table at
+//!    +152 of the virtual UART object [OFW-4.93 lv1 a:0x2F4354-0x2F43D4].
+//!    It refuses a slot with no endpoint [OFW-4.93 lv1 a:0x2F4410-0x2F4414].
+//! 4. It looks up the memory region of r4 with the function
+//!    [OFW-4.93 lv1 a:0x2CE74C] [OFW-4.93 lv1 a:0x2F4418-0x2F4444]. It
+//!    checks the region's class against the TOC slot at r2 - 5872, as
+//!    `configure_virtual_uart_irq` does [OFW-4.93 lv1 a:0x2F4448-0x2F4458].
+//! 5. It refuses a region with fewer than r5 bytes from r4 to its end
+//!    [OFW-4.93 lv1 a:0x2F445C-0x2F446C], and a region with no page array
+//!    at +176 [OFW-4.93 lv1 a:0x2F4470-0x2F4478].
+//! 6. For each page of the buffer, it gives the endpoint, the page's real
+//!    address and the bytes left in the page to the read function
+//!    [OFW-4.93 lv1 a:0x2F447C-0x2F44F4]. It stops after a read of 0
+//!    bytes, or when no byte is left [OFW-4.93 lv1 a:0x2F4500-0x2F4528].
+//! 7. It stores the sum of the bytes in the return slot of r4, and returns
+//!    0 [OFW-4.93 lv1 a:0x2F452C-0x2F4538] [OFW-4.93 lv1 a:0x2F45A0].
+//!
+//! A refusal skips that store [OFW-4.93 lv1 a:0x2F4604-0x2F4614], and the
+//! vector's entry zeroes the return slots [OFW-4.93 lv1 a:0x0C08]. So r4
+//! returns 0 for a call that fails, and r5 to r10 return 0. See
+//! [`READ_VIRTUAL_UART_NO_PORT_R3`] for the r3 of each check.
+//!
+//! The read function [OFW-4.93 lv1 a:0x2F06C0] reads the endpoint's
+//! receive buffer:
+//! - It returns 7 when the byte at +128 of the endpoint is not 0
+//!   [OFW-4.93 lv1 a:0x2F0740-0x2F074C].
+//! - It copies the lesser of the bytes asked for and the doubleword at
+//!   +120, the count of bytes that the buffer holds
+//!   [OFW-4.93 lv1 a:0x2F0750-0x2F0770]. It copies from the read pointer
+//!   at +96, which wraps in the buffer at +104 of the size at +112
+//!   [OFW-4.93 lv1 a:0x2F06D8-0x2F0710] [OFW-4.93 lv1 a:0x2F0780-0x2F07F0].
+//! - After it copies one or more bytes, it stores the new read pointer and
+//!   count [OFW-4.93 lv1 a:0x2F07FC-0x2F0810]. It then calls the listeners
+//!   of the endpoint and of its peer [OFW-4.93 lv1 a:0x2F0830-0x2F0940],
+//!   which compute the interrupt status that the section above gives.
+//! - When the buffer holds no byte and the endpoint has a peer with a
+//!   reference, it returns 0 with 0 bytes read, and changes nothing
+//!   [OFW-4.93 lv1 a:0x2F09F8-0x2F0A64] [OFW-4.93 lv1 a:0x2F0944-0x2F0948].
+//! - When the buffer holds no byte and the endpoint has no such peer, the
+//!   handler returns `LV1_WRONG_STATE` (-11), with r3 marked
+//!   [OFW-4.93 lv1 a:0x2F0A68-0x2F0A70] [OFW-4.93 lv1 a:0x2F45E0-0x2F45F0]
+//!   [OFW-4.93 lv1 a:0x2F464C-0x2F4658].
+//!
+//! So the answer to a call that passes the checks depends on the bytes in
+//! the port's receive buffer. lv1's endpoint write function
+//! [OFW-4.93 lv1 a:0x2F0494] puts bytes in that buffer. These callers
+//! reach it:
+//! - `write_virtual_uart` (hypercall 163), for the bytes that the
+//!   partition sends to the port's peer [OFW-4.93 lv1 a:0x2F2D90];
+//! - four functions of lv1's own code
+//!   [OFW-4.93 lv1 a:0x2F31B4] [OFW-4.93 lv1 a:0x2F53F0]
+//!   [OFW-4.93 lv1 a:0x2F59DC] [OFW-4.93 lv1 a:0x2F775C].
+//!
+//! One of these functions [OFW-4.93 lv1 a:0x2F30A0] serves a write whose
+//! buffer lv1 translates through the function [OFW-4.93 lv1 a:0x29D074]
+//! [OFW-4.93 lv1 a:0x2A9DB8] [OFW-4.93 lv1 a:0x2A9E20]. No image read
+//! shows when lv1's services make these writes to a port of the GameOS
+//! partition, or which bytes they write. So no source gives the bytes in
+//! a receive buffer at the kernel's reads.
+//!
+//! The 4.93 kernel's first read is the receive loop of its system manager
+//! port, port 2 [OFW-4.93 lv2_kernel a:0x8000000000264388]. The loop reads
+//! a 16-byte message header
+//! [OFW-4.93 lv2_kernel a:0x8000000000264bb0-0x8000000000264bc0], and its
+//! read sends hypercall 162
+//! [OFW-4.93 lv2_kernel a:0x8000000000016b6c-0x8000000000016b7c].
+//! CellGov's hypervisor refuses `write_virtual_uart`, and CellGov's boot
+//! of the kernel reaches this read with no such call before it. When lv1
+//! reads 0 bytes, the kernel adds the value 2 to the port's interrupt mask
+//! with hypercall 164, and waits for the port's interrupt
+//! [OFW-4.93 lv2_kernel a:0x8000000000016b9c-0x8000000000016be0]
+//! [OFW-4.93 lv2_kernel a:0x8000000000016aa8-0x8000000000016ac8].
 
 use crate::hw::ppu_mmu::SMALL_PAGE_LOG2;
 
@@ -640,6 +723,65 @@ pub const SET_VIRTUAL_UART_PARAM_MASK_R3: u64 = 0x0000_0004_FFFF_FFEF;
 /// method and the kernel addresses.
 pub const VIRTUAL_UART_PORT_MASK_CAPTURE: &str = "tests/micro/lv2_vuart_port_mask";
 
+/// The handler of hypercall 162 in one firmware's lv1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VirtualUartReadHandler {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The address of the `read_virtual_uart` handler.
+    pub handler: u32,
+}
+
+/// Each firmware whose lv1 image shows the handler, ascending.
+///
+/// The address is the entry of hypercall 162 in the live 4.93 hypercall
+/// table ([`super::table::LIVE_TABLE_HANDLERS`]).
+pub const VIRTUAL_UART_READ_HANDLERS: &[VirtualUartReadHandler] = &[VirtualUartReadHandler {
+    firmware: "4.93",
+    handler: 0x2F429C,
+}];
+
+/// The handler of the firmware version `firmware`, or `None` when no lv1
+/// image read shows it.
+pub fn virtual_uart_read_handler(firmware: &str) -> Option<&'static VirtualUartReadHandler> {
+    VIRTUAL_UART_READ_HANDLERS
+        .iter()
+        .find(|handler| handler.firmware == firmware)
+}
+
+/// The largest buffer address that `read_virtual_uart` looks up. The
+/// handler refuses an r4 above 2^62 - 1, unsigned
+/// [OFW-4.93 lv1 a:0x2F4344-0x2F4350].
+pub const VIRTUAL_UART_READ_ADDRESS_MAX: u64 = 0x3FFF_FFFF_FFFF_FFFF;
+
+/// The r3 of `read_virtual_uart` for a port that lv1 does not hold:
+/// `LV1_NO_ENTRY` (-6), with r3 marked in the high word
+/// [OFW-4.93 lv1 a:0x2F4604-0x2F4610].
+///
+/// The handler returns this r3 in these cases:
+/// - r3 is above [`VIRTUAL_UART_PORT_MAX`];
+/// - the table holds no endpoint for r3;
+/// - the read function returns 7, because the byte at +128 of the
+///   endpoint is not 0 [OFW-4.93 lv1 a:0x2F45D8-0x2F45DC].
+pub const READ_VIRTUAL_UART_NO_PORT_R3: u64 = 0x0000_0001_FFFF_FFFA;
+
+/// The r3 of `read_virtual_uart` for a buffer address that no memory
+/// region holds: `LV1_NO_ENTRY` (-6), with r4 marked in the high word
+/// [OFW-4.93 lv1 a:0x2F4618-0x2F4624].
+///
+/// The handler returns this r3 in these cases:
+/// - r4 is above [`VIRTUAL_UART_READ_ADDRESS_MAX`];
+/// - no region holds r4;
+/// - the region has no page array.
+pub const READ_VIRTUAL_UART_NO_REGION_R3: u64 = 0x0000_0002_FFFF_FFFA;
+
+/// The r3 of `read_virtual_uart` for a region that fails one of these
+/// checks: `LV1_TYPE_MISMATCH` (-8), with r4 marked in the high word
+/// [OFW-4.93 lv1 a:0x2F462C-0x2F4638]:
+/// - the region's class;
+/// - the r5 bytes from r4 to the region's end.
+pub const READ_VIRTUAL_UART_REGION_R3: u64 = 0x0000_0002_FFFF_FFF8;
+
 #[cfg(test)]
 #[path = "tests/uart_tests.rs"]
 mod tests;
@@ -663,3 +805,7 @@ mod set_param_tests;
 #[cfg(test)]
 #[path = "tests/uart_set_param_console_tests.rs"]
 mod set_param_console_tests;
+
+#[cfg(test)]
+#[path = "tests/uart_read_tests.rs"]
+mod read_tests;
