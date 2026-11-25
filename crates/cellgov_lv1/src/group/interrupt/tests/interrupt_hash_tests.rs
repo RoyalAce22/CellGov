@@ -14,20 +14,23 @@ fn a_bitmap_state_with_no_bitmap_adds_no_term() {
 }
 
 /// The list holds every nonzero lane of a state with one bitmap, of
-/// thread 1 of logical PPE 1.
+/// thread 1 of logical PPE 5, at the fixed lane source 81. The PPE id
+/// and the thread differ, so a field that moves to another lane changes
+/// the sum.
 #[test]
 fn irq_state_bitmap_sync_term_lane_vector_golden() {
     let mut bitmaps = IrqStateBitmapState::default();
-    bitmaps.register(registration(1, 0x0036_93c0));
-    let lane = |object, field, value| {
-        contribution(
-            LaneIndex::new(IRQ_STATE_BITMAP_SOURCE, object, field, 0),
-            value,
-        )
-    };
+    bitmaps.register(IrqStateBitmapRegistration {
+        key: IrqStateBitmapKey {
+            ppe_id: 5,
+            thread: 1,
+        },
+        lpar_address: 0x0036_93c0,
+    });
+    let lane = |object, field, value| contribution(LaneIndex::new(81, object, field, 0), value);
     let lanes = [
         lane(0, 0, 1),
-        lane(0, 1, 1),
+        lane(0, 1, 5),
         lane(0, 2, 1),
         lane(0, 3, 0x0036_93c0),
     ];
@@ -43,9 +46,12 @@ fn each_thread_and_each_address_moves_the_term() {
     both.register(registration(1, 0x0036_93c0));
     let mut moved = first.clone();
     moved.register(registration(0, 0x0036_9180));
+    let mut other_thread = IrqStateBitmapState::default();
+    other_thread.register(registration(1, 0x0036_9140));
     assert_ne!(first.sync_term(), 0);
     assert_ne!(both.sync_term(), first.sync_term());
     assert_ne!(moved.sync_term(), first.sync_term());
+    assert_ne!(other_thread.sync_term(), first.sync_term());
 }
 
 #[test]

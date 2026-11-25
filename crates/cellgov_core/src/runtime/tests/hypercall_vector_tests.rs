@@ -8,7 +8,8 @@ use std::rc::Rc;
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{
-    ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
+    ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, SaveRestore,
+    UnitStatus, YieldReason,
 };
 use cellgov_lv1::{HypercallRefusal, HypercallWitness};
 use cellgov_mem::GuestMemory;
@@ -21,7 +22,7 @@ use crate::runtime::types::{RuntimeMode, StepError};
 use crate::runtime::Runtime;
 
 /// What the caller's step after the hypercall received: r3, and the
-/// register writes.
+/// register writes to r4 to r10.
 type Inputs = (Option<u64>, Vec<(u8, u64)>);
 
 /// Where the caller keeps its [`Inputs`].
@@ -53,6 +54,12 @@ impl ExecutionUnit for Caller {
     fn in_problem_state(&self) -> bool {
         self.problem_state
     }
+    fn system_call_save_restore(&self) -> Option<SaveRestore> {
+        Some(SaveRestore {
+            srr0: 0x104,
+            srr1: 0,
+        })
+    }
     fn run_until_yield(
         &mut self,
         _budget: Budget,
@@ -69,7 +76,9 @@ impl ExecutionUnit for Caller {
                 syscall_args: Some(self.args),
             };
         }
-        *self.received.borrow_mut() = Some((ctx.syscall_return(), ctx.register_writes().to_vec()));
+        let outputs = ctx.register_writes().iter().copied();
+        let outputs = outputs.filter(|(reg, _)| (4..=10).contains(reg)).collect();
+        *self.received.borrow_mut() = Some((ctx.syscall_return(), outputs));
         ExecutionStepResult {
             yield_reason: YieldReason::Finished,
             consumed_cost: InstructionCost::new(1),

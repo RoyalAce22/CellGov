@@ -1,7 +1,36 @@
 use super::*;
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::lv1::repository::{field, first_field, READ_WRAPPER_SC_4_93};
+use cellgov_ps3_abi::lv1::repository::{
+    field, first_field, BOOT_RECORD_4_93, BOOT_RECORD_CAPTURE, READ_WRAPPER_SC_4_93,
+};
 use cellgov_time::GuestTicks;
+
+/// The reads of the capture's frame: three locator words and the 24
+/// words of the boot repository record.
+const BOOT_RECORD_READS: usize = 27;
+
+/// The `bi.rgntotal` value that the capture [`BOOT_RECORD_CAPTURE`] read
+/// at +0x68 of the 4.93 kernel's boot repository record. The README of
+/// the capture gives the offset.
+fn captured_rgntotal() -> u64 {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(BOOT_RECORD_CAPTURE)
+        .join("cgov_frame.bin");
+    let frame = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    assert_eq!(&frame[0..4], b"CGOV", "frame magic");
+    let len = u32::from_be_bytes(frame[4..8].try_into().expect("4 bytes")) as usize;
+    assert_eq!(frame.len(), 8 + len, "one whole frame");
+    assert_eq!(len, BOOT_RECORD_READS * 16, "{BOOT_RECORD_READS} reads");
+    let word = |b: &[u8]| u64::from_be_bytes(b.try_into().expect("8 bytes"));
+    let hits: Vec<u64> = frame[8..]
+        .chunks_exact(16)
+        .filter(|pair| word(&pair[..8]) == BOOT_RECORD_4_93 + 0x68)
+        .map(|pair| word(&pair[8..]))
+        .collect();
+    assert_eq!(hits.len(), 1, "{}: one read of bi.rgntotal", path.display());
+    hits[0]
+}
 
 /// The return address of the 4.93 kernel's `bi.rgntotal` accessor
 /// [OFW-4.93 lv2_kernel a:0x800000000000c94c].
@@ -42,14 +71,12 @@ fn unobserved_refusal(r: &HypercallRequest) -> HypercallDisposition {
     })
 }
 
-/// The 4.93 value is the console capture
-/// `tests/micro/lv2_repository_boot_nodes/ps3/cech20-cex-493`.
 #[test]
 fn a_read_from_the_site_that_discards_the_unobserved_second_value_answers_the_first() {
     let r = rgntotal_read_from(READ_WRAPPER_SC_4_93, RGNTOTAL_READER);
     assert_eq!(
         read_node(&r, Some("4.93")),
-        HypercallDisposition::Answered(HypercallAnswer::success([0x0f9a_0000, 0]))
+        HypercallDisposition::Answered(HypercallAnswer::success([captured_rgntotal(), 0]))
     );
 }
 

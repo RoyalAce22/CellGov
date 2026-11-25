@@ -5,6 +5,7 @@ use super::*;
 use crate::Hypervisor;
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::call::{CONNECT_IRQ_PLUG_EXT, CONSTRUCT_EVENT_RECEIVE_PORT};
+use cellgov_ps3_abi::lv1::event_port::game_os_port_id;
 use cellgov_ps3_abi::lv1::ppe::game_os_logical_ppe_id;
 use cellgov_time::GuestTicks;
 
@@ -26,14 +27,27 @@ const START: [u64; 3] = [
 /// the capture does not read [OFW-4.93 lv2_kernel a:0x8000000000027d20].
 const UNCAPTURED: u64 = 0x8000_0000_0002_7d20;
 
-/// The id of thread 0's record call, and the ids of thread 0's calls A,
-/// B and C, as the capture reads them.
-const THREAD_0_RECORD_ID: u64 = 3;
-const THREAD_0_START_IDS: [u64; 3] = [8, 9, 10];
+/// The port id of the call at `pc` on `thread`, from the abi row that the
+/// console test holds to the capture.
+fn captured_id(thread: u8, pc: u64) -> u64 {
+    game_os_port_id("4.93", thread, pc)
+        .unwrap_or_else(|| panic!("no 4.93 port id for thread {thread} at {pc:#018x}"))
+}
 
-/// The ids of thread 1's record call and its calls A, B and C, as the
-/// capture reads them.
-const THREAD_1_IDS: [u64; 4] = [4, 5, 6, 7];
+/// The id of thread 0's record call.
+fn thread_0_record_id() -> u64 {
+    captured_id(0, RECORD)
+}
+
+/// The ids of thread 0's calls A, B and C.
+fn thread_0_start_ids() -> [u64; 3] {
+    START.map(|pc| captured_id(0, pc))
+}
+
+/// The ids of thread 1's record call and its calls A, B and C.
+fn thread_1_ids() -> [u64; 4] {
+    [RECORD, START[0], START[1], START[2]].map(|pc| captured_id(1, pc))
+}
 
 fn kernel_call(number: u64, thread: Option<u8>, pc: u64, args: &[u64]) -> HypercallRequest {
     let mut inputs = [0; 8];
@@ -75,7 +89,7 @@ fn after_thread_0_record() -> Hypervisor {
     hv.set_firmware("4.93");
     assert_eq!(
         hv.dispatch(&construct(Some(0), RECORD)),
-        constructed(THREAD_0_RECORD_ID)
+        constructed(thread_0_record_id())
     );
     hv
 }
@@ -83,7 +97,7 @@ fn after_thread_0_record() -> Hypervisor {
 /// A 4.93 hypervisor after thread 0's record call and its start calls.
 fn after_thread_0_start() -> Hypervisor {
     let mut hv = after_thread_0_record();
-    for (pc, id) in START.into_iter().zip(THREAD_0_START_IDS) {
+    for (pc, id) in START.into_iter().zip(thread_0_start_ids()) {
         assert_eq!(hv.dispatch(&construct(Some(0), pc)), constructed(id));
     }
     hv
@@ -92,7 +106,7 @@ fn after_thread_0_start() -> Hypervisor {
 #[test]
 fn thread_0_s_start_calls_get_the_ids_the_capture_reads_after_its_record_call() {
     let mut hv = after_thread_0_record();
-    for (pc, id) in START.into_iter().zip(THREAD_0_START_IDS) {
+    for (pc, id) in START.into_iter().zip(thread_0_start_ids()) {
         assert_eq!(
             hv.dispatch(&construct(Some(0), pc)),
             constructed(id),
@@ -100,14 +114,17 @@ fn thread_0_s_start_calls_get_the_ids_the_capture_reads_after_its_record_call() 
         );
     }
     let held: Vec<u64> = hv.event_receive_ports().ports().keys().copied().collect();
-    assert_eq!(held, [3, 8, 9, 10]);
+    let mut expected = vec![thread_0_record_id()];
+    expected.extend(thread_0_start_ids());
+    expected.sort_unstable();
+    assert_eq!(held, expected);
     assert_eq!(hv.refusal(), None);
 }
 
 #[test]
 fn thread_1_s_calls_get_the_ids_the_capture_reads() {
     let mut hv = after_thread_0_record();
-    for (pc, id) in [RECORD].into_iter().chain(START).zip(THREAD_1_IDS) {
+    for (pc, id) in [RECORD].into_iter().chain(START).zip(thread_1_ids()) {
         assert_eq!(
             hv.dispatch(&construct(Some(1), pc)),
             constructed(id),
@@ -122,7 +139,7 @@ fn each_start_port_of_thread_0_connects_to_a_plug_of_thread_0() {
     let mut hv = after_thread_0_start();
     let ppe_id = game_os_logical_ppe_id("4.93").expect("the 4.93 logical PPE id");
     let thread_0 = IrqStateBitmapKey { ppe_id, thread: 0 };
-    for (plug, id) in (0u8..).zip(THREAD_0_START_IDS) {
+    for (plug, id) in (0u8..).zip(thread_0_start_ids()) {
         let connect = kernel_call(
             CONNECT_IRQ_PLUG_EXT,
             Some(0),
@@ -173,7 +190,7 @@ fn a_call_from_a_unit_that_names_no_hardware_thread_is_refused() {
 #[test]
 fn a_repeated_start_call_is_refused_and_leaves_the_connected_port() {
     let mut hv = after_thread_0_record();
-    let id = THREAD_0_START_IDS[0];
+    let id = thread_0_start_ids()[0];
     assert_eq!(hv.dispatch(&construct(Some(0), START[0])), constructed(id));
     let ppe_id = game_os_logical_ppe_id("4.93").expect("the 4.93 logical PPE id");
     let connect = kernel_call(CONNECT_IRQ_PLUG_EXT, Some(0), 0, &[ppe_id, 0, 0, id, 0]);

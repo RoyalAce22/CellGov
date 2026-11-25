@@ -42,7 +42,7 @@ fn entry_msr(msr: u64) -> u64 {
 /// is `cause`.
 ///
 /// [PPC-Book3 p:62 s:5.4] SRR1 bits 33:36 and 42:47 hold the interrupt's information, and every other bit holds the MSR.
-fn entry_srr1(msr: u64, cause: u64) -> u64 {
+pub(super) fn entry_srr1(msr: u64, cause: u64) -> u64 {
     (msr & !SRR1_INTERRUPT_INFO) | (cause & SRR1_INTERRUPT_INFO)
 }
 
@@ -335,3 +335,7 @@ mod interrupt_code_event_tests;
 #[cfg(test)]
 #[path = "tests/hypercall_yield_tests.rs"]
 mod hypercall_yield_tests;
+
+#[cfg(test)]
+#[path = "tests/hypercall_return_tests.rs"]
+mod hypercall_return_tests;

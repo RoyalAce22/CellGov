@@ -2,13 +2,16 @@ use super::*;
 use crate::AddressSpaceChange;
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::hw::ppu_mmu::{PPE_PTE_LP, PTE_C, PTE_G, PTE_H, PTE_I, PTE_L, PTE_PP, PTE_R};
+use cellgov_ps3_abi::lv1::address_space::game_os_boot_vas_id;
 use cellgov_ps3_abi::lv1::call::WRITE_HTAB_ENTRY;
 use cellgov_ps3_abi::lv1::page_table::PTE_M;
 use cellgov_time::GuestTicks;
 
 /// The vas id that the console capture `tests/micro/lv2_vas_boot_record`
 /// reads from the 4.93 kernel's record.
-const VAS_ID: u64 = 2;
+fn vas_id() -> u64 {
+    game_os_boot_vas_id("4.93").expect("the 4.93 boot vas id")
+}
 
 /// The bytes of real mode memory the test storage holds.
 const REAL_MODE_HELD: u64 = 0x20_0000;
@@ -35,13 +38,13 @@ fn write_request(vas_id: u64, index: u64, d0: u64, d1: u64) -> HypercallRequest 
 fn spaces() -> AddressSpaceState {
     let mut spaces = AddressSpaceState::default();
     spaces.apply(AddressSpaceChange::Constructed(AddressSpace {
-        vas_id: VAS_ID,
+        vas_id: vas_id(),
         htab_size_exp: 18,
         page_size_count: 2,
         page_shifts: 0x1014_0000_0000_0000,
         mapping: None,
     }));
-    spaces.apply(AddressSpaceChange::Selected(VAS_ID));
+    spaces.apply(AddressSpaceChange::Selected(vas_id()));
     spaces
 }
 
@@ -219,13 +222,19 @@ fn a_valid_entry_whose_page_cellgov_does_not_hold_refuses() {
 
 #[test]
 fn a_write_with_no_address_space_or_storage_refuses() {
+    let unread = "a page table call at a firmware whose lv1 handler is not read";
     let cases = [
-        (spaces(), 3, Some("4.93")),
-        (spaces(), 0, None),
-        (spaces(), 0, Some("4.92")),
+        (
+            spaces(),
+            3,
+            Some("4.93"),
+            "a page table call on an address space that this hypervisor did not construct",
+        ),
+        (spaces(), 0, None, unread),
+        (spaces(), 0, Some("4.92"), unread),
     ];
     assert_eq!(cases.len(), 3);
-    for (spaces, vas_id, firmware) in cases {
+    for (spaces, vas_id, firmware, what) in cases {
         let r = write_request(vas_id, 0, D0, 0x1000);
         let d = write_entry(
             &r,
@@ -234,8 +243,9 @@ fn a_write_with_no_address_space_or_storage_refuses() {
             &LogicalSpeState::default(),
             &storage(),
         );
-        assert!(
-            refusal_what(&d).is_some(),
+        assert_eq!(
+            refusal_what(&d),
+            Some(what),
             "{firmware:?} vas id {vas_id}: {d:?}"
         );
     }
@@ -249,5 +259,10 @@ fn a_write_with_no_address_space_or_storage_refuses() {
     assert_eq!(
         refusal_what(&write(D0, 0x1000, 0, &real_mode_only)),
         Some("a page table write with no storage for the table")
+    );
+    assert_eq!(
+        refusal_what(&write(D0 & !1, 0x1000, 0, &real_mode_only)),
+        Some("a page table write with no storage for the table"),
+        "an invalid entry skips the duplicate search"
     );
 }

@@ -14,19 +14,29 @@ fn a_port_state_with_no_port_adds_no_term() {
     assert_eq!(EventReceivePortState::default().sync_term(), 0);
 }
 
+/// The lane of field `field` of object `object` of the fixed source 82,
+/// with the value `value`.
+fn lane(object: u64, field: u8, value: u64) -> u128 {
+    contribution(LaneIndex::new(82, object, field, 0), value)
+}
+
 /// The list holds every nonzero lane of a state with one port, of id 3.
 #[test]
 fn event_receive_port_sync_term_lane_vector_golden() {
-    let lane = |object, field, value| {
-        contribution(
-            LaneIndex::new(EVENT_RECEIVE_PORT_SOURCE, object, field, 0),
-            value,
-        )
-    };
     let sum = [lane(0, 0, 1), lane(0, 1, 3)]
         .into_iter()
         .fold(0u128, u128::wrapping_add);
     assert_eq!(ports(&[3]).sync_term(), sum);
+}
+
+/// The list holds every nonzero lane of a state with the ports 4 and 3,
+/// constructed in that order: id 3 is object 0 and id 4 is object 1.
+#[test]
+fn two_ports_take_objects_0_and_1_in_id_order_golden() {
+    let sum = [lane(0, 0, 1), lane(0, 1, 3), lane(1, 0, 1), lane(1, 1, 4)]
+        .into_iter()
+        .fold(0u128, u128::wrapping_add);
+    assert_eq!(ports(&[4, 3]).sync_term(), sum);
 }
 
 #[test]

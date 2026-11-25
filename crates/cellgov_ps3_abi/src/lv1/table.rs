@@ -45,9 +45,10 @@ pub struct HypercallTableSite {
     /// The address of the Invalid HV Call function, at `set_table` +
     /// 0x1F0.
     pub invalid_function: u32,
-    /// The address of the table, or `None` where it was not read. The
-    /// memory call table follows the table at +0x800.
-    pub table_base: Option<u32>,
+    /// The address of the table. The memory call table follows the table
+    /// at +0x800. lv1's vector returns this value in r12 for a number
+    /// past the end of the table.
+    pub table_base: u32,
 }
 
 /// Each firmware whose lv1 image shows the entry count and the Invalid
@@ -57,37 +58,42 @@ pub struct HypercallTableSite {
 /// both functions. The 1.50 image does not hold the code these images
 /// share, and no further reading of it was made.
 ///
+/// `set_lv1_hvcall_table` loads the table base from its TOC. At 1.94 it
+/// loads the doubleword at TOC - 0x1540 [OFW-1.94 lv1 a:0x2D8DEC], and that
+/// doubleword holds 0x3AC660 [OFW-1.94 lv1 a:0x38CDB0-0x38CDB4]. The 1.94
+/// vector loads the TOC address 0x38E2F0 [OFW-1.94 lv1 a:0x09f4-0x09fc].
+///
 /// [PS3DEVWIKI-HV-RE s:set_lv1_hvcall_table] set_lv1_hvcall_table is at 0x2C1F04 at 3.15 and at 0x2C02B4 at 3.41.
 pub const HYPERCALL_TABLE_SITES: &[HypercallTableSite] = &[
     HypercallTableSite {
         firmware: "1.94",
         set_table: 0x2D8DE8,
         invalid_function: 0x2D8FD8,
-        table_base: None,
+        table_base: 0x3AC660,
     },
     HypercallTableSite {
         firmware: "3.15",
         set_table: 0x2C1F04,
         invalid_function: 0x2C20F4,
-        table_base: Some(0x363A08),
+        table_base: 0x363A08,
     },
     HypercallTableSite {
         firmware: "3.41",
         set_table: 0x2C02B4,
         invalid_function: 0x2C04A4,
-        table_base: Some(0x361B08),
+        table_base: 0x361B08,
     },
     HypercallTableSite {
         firmware: "3.70",
         set_table: 0x2C75C8,
         invalid_function: 0x2C77B8,
-        table_base: Some(0x371708),
+        table_base: 0x371708,
     },
     HypercallTableSite {
         firmware: "4.93",
         set_table: 0x2C8990,
         invalid_function: 0x2C8B80,
-        table_base: Some(0x372D08),
+        table_base: 0x372D08,
     },
 ];
 

@@ -25,6 +25,7 @@ pub mod barrier;
 pub mod code_event;
 pub mod context;
 pub mod fake_isa;
+pub mod interrupt_return;
 pub mod operand;
 pub mod problem_state;
 pub mod stall;
@@ -37,6 +38,7 @@ pub use barrier::{BarrierKind, RetiredBarrier};
 pub use code_event::CodeEvent;
 pub use context::{ExecutionContext, MfcOrderingView, ResumeKind};
 pub use fake_isa::{FakeIsaUnit, FakeOp};
+pub use interrupt_return::{CompareFields, CompareResult, SaveRestore};
 pub use problem_state::{OutMailboxes, ProblemStateError, SignalNotifier};
 pub use stall::{ChannelStall, StallWake};
 pub use step_result::{

@@ -1,0 +1,16 @@
+[test]
+name = "lv1_sc_return_registers"
+
+# A hardware probe: ten `sc 1` calls from a game's PPU thread in problem state, five numbers each sent with XER at 0 and with XER[SO] and XER[CA] set.
+# Numbers: 256, 0xFFFF and 0x8000000000000000 (past the end of lv1's hypercall table, the rfid return), 14 (an invalid entry of the live 4.93 table) and 74 (get_logical_partition_id), both refused from problem state through the hrfid return.
+# Before each call r0, r3 to r10, r12, LR and CTR hold marks and CR holds 0x6E7DACBF.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u64 words: 0 the case count (10), then from 8 per case 88 bytes: the number, the XER sent, the address 20 bytes before the sc, then r0, r3, r11, r12, CR, XER, LR and CTR as the call returned them. 888 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 888 },
+]
+
+[expect]
+outcome = "completed"

@@ -14,7 +14,7 @@ const VAS_ID: u64 = 2;
 
 /// The value of the field `field` in the capture. Both reads of the word
 /// must agree.
-fn captured(field: &str) -> u64 {
+pub(super) fn captured(field: &str) -> u64 {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join(LOGICAL_SPE_OBJECT_CAPTURE)
@@ -98,7 +98,7 @@ fn the_kernels_boot_call_gets_the_captured_spe_id_and_shadow_page() {
         panic!("{d:?}");
     };
     assert_eq!(answer.r3, 0);
-    let outputs = answer.outputs.expect("r4 to r10");
+    let outputs = answer.outputs().expect("r4 to r10");
     assert_eq!(outputs[4], captured("shadow"), "r8");
     assert_eq!(outputs[5], captured("spe_id"), "r9");
 }

@@ -13,7 +13,9 @@ const VAS_ID: u64 = 2;
 const BOOT_SC: u64 = 0x8000_0000_0004_f188;
 
 /// The spe id of the boot call in the capture `lv2_logical_spe_object`.
-const BOOT_SPE_ID: u64 = 11;
+fn boot_spe_id() -> u64 {
+    super::capture_tests::captured("spe_id")
+}
 
 /// The 4.93 kernel's boot call, with r3 to r10 as it sets them
 /// [OFW-4.93 lv2_kernel a:0x800000000004f158-0x800000000004f184].
@@ -81,11 +83,11 @@ fn the_kernels_boot_call_gets_the_area_the_shadow_page_and_the_captured_id() {
             area,
             0,
             shadow,
-            BOOT_SPE_ID,
+            boot_spe_id(),
             0,
         ],
         LogicalSpe {
-            id: BOOT_SPE_ID,
+            id: boot_spe_id(),
             spe_type: 1,
             vas_id: VAS_ID,
             area,
@@ -117,11 +119,11 @@ fn with_no_region_yet_the_area_and_the_shadow_page_take_the_boot_counter_values(
             area,
             0,
             shadow,
-            BOOT_SPE_ID,
+            boot_spe_id(),
             0,
         ],
         LogicalSpe {
-            id: BOOT_SPE_ID,
+            id: boot_spe_id(),
             spe_type: 1,
             vas_id: VAS_ID,
             area,
@@ -146,10 +148,12 @@ fn the_answer_does_not_read_r10() {
     let mut r = request();
     r.inputs[7] = 0xA5A5_A5A5_A5A5_A5A5;
     let spes = LogicalSpeState::default();
-    assert_eq!(
-        construct(&r, Some("4.93"), &memory(Some(5)), &spes),
-        construct(&request(), Some("4.93"), &memory(Some(5)), &spes)
+    let base = construct(&request(), Some("4.93"), &memory(Some(5)), &spes);
+    assert!(
+        matches!(base, HypercallDisposition::Answered(_)),
+        "{base:?}"
     );
+    assert_eq!(construct(&r, Some("4.93"), &memory(Some(5)), &spes), base);
 }
 
 #[test]
@@ -245,7 +249,7 @@ fn a_second_boot_call_is_refused() {
     let r = request();
     let mut spes = LogicalSpeState::default();
     spes.construct(LogicalSpe {
-        id: BOOT_SPE_ID,
+        id: boot_spe_id(),
         spe_type: 1,
         vas_id: VAS_ID,
         area: 0,
@@ -297,13 +301,13 @@ fn the_hypervisor_keeps_the_spe_and_moves_the_counter_past_the_shadow_page() {
     };
     let boot = game_os_region_counter_at_boot("4.93").expect("the 4.93 boot counter");
     assert_eq!(
-        hv.groups().spe().spes().spe(BOOT_SPE_ID),
+        hv.groups().spe().spes().spe(boot_spe_id()),
         Some(&LogicalSpe {
-            id: BOOT_SPE_ID,
+            id: boot_spe_id(),
             spe_type: 1,
             vas_id: VAS_ID,
-            area: answer.outputs.expect("r4 to r10")[2],
-            shadow: answer.outputs.expect("r4 to r10")[4],
+            area: answer.outputs().expect("r4 to r10")[2],
+            shadow: answer.outputs().expect("r4 to r10")[4],
             shadow_real: SHADOW_STORAGE_BASE,
         })
     );

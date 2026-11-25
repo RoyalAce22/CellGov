@@ -6,7 +6,7 @@ use crate::mmu::Partition;
 use crate::observation::PpuArchitecturalState;
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
-use cellgov_exec::{ExecutionContext, ExecutionStepResult, ExecutionUnit, UnitStatus};
+use cellgov_exec::{ExecutionContext, ExecutionStepResult, ExecutionUnit, SaveRestore, UnitStatus};
 use cellgov_time::Budget;
 
 impl ExecutionUnit for PpuExecutionUnit {
@@ -137,6 +137,10 @@ impl ExecutionUnit for PpuExecutionUnit {
 
     fn in_problem_state(&self) -> bool {
         self.state.supervisor().is_some_and(|s| s.problem_state())
+    }
+
+    fn system_call_save_restore(&self) -> Option<SaveRestore> {
+        self.save_restore_at_sc()
     }
 
     fn load_page_table(&mut self, sdr1: u64, lb: u8) -> bool {

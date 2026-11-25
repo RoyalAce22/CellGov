@@ -25,7 +25,7 @@ fn a_send_gives_the_sink_the_r4_bytes_r5_holds_and_answers_the_count_in_r4() {
     };
     assert_eq!(answer.r3, 0);
     assert_eq!(
-        answer.outputs,
+        answer.outputs(),
         Some([12, 0, 0, 0, 0, 0, 0]),
         "r4, and r5 to r10"
     );
@@ -40,7 +40,7 @@ fn a_send_of_32_bytes_takes_all_of_r5_to_r8() {
         panic!("a send of 32 bytes is answered");
     };
     assert_eq!(answer.console.expect("a write").bytes(), TEXT);
-    assert_eq!(answer.outputs.map(|o| o[0]), Some(32), "r4");
+    assert_eq!(answer.outputs().map(|o| o[0]), Some(32), "r4");
 }
 
 #[test]

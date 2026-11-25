@@ -28,5 +28,5 @@ fn the_answer_puts_the_partition_id_in_r4_and_zero_in_r5_to_r10() {
     assert_eq!(answer.r3, zero_extended(LV1_SUCCESS));
     // lv1's handler writes only the r4 slot [OFW-4.93 lv1 a:0x2EBDA8-0x2EBDC4];
     // the entry `dcbz` [OFW-4.93 lv1 a:0x0C00-0x0C08] zeroed the others.
-    assert_eq!(answer.outputs, Some([LPAR_ID_GAME_OS, 0, 0, 0, 0, 0, 0]));
+    assert_eq!(answer.outputs(), Some([LPAR_ID_GAME_OS, 0, 0, 0, 0, 0, 0]));
 }

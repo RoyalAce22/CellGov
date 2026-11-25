@@ -45,12 +45,13 @@ mod cost;
 mod group;
 mod handlers;
 mod request;
+mod return_path;
 mod state;
 mod vector;
 
 pub use answer::{
     ConsoleWrite, HypercallAnswer, HypercallDisposition, HypercallRefusal, OutputRegisters,
-    PageTableLoad,
+    PageTableLoad, ReturnPath,
 };
 pub use cost::cost;
 pub use group::device_bus::{DeviceBusChange, DeviceBusState};
@@ -78,4 +79,5 @@ pub use group::storage::{StorageChange, StorageState};
 pub use group::uart::{UartChange, UartState};
 pub use handlers::{answer, answered_numbers, answers};
 pub use request::HypercallRequest;
+pub use return_path::{Compare, ReturnPair, ReturnRegisters};
 pub use state::{HypercallWitness, Hypervisor};

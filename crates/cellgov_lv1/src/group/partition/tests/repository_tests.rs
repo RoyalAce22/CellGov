@@ -60,6 +60,8 @@ fn a_read_with_no_firmware_or_an_unnamed_firmware_is_a_refusal_that_names_the_ke
     assert_eq!(read_node(&r, Some("3.41")), refused);
 }
 
+/// The repository dump [PS3DEVWIKI-REPO s:3.41_GameOS] gives `bi.pu` at
+/// index 0 = 1.
 #[test]
 fn bi_pu_index_0_and_index_1_are_two_keys() {
     assert_eq!(

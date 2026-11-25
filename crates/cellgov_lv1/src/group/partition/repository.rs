@@ -95,7 +95,7 @@ pub(crate) fn read_record(
     disposition: &HypercallDisposition,
 ) -> RepositoryRead {
     let values = match disposition {
-        HypercallDisposition::Answered(answer) => answer.outputs.map(|[v1, v2, ..]| (v1, v2)),
+        HypercallDisposition::Answered(answer) => answer.outputs().map(|[v1, v2, ..]| (v1, v2)),
         HypercallDisposition::Refused(_) => None,
     };
     RepositoryRead {

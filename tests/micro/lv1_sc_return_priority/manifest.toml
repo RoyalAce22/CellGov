@@ -1,0 +1,16 @@
+[test]
+name = "lv1_sc_return_priority"
+
+# A hardware probe: eight `sc 1` calls from a game's PPU thread in problem state, asking whether the thread priority a game thread sets reaches the r0 that lv1's return gives.
+# Numbers: 256 (past the end of lv1's hypercall table, the rfid return) and 74 (get_logical_partition_id, refused from problem state through the hrfid return).
+# Before each call the thread runs no priority form, `or 1,1,1` (low), `or 2,2,2` (medium) or `or 3,3,3` (high); after each call it runs `or 2,2,2`.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u64 words: 0 the case count (8), then from 8 per case 32 bytes: the number, the form (0 none, 1 low, 2 medium, 3 high), then r0 and r3 as the call returned them. 264 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 264 },
+]
+
+[expect]
+outcome = "completed"

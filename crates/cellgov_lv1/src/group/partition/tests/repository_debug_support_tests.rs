@@ -28,19 +28,6 @@ fn debug_support_read() -> HypercallRequest {
     }
 }
 
-/// The values are the console capture
-/// `tests/micro/lv1_repository_debug_support/peek/cech20-cex-493`.
-#[test]
-fn a_debug_support_read_answers_all_ones_in_r4_and_r5_at_4_93() {
-    assert_eq!(
-        read_node(&debug_support_read(), Some("4.93")),
-        HypercallDisposition::Answered(HypercallAnswer::success([
-            0xffff_ffff_ffff_ffff,
-            0xffff_ffff_ffff_ffff,
-        ]))
-    );
-}
-
 #[test]
 fn a_debug_support_read_is_a_refusal_naming_the_key_at_every_floor() {
     let r = debug_support_read();

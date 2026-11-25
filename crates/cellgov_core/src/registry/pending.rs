@@ -6,7 +6,7 @@
 //! the unit's `ExecutionContext` at the start of its next step.
 
 use cellgov_event::UnitId;
-use cellgov_exec::ResumeKind;
+use cellgov_exec::{CompareFields, ResumeKind};
 
 use super::UnitRegistry;
 
@@ -85,6 +85,30 @@ impl UnitRegistry {
             .entry(id)
             .or_default()
             .push((reg, value));
+    }
+
+    /// Queue CR fields for the next step of `id`, in place of any queued
+    /// ones. Unknown-id policy matches [`Self::push_receive`].
+    pub fn set_compare_fields(&mut self, id: UnitId, fields: CompareFields) {
+        if !self.units.contains_key(&id) {
+            debug_assert!(
+                false,
+                "set_compare_fields for unknown UnitId {id:?} \
+                 (would leak into pending_compare_fields)"
+            );
+            return;
+        }
+        self.pending_compare_fields.insert(id, fields);
+    }
+
+    /// Drain the pending CR fields for `id`. Guard behaviour per
+    /// [`Self::drain_receives`].
+    #[inline]
+    pub fn drain_compare_fields(&mut self, id: UnitId) -> Option<CompareFields> {
+        if self.pending_compare_fields.is_empty() {
+            return None;
+        }
+        self.pending_compare_fields.remove(&id)
     }
 
     /// Drain pending register writes for `id`. Guard behaviour per

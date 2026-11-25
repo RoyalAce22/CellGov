@@ -7,18 +7,20 @@
 //! - its memory writes land at dispatch time through
 //!   [`Runtime::host_write`];
 //! - a page table load reaches the caller at dispatch time;
-//! - the caller's next step gets the status in r3 and the values for r4
-//!   to r10 as committed inputs, as with an LV2 call's return. The thread
-//!   then steps past `sc`.
+//! - the caller's next step gets these committed inputs, as with an LV2
+//!   call's return, and then steps past `sc`:
+//!   - the status in r3 and the values for r4 to r10;
+//!   - the r0, r11, r12 and CR fields that lv1's return leaves.
 //!
 //! A refusal answers nothing. The hypervisor keeps it, and the next
 //! [`Runtime::step`] stops the run with it.
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
-use cellgov_exec::ExecutionStepResult;
+use cellgov_exec::{CompareFields, CompareResult, ExecutionStepResult};
 use cellgov_lv1::{
-    cost, HypercallAnswer, HypercallDisposition, HypercallRefusal, HypercallRequest, PageTableLoad,
+    cost, Compare, HypercallAnswer, HypercallDisposition, HypercallRefusal, HypercallRequest,
+    PageTableLoad, ReturnPair,
 };
 use cellgov_ps3_abi::lv1::call::{LOGICAL_CONSOLE_SEND_MAX, MAX_OUTPUTS};
 use cellgov_trace::{HostWriter, TraceRecord, TracedHypercallDisposition, CONSOLE_RECORD_BYTES};
@@ -98,7 +100,7 @@ impl Runtime {
         if let Some(load) = answer.page_table {
             self.load_page_table(unit, load);
         }
-        let written = match answer.outputs {
+        let written = match answer.outputs() {
             Some(outputs) => {
                 for (reg, value) in (4u8..).zip(outputs) {
                     self.registry.push_register_write(unit, reg, value);
@@ -107,18 +109,56 @@ impl Runtime {
             }
             None => 0,
         };
+        self.apply_return_registers(request, &answer);
         let status = answer.r3;
         if tracing {
             self.trace.record(&TraceRecord::HypercallReturned {
                 unit,
                 status,
-                outputs: answer.outputs.unwrap_or_default(),
+                outputs: answer.outputs().unwrap_or_default(),
                 written,
                 untimed: cost(request.number).is_none(),
                 time: self.time,
             });
         }
         self.registry.set_syscall_return(unit, status);
+    }
+
+    /// Gives the caller of `request` the r0, r11, r12 and CR fields that
+    /// lv1's return for `answer` leaves.
+    ///
+    /// The return through `hrfid` gives r11 and r12 the SRR0 and SRR1 of
+    /// the caller's `sc`. A unit with no supervisor registers gives none:
+    /// the runtime then logs an invariant break, and r11 and r12 keep
+    /// their values.
+    ///
+    /// # Panics
+    ///
+    /// Panics in a debug build where the unit gives no SRR0 and SRR1.
+    fn apply_return_registers(&mut self, request: &HypercallRequest, answer: &HypercallAnswer) {
+        let unit = request.unit;
+        let returned = answer.return_registers(request, self.hypervisor.firmware());
+        self.registry.push_register_write(unit, 0, returned.r0);
+        let pair = match returned.r11_r12 {
+            ReturnPair::Values { r11, r12 } => Some((r11, r12)),
+            ReturnPair::SaveRestore => self
+                .registry
+                .get(unit)
+                .and_then(|u| u.system_call_save_restore())
+                .map(|s| (s.srr0, s.srr1)),
+        };
+        if let Some((r11, r12)) = pair {
+            self.registry.push_register_write(unit, 11, r11);
+            self.registry.push_register_write(unit, 12, r12);
+        } else {
+            debug_assert!(false, "{unit:?} gives no SRR0 and SRR1 for its hypercall");
+            self.lv2_host.log_invariant_break(
+                "dispatch.hypervisor_save_restore_missing",
+                format_args!("{unit:?} gives no SRR0 and SRR1 for its hypercall"),
+            );
+        }
+        self.registry
+            .set_compare_fields(unit, compare_fields(&returned.cr));
     }
 
     /// Gives `unit` the page table and large page sizes of `load`, as
@@ -204,6 +244,17 @@ impl Runtime {
     }
 }
 
+/// The CR fields of `cr`, as the caller's next step takes them.
+fn compare_fields(cr: &[Option<Compare>; 8]) -> CompareFields {
+    CompareFields(cr.map(|field| {
+        field.map(|result| match result {
+            Compare::Less => CompareResult::Less,
+            Compare::Greater => CompareResult::Greater,
+            Compare::Equal => CompareResult::Equal,
+        })
+    }))
+}
+
 fn traced_disposition(disposition: &HypercallDisposition) -> TracedHypercallDisposition {
     match disposition {
         HypercallDisposition::Answered(_) => TracedHypercallDisposition::Answered,
@@ -226,3 +277,7 @@ mod hypercall_dispatch_tests;
 #[cfg(test)]
 #[path = "tests/hypercall_vector_tests.rs"]
 mod hypercall_vector_tests;
+
+#[cfg(test)]
+#[path = "tests/hypercall_return_path_tests.rs"]
+mod hypercall_return_path_tests;

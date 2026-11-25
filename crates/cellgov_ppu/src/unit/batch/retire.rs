@@ -139,6 +139,7 @@ impl PpuExecutionUnit {
     /// - a syscall return
     /// - whether the unit left the PPE since its last step
     /// - register writes
+    /// - the CR fields that the hypervisor's compares set
     /// - the PPE sibling count
     #[inline]
     fn apply_committed_inputs(&mut self, ctx: &ExecutionContext<'_>) {
@@ -167,6 +168,9 @@ impl PpuExecutionUnit {
             if (reg as usize) < 32 {
                 self.state.set_gpr(reg as usize, val);
             }
+        }
+        if let Some(fields) = ctx.compare_fields() {
+            super::super::hypercall::take_compare_fields(&mut self.state, fields);
         }
 
         // A runnable sibling shares the PPE's issue for this batch.

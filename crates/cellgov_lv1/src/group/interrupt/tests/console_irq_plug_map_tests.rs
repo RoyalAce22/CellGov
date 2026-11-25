@@ -197,7 +197,12 @@ fn the_kernels_connections_leave_the_maps_and_bitmaps_the_console_holds_after_bo
             };
             let answer = answered(connect_plug(&connect, Some("4.93"), &state), &what);
             assert_eq!(answer.r3, zero_extended(LV1_SUCCESS), "{what}: r3");
-            assert_eq!(answer.outputs, Some([0; 7]), "{what}: r4 to r10");
+            assert_eq!(answer.outputs(), Some([0; 7]), "{what}: r4 to r10");
+            assert_eq!(
+                answer.effects.len(),
+                1,
+                "{what}: the status doubleword write"
+            );
             apply(&answer, lpar, image, &what);
             let [StateChange::Interrupt(change)] = answer.changes.as_slice() else {
                 panic!("{what}: {:?}", answer.changes);

@@ -66,6 +66,43 @@ pub const UNKNOWN_HYPERCALL_R3: u64 = 0x0000_0000_FFFF_FFEC;
 ///   [OFW-1.94 lv1 a:0x09b0-0x0ad0] holds them at the same addresses.
 pub const PROBLEM_STATE_DENIED_R3: u64 = 0x0000_0000_FFFF_FFFD;
 
+/// The r0 that lv1 returns from every hypercall: the caller's TSRL, as
+/// the `lv1_sc_return_registers` capture shows it after each of its ten
+/// calls.
+///
+/// The vector saves SPR 896 at entry [OFW-4.93 lv1 a:0x0c0c-0x0c10]. Each
+/// return loads the saved value into r0 and writes it back to SPR 896:
+/// - the past-the-table return [OFW-4.93 lv1 a:0x0c48-0x0c54];
+/// - the return through `hrfid` [OFW-4.93 lv1 a:0x1054-0x1078].
+///
+/// The value holds TP = 0b10 (medium) and FWDP = 0x4000. CellGov does not
+/// model TSRL, so it gives every caller this value.
+///
+/// [CBE-Handbook p:307 s:10.4.5] TSRL bits 11:12 hold TP, the thread priority, with 0b10 for medium, and bits 44:63 hold FWDP, the forward-progress timer.
+pub const CALLER_TSRL: u64 = 0x0010_0000_0000_4000;
+
+/// The firmware versions whose vector, on the return through `hrfid`,
+/// calls a function that leaves `GT` in CR7.
+///
+/// The return calls it with r3 = 1 [OFW-4.93 lv1 a:0x1020-0x1024]. Each
+/// path through the function ends with a compare of a positive value
+/// with 0 in CR7 [OFW-4.93 lv1 a:0x1240-0x132c]. The 3.15
+/// [OFW-3.15 lv1 a:0x0f60-0x107c], 3.41 [OFW-3.41 lv1 a:0x0f60-0x107c] and
+/// 3.70 [OFW-3.70 lv1 a:0x0f60-0x107c] returns hold the same instructions
+/// at the same addresses, except the TOC address that each loads into r2.
+/// Their functions hold the same instructions at the same addresses:
+/// 3.15 [OFW-3.15 lv1 a:0x1240-0x132c], 3.41
+/// [OFW-3.41 lv1 a:0x1240-0x132c] and 3.70 [OFW-3.70 lv1 a:0x1240-0x132c].
+pub const HRFID_CR7_FIRMWARE: &[&str] = &["3.15", "3.41", "3.70", "4.93"];
+
+/// The firmware versions whose return through `hrfid` does not call
+/// that function, and so leaves CR7 as the handler left it.
+///
+/// The 1.50 [OFW-1.50 lv1 a:0x09b0-0x0ac4] and 1.94
+/// [OFW-1.94 lv1 a:0x09b0-0x0ac4] returns hold the other compares of the
+/// 4.93 return, and no such call.
+pub const HRFID_KEEPS_CR7_FIRMWARE: &[&str] = &["1.50", "1.94"];
+
 #[cfg(test)]
 #[path = "tests/dispatch_tests.rs"]
 mod tests;

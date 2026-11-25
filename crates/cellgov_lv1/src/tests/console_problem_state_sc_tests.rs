@@ -81,7 +81,7 @@ fn cellgov_registers(case: usize) -> [u64; 8] {
     };
     let mut regs = inputs;
     regs[0] = answer.r3;
-    if let Some(outputs) = answer.outputs {
+    if let Some(outputs) = answer.outputs() {
         regs[1..].copy_from_slice(&outputs);
     }
     regs

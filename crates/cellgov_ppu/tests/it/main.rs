@@ -2,6 +2,8 @@
 //! one test binary so each profile links the crate's dependencies once.
 
 mod console_cases;
+mod console_lv1_sc_return_priority;
+mod console_lv1_sc_return_registers;
 mod console_lv2_span_shm_buffers;
 mod console_ppu_addc_xer;
 mod console_ppu_alignment;

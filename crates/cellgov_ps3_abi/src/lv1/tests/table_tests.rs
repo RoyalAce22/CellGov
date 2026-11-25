@@ -30,10 +30,7 @@ fn every_site_puts_the_invalid_function_0x1f0_past_set_table() {
 fn the_sites_ascend_by_firmware_and_each_is_found_by_its_version() {
     let versions: Vec<&str> = HYPERCALL_TABLE_SITES.iter().map(|s| s.firmware).collect();
     assert_eq!(versions, ["1.94", "3.15", "3.41", "3.70", "4.93"]);
-    assert_eq!(
-        table_site("4.93").map(|s| s.table_base),
-        Some(Some(0x372D08))
-    );
+    assert_eq!(table_site("4.93").map(|s| s.table_base), Some(0x372D08));
     assert_eq!(table_site("1.50"), None);
 }
 

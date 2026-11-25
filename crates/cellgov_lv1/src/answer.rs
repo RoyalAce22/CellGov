@@ -8,6 +8,8 @@ use cellgov_ps3_abi::lv1::repository::RepositoryKey;
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
 use crate::group::state::StateChange;
+use crate::request::HypercallRequest;
+use crate::return_path::{self, ReturnRegisters};
 
 /// The values for r4 to r10, in register order.
 pub type OutputRegisters = [u64; MAX_OUTPUTS as usize];
@@ -38,9 +40,8 @@ pub struct HypercallAnswer {
     /// zero-extended status, or the argument mark of an
     /// `allocate_memory` refusal.
     pub r3: u64,
-    /// The values for r4 to r10 that lv1's return path loads, or `None`
-    /// where lv1's return leaves r4 to r10 as the caller had them.
-    pub outputs: Option<OutputRegisters>,
+    /// How lv1 returns to the caller.
+    pub path: ReturnPath,
     /// Memory writes, at real addresses.
     pub effects: Vec<Effect>,
     /// Bytes for the guest TTY sink.
@@ -51,6 +52,17 @@ pub struct HypercallAnswer {
     /// The changes to the hypercall groups' state, which the hypervisor
     /// applies in order.
     pub changes: Vec<StateChange>,
+}
+
+/// How lv1's vector returns to the caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReturnPath {
+    /// The `hrfid` that every number in the table takes, which loads r4
+    /// to r10 with these values [OFW-4.93 lv1 a:0x1040-0x1068].
+    Table(OutputRegisters),
+    /// The `rfid` for a number past the end of the table, which leaves r4
+    /// to r10 as the caller had them [OFW-4.93 lv1 a:0x0C44-0x0C58].
+    PastTheTable(ReturnRegisters),
 }
 
 /// The translation registers that lv1 loads on the calling thread when
@@ -94,19 +106,41 @@ impl HypercallAnswer {
         const { assert!(N <= MAX_OUTPUTS as usize, "more outputs than r4 to r10") };
         let mut registers = OutputRegisters::default();
         registers[..N].copy_from_slice(&outputs);
-        Self::with_outputs(r3, Some(registers))
+        Self::with_path(r3, ReturnPath::Table(registers))
     }
 
-    /// The exact `r3`, with r4 to r10 as the caller had them and no memory
-    /// write.
-    pub(crate) fn r3_only(r3: u64) -> Self {
-        Self::with_outputs(r3, None)
+    /// The exact `r3` of the past-the-table return, with the `registers`
+    /// it leaves, r4 to r10 as the caller had them, and no memory write.
+    pub(crate) fn past_the_table(r3: u64, registers: ReturnRegisters) -> Self {
+        Self::with_path(r3, ReturnPath::PastTheTable(registers))
     }
 
-    fn with_outputs(r3: u64, outputs: Option<OutputRegisters>) -> Self {
+    /// The values for r4 to r10 that lv1's return loads, or `None` where
+    /// lv1's return leaves r4 to r10 as the caller had them.
+    pub fn outputs(&self) -> Option<OutputRegisters> {
+        match self.path {
+            ReturnPath::Table(outputs) => Some(outputs),
+            ReturnPath::PastTheTable(_) => None,
+        }
+    }
+
+    /// What lv1's return leaves in r0, r11, r12 and CR for `request`,
+    /// from a hypervisor for the firmware version `firmware`.
+    pub fn return_registers(
+        &self,
+        request: &HypercallRequest,
+        firmware: Option<&str>,
+    ) -> ReturnRegisters {
+        match self.path {
+            ReturnPath::Table(_) => return_path::table(request.problem_state, firmware),
+            ReturnPath::PastTheTable(registers) => registers,
+        }
+    }
+
+    fn with_path(r3: u64, path: ReturnPath) -> Self {
         Self {
             r3,
-            outputs,
+            path,
             effects: Vec::new(),
             console: None,
             page_table: None,

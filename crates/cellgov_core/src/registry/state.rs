@@ -2,7 +2,7 @@
 //! accessors live in sibling submodules.
 
 use cellgov_event::UnitId;
-use cellgov_exec::{ResumeKind, UnitStatus};
+use cellgov_exec::{CompareFields, ResumeKind, UnitStatus};
 use cellgov_time::GuestTicks;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -43,6 +43,9 @@ pub struct UnitRegistry {
     /// Per-unit register writes injected by HLE dispatch; drained
     /// alongside syscall returns.
     pub(super) pending_register_writes: BTreeMap<UnitId, Vec<(u8, u64)>>,
+    /// Per-unit CR fields that the hypervisor's compares set; drained
+    /// alongside syscall returns.
+    pub(super) pending_compare_fields: BTreeMap<UnitId, CompareFields>,
     /// The unit-status hash accumulator. Every path that can change a
     /// unit's effective status marks the unit stale here; the hash read
     /// refreshes only the stale lanes.
@@ -85,6 +88,7 @@ impl Clone for UnitRegistry {
             pending_receives: self.pending_receives.clone(),
             pending_syscall_returns: self.pending_syscall_returns.clone(),
             pending_register_writes: self.pending_register_writes.clone(),
+            pending_compare_fields: self.pending_compare_fields.clone(),
             status_lanes: RefCell::new(self.status_lanes.borrow().clone()),
             clocks: self.clocks.clone(),
             parked: self.parked.clone(),

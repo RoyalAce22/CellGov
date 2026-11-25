@@ -3,7 +3,7 @@
 
 use cellgov_event::UnitId;
 use cellgov_mem::GuestMemory;
-use cellgov_ps3_abi::lv1::call::READ_REPOSITORY_NODE;
+use cellgov_ps3_abi::lv1::call::{GET_LOGICAL_PARTITION_ID, READ_REPOSITORY_NODE};
 use cellgov_ps3_abi::lv1::dispatch::{PROBLEM_STATE_DENIED_R3, UNKNOWN_HYPERCALL_R3};
 use cellgov_ps3_abi::lv1::table::{
     table_entry, TableEntry, HYPERCALL_TABLE_SITES, INVALID_HYPERCALL_R3,
@@ -11,9 +11,10 @@ use cellgov_ps3_abi::lv1::table::{
 use cellgov_time::GuestTicks;
 
 use super::{null_backend, vector_disposition};
+use crate::return_path::past_the_table;
 use crate::{
-    answer, answered_numbers, GroupStates, HypercallAnswer, HypercallDisposition, HypercallRefusal,
-    HypercallRequest, HypercallWitness, Hypervisor,
+    answer, answered_numbers, answers, GroupStates, HypercallAnswer, HypercallDisposition,
+    HypercallRefusal, HypercallRequest, HypercallWitness, Hypervisor, ReturnPath,
 };
 
 fn request(number: u64, problem_state: bool) -> HypercallRequest {
@@ -29,10 +30,10 @@ fn request(number: u64, problem_state: bool) -> HypercallRequest {
     }
 }
 
-fn answered(r3: u64, outputs: Option<[u64; 7]>) -> HypercallDisposition {
+fn answered(r3: u64, path: ReturnPath) -> HypercallDisposition {
     HypercallDisposition::Answered(HypercallAnswer {
         r3,
-        outputs,
+        path,
         effects: Vec::new(),
         console: None,
         page_table: None,
@@ -56,7 +57,10 @@ fn a_number_past_the_table_answers_not_implemented_at_each_site_firmware() {
             for problem_state in [false, true] {
                 assert_eq!(
                     vector_disposition(&request(number, problem_state), Some(site.firmware)),
-                    Some(answered(UNKNOWN_HYPERCALL_R3, None)),
+                    Some(answered(
+                        UNKNOWN_HYPERCALL_R3,
+                        ReturnPath::PastTheTable(past_the_table(number, site.table_base))
+                    )),
                     "{} number {number} problem state {problem_state}",
                     site.firmware
                 );
@@ -90,7 +94,7 @@ fn every_problem_state_call_below_256_answers_no_privilege_at_4_93() {
                 &GroupStates::default(),
                 &GuestMemory::new(0)
             ),
-            answered(PROBLEM_STATE_DENIED_R3, Some([0; 7])),
+            answered(PROBLEM_STATE_DENIED_R3, ReturnPath::Table([0; 7])),
             "number {number}"
         );
         checked += 1;
@@ -127,7 +131,7 @@ fn an_invalid_entry_answers_the_invalid_function_with_r4_to_r10_cleared_at_4_93(
     let r = request(14, false);
     assert_eq!(
         null_backend(&r, Some("4.93")),
-        answered(INVALID_HYPERCALL_R3, Some([0; 7]))
+        answered(INVALID_HYPERCALL_R3, ReturnPath::Table([0; 7]))
     );
 }
 
@@ -175,10 +179,14 @@ fn the_invalid_answer_counts_a_witness_and_keeps_no_refusal() {
 
 #[test]
 fn a_problem_state_call_to_an_answered_number_counts_no_witness() {
+    assert!(answers(GET_LOGICAL_PARTITION_ID));
     let mut hv = Hypervisor::new();
     hv.set_firmware("4.93");
-    let d = hv.dispatch(&request(74, true));
-    assert_eq!(d, answered(PROBLEM_STATE_DENIED_R3, Some([0; 7])));
+    let d = hv.dispatch(&request(GET_LOGICAL_PARTITION_ID, true));
+    assert_eq!(
+        d,
+        answered(PROBLEM_STATE_DENIED_R3, ReturnPath::Table([0; 7]))
+    );
     assert!(hv.witnesses().is_empty());
 }
 

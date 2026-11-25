@@ -150,19 +150,22 @@ fn an_r5_of_0_with_no_bitmap_held_gets_lv1s_wrong_state() {
 
 #[test]
 fn an_r5_of_0_after_a_registration_of_either_thread_is_refused() {
-    let mut bitmaps = IrqStateBitmapState::default();
-    bitmaps.register(IrqStateBitmapRegistration {
-        key: IrqStateBitmapKey {
-            ppe_id: 1,
-            thread: 1,
-        },
-        lpar_address: THREAD_1_BITMAP,
-    });
-    let r = with(&request(0), 5, 0);
-    assert_eq!(
-        configure(&r, &bitmaps),
-        refused(&r, "the release of a registered interrupt state bitmap")
-    );
+    for (held, address) in [(0, THREAD_0_BITMAP), (1, THREAD_1_BITMAP)] {
+        let mut bitmaps = IrqStateBitmapState::default();
+        bitmaps.register(IrqStateBitmapRegistration {
+            key: IrqStateBitmapKey {
+                ppe_id: 1,
+                thread: held,
+            },
+            lpar_address: address,
+        });
+        let r = with(&request(0), 5, 0);
+        assert_eq!(
+            configure(&r, &bitmaps),
+            refused(&r, "the release of a registered interrupt state bitmap"),
+            "thread {held}"
+        );
+    }
 }
 
 /// The low 3 bits check at [OFW-4.93 lv1 a:0x2EA648].
@@ -304,6 +307,29 @@ fn the_hypervisor_keeps_each_threads_bitmap_and_hashes_it() {
     assert_ne!(hv.sync_term(), one);
     assert!(hv.witnesses().is_empty());
     assert_eq!(hv.refusal(), None);
+}
+
+#[test]
+fn a_release_after_the_hypervisor_registers_a_bitmap_is_refused() {
+    let mut hv = Hypervisor::new();
+    hv.set_firmware("4.93");
+    let r0 = request(0);
+    assert_eq!(
+        hv.dispatch_with(&r0, &storage()),
+        registered(&r0, 0, THREAD_0_BITMAP)
+    );
+    let release = with(&request(1), 5, 0);
+    let refusal = HypercallRefusal::UnmodelledInput {
+        number: CONFIGURE_IRQ_STATE_BITMAP,
+        unit: release.unit,
+        pc: release.pc,
+        what: "the release of a registered interrupt state bitmap",
+    };
+    assert_eq!(
+        hv.dispatch_with(&release, &storage()),
+        HypercallDisposition::Refused(refusal)
+    );
+    assert_eq!(hv.refusal(), Some(refusal));
 }
 
 #[test]

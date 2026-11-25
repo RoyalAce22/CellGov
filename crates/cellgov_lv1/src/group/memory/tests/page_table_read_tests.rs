@@ -2,6 +2,7 @@ use super::*;
 use crate::state::Hypervisor;
 use crate::AddressSpaceChange;
 use cellgov_event::UnitId;
+use cellgov_ps3_abi::lv1::address_space::game_os_boot_vas_id;
 use cellgov_ps3_abi::lv1::call::{
     CONSTRUCT_VIRTUAL_ADDRESS_SPACE, READ_HTAB_ENTRIES, SELECT_VIRTUAL_ADDRESS_SPACE,
 };
@@ -9,7 +10,9 @@ use cellgov_time::GuestTicks;
 
 /// The vas id that the console capture `tests/micro/lv2_vas_boot_record`
 /// reads from the 4.93 kernel's record.
-const VAS_ID: u64 = 2;
+fn vas_id() -> u64 {
+    game_os_boot_vas_id("4.93").expect("the 4.93 boot vas id")
+}
 
 /// The last index whose four entries a 256 KB page table holds.
 const LAST_INDEX: u64 = 16380;
@@ -36,14 +39,14 @@ fn read_request(vas_id: u64, index: u64) -> HypercallRequest {
 fn spaces(selected: bool) -> AddressSpaceState {
     let mut spaces = AddressSpaceState::default();
     spaces.apply(AddressSpaceChange::Constructed(AddressSpace {
-        vas_id: VAS_ID,
+        vas_id: vas_id(),
         htab_size_exp: 18,
         page_size_count: 2,
         page_shifts: 0x1014_0000_0000_0000,
         mapping: None,
     }));
     if selected {
-        spaces.apply(AddressSpaceChange::Selected(VAS_ID));
+        spaces.apply(AddressSpaceChange::Selected(vas_id()));
     }
     spaces
 }
@@ -90,7 +93,7 @@ fn refusal_what(d: &HypercallDisposition) -> Option<&'static str> {
 #[test]
 fn a_read_of_the_selected_table_returns_four_entries_as_storage_holds_them() {
     let (spaces, storage) = (spaces(true), storage());
-    for vas_id in [0, VAS_ID] {
+    for vas_id in [0, vas_id()] {
         for first in [0, 6, LAST_INDEX] {
             let d = read_entries(
                 &read_request(vas_id, first),
@@ -128,16 +131,23 @@ fn an_index_whose_end_overflows_refuses() {
 #[test]
 fn a_read_with_no_address_space_or_storage_refuses() {
     let storage = storage();
+    let unread = "a page table call at a firmware whose lv1 handler is not read";
     let cases = [
-        (spaces(true), 3, Some("4.93")),
-        (spaces(true), 0, None),
-        (spaces(true), 0, Some("4.92")),
+        (
+            spaces(true),
+            3,
+            Some("4.93"),
+            "a page table call on an address space that this hypervisor did not construct",
+        ),
+        (spaces(true), 0, None, unread),
+        (spaces(true), 0, Some("4.92"), unread),
     ];
     assert_eq!(cases.len(), 3);
-    for (spaces, vas_id, firmware) in cases {
+    for (spaces, vas_id, firmware, what) in cases {
         let d = read_entries(&read_request(vas_id, 0), firmware, &spaces, &storage);
-        assert!(
-            refusal_what(&d).is_some(),
+        assert_eq!(
+            refusal_what(&d),
+            Some(what),
             "{firmware:?} vas id {vas_id}: {d:?}"
         );
     }
@@ -163,8 +173,11 @@ fn the_hypervisor_reads_the_table_only_from_the_storage_it_is_given() {
         &call(CONSTRUCT_VIRTUAL_ADDRESS_SPACE, 0, 2, shifts),
         &storage,
     );
-    hv.dispatch_with(&call(SELECT_VIRTUAL_ADDRESS_SPACE, VAS_ID, 0, 0), &storage);
-    assert_eq!(hv.address_spaces().selected(), Some(VAS_ID));
+    hv.dispatch_with(
+        &call(SELECT_VIRTUAL_ADDRESS_SPACE, vas_id(), 0, 0),
+        &storage,
+    );
+    assert_eq!(hv.address_spaces().selected(), Some(vas_id()));
     assert_eq!(hv.dispatch_with(&read_request(0, 0), &storage), expected(0));
     let d = hv.dispatch(&read_request(0, 0));
     assert_eq!(

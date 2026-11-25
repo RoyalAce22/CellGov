@@ -1,9 +1,11 @@
 use super::*;
-use crate::group::memory::{ADDRESS_SPACE_SOURCE, SELECTED_ADDRESS_SPACE_SOURCE};
+use crate::group::memory::ADDRESS_SPACE_SOURCE;
 use crate::state::Hypervisor;
 use crate::MemoryRegion;
 use cellgov_event::UnitId;
+use cellgov_mem::lanes::{contribution, LaneIndex};
 use cellgov_ps3_abi::hw::ppu_mmu::PTE_L;
+use cellgov_ps3_abi::lv1::address_space::game_os_boot_vas_id;
 use cellgov_ps3_abi::lv1::call::{
     ALLOCATE_MEMORY, CONSTRUCT_VIRTUAL_ADDRESS_SPACE, MAP_HTAB, SELECT_VIRTUAL_ADDRESS_SPACE,
     WRITE_HTAB_ENTRY,
@@ -13,7 +15,9 @@ use cellgov_time::GuestTicks;
 
 /// The vas id that the console capture `tests/micro/lv2_vas_boot_record`
 /// reads from the 4.93 kernel's record.
-const VAS_ID: u64 = 2;
+fn vas_id() -> u64 {
+    game_os_boot_vas_id("4.93").expect("the 4.93 boot vas id")
+}
 
 /// The size of the 4.93 kernel's page table: 256 KB.
 const TABLE_BYTES: u64 = 0x4_0000;
@@ -34,14 +38,14 @@ fn call(number: u64, inputs: [u64; 4]) -> HypercallRequest {
 fn spaces(selected: bool) -> AddressSpaceState {
     let mut spaces = AddressSpaceState::default();
     spaces.apply(AddressSpaceChange::Constructed(AddressSpace {
-        vas_id: VAS_ID,
+        vas_id: vas_id(),
         htab_size_exp: 18,
         page_size_count: 2,
         page_shifts: 0x1014_0000_0000_0000,
         mapping: None,
     }));
     if selected {
-        spaces.apply(AddressSpaceChange::Selected(VAS_ID));
+        spaces.apply(AddressSpaceChange::Selected(vas_id()));
     }
     spaces
 }
@@ -54,7 +58,7 @@ fn mapped(counter: u64) -> HypercallDisposition {
     let lpar_address = region_address(TABLE_BYTES, counter).expect("address");
     let mut answer = HypercallAnswer::lv1_status(0, [lpar_address, 0, 0, 0, 0, 0, 0]);
     answer.push_change(AddressSpaceChange::Mapped {
-        vas_id: VAS_ID,
+        vas_id: vas_id(),
         lpar_address,
         counter,
     });
@@ -71,7 +75,7 @@ fn refusal_what(d: &HypercallDisposition) -> Option<&'static str> {
 #[test]
 fn a_mapping_takes_the_next_region_counter_value() {
     let fresh = MemoryState::default();
-    for vas_id in [0, VAS_ID] {
+    for vas_id in [0, vas_id()] {
         let d = map_table(
             &call(MAP_HTAB, [vas_id, 0, 0, 0]),
             Some("4.93"),
@@ -101,26 +105,33 @@ fn a_mapping_takes_the_next_region_counter_value() {
 fn a_mapping_refuses_twice_and_where_no_address_space_is_named() {
     let mut twice = spaces(true);
     twice.apply(AddressSpaceChange::Mapped {
-        vas_id: VAS_ID,
+        vas_id: vas_id(),
         lpar_address: 0x1234_0000,
         counter: 0,
     });
+    let unread = "a page table call at a firmware whose lv1 handler is not read";
     let cases = [
-        (twice, 0, Some("4.93")),
-        (spaces(true), 3, Some("4.93")),
-        (spaces(true), 0, None),
-        (spaces(true), 0, Some("4.92")),
+        (twice, 0, Some("4.93"), "a second mapping of a page table"),
+        (
+            spaces(true),
+            3,
+            Some("4.93"),
+            "a page table call on an address space that this hypervisor did not construct",
+        ),
+        (spaces(true), 0, None, unread),
+        (spaces(true), 0, Some("4.92"), unread),
     ];
     assert_eq!(cases.len(), 4);
-    for (spaces, vas_id, firmware) in cases {
+    for (spaces, vas_id, firmware, what) in cases {
         let d = map_table(
             &call(MAP_HTAB, [vas_id, 0, 0, 0]),
             firmware,
             &spaces,
             &MemoryState::default(),
         );
-        assert!(
-            refusal_what(&d).is_some(),
+        assert_eq!(
+            refusal_what(&d),
+            Some(what),
             "{firmware:?} vas id {vas_id}: {d:?}"
         );
     }
@@ -143,7 +154,7 @@ fn the_hypervisor_keeps_the_mapping_and_maps_its_pages_to_the_table_storage() {
         &storage,
     );
     hv.dispatch_with(
-        &call(SELECT_VIRTUAL_ADDRESS_SPACE, [VAS_ID, 0, 0, 0]),
+        &call(SELECT_VIRTUAL_ADDRESS_SPACE, [vas_id(), 0, 0, 0]),
         &storage,
     );
     let d = hv.dispatch_with(&call(MAP_HTAB, [0, 0, 0, 0]), &storage);
@@ -187,35 +198,26 @@ fn the_hypervisor_keeps_the_mapping_and_maps_its_pages_to_the_table_storage() {
         panic!("the allocation refused");
     };
     assert_eq!(
-        answer.outputs.expect("r4 to r10")[0],
+        answer.outputs().expect("r4 to r10")[0],
         region_address(0x10_0000, boot_counter() + 1).expect("address")
     );
 }
 
 #[test]
-fn a_mapping_moves_the_address_space_hash_and_an_unmapped_space_keeps_it() {
+fn a_mapping_adds_its_address_as_lane_5_of_the_address_space_term() {
     let unmapped = spaces(true);
+    assert_eq!(unmapped.spaces().len(), 1);
+    let lpar_address = 0x0004_8000_0000_0000;
     let mut mapped = spaces(true);
     mapped.apply(AddressSpaceChange::Mapped {
-        vas_id: VAS_ID,
-        lpar_address: 0x0004_8000_0000_0000,
+        vas_id: vas_id(),
+        lpar_address,
         counter: 0x20,
     });
-    assert_ne!(mapped.sync_term(), unmapped.sync_term());
-    let mut expected = 0u128;
-    for (index, space) in (0u64..).zip(unmapped.spaces()) {
-        let mut lanes_only = *space;
-        lanes_only.mapping = None;
-        expected = expected.wrapping_add(cellgov_mem::lanes::value_term(
-            ADDRESS_SPACE_SOURCE,
-            index,
-            &lanes_only,
-        ));
-    }
-    expected = expected.wrapping_add(cellgov_mem::lanes::value_term(
-        SELECTED_ADDRESS_SPACE_SOURCE,
-        0,
-        &VAS_ID,
-    ));
-    assert_eq!(unmapped.sync_term(), expected);
+    let lane_5 = contribution(LaneIndex::new(ADDRESS_SPACE_SOURCE, 0, 5, 0), lpar_address);
+    assert_ne!(lane_5, 0);
+    assert_eq!(
+        mapped.sync_term(),
+        unmapped.sync_term().wrapping_add(lane_5)
+    );
 }

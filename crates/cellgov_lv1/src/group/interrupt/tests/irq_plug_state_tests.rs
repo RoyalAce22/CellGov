@@ -1,5 +1,4 @@
 use super::*;
-use crate::group::interrupt::EVENT_RECEIVE_PORT_SOURCE;
 use crate::Hypervisor;
 use cellgov_event::UnitId;
 use cellgov_mem::lanes::{contribution, LaneIndex};
@@ -109,14 +108,28 @@ fn a_second_connect_of_the_port_changes_nothing() {
 
 #[test]
 fn a_failed_check_and_a_refusal_keep_the_port_unconnected() {
-    for args in [
-        [1, 2, 0, FIRST_PORT_ID, 0],
-        [1, 0, 0, FIRST_PORT_ID, 1],
-        [1, 0, 0, 4, 0],
+    for (args, failed_r3) in [
+        ([1, 2, 0, FIRST_PORT_ID, 0], Some(IRQ_PLUG_THREAD_R3)),
+        ([1, 0, 0, FIRST_PORT_ID, 1], Some(IRQ_PLUG_R7_R3)),
+        ([1, 0, 0, 4, 0], None),
     ] {
         let mut hv = booted();
         let before = hv.sync_term();
-        connect(&mut hv, &args);
+        match (connect(&mut hv, &args), failed_r3) {
+            (HypercallDisposition::Answered(answer), Some(r3)) => {
+                assert_eq!(answer.r3, r3, "{args:?}");
+                assert!(answer.changes.is_empty(), "{args:?}");
+            }
+            (
+                HypercallDisposition::Refused(HypercallRefusal::UnmodelledInput {
+                    number: CONNECT_IRQ_PLUG_EXT,
+                    what: "an IRQ plug call whose port id names no object CellGov holds",
+                    ..
+                }),
+                None,
+            ) => {}
+            (disposition, _) => panic!("{args:?}: {disposition:?}"),
+        }
         assert_eq!(
             hv.event_receive_ports().port(FIRST_PORT_ID),
             Some(&EventReceivePort::new(FIRST_PORT_ID)),
@@ -140,21 +153,19 @@ fn the_plug_of_an_unconnected_port_moves_the_hash() {
 }
 
 /// The list holds every nonzero lane of a state with one port, of id 3,
-/// connected to plug 9 of thread 1 of the logical PPE 1.
+/// connected to plug 9 of thread 7 of the logical PPE 5. Each field has
+/// a different value, so a field that moves to another lane changes the
+/// sum. The lane source is the fixed 82, so a moved source changes it
+/// too.
 #[test]
 fn connected_port_sync_term_lane_vector_golden() {
-    let lane = |field, value| {
-        contribution(
-            LaneIndex::new(EVENT_RECEIVE_PORT_SOURCE, 0, field, 0),
-            value,
-        )
-    };
+    let lane = |field, value| contribution(LaneIndex::new(82, 0, field, 0), value);
     let mut ports = EventReceivePortState::default();
     ports.construct(EventReceivePort {
         id: 3,
         connection: Some(IrqStateBitmapKey {
-            ppe_id: 1,
-            thread: 1,
+            ppe_id: 5,
+            thread: 7,
         }),
         plug: 9,
     });
@@ -162,8 +173,8 @@ fn connected_port_sync_term_lane_vector_golden() {
         lane(0, 1),
         lane(1, 3),
         lane(2, 1),
-        lane(3, 1),
-        lane(4, 1),
+        lane(3, 5),
+        lane(4, 7),
         lane(5, 9),
     ]
     .into_iter()

@@ -6,7 +6,7 @@ use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::repository::{field, first_field};
 use cellgov_time::GuestTicks;
 
-use crate::{HypercallDisposition, HypercallRequest, Hypervisor};
+use crate::{HypercallAnswer, HypercallDisposition, HypercallRequest, Hypervisor};
 
 const CAPTURE: &str = "tests/micro/lv1_repository_debug_support/peek/cech20-cex-493";
 
@@ -83,6 +83,11 @@ fn the_debug_support_read_answers_status_0_and_the_captured_node_values() {
         HypercallDisposition::Refused(refusal) => panic!("{refusal}"),
     };
     assert_eq!(answer.r3, 0, "r3");
-    let outputs = answer.outputs.expect("r4 to r10");
+    let outputs = answer.outputs().expect("r4 to r10");
     assert_eq!(outputs[..2], [hex(&row[9]), hex(&row[10])], "r4 and r5");
+    assert_eq!(
+        answer,
+        HypercallAnswer::success([hex(&row[9]), hex(&row[10])]),
+        "r6 to r10 cleared and no other effect"
+    );
 }

@@ -19,6 +19,7 @@ use cellgov_ps3_abi::lv1::table::{self, TableEntry, HYPERCALL_TABLE_ENTRIES};
 
 use super::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use super::request::HypercallRequest;
+use super::return_path;
 
 /// An answer of `r3` with r4 to r10 at 0, as lv1's return path gives
 /// it, and no memory write.
@@ -43,10 +44,13 @@ pub(super) fn vector_disposition(
     firmware: Option<&str>,
 ) -> Option<HypercallDisposition> {
     let site = firmware.and_then(table::table_site);
-    if request.number >= HYPERCALL_TABLE_ENTRIES && site.is_some() {
-        return Some(HypercallDisposition::Answered(HypercallAnswer::r3_only(
-            UNKNOWN_HYPERCALL_R3,
-        )));
+    if let Some(site) = site.filter(|_| request.number >= HYPERCALL_TABLE_ENTRIES) {
+        return Some(HypercallDisposition::Answered(
+            HypercallAnswer::past_the_table(
+                UNKNOWN_HYPERCALL_R3,
+                return_path::past_the_table(request.number, site.table_base),
+            ),
+        ));
     }
     if !request.problem_state {
         return None;

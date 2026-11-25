@@ -9,7 +9,7 @@ use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{
     CodeEvent, ExecutionContext, ExecutionStepResult, ExecutionUnit, FaultRegisterDump,
-    PpuFingerprint, ProblemStateError, RestartError, RetiredBarrier, SignalNotifier,
+    PpuFingerprint, ProblemStateError, RestartError, RetiredBarrier, SaveRestore, SignalNotifier,
     SpuFingerprint, StopRegisters, UnitStatus,
 };
 use cellgov_time::Budget;
@@ -93,6 +93,10 @@ pub trait RegisteredUnit: 'static {
     /// Whether the unit's thread is in problem state. See
     /// [`ExecutionUnit::in_problem_state`].
     fn in_problem_state(&self) -> bool;
+
+    /// The SRR0 and SRR1 of a system call at the unit's pc. See
+    /// [`ExecutionUnit::system_call_save_restore`].
+    fn system_call_save_restore(&self) -> Option<SaveRestore>;
 
     /// Give the thread a page table and large page sizes. See
     /// [`ExecutionUnit::load_page_table`].
@@ -333,6 +337,11 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn in_problem_state(&self) -> bool {
         ExecutionUnit::in_problem_state(self)
+    }
+
+    #[inline]
+    fn system_call_save_restore(&self) -> Option<SaveRestore> {
+        ExecutionUnit::system_call_save_restore(self)
     }
 
     #[inline]

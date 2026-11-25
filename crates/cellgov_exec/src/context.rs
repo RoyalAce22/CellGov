@@ -5,6 +5,7 @@
 //! unit's next scheduled invocation. Enforced structurally via the
 //! immutable borrow of `GuestMemory` held by `ExecutionContext`.
 
+use crate::interrupt_return::CompareFields;
 use crate::unit::PpeIssuePressure;
 use cellgov_event::UnitId;
 use cellgov_mem::GuestMemory;
@@ -47,6 +48,7 @@ pub struct ExecutionContext<'a> {
     ppe_older_sibling: bool,
     time_base: u64,
     resumed: Option<ResumeKind>,
+    compare_fields: Option<CompareFields>,
 }
 
 /// Why a unit was not runnable at a clock sync before it resumed.
@@ -113,6 +115,7 @@ impl<'a> ExecutionContext<'a> {
             ppe_older_sibling: false,
             time_base: 0,
             resumed: None,
+            compare_fields: None,
         }
     }
 
@@ -142,6 +145,7 @@ impl<'a> ExecutionContext<'a> {
             ppe_older_sibling: false,
             time_base: 0,
             resumed: None,
+            compare_fields: None,
         }
     }
 
@@ -173,6 +177,7 @@ impl<'a> ExecutionContext<'a> {
             ppe_older_sibling: false,
             time_base: 0,
             resumed: None,
+            compare_fields: None,
         }
     }
 
@@ -208,6 +213,7 @@ impl<'a> ExecutionContext<'a> {
             ppe_older_sibling: false,
             time_base: 0,
             resumed: None,
+            compare_fields: None,
         }
     }
 
@@ -241,6 +247,23 @@ impl<'a> ExecutionContext<'a> {
     #[inline]
     pub const fn resumed(&self) -> Option<ResumeKind> {
         self.resumed
+    }
+
+    /// Attach the CR fields that the unit takes; see
+    /// [`Self::compare_fields`].
+    #[inline]
+    pub const fn with_compare_fields(self, compare_fields: Option<CompareFields>) -> Self {
+        Self {
+            compare_fields,
+            ..self
+        }
+    }
+
+    /// The CR fields that compares outside the unit set before this step,
+    /// such as the hypervisor's return from a hypercall.
+    #[inline]
+    pub const fn compare_fields(&self) -> Option<CompareFields> {
+        self.compare_fields
     }
 
     /// Attach the committed reservation table, replacing any prior
