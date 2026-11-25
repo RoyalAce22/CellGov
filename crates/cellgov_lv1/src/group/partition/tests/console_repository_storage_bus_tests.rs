@@ -3,10 +3,10 @@
 //! committed capture `tests/micro/lv1_repository_bus`.
 
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::lv1::repository::{field, first_field, RepositoryKey};
+use cellgov_ps3_abi::lv1::repository::{field, first_field};
 use cellgov_time::GuestTicks;
 
-use crate::{HypercallDisposition, HypercallRefusal, HypercallRequest, Hypervisor};
+use crate::{HypercallDisposition, HypercallRequest, Hypervisor};
 
 const CAPTURE: &str = "tests/micro/lv1_repository_bus/peek/cech20-cex-493";
 
@@ -101,25 +101,4 @@ fn the_storage_search_reads_answer_status_0_and_the_unread_node_values() {
             "r4 and r5 of {n:x?}"
         );
     }
-}
-
-/// No committed capture gives the values of bus 4, so its id read stays a
-/// refusal.
-#[test]
-fn the_bus_4_id_read_is_refused() {
-    let n = bus_field(4, b"id");
-    assert_eq!(
-        dispatch_4_93(&read(n, 0x8000_0000_0009_62bc)),
-        HypercallDisposition::Refused(HypercallRefusal::RepositoryNode {
-            key: RepositoryKey {
-                lpar: 1,
-                n1: n[0],
-                n2: n[1],
-                n3: n[2],
-                n4: n[3],
-            },
-            unit: UnitId::new(0),
-            pc: WRAPPER_SC,
-        })
-    );
 }

@@ -3,12 +3,12 @@ use crate::lv1::partition::LPAR_ID_PME;
 
 const HEADER: &str = "fw\tlpar\tn1\tn2\tn3\tn4\taddress\treads\tagree\tv1\tv2";
 
-/// The data rows of the bus capture's `unread_node.tsv`.
-fn unread_rows() -> Vec<Vec<String>> {
+/// The data rows of the bus capture's file `name`.
+fn bus_rows(name: &str) -> Vec<Vec<String>> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join(BUS_CAPTURE)
-        .join("unread_node.tsv");
+        .join(name);
     let shown = path.display().to_string();
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{shown}: {e}"));
     let mut lines = text.lines();
@@ -27,6 +27,10 @@ fn hex(cell: &str) -> u64 {
         .strip_prefix("0x")
         .unwrap_or_else(|| panic!("{cell} is not 0x hex"));
     u64::from_str_radix(digits, 16).unwrap_or_else(|e| panic!("{cell}: {e}"))
+}
+
+fn row_key(row: &[String]) -> [u64; 4] {
+    [hex(&row[2]), hex(&row[3]), hex(&row[4]), hex(&row[5])]
 }
 
 /// The key `bus.<bus>.<word>` of lpar 1.
@@ -72,7 +76,7 @@ fn the_served_bus_0_id_key_is_the_words_the_4_93_kernel_builds() {
 
 #[test]
 fn each_storage_search_node_answers_its_unread_node_row_and_cites_it() {
-    let rows = unread_rows();
+    let rows = bus_rows("unread_node.tsv");
     let keys = storage_search_keys();
     assert_eq!(keys.len(), 5);
     for key in keys {
@@ -113,34 +117,58 @@ fn each_storage_search_node_answers_its_unread_node_row_and_cites_it() {
 /// [OFW-4.93 lv2_kernel a:0x8000000000287218-0x8000000000287220]. No bus
 /// of 0 to 3 has that type, so the search goes on to bus 4.
 #[test]
-fn no_bus_of_0_to_3_has_type_5_and_each_answers_its_id() {
+fn each_bus_of_0_to_3_answers_its_captured_type_and_id_and_no_captured_type_is_5() {
+    let rows: Vec<Vec<String>> = bus_rows("node.tsv")
+        .into_iter()
+        .chain(bus_rows("unread_node.tsv"))
+        .collect();
+    let captured_v1 = |key: RepositoryKey| {
+        let matching: Vec<&Vec<String>> = rows
+            .iter()
+            .filter(|row| row_key(row) == [key.n1, key.n2, key.n3, key.n4])
+            .collect();
+        assert_eq!(matching.len(), 1, "one captured row for {key}");
+        hex(&matching[0][9])
+    };
     for bus in 0..4 {
+        let captured_type = captured_v1(bus_field(bus, b"type"));
+        assert_ne!(captured_type, 5, "the captured type of bus {bus}");
         let type_node = lookup(&bus_field(bus, b"type"), "4.93")
             .unwrap_or_else(|| panic!("no 4.93 type row for bus {bus}"));
-        assert_ne!(type_node.v1, 5, "bus {bus}");
+        assert_eq!(type_node.v1, captured_type, "the type of bus {bus}");
         let id_node = lookup(&bus_field(bus, b"id"), "4.93")
             .unwrap_or_else(|| panic!("no 4.93 id row for bus {bus}"));
-        assert_eq!(id_node.v1, bus, "the id of bus {bus}");
+        assert_eq!(
+            id_node.v1,
+            captured_v1(bus_field(bus, b"id")),
+            "the id of bus {bus}"
+        );
     }
 }
 
-/// The capture gives no value of bus 4, and the 4.93 boot sends no read
-/// of the other bus 0, 2 and 3 nodes that `unread_node.tsv` holds.
+/// The 4.93 boot sends no read of the other bus 0, 2 and 3 nodes that
+/// `unread_node.tsv` holds.
 #[test]
-fn the_bus_reads_that_no_served_row_gives_stay_refused() {
-    let unserved = [
-        bus_field(0, b"num_dev"),
-        bus_field(2, b"num_dev"),
-        bus_field(3, b"num_dev"),
-        bus_field(4, b"id"),
-        bus_field(4, b"type"),
-        RepositoryKey {
-            n2: field(b"dev", 0),
-            n3: field(b"id", 0),
-            ..bus_field(0, b"dev")
-        },
-    ];
-    assert_eq!(unserved.len(), 6);
+fn every_unread_node_row_outside_the_storage_search_stays_refused() {
+    let searched: Vec<[u64; 4]> = storage_search_keys()
+        .iter()
+        .map(|key| [key.n1, key.n2, key.n3, key.n4])
+        .collect();
+    let unserved: Vec<RepositoryKey> = bus_rows("unread_node.tsv")
+        .iter()
+        .filter(|row| !searched.contains(&row_key(row)))
+        .map(|row| {
+            let n = row_key(row);
+            RepositoryKey {
+                lpar: row[1].parse::<u64>().expect("a decimal lpar"),
+                n1: n[0],
+                n2: n[1],
+                n3: n[2],
+                n4: n[3],
+            }
+        })
+        .collect();
+    assert_eq!(unserved.len(), 5);
     for key in unserved {
         assert!(lookup(&key, "4.93").is_none(), "{key}");
         assert!(lookup_absent(&key, "4.93").is_none(), "{key}");

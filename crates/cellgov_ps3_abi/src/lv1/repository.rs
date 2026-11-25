@@ -232,8 +232,9 @@ const GAME_OS_341_DUMP: NodeSource = NodeSource::PsdevwikiDump {
 /// The dump is of firmware 3.41, which no logged boot is. No source gives
 /// the values for 1.50, 1.94 or 3.70. At 4.93 the console captures
 /// [`BOOT_RECORD_CAPTURE`], [`DEBUG_SUPPORT_CAPTURE`],
-/// [`FLASH_EXT_CAPTURE`], [`HW_CONFIG_CAPTURE`], [`LIST_CAPTURE`] and
-/// [`BUS_CAPTURE`] give each value that the 4.93 boot reads.
+/// [`FLASH_EXT_CAPTURE`], [`HW_CONFIG_CAPTURE`], [`LIST_CAPTURE`],
+/// [`BUS_CAPTURE`] and [`STORAGE_BUS_CAPTURE`] give each value that the
+/// 4.93 boot reads.
 const DUMP_FIRMWARE_BEFORE_4_93: &[&str] = &["1.50", "1.94", "3.70"];
 
 /// The console capture of the 4.93 kernel's boot repository record, on
@@ -249,8 +250,8 @@ pub const BOOT_RECORD_CAPTURE: &str = "tests/micro/lv2_repository_boot_nodes/ps3
 pub const BOOT_RECORD_4_93: u64 = 0x8000_0000_0037_a5a0;
 
 /// The firmware of [`BOOT_RECORD_CAPTURE`], [`DEBUG_SUPPORT_CAPTURE`],
-/// [`FLASH_EXT_CAPTURE`], [`HW_CONFIG_CAPTURE`], [`LIST_CAPTURE`] and
-/// [`BUS_CAPTURE`].
+/// [`FLASH_EXT_CAPTURE`], [`HW_CONFIG_CAPTURE`], [`LIST_CAPTURE`],
+/// [`BUS_CAPTURE`] and [`STORAGE_BUS_CAPTURE`].
 const CAPTURE_FIRMWARE: &[&str] = &["4.93"];
 
 /// The value at offset `offset` of the 4.93 boot record, as
@@ -324,21 +325,38 @@ const UPDATE_STATUS_V1_ADDRESS: u64 = 0x0076_3e58;
 /// reference console at firmware 4.93. Its README gives the method.
 pub const BUS_CAPTURE: &str = "tests/micro/lv1_repository_bus/peek/cech20-cex-493";
 
+/// The console capture of lpar 1's bus 4 `id` and `type` nodes in lv1's
+/// repository, on the reference console at firmware 4.93. Its README
+/// gives the method.
+pub const STORAGE_BUS_CAPTURE: &str = "tests/micro/lv1_repository_storage_bus/peek/cech20-cex-493";
+
 /// A node of lpar 1's bus `bus` whose last three key words are `n`.
 ///
 /// [`BUS_CAPTURE`] read the node's two values at the lv1 addresses
 /// `address` and `address` + 8.
 const fn bus_node(bus: u64, n: [u64; 3], v1: u64, v2: u64, address: u64) -> RepositoryNode {
+    bus_node_of(BUS_CAPTURE, bus, n, v1, v2, address)
+}
+
+/// A node of lpar 1's bus `bus` whose last three key words are `n`.
+///
+/// `capture` read the node's two values at the lv1 addresses `address`
+/// and `address` + 8.
+const fn bus_node_of(
+    capture: &'static str,
+    bus: u64,
+    n: [u64; 3],
+    v1: u64,
+    v2: u64,
+    address: u64,
+) -> RepositoryNode {
     node(
         LPAR_ID_PME,
         [first_field(b"bus", bus), n[0], n[1], n[2]],
         v1,
         SecondValue::Given(v2),
         CAPTURE_FIRMWARE,
-        NodeSource::Lv1NodeCapture {
-            capture: BUS_CAPTURE,
-            address,
-        },
+        NodeSource::Lv1NodeCapture { capture, address },
     )
 }
 
@@ -395,7 +413,7 @@ pub const NODES: &[RepositoryNode] = &[
         CAPTURE_FIRMWARE,
         captured(0xb0),
     ),
-    // `bus.<n>.id` for n = 0, 2, 3: the bus id. The storage bus search
+    // `bus.<n>.id` for n = 0, 2, 3, 4: the bus id. The storage bus search
     // reads `bus.<n>.id` and then `bus.<n>.type` for n = 0 to 9. It stops
     // at the first bus of type 5
     // [OFW-4.93 lv2_kernel a:0x80000000002871e4-0x8000000000287228]. It
@@ -405,7 +423,7 @@ pub const NODES: &[RepositoryNode] = &[
     // the frame without a load of that slot
     // [OFW-4.93 lv2_kernel a:0x80000000000962f8-0x800000000009631c].
     bus_node(0, [field(b"id", 0), 0, 0], 0, 0, 0x0068_9f78),
-    // `bus.<n>.type` for n = 0 to 3: the bus type. The kernel's bus search
+    // `bus.<n>.type` for n = 0 to 4: the bus type. The kernel's bus search
     // reads it for n = 0 to 3 and stops at the first bus of type 4
     // [OFW-4.93 lv2_kernel a:0x80000000002777f8-0x8000000000277830]. Its
     // caller asks for type 4 [OFW-4.93 lv2_kernel a:0x8000000000277910].
@@ -601,6 +619,26 @@ pub const NODES: &[RepositoryNode] = &[
     bus_node(3, [field(b"id", 0), 0, 0], 3, 0, 0x0068_aff8),
     // `bus.3.type`; see `bus.<n>.type` above.
     bus_node(3, [field(b"type", 0), 0, 0], 2, 0, 0x0068_b078),
+    // `bus.4.id`; see `bus.<n>.id` above.
+    bus_node_of(
+        STORAGE_BUS_CAPTURE,
+        4,
+        [field(b"id", 0), 0, 0],
+        4,
+        0,
+        0x0069_4278,
+    ),
+    // `bus.4.type`; see `bus.<n>.type` above. Bus 4 is the first bus of
+    // type 5 on the reference console, so the storage bus search stops
+    // there.
+    bus_node_of(
+        STORAGE_BUS_CAPTURE,
+        4,
+        [field(b"type", 0), 0, 0],
+        5,
+        0,
+        0x0069_42f8,
+    ),
     // `plat.id`: the platform id, 8 bytes of text. The kernel keeps it at
     // offset 0xa8 of its boot record [OFW-4.93 lv2_kernel a:0x800000000000CD08].
     node(
@@ -933,6 +971,10 @@ mod bus_tests;
 #[cfg(test)]
 #[path = "tests/repository_storage_bus_tests.rs"]
 mod storage_bus_tests;
+
+#[cfg(test)]
+#[path = "tests/repository_storage_bus_4_tests.rs"]
+mod storage_bus_4_tests;
 
 #[cfg(test)]
 #[path = "tests/repository_bus_device_tests.rs"]

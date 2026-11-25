@@ -256,7 +256,8 @@ rows.
 - `bus.0.id` holds 0, `bus.2.id` holds 2 and `bus.3.id` holds 3.
   `bus.2.type` holds 1 and `bus.3.type` holds 2. So no bus of 0 to 3 has
   type 5, and the storage bus search goes on to bus 4. This capture
-  keeps no value of bus 4.
+  keeps no value of bus 4. `tests/micro/lv1_repository_storage_bus`
+  gives the bus 4 `id` and `type` values.
 
 The other served values are 0 in v2. lv1 answers each read with r3 = 0
 and the node's two values.

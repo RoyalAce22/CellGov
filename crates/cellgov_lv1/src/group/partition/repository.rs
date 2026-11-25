@@ -161,6 +161,10 @@ mod console_bus_tests;
 mod console_storage_bus_tests;
 
 #[cfg(test)]
+#[path = "tests/console_repository_storage_bus_4_tests.rs"]
+mod console_storage_bus_4_tests;
+
+#[cfg(test)]
 #[path = "tests/console_repository_bus_device_tests.rs"]
 mod console_bus_device_tests;
 
