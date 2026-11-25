@@ -56,13 +56,37 @@ wrapper, which sets r3 = 1 and makes hypercall 91
 5. The handler of a device of type 3 reads `bus.<n>.dev.<m>.id`, and
    gives it to the device object with the bus id
    [OFW-4.93 lv2_kernel a:0x80000000000936cc-0x80000000000936ec].
+6. After its open of the device, the handler of a device of type 3 reads
+   `bus.<n>.dev.<m>.intr.0`
+   [OFW-4.93 lv2_kernel a:0x8000000000093738-0x8000000000093748]. When
+   v1 is 2, it keeps v2 at +128 of the device object. Otherwise it logs
+   the value and keeps nothing
+   [OFW-4.93 lv2_kernel a:0x8000000000093754-0x8000000000093790]. Then
+   the device loop reads the type of the next device
+   [OFW-4.93 lv2_kernel a:0x80000000000937ec-0x8000000000093808].
+7. The handler of a device of type 4 reads `bus.<n>.dev.<m>.id` and
+   gives it to its device object. The object then opens the device. The
+   handler takes one of two paths
+   [OFW-4.93 lv2_kernel a:0x8000000000093448-0x800000000009346c]:
+   - for the bus's first device of type 4, the read is at
+     [OFW-4.93 lv2_kernel a:0x8000000000093648-0x8000000000093654];
+   - for a later device of type 4, the read is at
+     [OFW-4.93 lv2_kernel a:0x8000000000093484-0x8000000000093490].
+
+The accessor of the `intr` read builds its key from the `bus` and `dev`
+words and the word `intr` with an index, and returns v1 and v2
+[OFW-4.93 lv2_kernel a:0x8000000000095da8-0x8000000000095ea8]. The
+handler's call gives it index 0
+[OFW-4.93 lv2_kernel a:0x8000000000095eac-0x8000000000095eb8].
+Linux `ps3_repository_read_dev_intr` reads the same key form.
 
 The accessors build the key words from TOC strings: `bus`
 [OFW-4.93 lv2_kernel a:0x80000000002d92b8], `dev`
 [OFW-4.93 lv2_kernel a:0x80000000002fa1e0], `id`
 [OFW-4.93 lv2_kernel a:0x80000000002d66d8], `type`
-[OFW-4.93 lv2_kernel a:0x80000000002d92d0] and `num_dev`
-[OFW-4.93 lv2_kernel a:0x80000000002d92f8]. Linux
+[OFW-4.93 lv2_kernel a:0x80000000002d92d0], `num_dev`
+[OFW-4.93 lv2_kernel a:0x80000000002d92f8] and `intr`
+[OFW-4.93 lv2_kernel a:0x80000000002d92c8]. Linux
 `arch/powerpc/platforms/ps3/repository.c` uses the same key layouts.
 
 ## Where lv1 keeps the nodes
@@ -107,6 +131,9 @@ The served nodes:
 | `bus.1.num_dev` | 0x2865685E | 14 | 0x7A16A615 | 0x68AD90 |
 | `bus.1.dev.0.type` | 0x32697564 | 4 | 0x26AE964D | 0x68A210 |
 | `bus.1.dev.0.id` | 0x2F740501 | 1 | 0x80A02EF5 | 0x68A190 |
+| `bus.1.dev.0.intr.0` | 0x2F7E7173 | 3 | 0xCE8E7EF5 | 0x68A290 |
+| `bus.1.dev.1.type` | 0x32697565 | 5 | 0xA6AE964D | 0x68A390 |
+| `bus.1.dev.1.id` | 0x2F740500 | 0 | 0x00A02EF5 | 0x68A310 |
 
 ## What writes the nodes
 
@@ -119,8 +146,13 @@ depend on the unit. Its values are those of one CECH-2001A.
 
 | File | Rows | Holds |
 |---|---|---|
-| `node.tsv` | 6 | the nodes that the 4.93 boot reads: the firmware, the key, the lv1 address of v1, the number of reads, whether they agree, and v1 and v2 |
-| `unread_node.tsv` | 30 | the other bus nodes of buses 0 to 3, in the same columns, for a later boot that reads them |
+| `node.tsv` | 9 | the nodes that the 4.93 boot reads: the firmware, the key, the lv1 address of v1, the number of reads, whether they agree, and v1 and v2 |
+| `unread_node.tsv` | 27 | the other bus nodes of buses 0 to 3, in the same columns, for a later boot that reads them |
+
+The rows of `bus.1.dev.0.intr.0`, `bus.1.dev.1.type` and
+`bus.1.dev.1.id` moved from `unread_node.tsv` to `node.tsv` when the
+4.93 boot came to read them. Their values are those of the one walk on
+2026-11-14.
 
 ## The values
 
@@ -131,6 +163,11 @@ depend on the unit. Its values are those of one CECH-2001A.
 - `bus.1.dev.0.type` holds 3, so the device loop runs the handler of
   type 3 for device 0.
 - `bus.1.dev.0.id` holds 0.
+- `bus.1.dev.0.intr.0` holds v1 = 2 and v2 = 0, so the handler of type
+  3 keeps 0 at +128 of the device object.
+- `bus.1.dev.1.type` holds 4, so the device loop runs the handler of
+  type 4 for device 1.
+- `bus.1.dev.1.id` holds 1.
 
 Every other served value is 0 in v2. lv1 answers each read with r3 = 0
 and the node's two values.

@@ -386,6 +386,18 @@ pub const NODES: &[RepositoryNode] = &[
     // reads it and gives it to the device object with the bus id
     // [OFW-4.93 lv2_kernel a:0x80000000000936cc-0x80000000000936ec].
     bus_node(1, [field(b"dev", 0), field(b"id", 0), 0], 0, 0, 0x0068_a1f8),
+    // `bus.1.dev.0.intr.0`: the first interrupt node of device 0. The
+    // handler of a device of type 3 reads it after its open of the device
+    // [OFW-4.93 lv2_kernel a:0x8000000000093738-0x8000000000093748]. When
+    // v1 is 2, it keeps v2 in the device object
+    // [OFW-4.93 lv2_kernel a:0x8000000000093754-0x8000000000093790].
+    bus_node(
+        1,
+        [field(b"dev", 0), field(b"intr", 0), 0],
+        2,
+        0,
+        0x0068_a2f8,
+    ),
     // `bus.1.dev.<n>.type`: the device type. The kernel reads it for each
     // device of the bus and selects a handler for types 3, 4 and 6
     // [OFW-4.93 lv2_kernel a:0x80000000000937fc-0x8000000000093844].
@@ -395,6 +407,17 @@ pub const NODES: &[RepositoryNode] = &[
         3,
         0,
         0x0068_a278,
+    ),
+    // `bus.1.dev.1.id`: the handler of the bus's first device of type 4
+    // reads it and gives it to the device object
+    // [OFW-4.93 lv2_kernel a:0x8000000000093648-0x8000000000093664].
+    bus_node(1, [field(b"dev", 1), field(b"id", 0), 0], 1, 0, 0x0068_a378),
+    bus_node(
+        1,
+        [field(b"dev", 1), field(b"type", 0), 0],
+        4,
+        0,
+        0x0068_a3f8,
     ),
     // `bus.1.id`: the bus id. The bus search reads it for the bus it finds
     // [OFW-4.93 lv2_kernel a:0x800000000027786c]. The kernel reads it again
@@ -609,3 +632,7 @@ mod flash_ext_tests;
 #[cfg(test)]
 #[path = "tests/repository_bus_tests.rs"]
 mod bus_tests;
+
+#[cfg(test)]
+#[path = "tests/repository_bus_device_tests.rs"]
+mod bus_device_tests;

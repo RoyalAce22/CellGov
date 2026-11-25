@@ -46,7 +46,7 @@ fn every_lv1_node_row_is_the_node_its_capture_read_twice_alike() {
             NodeSource::PsdevwikiDump { .. } | NodeSource::ConsoleCapture { .. } => None,
         })
         .collect();
-    assert_eq!(rows.len(), 8);
+    assert_eq!(rows.len(), 11);
     for (node, capture, address) in rows {
         let captured = capture_rows(
             capture,

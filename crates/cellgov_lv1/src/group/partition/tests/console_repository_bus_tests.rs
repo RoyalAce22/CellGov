@@ -3,10 +3,10 @@
 //! `tests/micro/lv1_repository_bus`.
 
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::lv1::repository::{field, first_field, RepositoryKey};
+use cellgov_ps3_abi::lv1::repository::{field, first_field};
 use cellgov_time::GuestTicks;
 
-use crate::{HypercallDisposition, HypercallRefusal, HypercallRequest, Hypervisor};
+use crate::{HypercallDisposition, HypercallRequest, Hypervisor};
 
 const CAPTURE: &str = "tests/micro/lv1_repository_bus/peek/cech20-cex-493";
 
@@ -100,36 +100,4 @@ fn every_captured_bus_node_answers_its_captured_values_at_4_93() {
             "{row:?}"
         );
     }
-}
-
-/// The device loop reads the type of device 1 after the handler of device
-/// 0 returns [OFW-4.93 lv2_kernel a:0x80000000000937ec-0x8000000000093808].
-/// No logged boot reaches that read, so the node table does not serve the
-/// node.
-#[test]
-fn the_unserved_bus_1_device_1_type_read_is_a_refusal_that_names_its_key() {
-    let n = [
-        first_field(b"bus", 1),
-        field(b"dev", 1),
-        field(b"type", 0),
-        0,
-    ];
-    let request = read(n, 0x8000_0000_0009_5f84);
-    let HypercallDisposition::Refused(refusal) = dispatch_4_93(&request) else {
-        panic!("bus.1.dev.1.type is answered");
-    };
-    assert_eq!(
-        refusal,
-        HypercallRefusal::RepositoryNode {
-            key: RepositoryKey {
-                lpar: 1,
-                n1: n[0],
-                n2: n[1],
-                n3: n[2],
-                n4: n[3],
-            },
-            unit: UnitId::new(0),
-            pc: WRAPPER_SC,
-        }
-    );
 }
