@@ -55,6 +55,7 @@ impl Runtime {
     ///   - the RSX call stack
     ///   - the deferred RSX effects
     ///   - the pending child inits
+    ///   - the inputs that commits queued for each unit's next step
     ///   - the hypervisor's memory regions, virtual address spaces,
     ///     interrupt state bitmaps and event receive ports
     /// - The LV2 host adds its partial.
@@ -98,6 +99,7 @@ impl Runtime {
             lanes::value_term(source::RSX_LABEL_BASE, 0, &u64::from(self.rsx_label_base)),
             self.rsx_call_stack.sync_term(),
             self.ppe_placement.sync_term(),
+            self.registry.pending_inputs_sync_term(),
             self.hypervisor.sync_term(),
         ] {
             sum = sum.wrapping_add(term);

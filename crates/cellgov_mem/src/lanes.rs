@@ -221,6 +221,9 @@ pub mod source {
     pub const PPE_PLACEMENT: u8 = 75;
     /// The PPE run-queue sequence counter.
     pub const PPE_QUEUE_SEQ: u8 = 76;
+    /// The inputs that commits queued for each unit's next step, one
+    /// object per unit.
+    pub const PENDING_UNIT_INPUT: u8 = 83;
     /// The tags of the hypervisor's hypercall groups. `cellgov_lv1`
     /// gives each group its own range inside these, and each group
     /// declares its tags in its own module. No other source takes one of

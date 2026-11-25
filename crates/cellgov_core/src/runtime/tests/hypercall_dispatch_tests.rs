@@ -18,6 +18,9 @@ use crate::runtime::Runtime;
 #[path = "hypercall_return_registers_tests.rs"]
 mod return_registers;
 
+#[path = "hypercall_pending_hash_tests.rs"]
+mod pending_hash;
+
 /// The address of the scripted `sc`.
 const PC: u64 = 0x100;
 
