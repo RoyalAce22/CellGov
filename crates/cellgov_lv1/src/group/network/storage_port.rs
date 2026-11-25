@@ -142,3 +142,7 @@ mod storage_device_tests;
 #[cfg(test)]
 #[path = "tests/storage_device_port_console_tests.rs"]
 mod storage_device_console_tests;
+
+#[cfg(test)]
+#[path = "tests/storage_port_close_tests.rs"]
+mod close_tests;

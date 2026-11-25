@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use cellgov_mem::lanes::{self, LaneValue, ObjectLanes};
 use cellgov_mem::scheme::{HashedSurface, Stamp};
+use cellgov_ps3_abi::lv1::device_bus::{opens_storage_bus, STORAGE_BUS};
 
 use super::close;
 use super::dma_map::{self, DmaMapping};
@@ -273,8 +274,30 @@ impl DeviceBusState {
                     .retain(|mapping| mapping.bus != device.bus || mapping.device != device.device);
                 self.regions
                     .retain(|region| region.bus != device.bus || region.device != device.device);
+                self.release_storage_slot(device);
             }
         }
+    }
+
+    /// Removes the partition's open of the storage bus or storage device
+    /// `device`, and the port that lv1 connected to that slot.
+    ///
+    /// lv1's storage connect takes only a used slot that holds the
+    /// caller's partition. It gives -9 only while the slot's handle holds
+    /// a port with a reference [OFW-4.93 lv1 a:0x2554F0-0x25551C]
+    /// [OFW-4.93 lv1 a:0x255520-0x255548]. A kept port after a close would
+    /// thus give a busy answer that lv1 cannot give.
+    fn release_storage_slot(&mut self, device: OpenDevice) {
+        if opens_storage_bus(device.bus, device.device) {
+            self.storage_bus = None;
+            self.storage_bus_port = None;
+            return;
+        }
+        if device.bus != STORAGE_BUS {
+            return;
+        }
+        self.storage_devices.remove(&device.device);
+        self.storage_device_ports.remove(&device.device);
     }
 
     /// The sum of the sync-state terms of the group's hashed surfaces.
@@ -348,9 +371,13 @@ pub enum DeviceBusChange {
     StorageDevicePortConnected(StorageDevicePort),
     /// lv1 made this MMIO mapping for the partition.
     MmioRegionMapped(MmioMapping),
-    /// The call closed this device. lv1 removed each DMA mapping of the
-    /// device, freed each DMA region of the device and removed each MMIO
-    /// mapping of the device.
+    /// The call closed this device. The change removes these values of
+    /// the device:
+    /// - each DMA mapping, which lv1 removed;
+    /// - each DMA region, which lv1 freed;
+    /// - each MMIO mapping, which lv1 removed;
+    /// - for a device of the storage bus, or the storage bus itself, the
+    ///   partition's open and the port of its slot.
     Closed(OpenDevice),
 }
 
@@ -395,3 +422,7 @@ mod mmio_map_hash_tests;
 #[cfg(test)]
 #[path = "tests/mmio_page_shift_hash_tests.rs"]
 mod mmio_page_shift_hash_tests;
+
+#[cfg(test)]
+#[path = "tests/storage_close_state_tests.rs"]
+mod storage_close_state_tests;
