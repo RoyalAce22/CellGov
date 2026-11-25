@@ -66,7 +66,8 @@ pub struct NetworkState {
 
 impl NetworkState {
     /// The logical partition address of the network device's interrupt
-    /// status indicator, or `None` when the partition set none.
+    /// status indicator, or `None` when the partition set none since the
+    /// device's open.
     pub fn status_indicator(&self) -> Option<u64> {
         self.indicator
     }
@@ -78,7 +79,8 @@ impl NetworkState {
     }
 
     /// The network device's interrupt mask that the partition set last, or
-    /// `None` when the partition set none.
+    /// `None` when the partition set none since the device's open. lv1's
+    /// teardown at the close of the device stores 0 in the mask.
     pub fn interrupt_mask(&self) -> Option<u64> {
         self.interrupt_mask
     }
@@ -89,6 +91,11 @@ impl NetworkState {
             NetworkChange::StatusIndicatorSet(address) => self.indicator = Some(address),
             NetworkChange::InterruptPortConnected(id) => self.interrupt_port = Some(id),
             NetworkChange::InterruptMaskSet(mask) => self.interrupt_mask = Some(mask),
+            NetworkChange::TornDown => {
+                self.indicator = None;
+                self.interrupt_port = None;
+                self.interrupt_mask = None;
+            }
         }
     }
 
@@ -119,6 +126,9 @@ pub enum NetworkChange {
     InterruptPortConnected(u64),
     /// The call set this interrupt mask for the network device.
     InterruptMaskSet(u64),
+    /// lv1's close of the network device tore the device down. The
+    /// device has no indicator, no interrupt port and no interrupt mask.
+    TornDown,
 }
 
 impl From<NetworkChange> for StateChange {

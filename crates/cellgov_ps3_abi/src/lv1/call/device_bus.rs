@@ -10,6 +10,14 @@
 /// form; see [`crate::lv1::device_bus`].
 pub const OPEN_DEVICE: u64 = 170;
 
+/// `close_device`: two inputs and no output.
+/// - r3 is the id of a bus.
+/// - r4 is the id of a device on that bus.
+///
+/// The lv1 handler [OFW-4.93 lv1 a:0x306EEC] reads the inputs in this
+/// form; see [`crate::lv1::device_bus`].
+pub const CLOSE_DEVICE: u64 = 171;
+
 /// `allocate_device_dma_region`: five inputs and one output.
 /// - r3 is the id of a bus.
 /// - r4 is the id of a device on that bus.

@@ -4,11 +4,13 @@
 //! The group answers these calls:
 //! - `open_device` for devices 0, 1 and 2 of bus 1, the first devices
 //!   that the 4.93 kernel opens, and for the storage bus;
+//! - `close_device` for devices 0, 1 and 2 of bus 1;
 //! - `allocate_device_dma_region` and `map_device_dma_region` for device
 //!   0 of bus 1.
 //!
 //! [`DeviceBusState`] holds the state of the group.
 
+mod close;
 mod dma_map;
 mod dma_region;
 mod open;

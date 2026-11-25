@@ -12,6 +12,9 @@
 //! storage bus object, device -1 of bus 4. The device bus state holds
 //! that port.
 //!
+//! The device bus group's `close_device` of the network device clears the
+//! indicator, the port and the mask, as lv1's teardown does.
+//!
 //! CellGov models a network device with no link. So no answer raises a
 //! device interrupt, sends an event on the port or writes the indicator.
 

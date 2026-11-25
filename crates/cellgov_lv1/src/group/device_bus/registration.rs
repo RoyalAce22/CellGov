@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 use cellgov_mem::lanes;
 use cellgov_mem::scheme::{HashedSurface, Stamp};
 
+use super::close;
 use super::dma_map::{self, DmaMapping};
 use super::dma_region::{self, DmaRegion};
 use super::open::{self, OpenDevice, StorageBusOpen};
@@ -17,6 +18,7 @@ pub(crate) const GROUP: Group = Group {
     name: "device_bus",
     hypercalls: &[
         open::HYPERCALLS,
+        close::HYPERCALLS,
         dma_region::HYPERCALLS,
         dma_map::HYPERCALLS,
     ],
@@ -150,6 +152,13 @@ impl DeviceBusState {
             DeviceBusChange::StorageBusPortConnected(id) => {
                 self.storage_bus_port = Some(id);
             }
+            DeviceBusChange::Closed(device) => {
+                self.open.remove(&device);
+                self.mappings
+                    .retain(|mapping| mapping.bus != device.bus || mapping.device != device.device);
+                self.regions
+                    .retain(|region| region.bus != device.bus || region.device != device.device);
+            }
         }
     }
 
@@ -195,6 +204,9 @@ pub enum DeviceBusChange {
     /// The call connected the event receive port with this id to the
     /// partition's slot of the storage bus.
     StorageBusPortConnected(u64),
+    /// The call closed this device. lv1 removed each DMA mapping of the
+    /// device and then freed each DMA region of the device.
+    Closed(OpenDevice),
 }
 
 impl From<DeviceBusChange> for StateChange {
