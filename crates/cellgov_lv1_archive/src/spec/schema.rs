@@ -8,4 +8,4 @@ pub const REGENERATE: &str = "CELLGOV_REGENERATE=1 cargo test -p cellgov_lv1_arc
 pub const GATE: &str = "committed_archive_matches_generator";
 
 /// Pins SQLite's `user_version` to the archive's frozen schema.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;

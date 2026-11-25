@@ -8,6 +8,10 @@
 //! copies disagree only on the input counts of 90, 92 and 93, and this
 //! table takes the Linux counts there.
 //!
+//! A row can also carry an alias: the name psdevwiki or CellGov's lv1
+//! reading gives a call. [`UNLISTED_ALIASES`] names numbers that neither
+//! header lists.
+//!
 //! Each hypercall group keeps the number constants of its calls in a
 //! module of its own, and this module re-exports them. A new constant
 //! goes in its group's module, so two groups never edit one file.
@@ -42,6 +46,24 @@ pub enum CallSource {
     OtherOsPlusPlus,
 }
 
+/// The source of an alias.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AliasSource {
+    /// psdevwiki's list of hypercalls.
+    Psdevwiki,
+    /// CellGov's reading of the call's lv1 handler in the 4.93 firmware.
+    CellGov,
+}
+
+/// A name for a call that a source other than the headers gives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Alias {
+    /// The name, without the `lv1_` prefix.
+    pub name: &'static str,
+    /// The source that gives the name.
+    pub source: AliasSource,
+}
+
 /// One row of the hypercall table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Lv1Call {
@@ -55,6 +77,9 @@ pub struct Lv1Call {
     pub outputs: u8,
     /// The header the row comes from.
     pub source: CallSource,
+    /// The name another source gives the call; `None` when only the
+    /// header names it.
+    pub alias: Option<Alias>,
 }
 
 impl Lv1Call {
@@ -71,6 +96,15 @@ impl Lv1Call {
             inputs,
             outputs,
             source,
+            alias: None,
+        }
+    }
+
+    /// This row, with `name` from `source` as its alias.
+    const fn aka(self, name: &'static str, source: AliasSource) -> Self {
+        Self {
+            alias: Some(Alias { name, source }),
+            ..self
         }
     }
 }
@@ -140,13 +174,15 @@ pub const LV1_CALLS: &[Lv1Call] = &[
     Lv1Call::new(54, "destruct_logical_spe", 1, 0, CallSource::Linux),
     Lv1Call::new(57, "construct_logical_spe", 7, 6, CallSource::Linux),
     Lv1Call::new(61, "set_spe_interrupt_mask", 3, 0, CallSource::Linux),
+    // psdevwiki's name [PS3DEVWIKI-HV-SYSCALLS s:HV_Syscalls].
     Lv1Call::new(
         62,
         "undocumented_function_62",
         5,
         0,
         CallSource::OtherOsPlusPlus,
-    ),
+    )
+    .aka("set_slb_for_logical_spu", AliasSource::Psdevwiki),
     Lv1Call::new(64, "set_spe_transition_notifier", 3, 0, CallSource::Linux),
     Lv1Call::new(65, "disable_logical_spe", 2, 0, CallSource::Linux),
     Lv1Call::new(66, "clear_spe_interrupt_status", 4, 0, CallSource::Linux),
@@ -175,49 +211,61 @@ pub const LV1_CALLS: &[Lv1Call] = &[
     Lv1Call::new(93, "delete_repository_node", 4, 0, CallSource::Linux),
     Lv1Call::new(95, "read_htab_entries", 2, 5, CallSource::Linux),
     Lv1Call::new(96, "set_dabr", 2, 0, CallSource::Linux),
+    // psdevwiki's name [PS3DEVWIKI-HV-SYSCALLS s:HV_Syscalls].
     Lv1Call::new(
         99,
         "undocumented_function_99",
         2,
         0,
         CallSource::OtherOsPlusPlus,
-    ),
+    )
+    .aka("authenticate_program_segment", AliasSource::Psdevwiki),
     Lv1Call::new(103, "get_total_execution_time", 2, 1, CallSource::Linux),
+    // psdevwiki's name [PS3DEVWIKI-HV-SYSCALLS s:HV_Syscalls].
     Lv1Call::new(
         105,
         "undocumented_function_105",
         7,
         0,
         CallSource::OtherOsPlusPlus,
-    ),
+    )
+    .aka("comm_dev_logical_console_construct", AliasSource::Psdevwiki),
+    // psdevwiki's name [PS3DEVWIKI-HV-SYSCALLS s:HV_Syscalls].
     Lv1Call::new(
         106,
         "undocumented_function_106",
         1,
         0,
         CallSource::OtherOsPlusPlus,
-    ),
+    )
+    .aka("comm_dev_logical_console_destruct", AliasSource::Psdevwiki),
+    // psdevwiki's name [PS3DEVWIKI-HV-SYSCALLS s:HV_Syscalls].
     Lv1Call::new(
         107,
         "undocumented_function_107",
         6,
         1,
         CallSource::OtherOsPlusPlus,
-    ),
+    )
+    .aka("comm_dev_logical_console_send", AliasSource::Psdevwiki),
+    // psdevwiki's name [PS3DEVWIKI-HV-SYSCALLS s:HV_Syscalls].
     Lv1Call::new(
         108,
         "undocumented_function_108",
         1,
         5,
         CallSource::OtherOsPlusPlus,
-    ),
+    )
+    .aka("comm_dev_logical_console_receive", AliasSource::Psdevwiki),
+    // psdevwiki's name [PS3DEVWIKI-HV-SYSCALLS s:HV_Syscalls].
     Lv1Call::new(
         109,
         "undocumented_function_109",
         1,
         0,
         CallSource::OtherOsPlusPlus,
-    ),
+    )
+    .aka("comm_dev_logical_console_flush", AliasSource::Psdevwiki),
     Lv1Call::new(
         114,
         "undocumented_function_114",
@@ -239,13 +287,15 @@ pub const LV1_CALLS: &[Lv1Call] = &[
     Lv1Call::new(122, "map_htab", 1, 1, CallSource::Linux),
     Lv1Call::new(123, "unmap_htab", 1, 0, CallSource::Linux),
     Lv1Call::new(127, "get_version_info", 0, 2, CallSource::Linux),
+    // CellGov's name, from the handler [OFW-4.93 lv1 a:0x31BD54].
     Lv1Call::new(
         138,
         "undocumented_function_138",
         2,
         0,
         CallSource::OtherOsPlusPlus,
-    ),
+    )
+    .aka("logical_spu_set_run_timeout", AliasSource::CellGov),
     Lv1Call::new(140, "construct_lpm", 6, 3, CallSource::Linux),
     Lv1Call::new(141, "destruct_lpm", 1, 0, CallSource::Linux),
     Lv1Call::new(142, "start_lpm", 1, 0, CallSource::Linux),
@@ -270,20 +320,24 @@ pub const LV1_CALLS: &[Lv1Call] = &[
     Lv1Call::new(164, "set_virtual_uart_param", 3, 0, CallSource::Linux),
     Lv1Call::new(165, "get_virtual_uart_param", 2, 1, CallSource::Linux),
     Lv1Call::new(166, "configure_virtual_uart_irq", 1, 1, CallSource::Linux),
+    // CellGov's name, from the handler [OFW-4.93 lv1 a:0x31C80C].
     Lv1Call::new(
         167,
         "undocumented_function_167",
         2,
         1,
         CallSource::OtherOsPlusPlus,
-    ),
+    )
+    .aka("logical_spu_get_mfc_control", AliasSource::CellGov),
+    // psdevwiki's name [PS3DEVWIKI-HV-SYSCALLS s:HV_Syscalls].
     Lv1Call::new(
         168,
         "undocumented_function_168",
         3,
         0,
         CallSource::OtherOsPlusPlus,
-    ),
+    )
+    .aka("logical_spu_set_mfc_control", AliasSource::Psdevwiki),
     Lv1Call::new(170, "open_device", 3, 0, CallSource::Linux),
     Lv1Call::new(171, "close_device", 2, 0, CallSource::Linux),
     Lv1Call::new(172, "map_device_mmio_region", 5, 1, CallSource::Linux),
@@ -328,29 +382,35 @@ pub const LV1_CALLS: &[Lv1Call] = &[
         1,
         CallSource::Linux,
     ),
+    // psdevwiki's name [PS3DEVWIKI-HV-SYSCALLS s:HV_Syscalls].
     Lv1Call::new(
         200,
         "undocumented_function_200",
         1,
         0,
         CallSource::OtherOsPlusPlus,
-    ),
+    )
+    .aka("logical_spu_start_isolated", AliasSource::Psdevwiki),
+    // CellGov's name, from the handler [OFW-4.93 lv1 a:0x31B108-0x31B408].
     Lv1Call::new(
         201,
         "undocumented_function_201",
         1,
         0,
         CallSource::OtherOsPlusPlus,
-    ),
+    )
+    .aka("logical_spu_unload_isolated", AliasSource::CellGov),
     Lv1Call::new(202, "deconfigure_virtual_uart_irq", 0, 0, CallSource::Linux),
     Lv1Call::new(207, "enable_logical_spe", 2, 0, CallSource::Linux),
+    // CellGov's name, from the handler [OFW-4.93 lv1 a:0x31B710].
     Lv1Call::new(
         209,
         "undocumented_function_209",
         8,
         0,
         CallSource::OtherOsPlusPlus,
-    ),
+    )
+    .aka("logical_spu_load_isolated", AliasSource::CellGov),
     Lv1Call::new(210, "gpu_open", 1, 0, CallSource::Linux),
     Lv1Call::new(211, "gpu_close", 0, 0, CallSource::Linux),
     Lv1Call::new(212, "gpu_device_map", 1, 2, CallSource::Linux),
@@ -407,6 +467,59 @@ pub const LV1_CALLS: &[Lv1Call] = &[
     ),
     Lv1Call::new(254, "storage_check_async_status", 2, 1, CallSource::Linux),
     Lv1Call::new(255, "panic", 1, 0, CallSource::Linux),
+];
+
+/// The aliases of the numbers that neither header lists, ascending by
+/// number.
+pub const UNLISTED_ALIASES: &[(u16, Alias)] = &[
+    // CellGov's name, from the handler [OFW-4.93 lv1 a:0x2FD980-0x2FDC60].
+    (
+        89,
+        Alias {
+            name: "invalidate_spe_tlb",
+            source: AliasSource::CellGov,
+        },
+    ),
+    // psdevwiki's name [PS3DEVWIKI-HV-SYSCALLS s:HV_Syscalls].
+    (
+        137,
+        Alias {
+            name: "disable_spe_execution_locked",
+            source: AliasSource::Psdevwiki,
+        },
+    ),
+    // CellGov's name, from the handler [OFW-4.93 lv1 a:0x307B48-0x307D28].
+    (
+        195,
+        Alias {
+            name: "net_driver_wlan_eurus_send_command",
+            source: AliasSource::CellGov,
+        },
+    ),
+    // psdevwiki's name [PS3DEVWIKI-HV-SYSCALLS s:HV_Syscalls].
+    (
+        196,
+        Alias {
+            name: "net_driver_wlan_eurus_proxy",
+            source: AliasSource::Psdevwiki,
+        },
+    ),
+    // CellGov's name, from the handler [OFW-4.93 lv1 a:0x20E394].
+    (
+        230,
+        Alias {
+            name: "gpu_get_info",
+            source: AliasSource::CellGov,
+        },
+    ),
+    // CellGov's name, from the worker [OFW-4.93 lv1 a:0x3131C0].
+    (
+        231,
+        Alias {
+            name: "comm_dev_logical_console_try_flush",
+            source: AliasSource::CellGov,
+        },
+    ),
 ];
 
 #[cfg(test)]

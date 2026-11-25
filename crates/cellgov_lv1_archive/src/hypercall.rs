@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use cellgov_ps3_abi::lv1::call::{
-    self, LOGICAL_CONSOLE_CONSTRUCT, LOGICAL_CONSOLE_DESTRUCT, LOGICAL_CONSOLE_FLUSH,
+    self, AliasSource, LOGICAL_CONSOLE_CONSTRUCT, LOGICAL_CONSOLE_DESTRUCT, LOGICAL_CONSOLE_FLUSH,
     LOGICAL_CONSOLE_SEND,
 };
 use cellgov_ps3_abi::lv1::table::{self as lv1_table, TableEntry};
@@ -111,16 +111,80 @@ impl Lv1Entry {
     }
 }
 
-/// One hypercall number: its call-table row, its family and the work
-/// item that owns it, the kernels that call it, lv1's 4.93 table entry
-/// and CellGov's answer.
+/// The source of a hypercall's name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NameSource {
+    /// `lv1call.h`, in its Linux copy or its OtherOS++ copy.
+    Header,
+    /// psdevwiki's list of hypercalls.
+    Psdevwiki,
+    /// CellGov's reading of the call's lv1 handler in the 4.93 firmware.
+    CellGov,
+}
+
+impl NameSource {
+    /// The label `hypercall.tsv` uses.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Header => "header",
+            Self::Psdevwiki => "psdevwiki",
+            Self::CellGov => "cellgov",
+        }
+    }
+}
+
+impl From<AliasSource> for NameSource {
+    fn from(source: AliasSource) -> Self {
+        match source {
+            AliasSource::Psdevwiki => Self::Psdevwiki,
+            AliasSource::CellGov => Self::CellGov,
+        }
+    }
+}
+
+/// A hypercall's name and the source that gives it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HypercallName {
+    /// The name, without the `lv1_` prefix.
+    pub text: &'static str,
+    /// The source that gives the name.
+    pub source: NameSource,
+}
+
+/// The name of hypercall `number`, or `None` when no source names it.
+///
+/// The alias in `cellgov_ps3_abi::lv1::call` wins over the header's
+/// name. A number with no alias keeps the header's name, which can be
+/// the placeholder `undocumented_function_N`.
+pub fn hypercall_name(number: u64) -> Option<HypercallName> {
+    let row = call::lookup(number);
+    let unlisted = || {
+        call::UNLISTED_ALIASES
+            .iter()
+            .find(|(listed, _)| u64::from(*listed) == number)
+            .map(|(_, alias)| *alias)
+    };
+    if let Some(alias) = row.and_then(|row| row.alias).or_else(unlisted) {
+        return Some(HypercallName {
+            text: alias.name,
+            source: alias.source.into(),
+        });
+    }
+    row.map(|row| HypercallName {
+        text: row.name,
+        source: NameSource::Header,
+    })
+}
+
+/// One hypercall number: its name, its call-table counts, its family and
+/// the work item that owns it, the kernels that call it, lv1's 4.93
+/// table entry and CellGov's answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HypercallRow {
     /// The constant a site loads into r11.
     pub number: u64,
-    /// The name `lv1call.h` gives it; `None` when neither copy of that
-    /// header lists it ([`call::lookup`]).
-    pub name: Option<&'static str>,
+    /// The name [`hypercall_name`] gives it.
+    pub name: Option<HypercallName>,
     /// Input registers from r3, when the call table lists the number.
     pub inputs: Option<u8>,
     /// Output registers from r4, when the call table lists the number.
@@ -240,7 +304,7 @@ pub fn hypercall_rows(
             let by_fw = called.get(&number);
             HypercallRow {
                 number,
-                name: entry.map(|e| e.name),
+                name: hypercall_name(number),
                 inputs: entry.map(|e| e.inputs),
                 outputs: entry.map(|e| e.outputs),
                 family,
@@ -271,7 +335,7 @@ pub fn hypercall_rows(
 pub fn census_answered(table: &Table) -> Result<BTreeSet<u64>, ArchiveError> {
     // The column indexes of `number` and `state` in `HYPERCALL`.
     const NUMBER: usize = 0;
-    const STATE: usize = 9;
+    const STATE: usize = 10;
     let mut answered = BTreeSet::new();
     for row in archive::checked_rows(&HYPERCALL, table)? {
         if row.text(STATE)? == HypercallState::Answered.label() {
@@ -304,7 +368,8 @@ pub fn hypercall_tsv(rows: &[HypercallRow]) -> Result<String, ArchiveError> {
         .map(|row| {
             vec![
                 row.number.to_string(),
-                optional(row.name.map(str::to_string)),
+                optional(row.name.map(|name| name.text.to_string())),
+                optional(row.name.map(|name| name.source.label().to_string())),
                 optional(row.inputs.map(|n| n.to_string())),
                 optional(row.outputs.map(|n| n.to_string())),
                 row.family.to_string(),
@@ -426,3 +491,7 @@ mod lv1_entry_tests;
 #[cfg(test)]
 #[path = "tests/census_lag_tests.rs"]
 mod census_lag_tests;
+
+#[cfg(test)]
+#[path = "tests/hypercall_name_tests.rs"]
+mod name_tests;

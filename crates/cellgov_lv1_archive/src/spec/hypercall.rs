@@ -36,6 +36,9 @@ pub const HYPERCALL_LEAVES: &[&str] = &[
     "translation",
 ];
 
+/// Labels of `hypercall.name_source`; `NameSource::label` gives each one.
+pub const HYPERCALL_NAME_SOURCES: &[&str] = &["header", "psdevwiki", "cellgov"];
+
 /// Labels of `hypercall.state`; `HypercallState::label` gives each one.
 pub const HYPERCALL_STATES: &[&str] = &["answered", "null_backend"];
 
@@ -111,6 +114,12 @@ pub const HYPERCALL: TableSpec = TableSpec {
         Column {
             name: "name",
             kind: ColumnKind::Ident,
+            nullable: true,
+            references: None,
+        },
+        Column {
+            name: "name_source",
+            kind: ColumnKind::Enum(HYPERCALL_NAME_SOURCES),
             nullable: true,
             references: None,
         },

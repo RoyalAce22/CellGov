@@ -82,7 +82,10 @@ fn a_number_row_joins_the_call_table_the_kernels_and_the_hypervisor() {
         *row(74),
         HypercallRow {
             number: 74,
-            name: Some("get_logical_partition_id"),
+            name: Some(HypercallName {
+                text: "get_logical_partition_id",
+                source: NameSource::Header,
+            }),
             inputs: Some(0),
             outputs: Some(1),
             family: "partition",
@@ -111,9 +114,10 @@ fn a_number_row_joins_the_call_table_the_kernels_and_the_hypervisor() {
     assert_eq!((row(91).fw.len(), row(91).sites), (0, 0), "91 is uncalled");
     let text = hypercall_tsv(&rows).expect("the rows fit the schema");
     assert!(text.contains(
-        "\n74\tget_logical_partition_id\t0\t1\tpartition\tdispatch\t1.50,4.93\t3\thandler\tanswered\n"
+        "\n74\tget_logical_partition_id\theader\t0\t1\tpartition\tdispatch\t1.50,4.93\t3\thandler\tanswered\n"
     ));
-    assert!(text.contains("\n5\tnone\tnone\tnone\tunnamed\tboot\t1.50\t1\thandler\tnull_backend\n"));
+    assert!(text
+        .contains("\n5\tnone\tnone\tnone\tnone\tunnamed\tboot\t1.50\t1\thandler\tnull_backend\n"));
 }
 
 #[test]

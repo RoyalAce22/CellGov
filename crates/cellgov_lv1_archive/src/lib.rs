@@ -32,10 +32,10 @@ mod sql;
 mod reader_refusal_tests;
 
 pub use hypercall::{
-    census_answered, census_contradictions, hypercall_family, hypercall_rows, hypercall_site_rows,
-    hypercall_site_tsv, hypercall_tsv, hypercall_unresolved_rows, hypercall_unresolved_tsv,
-    HypercallCensus, HypercallRow, HypercallSiteRow, HypercallState, HypercallUnresolvedRow,
-    Lv1Entry,
+    census_answered, census_contradictions, hypercall_family, hypercall_name, hypercall_rows,
+    hypercall_site_rows, hypercall_site_tsv, hypercall_tsv, hypercall_unresolved_rows,
+    hypercall_unresolved_tsv, HypercallCensus, HypercallName, HypercallRow, HypercallSiteRow,
+    HypercallState, HypercallUnresolvedRow, Lv1Entry, NameSource,
 };
 pub use repository::{
     replace_repository_reads, repository_read_rows, repository_read_rows_of, repository_read_tsv,
@@ -44,9 +44,9 @@ pub use repository::{
 };
 pub use spec::{
     files, manifest, GATE, HYPERCALL, HYPERCALL_FAMILIES, HYPERCALL_GATE, HYPERCALL_LEAVES,
-    HYPERCALL_LV1_ENTRIES, HYPERCALL_REGENERATE, HYPERCALL_SITE, HYPERCALL_STATES,
-    HYPERCALL_UNRESOLVED, REGENERATE, REPOSITORY, REPOSITORY_GATE, REPOSITORY_LOGGED_FIRMWARE,
-    REPOSITORY_READ, REPOSITORY_READ_STATES, REPOSITORY_REGENERATE, REPOSITORY_SOURCES,
-    REPOSITORY_UNOBSERVED, SCHEMA_VERSION, SHARED_TABLES, TABLES,
+    HYPERCALL_LV1_ENTRIES, HYPERCALL_NAME_SOURCES, HYPERCALL_REGENERATE, HYPERCALL_SITE,
+    HYPERCALL_STATES, HYPERCALL_UNRESOLVED, REGENERATE, REPOSITORY, REPOSITORY_GATE,
+    REPOSITORY_LOGGED_FIRMWARE, REPOSITORY_READ, REPOSITORY_READ_STATES, REPOSITORY_REGENERATE,
+    REPOSITORY_SOURCES, REPOSITORY_UNOBSERVED, SCHEMA_VERSION, SHARED_TABLES, TABLES,
 };
 pub use sql::{build_sql, schema_sql, SHARED_TABLE_DIR};

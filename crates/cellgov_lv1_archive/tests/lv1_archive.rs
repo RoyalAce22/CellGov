@@ -24,7 +24,9 @@ use cellgov_lv1_archive::{
     TABLES,
 };
 use cellgov_lv2_archive::{self as lv2_archive, KernelRow, OwnerClass, PupRow, KERNEL, PUP};
+use cellgov_ps3_abi::lv1::call::UNLISTED_ALIASES;
 use cellgov_ps3_abi::lv1::repository::NODES;
+use cellgov_ps3_abi::lv1::table::{HYPERCALL_TABLE_ENTRIES, HYPERCALL_TABLE_SITES};
 
 const README_TEMPLATE: &str = include_str!("templates/README.md.template");
 
@@ -84,6 +86,15 @@ fn fill(template: &str, subs: &[(&str, String)]) -> String {
     out
 }
 
+/// `items` as an English list: `a`, `a and b`, `a, b and c`.
+fn prose_list(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [only] => only.clone(),
+        [head @ .., last] => format!("{} and {last}", head.join(", ")),
+    }
+}
+
 fn readme(
     hypercalls: &[archive::HypercallRow],
     repository: &[archive::RepositoryRow],
@@ -135,6 +146,36 @@ fn readme(
                     .filter(|row| row.lv1_493 == archive::Lv1Entry::Invalid)
                     .count()
                     .to_string(),
+            ),
+            (
+                "hypercall_past_table",
+                hypercalls
+                    .iter()
+                    .filter(|row| row.lv1_493 == archive::Lv1Entry::PastTable)
+                    .count()
+                    .to_string(),
+            ),
+            (
+                "hypercall_table_entries",
+                HYPERCALL_TABLE_ENTRIES.to_string(),
+            ),
+            (
+                "hypercall_table_sites",
+                prose_list(
+                    &HYPERCALL_TABLE_SITES
+                        .iter()
+                        .map(|site| site.firmware.to_string())
+                        .collect::<Vec<_>>(),
+                ),
+            ),
+            (
+                "hypercall_unlisted",
+                prose_list(
+                    &UNLISTED_ALIASES
+                        .iter()
+                        .map(|(number, _)| number.to_string())
+                        .collect::<Vec<_>>(),
+                ),
             ),
             ("hypercall_gate", HYPERCALL_GATE.to_string()),
             ("hypercall_regenerate", HYPERCALL_REGENERATE.to_string()),
