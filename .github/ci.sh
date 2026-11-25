@@ -318,8 +318,14 @@ microtests() {
 # Each run, pass or fail, appends one line to vfs/.cellgov/data-runs.tsv
 # (CELLGOV_DATA_LEDGER moves it): the UTC time, the commit, the
 # installed firmware and titles, and nextest's summary.
+#
+# `data_targets` names every `cellgov_cli` test target with
+# `required-features`, and `install_data_targets` every such
+# `cellgov_install` target. The testkit guard
+# `data_group_targets_guard` fails when a gated target is missing from
+# its list.
 data_features=${external_data_features//,runner_ps3\/ps3-hardware/}
-data_targets="firmware_set_load lv2_census_firmware ps3autotests process_spawn_microtest microtests lv2_call_contended_microtest spurs_microtest title_witnesses obs_null_sink authority_id bench_stdout_purity system_ver_floor"
+data_targets="firmware_set_load lv2_census_firmware lv2_kernel_of_record repository_census_firmware hypercall_census_run_firmware region_counter_boot_firmware ps3autotests process_spawn_microtest microtests lv2_call_contended_microtest spurs_microtest title_witnesses obs_null_sink authority_id bench_stdout_purity system_ver_floor"
 install_data_targets="npdrm_oracle_vectors parity_pkg parity_disc parity_title_digests firmware_pipeline_end_to_end parity_firmware_decrypt"
 
 # The installed firmware count and newest version, and the installed
