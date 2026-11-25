@@ -204,12 +204,15 @@ fn a_switch_target_forgets_the_srr1_that_the_path_before_it_builds() {
     assert_eq!(ordinals(0, &to_word_1), [(SC, None)]);
 }
 
-/// The window lies at real address 0x3000, and a word of another segment
-/// shares the real address of its middle word, which the image names.
+/// The window lies at real address 0x1_0000_3000, and a word of another
+/// segment shares the real address of its middle word, which the image
+/// names. No 32-bit half of the naming doubleword names a word of the
+/// code.
 ///
 /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
 #[test]
 fn an_unbounded_rfid_enters_the_real_address_of_each_named_word() {
+    const HIGH: u64 = 0x1_0000_3000;
     let site = |srr1: &[u32]| {
         let mut before = vec![ld(3)];
         before.extend_from_slice(srr1);
@@ -217,12 +220,15 @@ fn an_unbounded_rfid_enters_the_real_address_of_each_named_word() {
             0,
             &[
                 rfid_after(&before),
-                code(0x3000, &[li(11, 75), NOP, PPC_SC_1, PPC_BLR]),
-                code(KERNEL + 0x3000, &[NOP, NOP]),
-                data_bytes(KERNEL + 0x8_0000, (KERNEL + 0x3004).to_be_bytes().to_vec()),
+                code(HIGH, &[li(11, 75), NOP, PPC_SC_1, PPC_BLR]),
+                code(KERNEL + HIGH, &[NOP, NOP]),
+                data_bytes(
+                    KERNEL + 0x8_0000,
+                    (KERNEL + HIGH + 4).to_be_bytes().to_vec(),
+                ),
             ],
         )
     };
-    assert_eq!(site(&ir_set()), [(0x3008, Some(75))]);
-    assert_eq!(site(&[ld(4)]), [(0x3008, None)]);
+    assert_eq!(site(&ir_set()), [(HIGH + 8, Some(75))]);
+    assert_eq!(site(&[ld(4)]), [(HIGH + 8, None)]);
 }

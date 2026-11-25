@@ -50,6 +50,16 @@ impl FileSegment<'_> {
             .map(|bytes| u64::from_be_bytes(bytes.try_into().expect("eight bytes")))
     }
 
+    /// The big-endian value of each 32-bit word that starts at a
+    /// word-aligned address.
+    fn words(&self) -> impl Iterator<Item = u32> + '_ {
+        let first = (4 - self.vaddr % 4) % 4;
+        (first as usize..)
+            .step_by(4)
+            .map_while(|offset| self.bytes.get(offset..)?.first_chunk::<4>().copied())
+            .map(u32::from_be_bytes)
+    }
+
     /// The code address, the TOC and the environment of a function
     /// descriptor that starts at each word-aligned address.
     pub(super) fn descriptors(&self) -> impl Iterator<Item = [u64; 3]> + '_ {
@@ -79,8 +89,8 @@ pub(crate) struct IndirectBound {
     /// The words that control can enter other than by a direct branch or
     /// a fall-through, with the real-mode entries.
     pub(crate) entries: BTreeSet<u64>,
-    /// Each word at the real address of a doubleword of the file bytes or
-    /// of a constant that the code builds.
+    /// Each word at the real address of a doubleword or a 32-bit word of
+    /// the file bytes, or of a constant that the code builds.
     ///
     /// A `bcctr` or a `bclr` in real mode can reach these words with a
     /// CTR or LR that the scan does not record. A branch in virtual mode
@@ -157,6 +167,11 @@ pub(crate) fn indirect_entries(
     for file in files {
         for value in file.doublewords() {
             bound.name(value);
+        }
+        for value in file.words() {
+            // [PPC-Book1 p:38 s:3.3.2] `lwa` fills RT bits 0:31 with a copy of bit 0 of the loaded word.
+            bound.name(u64::from(value));
+            bound.name(i64::from(value.cast_signed()).cast_unsigned());
         }
     }
     bound.tables.extend(tables_after_bcctr(code));
@@ -262,8 +277,8 @@ impl Bound<'_> {
         }
     }
 
-    /// Records a named address: a doubleword of the file bytes, or a
-    /// constant that the code builds. For this address:
+    /// Records a named address: a doubleword or a 32-bit word of the file
+    /// bytes, or a constant that the code builds. For this address:
     /// - an indirect branch can reach it;
     /// - an indirect branch in real mode can reach each word at its real
     ///   address, also when no segment holds the address itself;

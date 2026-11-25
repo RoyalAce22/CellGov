@@ -8,9 +8,12 @@
 //! - an indirect branch (`bcctr`, `bclr`) or an `rfid`, at an address
 //!   that the image names.
 //!
-//! The image names an address in three ways:
+//! The image names an address in these ways:
 //! - a doubleword in the file bytes of a segment, such as a function
 //!   descriptor or a TOC entry;
+//! - a 32-bit word in the file bytes of a segment, which `lwz` extends
+//!   with zeros and `lwa` extends with its sign into a complete address.
+//!   The bound names both addresses;
 //! - a constant that the code builds in a GPR on a path of fall-throughs
 //!   and direct branches;
 //! - an entry of a relative jump table: a 32-bit offset from a named
@@ -28,10 +31,14 @@
 //!
 //! Real mode also ignores EA bits 0 and 1. So an indirect branch in real
 //! mode can reach the word at the real address of a named address. For
-//! each doubleword of the file bytes and each constant that the code
-//! builds, the bound keeps that word. It keeps the word also when no
-//! segment holds the address itself. A jump table entry names only the
-//! word at the address itself.
+//! each doubleword and each 32-bit word of the file bytes, and for each
+//! constant that the code builds, the bound keeps that word. It keeps the
+//! word also when no segment holds the address itself. A jump table entry
+//! names only the word at the address itself.
+//!
+//! The scan cannot tell a code address from another value of the same
+//! size. So each 32-bit word names an address, also a count or a flag
+//! that only looks like the real address of a word of the code.
 //!
 //! A function reaches each word that control can get to from its first
 //! word with r2 unchanged. On each word that a function reaches, r2 can

@@ -911,6 +911,14 @@ mod hypercall_real_alias_constant_tests;
 mod hypercall_real_alias_named_tests;
 
 #[cfg(test)]
+#[path = "tests/caller_census_hypercall_real_alias_word_tests.rs"]
+mod hypercall_real_alias_word_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_sign_extended_word_tests.rs"]
+mod hypercall_sign_extended_word_tests;
+
+#[cfg(test)]
 #[path = "tests/caller_census_hypercall_constant_join_tests.rs"]
 mod hypercall_constant_join_tests;
 

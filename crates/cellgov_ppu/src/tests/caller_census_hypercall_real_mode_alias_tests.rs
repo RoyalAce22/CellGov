@@ -17,11 +17,15 @@ const DATA: u64 = KERNEL + 0x4_0000;
 /// The address of a window in a segment at a real address.
 const REAL_WINDOW: u64 = 0x3000;
 
+/// The address of a window in a segment at a real address above 4 GiB.
+/// No 32-bit half of the doubleword [`ALIAS`] names a word of the code.
+const HIGH_WINDOW: u64 = 0x1_0000_3000;
+
 /// The kernel address of a word with the real address of the word
-/// between the `li r11` and the `sc` of the window at [`REAL_WINDOW`].
+/// between the `li r11` and the `sc` of the window at [`HIGH_WINDOW`].
 ///
 /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
-const ALIAS: u64 = KERNEL + REAL_WINDOW + 4;
+const ALIAS: u64 = KERNEL + HIGH_WINDOW + 4;
 
 /// A data segment whose one doubleword names `address`.
 fn naming(address: u64) -> Segment {
@@ -49,32 +53,34 @@ fn bctr() -> u32 {
     })
 }
 
-/// The site of a window at [`REAL_WINDOW`] that loads 75, with a word
+/// The site of a window at [`HIGH_WINDOW`] that loads 75, with a word
 /// at [`ALIAS`] that [`naming`] names and with `stub` at `at`.
 fn real_window_site(at: u64, stub: &[u32]) -> Vec<(u64, Option<u16>)> {
     let segments = [
         code(at, stub),
-        code(KERNEL + REAL_WINDOW, &[NOP, NOP, NOP]),
+        code(KERNEL + HIGH_WINDOW, &[NOP, NOP, NOP]),
         naming(ALIAS),
-        code(REAL_WINDOW, &[li(11, 75), NOP, PPC_SC_1]),
+        code(HIGH_WINDOW, &[li(11, 75), NOP, PPC_SC_1]),
     ];
     ordinals(0, &segments)
 }
 
 const REAL_SC: u64 = REAL_WINDOW + 8;
 
+const HIGH_SC: u64 = HIGH_WINDOW + 8;
+
 #[test]
 fn a_real_mode_bctr_to_a_loaded_address_enters_the_real_alias_of_a_named_word() {
     let stub = [ld_r3(), mtctr_r3(), bctr()];
-    assert_eq!(real_window_site(VECTOR, &stub), [(REAL_SC, None)]);
-    assert_eq!(real_window_site(OUTSIDE, &stub), [(REAL_SC, Some(75))]);
+    assert_eq!(real_window_site(VECTOR, &stub), [(HIGH_SC, None)]);
+    assert_eq!(real_window_site(OUTSIDE, &stub), [(HIGH_SC, Some(75))]);
 }
 
 #[test]
 fn a_real_mode_blr_to_a_loaded_address_enters_the_real_alias_of_a_named_word() {
     let stub = [ld_r3(), word(PpuInstruction::Mtlr { rs: 3 }), PPC_BLR];
-    assert_eq!(real_window_site(VECTOR, &stub), [(REAL_SC, None)]);
-    assert_eq!(real_window_site(OUTSIDE, &stub), [(REAL_SC, Some(75))]);
+    assert_eq!(real_window_site(VECTOR, &stub), [(HIGH_SC, None)]);
+    assert_eq!(real_window_site(OUTSIDE, &stub), [(HIGH_SC, Some(75))]);
 }
 
 /// The kernel address of a window that loads 75 and runs `sc`.
@@ -114,7 +120,8 @@ fn a_real_mode_bctr_to_a_loaded_address_puts_the_named_word_in_real_mode() {
 }
 
 /// The site of a window at [`REAL_WINDOW`] that loads 75, with a call
-/// to `at` whose return address is [`ALIAS`], and with `stub` at `at`.
+/// to `at` whose return address is the kernel address of the window's
+/// `nop`, and with `stub` at `at`.
 ///
 /// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.
 fn return_site(at: u64, stub: &[u32]) -> Vec<(u64, Option<u16>)> {
