@@ -36,8 +36,8 @@ use cellgov_event::UnitId;
 use cellgov_exec::{CompareFields, CompareResult, ExecutionStepResult, UnitStatus};
 use cellgov_lv1::{
     cost, Compare, ExternalRaise, HypercallAnswer, HypercallDisposition, HypercallRefusal,
-    HypercallRequest, MediatedTake, PageTableLoad, ReturnPair, RunningThread, RunningThreads,
-    SavedMsrs, ThreadInterrupt, ThreadResume,
+    HypercallRequest, MediatedEntry, MediatedTake, PageTableLoad, ReturnPair, RunningThread,
+    RunningThreads, SavedMsrs, ThreadInterrupt, ThreadResume,
 };
 use cellgov_ps3_abi::hw::ppu_interrupt::{SRR1_MEDIATED_EXTERNAL, VECTOR_EXTERNAL};
 use cellgov_ps3_abi::lv1::call::{LOGICAL_CONSOLE_SEND_MAX, MAX_OUTPUTS};
@@ -283,11 +283,18 @@ impl Runtime {
     /// [OFW-4.93 lv1 a:0x1A5C].
     ///
     /// The take of a mediated interrupt sets [`SRR1_MEDIATED_EXTERNAL`] in
-    /// SRR1. A take that the hypervisor refuses stops the run at the next
-    /// step, after the thread entered the vector. The hypervisor reads the
-    /// decrementer at the unit's clock, the end of the step that took the
-    /// interrupt. Where the run's time base is later, it reads the
-    /// decrementer at that time base, as the thread's next read does.
+    /// SRR1, and leaves the thread at the interrupted instruction. The
+    /// hypervisor's answer moves the thread:
+    /// - [`MediatedEntry::Vector`] moves it to the external vector.
+    /// - [`MediatedEntry::Resume`] keeps it at the interrupted instruction,
+    ///   with the MSR of lv1's `hrfid`.
+    /// - A refusal also moves it to the vector, and the next step stops the
+    ///   run.
+    ///
+    /// The hypervisor reads the decrementer at the unit's clock, the end of
+    /// the step that took the interrupt. Where the run's time base is
+    /// later, it reads the decrementer at that time base, as the thread's
+    /// next read does.
     pub(in crate::runtime) fn end_external_interrupt(
         &mut self,
         result: &ExecutionStepResult,
@@ -324,7 +331,26 @@ impl Runtime {
             crate::runtime::spaces::resolve_space_memory(&self.memory, &self.spaces, space);
         // The hypervisor keeps a refusal, and the next step stops the run
         // with it.
-        let _ = self.hypervisor.take_mediated_external(&take, storage);
+        let entry = self.hypervisor.take_mediated_external(&take, storage);
+        let Some(registered) = self.registry.get_mut(source) else {
+            return;
+        };
+        let moved = match entry {
+            Ok(MediatedEntry::Resume) => registered.resume_from_mediated_take(),
+            Ok(MediatedEntry::Vector) | Err(_) => registered.enter_mediated_external_vector(),
+        };
+        if !moved {
+            debug_assert!(
+                false,
+                "{source:?} took a mediated interrupt it cannot leave"
+            );
+            self.lv2_host.log_invariant_break(
+                "dispatch.hypervisor_mediated_take_unmoved",
+                format_args!(
+                    "{source:?} took a mediated interrupt but holds no supervisor registers"
+                ),
+            );
+        }
     }
 
     /// Gives the caller of `request` the r0, r11, r12 and CR fields that

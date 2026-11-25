@@ -82,7 +82,12 @@
 //! [OFW-4.93 lv1 a:0x1870] enters the vector at +496 with the MSR of
 //! [`external_interrupt_msr`], and gives the guest's SRR0 and SRR1 the
 //! saved HSRR0 and HSRR1 [OFW-4.93 lv1 a:0x188C-0x18C0]. The handler's
-//! `hrfid` loads these registers [OFW-4.93 lv1 a:0x1AF0-0x1B84].
+//! `hrfid` loads these registers [OFW-4.93 lv1 a:0x1AF0-0x1B84]. For a
+//! zero result, the handler skips the function
+//! [OFW-4.93 lv1 a:0x1AD4]. Its `hrfid` then returns to the interrupted
+//! address, and SRR0 and SRR1 keep their values from before the
+//! interrupt [OFW-4.93 lv1 a:0x1AF8-0x1B10]
+//! [OFW-4.93 lv1 a:0x1B2C-0x1B40].
 //!
 //! The function enters no vector, and sets [`LPCR_MER`] again
 //! [OFW-4.93 lv1 a:0x18D0-0x18DC], in these cases:

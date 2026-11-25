@@ -1,5 +1,6 @@
 //! The take of a mediated external interrupt: whether lv1's handler
-//! enters the thread's vector with the registers that the PPU gave it.
+//! enters the thread's vector with the registers that the PPU gave it,
+//! or returns the thread to the interrupted address.
 //!
 //! A thread takes the interrupt after a return set LPCR\[MER\] for it;
 //! see [`crate::ExternalRaise::Mediated`]. lv1's handler then tests the
@@ -50,49 +51,82 @@ pub struct MediatedTake {
     pub decrementer: Option<u32>,
 }
 
-/// The refusal of `take`, or `None` when lv1's handler enters the
-/// vector with the registers of the take.
+/// Where lv1's handler sends a thread after a mediated take that the
+/// model covers.
+///
+/// The handler reloads the LPCR before its shadow test, which clears
+/// LPCR\[MER\] [OFW-4.93 lv1 a:0x1A5C]. Both outcomes then leave through
+/// one tail. It reloads HSRR0, HSRR1, SRR0 and SRR1 from the values that
+/// the handler saved at entry, unless the vector entry changed them
+/// [OFW-4.93 lv1 a:0x1AF8-0x1B10] [OFW-4.93 lv1 a:0x1B2C-0x1B40]. Then
+/// its `hrfid` returns to the thread [OFW-4.93 lv1 a:0x1B84].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediatedEntry {
+    /// The shadow test finds a bit. The handler enters the thread's
+    /// external interrupt vector with SRR0 = the interrupted address and
+    /// SRR1 = the saved HSRR1 [OFW-4.93 lv1 a:0x1AD4]
+    /// [OFW-4.93 lv1 a:0x188C-0x18C0].
+    Vector,
+    /// The shadow test finds no bit, so the handler skips the vector
+    /// entry [OFW-4.93 lv1 a:0x1A84-0x1AD4]. The thread resumes at the
+    /// interrupted address with the MSR that `hrfid` takes from the saved
+    /// HSRR1. SRR0 and SRR1 keep their values from before the take.
+    Resume,
+}
+
+/// Where lv1's handler sends the thread of `take`.
 ///
 /// The test reads the interrupt state `interrupt` and the masks in
 /// `storage`, the thread's real address space.
-pub(crate) fn take_refusal(
+///
+/// # Errors
+///
+/// Returns [`HypercallRefusal::MediatedExternal`] for a take that the
+/// model does not cover; see [`check`].
+pub(crate) fn take_entry(
     take: &MediatedTake,
     firmware: Option<&str>,
     interrupt: &InterruptGroupState,
     storage: &GuestMemory,
-) -> Option<HypercallRefusal> {
-    let error = check(take, firmware, interrupt, storage).err()?;
-    Some(HypercallRefusal::MediatedExternal {
+) -> Result<MediatedEntry, HypercallRefusal> {
+    check(take, firmware, interrupt, storage).map_err(|error| HypercallRefusal::MediatedExternal {
         unit: take.unit,
         pc: take.srr0,
         what: error.what,
     })
 }
 
-/// Checks `take` against the cases that the model covers.
+/// Tests `take` in the order of lv1's handler, and returns where the
+/// handler sends the thread.
+///
+/// The handler runs its decrementer steps before the shadow test
+/// [OFW-4.93 lv1 a:0x1A04] [OFW-4.93 lv1 a:0x1A68]. The vector entry
+/// compares SRR0 with the trampoline slot and clears MSR bits 48 to 63
+/// [OFW-4.93 lv1 a:0x1898-0x18A8], so only a take whose shadow test finds
+/// a bit gets the two checks that follow from them.
 ///
 /// # Errors
 ///
 /// Returns the case of `take` that the model does not cover:
 /// - No table gives the firmware's logical PPE id.
 /// - The take's unit runs no PPE hardware thread.
-/// - The shadow test of lv1's handler finds no bit
-///   [OFW-4.93 lv1 a:0x1A84-0x1AD4]. The handler enters no vector.
-/// - SRR0 is [`MEDIATED_UNDELIVERED_PC`]. The handler enters no vector.
-/// - The MSR holds a bit of 48 to 63 that the PPU's interrupt entry
-///   keeps. lv1 clears it in the vector's MSR [OFW-4.93 lv1 a:0x1898-0x18A4].
 /// - The MSR holds HV. CellGov's partition never enters hypervisor state.
 /// - The take's unit gives no decrementer.
 /// - The decrementer is negative. lv1's handler then resets it
 ///   [OFW-4.93 lv1 a:0x2C636C-0x2C637C] [OFW-4.93 lv1 a:0x1B88-0x1BA0].
 ///   With +1832 set, the handler also gives the take the saved pc 0x28B8
 ///   [OFW-4.93 lv1 a:0x1BA4-0x1BBC] [OFW-4.93 lv1 a:0x1840-0x1868].
+/// - The shadow test finds a bit, and SRR0 is [`MEDIATED_UNDELIVERED_PC`].
+///   The handler enters no vector.
+/// - The shadow test finds a bit, and the MSR holds a bit of 48 to 63 that
+///   the PPU's interrupt entry keeps. lv1 clears it in the vector's MSR
+///   [OFW-4.93 lv1 a:0x1898-0x18A4].
 fn check(
     take: &MediatedTake,
     firmware: Option<&str>,
     interrupt: &InterruptGroupState,
     storage: &GuestMemory,
-) -> Result<(), UnmodelledError> {
+) -> Result<MediatedEntry, UnmodelledError> {
     let ppe_id = firmware
         .and_then(game_os_logical_ppe_id)
         .ok_or(UnmodelledError::new(
@@ -101,25 +135,7 @@ fn check(
     let thread = take.thread.ok_or(UnmodelledError::new(
         "a take on a unit that runs no PPE hardware thread",
     ))?;
-    let key = IrqStateBitmapKey { ppe_id, thread };
-    if !unmasked(interrupt.bitmaps(), key, storage)? {
-        return Err(UnmodelledError::new(
-            "a take whose status shadow and mask share no bit, for which lv1's handler enters no \
-             vector",
-        ));
-    }
-    if take.srr0 == MEDIATED_UNDELIVERED_PC {
-        return Err(UnmodelledError::new(
-            "a take at lv1's trampoline slot 0x28B8, for which lv1's handler enters no vector",
-        ));
-    }
     let msr = take.srr1 & !SRR1_INTERRUPT_INFO;
-    if msr & EXTERNAL_INTERRUPT_MSR_CLEARED & !MSR_INTERRUPT_CLEARED != 0 {
-        return Err(UnmodelledError::new(
-            "a take whose MSR holds a bit of 48 to 63 that lv1 clears and the PPU's interrupt \
-             entry keeps",
-        ));
-    }
     if msr & MSR_HV != 0 {
         return Err(UnmodelledError::new(
             "a take in hypervisor state, which lv1 treats as an interrupt of its own",
@@ -134,7 +150,22 @@ fn check(
              its trampoline slot 0x28B8",
         ));
     }
-    Ok(())
+    let key = IrqStateBitmapKey { ppe_id, thread };
+    if !unmasked(interrupt.bitmaps(), key, storage)? {
+        return Ok(MediatedEntry::Resume);
+    }
+    if take.srr0 == MEDIATED_UNDELIVERED_PC {
+        return Err(UnmodelledError::new(
+            "a take at lv1's trampoline slot 0x28B8, for which lv1's handler enters no vector",
+        ));
+    }
+    if msr & EXTERNAL_INTERRUPT_MSR_CLEARED & !MSR_INTERRUPT_CLEARED != 0 {
+        return Err(UnmodelledError::new(
+            "a take whose MSR holds a bit of 48 to 63 that lv1 clears and the PPU's interrupt \
+             entry keeps",
+        ));
+    }
+    Ok(MediatedEntry::Vector)
 }
 
 #[cfg(test)]

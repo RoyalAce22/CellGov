@@ -47,7 +47,7 @@ fn external_record(pc: u64, msr: u64, cause: u64) -> InterruptRecord {
 
 /// [CBE-Handbook p:276 s:9.7] A mediated external interrupt needs MSR\[EE\] = 1; [CBE-Handbook p:277 s:9.8] Table 9-27: its HSRR1 holds bits 33 and 42, which lv1 passes to the kernel's SRR1.
 #[test]
-fn a_mediated_exception_waits_while_ee_is_0_and_vectors_to_0x500_with_bits_33_and_42() {
+fn a_mediated_exception_waits_while_ee_is_0_and_enters_0x500_with_bits_33_and_42() {
     // nop; nop; mtmsrd r7,1 with r7 = EE | RI; nop.
     let mem = memory(&[NOP, NOP, mtmsrd(7, true), NOP]);
     let mut unit = thread(KERNEL_MSR);
@@ -76,6 +76,12 @@ fn a_mediated_exception_waits_while_ee_is_0_and_vectors_to_0x500_with_bits_33_an
             irq::SRR1_MEDIATED_EXTERNAL
         ))
     );
+    assert_eq!(
+        unit.state().pc,
+        CODE + 12,
+        "the hypervisor moves the thread"
+    );
+    assert!(unit.enter_mediated_external_vector());
     assert_eq!(unit.state().pc, irq::VECTOR_EXTERNAL);
     assert_eq!(sup(&unit).msr, MSR_SF | MSR_ME);
     assert!(

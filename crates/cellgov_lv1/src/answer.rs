@@ -317,8 +317,8 @@ pub enum HypercallRefusal {
         /// The part of the reply that no source gives.
         part: &'static str,
     },
-    /// A thread took a mediated external interrupt in a case where lv1's
-    /// handler enters no vector, or enters it with other registers.
+    /// A thread took a mediated external interrupt in a case that the
+    /// model of lv1's handler does not cover.
     #[error(
         "the mediated external interrupt that {unit:?} took at pc 0x{pc:016x}: CellGov does not \
          model {what}"

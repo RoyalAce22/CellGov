@@ -277,19 +277,20 @@ fn a_later_return_that_finds_no_bit_ends_the_request() {
 }
 
 /// The mask lost its bit with no hypercall, so LPCR\[MER\] stays. lv1's
-/// handler finds no bit and enters no vector
-/// [OFW-4.93 lv1 a:0x1A84-0x1AD4].
+/// handler finds no bit, enters no vector [OFW-4.93 lv1 a:0x1A84-0x1AD4],
+/// and its `hrfid` returns to the word after the move
+/// [OFW-4.93 lv1 a:0x1AF8-0x1B10] [OFW-4.93 lv1 a:0x1B84]. That word
+/// faults.
 #[test]
-fn a_take_after_the_mask_lost_its_bit_stops_the_run() {
+fn a_take_after_the_mask_lost_its_bit_resumes_at_the_interrupted_word() {
     let (kernel, after_move) = requesting_kernel(After::ClearMask);
     let run = run_kernel_from_entry(&kernel, FW_MEDIATED, 2_000).unwrap();
-    assert_eq!(
-        take_refusal(&run),
-        (
-            after_move,
-            "a take whose status shadow and mask share no bit, for which lv1's handler enters \
-             no vector"
-        )
+    assert_eq!(fault_pc(&run), after_move);
+    let thread0 = run.thread0.expect("thread 0's position");
+    assert!(
+        !thread0.recent_pcs.contains(&EXTERNAL_INTERRUPT_VECTOR),
+        "recent pcs {:x?}",
+        thread0.recent_pcs
     );
 }
 

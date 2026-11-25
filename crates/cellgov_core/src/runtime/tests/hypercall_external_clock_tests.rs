@@ -68,6 +68,12 @@ impl ExecutionUnit for Clocked {
     fn clear_mediated_external_exception(&mut self) -> bool {
         self.0.clear_mediated_external_exception()
     }
+    fn enter_mediated_external_vector(&mut self) -> bool {
+        self.0.enter_mediated_external_vector()
+    }
+    fn resume_from_mediated_take(&mut self) -> bool {
+        self.0.resume_from_mediated_take()
+    }
     fn run_until_yield(
         &mut self,
         budget: Budget,

@@ -1,7 +1,7 @@
 use crate::return_path::{ExternalRaise, SavedMsrs};
 use crate::{
     HypercallAnswer, HypercallDisposition, HypercallRefusal, HypercallRequest, Hypervisor,
-    MediatedTake,
+    MediatedEntry, MediatedTake,
 };
 use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
@@ -126,32 +126,30 @@ fn a_take_whose_shadow_and_mask_share_a_bit_is_answered() {
     let mut hv = requested();
     assert_eq!(
         hv.take_mediated_external(&take(TAKE_PC, TAKE_MSR), &storage(PLUG_BIT)),
-        Ok(())
+        Ok(MediatedEntry::Vector)
     );
     assert_eq!(hv.refusal(), None);
 }
 
-/// The guest cleared its mask after the return: lv1's handler finds no
-/// bit and enters no vector [OFW-4.93 lv1 a:0x1AC8-0x1AD4].
 #[test]
-fn a_take_after_the_mask_lost_its_bit_is_a_kept_refusal() {
+fn a_take_refusal_is_kept_and_a_later_one_does_not_replace_it() {
     let mut hv = requested();
     let expected = refusal(
-        TAKE_PC,
-        "a take whose status shadow and mask share no bit, for which lv1's handler enters no \
-         vector",
-    );
-    assert_eq!(
-        hv.take_mediated_external(&take(TAKE_PC, TAKE_MSR), &storage(0)),
-        Err(expected)
-    );
-    assert_eq!(hv.refusal(), Some(expected));
-    let second = refusal(
         0x28B8,
         "a take at lv1's trampoline slot 0x28B8, for which lv1's handler enters no vector",
     );
     assert_eq!(
         hv.take_mediated_external(&take(0x28B8, TAKE_MSR), &storage(PLUG_BIT)),
+        Err(expected)
+    );
+    assert_eq!(hv.refusal(), Some(expected));
+    let second = refusal(
+        TAKE_PC,
+        "a take whose MSR holds a bit of 48 to 63 that lv1 clears and the PPU's interrupt \
+         entry keeps",
+    );
+    assert_eq!(
+        hv.take_mediated_external(&take(TAKE_PC, TAKE_MSR | 0x80), &storage(PLUG_BIT)),
         Err(second)
     );
     assert_eq!(hv.refusal(), Some(expected));
@@ -160,8 +158,9 @@ fn a_take_after_the_mask_lost_its_bit_is_a_kept_refusal() {
 #[test]
 fn a_take_refusal_names_no_hypercall_number() {
     let mut hv = requested();
-    let Err(refused) = hv.take_mediated_external(&take(TAKE_PC, TAKE_MSR), &storage(0)) else {
-        panic!("a take with no shared bit is answered");
+    let Err(refused) = hv.take_mediated_external(&take(0x28B8, TAKE_MSR), &storage(PLUG_BIT))
+    else {
+        panic!("a take at the trampoline slot is answered");
     };
     assert_eq!(refused.number(), None);
 }
@@ -240,3 +239,6 @@ fn a_take_in_hypervisor_state_is_a_refusal() {
 
 #[path = "mediated_decrementer_tests.rs"]
 mod decrementer;
+
+#[path = "mediated_resume_tests.rs"]
+mod resume;

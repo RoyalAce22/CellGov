@@ -32,7 +32,7 @@ fn a_take_whose_decrementer_is_0_or_0x7fffffff_is_answered() {
         let mut hv = requested();
         assert_eq!(
             hv.take_mediated_external(&take_with(Some(decrementer)), &storage(PLUG_BIT)),
-            Ok(()),
+            Ok(MediatedEntry::Vector),
             "decrementer {decrementer:#x}"
         );
     }

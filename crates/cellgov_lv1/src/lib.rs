@@ -98,7 +98,7 @@ pub use group::uart::{
 };
 pub use handlers::{answer, answered_numbers, answers};
 pub use interprocessor::{RunningThread, RunningThreads};
-pub use mediated::MediatedTake;
+pub use mediated::{MediatedEntry, MediatedTake};
 pub use request::HypercallRequest;
 pub use return_path::{
     Compare, ExternalDelivery, ExternalRaise, ReturnPair, ReturnRegisters, SavedMsrs,

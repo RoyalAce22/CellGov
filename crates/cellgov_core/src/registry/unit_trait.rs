@@ -122,6 +122,14 @@ pub trait RegisteredUnit: 'static {
     /// [`ExecutionUnit::clear_mediated_external_exception`].
     fn clear_mediated_external_exception(&mut self) -> bool;
 
+    /// Moves the thread to its external interrupt vector after a mediated
+    /// take. See [`ExecutionUnit::enter_mediated_external_vector`].
+    fn enter_mediated_external_vector(&mut self) -> bool;
+
+    /// Returns the thread to the interrupted instruction after a mediated
+    /// take. See [`ExecutionUnit::resume_from_mediated_take`].
+    fn resume_from_mediated_take(&mut self) -> bool;
+
     /// The PPE thread's issue pressure. See
     /// [`ExecutionUnit::ppe_issue_pressure`].
     fn ppe_issue_pressure(&self) -> cellgov_exec::PpeIssuePressure;
@@ -392,6 +400,16 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn clear_mediated_external_exception(&mut self) -> bool {
         ExecutionUnit::clear_mediated_external_exception(self)
+    }
+
+    #[inline]
+    fn enter_mediated_external_vector(&mut self) -> bool {
+        ExecutionUnit::enter_mediated_external_vector(self)
+    }
+
+    #[inline]
+    fn resume_from_mediated_take(&mut self) -> bool {
+        ExecutionUnit::resume_from_mediated_take(self)
     }
 
     #[inline]

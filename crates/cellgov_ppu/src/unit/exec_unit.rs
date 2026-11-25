@@ -183,6 +183,14 @@ impl ExecutionUnit for PpuExecutionUnit {
         PpuExecutionUnit::clear_mediated_external_exception(self)
     }
 
+    fn enter_mediated_external_vector(&mut self) -> bool {
+        PpuExecutionUnit::enter_mediated_external_vector(self)
+    }
+
+    fn resume_from_mediated_take(&mut self) -> bool {
+        PpuExecutionUnit::resume_from_mediated_take(self)
+    }
+
     fn time_base_read(&self) -> Option<u64> {
         self.state.clock_read.then_some(self.state.tb)
     }

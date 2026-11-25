@@ -45,6 +45,9 @@ mod time_base;
 #[path = "hypercall_external_clock_tests.rs"]
 mod clock;
 
+#[path = "hypercall_external_resume_tests.rs"]
+mod resume;
+
 /// The `sc` of the kernel's port call in the setup of a thread's record
 /// [OFW-4.93 lv2_kernel a:0x8000000000007d8c]. The console gave thread 1's
 /// call the port id 4 (`GAME_OS_PORT_CALLS`).
@@ -106,6 +109,11 @@ struct Seen {
     interrupts: u32,
     /// The steps that took the mediated external interrupt.
     mediated_takes: u32,
+    /// The mediated takes that the runtime moved to the vector.
+    vector_entries: u32,
+    /// The mediated takes that the runtime returned to the interrupted
+    /// instruction.
+    resumes: u32,
     /// Whether the thread yielded its `pause`.
     paused: bool,
     /// The decrementer that the thread's boundary registers give at time
@@ -185,6 +193,14 @@ impl ExecutionUnit for Thread {
     }
     fn clear_mediated_external_exception(&mut self) -> bool {
         self.seen.borrow_mut().mediated = false;
+        true
+    }
+    fn enter_mediated_external_vector(&mut self) -> bool {
+        self.seen.borrow_mut().vector_entries += 1;
+        true
+    }
+    fn resume_from_mediated_take(&mut self) -> bool {
+        self.seen.borrow_mut().resumes += 1;
         true
     }
     fn run_until_yield(
@@ -533,7 +549,8 @@ fn a_return_with_ee_off_raises_the_mediated_exception_until_the_take_ends_it() {
 /// lv1's handler enters no vector for a take at its trampoline slot
 /// (`MEDIATED_UNDELIVERED_PC`). The hypervisor keeps the refusal, which
 /// names the unit and the SRR0 of the take, and the run stops at the
-/// step after the take: four calls and the take.
+/// step after the take: four calls and the take. The runtime moves the
+/// thread of the refused take to the vector.
 #[test]
 fn a_refused_mediated_take_stops_the_run_at_the_next_step() {
     let mut rt = runtime(PLUG_BIT);
@@ -562,6 +579,7 @@ fn a_refused_mediated_take_stops_the_run_at_the_next_step() {
     );
     let seen = seen.borrow();
     assert_eq!(seen.mediated_takes, 1);
+    assert_eq!((seen.resumes, seen.vector_entries), (0, 1));
     assert_eq!(seen.writes.len(), 5);
 }
 

@@ -5,7 +5,9 @@
 //! - an interrupt its instruction causes, except a machine check and
 //!   `sc` with LEV = 1;
 //! - the system call interrupt of `sc` with any other LEV;
-//! - the external and decrementer interrupts, between two instructions;
+//! - the external and decrementer interrupts, between two instructions,
+//!   except a mediated external interrupt that CellGov's hypervisor
+//!   returns to the interrupted instruction;
 //! - the trace interrupt, after the instruction that it traces.
 //!
 //! `sc` with LEV = 1 yields a hypercall in either processor state.
@@ -23,7 +25,7 @@ use cellgov_ps3_abi::hw::ppu_interrupt::{
     VECTOR_TRACE,
 };
 use cellgov_ps3_abi::hw::ppu_supervisor::{
-    MSR_BE, MSR_EE, MSR_HV, MSR_INTERRUPT_CLEARED, MSR_PR, MSR_SE, MSR_SF,
+    MSR_BE, MSR_BIT1, MSR_DR, MSR_EE, MSR_HV, MSR_INTERRUPT_CLEARED, MSR_IR, MSR_PR, MSR_SE, MSR_SF,
 };
 
 use super::batch::BatchEntry;
@@ -51,6 +53,24 @@ fn entry_msr(msr: u64) -> u64 {
 /// [PPC-Book3 p:62 s:5.4] SRR1 bits 33:36 and 42:47 hold the interrupt's information, and every other bit holds the MSR.
 pub(super) fn entry_srr1(msr: u64, cause: u64) -> u64 {
     (msr & !SRR1_INTERRUPT_INFO) | (cause & SRR1_INTERRUPT_INFO)
+}
+
+/// The MSR after an `hrfid` with HSRR1 `hsrr1`, from a thread with MSR
+/// `msr`.
+///
+/// The bits that `hrfid` does not set are the interrupt information bits
+/// of SRR1, so they keep their values.
+///
+/// [PPC-Book3 p:13 s:2.3] hrfid places the OR of HSRR1 bits 0 and 1 into MSR\[SF\], the OR of HSRR1 bit 49 with bits 48, 58 and 59 into MSR\[EE\], MSR\[IR\] and MSR\[DR\], and HSRR1 bits 1:32, 37:41, 49:57 and 60:63 into the same MSR bits.
+fn hrfid_msr(hsrr1: u64, msr: u64) -> u64 {
+    let mut next = (hsrr1 & !SRR1_INTERRUPT_INFO) | (msr & SRR1_INTERRUPT_INFO);
+    if hsrr1 & (MSR_SF | MSR_BIT1) != 0 {
+        next |= MSR_SF;
+    }
+    if hsrr1 & MSR_PR != 0 {
+        next |= MSR_EE | MSR_IR | MSR_DR;
+    }
+    next
 }
 
 /// Whether a thread with MSR `msr` may take a mediated external
@@ -253,6 +273,11 @@ impl PpuExecutionUnit {
 
     /// Takes `interrupt` ahead of the instruction at `pc`, and yields at
     /// the interrupt boundary. The instructions the batch retired commit.
+    ///
+    /// A mediated external interrupt enters the hypervisor, which decides
+    /// where the thread goes. So its take leaves the thread at `pc`; see
+    /// [`Self::enter_mediated_external_vector`] and
+    /// [`Self::resume_from_mediated_take`].
     pub(super) fn boundary_interrupt_yield(
         &mut self,
         entry: &BatchEntry,
@@ -261,7 +286,57 @@ impl PpuExecutionUnit {
         interrupt: BoundaryInterrupt,
     ) -> ExecutionStepResult {
         self.note_entry_context_sync(entry);
-        self.boundary_yield(entry, effects, pc, interrupt.record(pc))
+        if interrupt != BoundaryInterrupt::Mediated {
+            return self.boundary_yield(entry, effects, pc, interrupt.record(pc));
+        }
+        self.close_block(effects);
+        let mut record = interrupt.record(pc);
+        let Some(msr) = self.state.supervisor().map(|s| s.msr) else {
+            debug_assert!(
+                false,
+                "a mediated take on a thread with no supervisor registers"
+            );
+            return self.boundary_result(entry, pc, record);
+        };
+        record.srr1 = entry_srr1(msr, record.srr1);
+        self.state.pc = pc;
+        self.boundary_result(entry, pc, record)
+    }
+
+    /// Moves the thread from the interrupted instruction to the external
+    /// vector, as lv1's vector entry does after a mediated take. Returns
+    /// `false`, and changes nothing, when the thread has no supervisor
+    /// registers.
+    ///
+    /// The thread's pc is the interrupted instruction, and its MSR is the
+    /// MSR at the take.
+    #[must_use]
+    pub fn enter_mediated_external_vector(&mut self) -> bool {
+        if self.state.supervisor().is_none() {
+            return false;
+        }
+        let pc = self.state.pc;
+        self.enter_interrupt(BoundaryInterrupt::Mediated.record(pc));
+        true
+    }
+
+    /// Returns the thread to the interrupted instruction, as lv1's `hrfid`
+    /// does when its handler enters no vector after a mediated take.
+    /// Returns `false`, and changes nothing, when the thread has no
+    /// supervisor registers.
+    ///
+    /// lv1 reloads HSRR0 and HSRR1 from the values that the take saved
+    /// [OFW-4.93 lv1 a:0x1AF8-0x1B10], and reloads SRR0 and SRR1 from the
+    /// values that they held before the take [OFW-4.93 lv1 a:0x1B2C-0x1B40].
+    /// So the thread keeps its pc, SRR0 and SRR1, and takes the MSR that
+    /// [`hrfid_msr`] gives for the take's SRR1.
+    #[must_use]
+    pub fn resume_from_mediated_take(&mut self) -> bool {
+        self.state
+            .update_supervisor(|s| {
+                s.msr = hrfid_msr(entry_srr1(s.msr, SRR1_MEDIATED_EXTERNAL), s.msr);
+            })
+            .is_some()
     }
 
     /// Takes the trace interrupt of the instruction at `pc`, and yields at
@@ -346,6 +421,17 @@ impl PpuExecutionUnit {
     ) -> ExecutionStepResult {
         self.close_block(effects);
         let record = self.enter_interrupt(record);
+        self.boundary_result(entry, pc, record)
+    }
+
+    /// The step result of an interrupt boundary at `pc`, whose record
+    /// holds the whole SRR1.
+    fn boundary_result(
+        &self,
+        entry: &BatchEntry,
+        pc: u64,
+        record: InterruptRecord,
+    ) -> ExecutionStepResult {
         ExecutionStepResult {
             yield_reason: YieldReason::InterruptBoundary,
             consumed_cost: self.cost(entry),
@@ -446,6 +532,10 @@ mod interrupt_boundary_tests;
 #[cfg(test)]
 #[path = "tests/interrupt_mediated_tests.rs"]
 mod interrupt_mediated_tests;
+
+#[cfg(test)]
+#[path = "tests/interrupt_mediated_resume_tests.rs"]
+mod interrupt_mediated_resume_tests;
 
 #[cfg(test)]
 #[path = "tests/interrupt_system_call_tests.rs"]
