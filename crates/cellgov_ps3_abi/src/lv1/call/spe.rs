@@ -44,3 +44,14 @@ pub const GET_SPE_IRQ_OUTLET: u64 = 78;
 /// and no output. The lv1 handler [OFW-4.93 lv1 a:0x2FCF68] reads the
 /// inputs in this form; see [`crate::lv1::spe`].
 pub const SET_SPE_TRANSITION_NOTIFIER: u64 = 64;
+
+/// `logical_spu_set_run_timeout`: two inputs and no output.
+///
+/// The inputs are the spe id in r3 and the run time limit in timebase
+/// ticks in r4.
+///
+/// The OtherOS++ copy of `lv1call.h` gives the call two inputs and no
+/// output, as `undocumented_function_138`. The lv1 handler
+/// [OFW-4.93 lv1 a:0x31BD54] reads the inputs in this form; see
+/// [`crate::lv1::spe`].
+pub const LOGICAL_SPU_SET_RUN_TIMEOUT: u64 = 138;

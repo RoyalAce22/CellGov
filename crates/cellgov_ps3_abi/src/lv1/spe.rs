@@ -7,6 +7,8 @@
 //!   `get_spe_irq_outlet` (hypercall 78);
 //! - the handler of `set_spe_transition_notifier` (hypercall 64) and its
 //!   checks;
+//! - the handler of `logical_spu_set_run_timeout` (hypercall 138) and its
+//!   checks;
 //! - the spe id and the outlet ids of each call of the GameOS kernel's
 //!   boot.
 //!
@@ -237,6 +239,77 @@
 //! +152, the values that the constructor set, and removes a reference
 //! from the port of an earlier call [OFW-4.93 lv1 a:0x2FA530-0x2FA550].
 //! So it clears the notifier of an earlier call.
+//!
+//! The handler of `logical_spu_set_run_timeout` [OFW-4.93 lv1 a:0x31BD54]
+//! gives r3 and r4 to the worker [OFW-4.93 lv1 a:0x31BDDC-0x31BDE4]. It
+//! returns the worker's r3 [OFW-4.93 lv1 a:0x31BE50], and writes no
+//! return slot. The vector's entry zeroes the slots
+//! [OFW-4.93 lv1 a:0x0C08]. So r4 to r10 return 0 on each path.
+//!
+//! The worker [OFW-4.93 lv1 a:0x31BAF0] does these steps in this order:
+//! 1. It calls the function [OFW-4.93 lv1 a:0x31D7D8] with the calling
+//!    partition and 1, and returns a nonzero status
+//!    [OFW-4.93 lv1 a:0x31BB10-0x31BB2C].
+//! 2. It returns `LV1_CONDITION_NOT_SATISFIED` (-16), zero-extended, when
+//!    a flag of lv1's is 0
+//!    [OFW-4.93 lv1 a:0x31BB30-0x31BB40] [OFW-4.93 lv1 a:0x31BCC4-0x31BCD0].
+//! 3. It looks up r3 in the partition's object table, and checks these
+//!    fields of the object [OFW-4.93 lv1 a:0x31BB44-0x31BD0C]:
+//!    - the class word at +48 is the SPE class in the TOC slot at
+//!      r2 - 128;
+//!    - the doubleword at +192 is 0x0002000000000000.
+//!
+//!    A failed check returns `LV1_NO_ENTRY` (-6), marked with bit 0 for r3
+//!    [OFW-4.93 lv1 a:0x31BC60-0x31BC6C].
+//! 4. It gives r4 to the method in the TOC slot at r2 - 80, through the
+//!    call function [OFW-4.93 lv1 a:0x31A028], and returns the method's r3
+//!    [OFW-4.93 lv1 a:0x31BD18-0x31BD50]. That slot holds the function
+//!    descriptor [OFW-4.93 lv1 a:0x351348] of the method
+//!    [OFW-4.93 lv1 a:0x315688].
+//!
+//! On the type 1 path, the worker of `construct_logical_spe`
+//! [OFW-4.93 lv1 a:0x31A34C] makes the same call of
+//! step 1 [OFW-4.93 lv1 a:0x31A678-0x31A680], and tests the same flag
+//! as step 2 [OFW-4.93 lv1 a:0x31A6C0-0x31A6D0]. A type 1 SPE passes the
+//! checks of step 3:
+//! - The SPE constructor gives the object constructor the class in the
+//!   TOC slot at r2 - 5008 [OFW-4.93 lv1 a:0x2FA634]
+//!   [OFW-4.93 lv1 a:0x2FA650]. The object constructor stores it at +48
+//!   [OFW-4.93 lv1 a:0x2CC6A8]. The slots at r2 - 5008 and r2 - 128
+//!   hold the same class [OFW-4.93 lv1 a:0x358CA8]
+//!   [OFW-4.93 lv1 a:0x359FB8]. The descriptors of this handler and of
+//!   the `get_spe_irq_outlet` method beside the constructor give the same
+//!   TOC, 0x35A038 [OFW-4.93 lv1 a:0x351C6C] [OFW-4.93 lv1 a:0x34AAFC].
+//! - The type 1 worker gives the SPE constructor 0x0002000000000000 in r7
+//!   and r8 [OFW-4.93 lv1 a:0x315928-0x315948]. The constructor stores r8
+//!   at +184 and r7 at +192
+//!   [OFW-4.93 lv1 a:0x2FA638] [OFW-4.93 lv1 a:0x2FA64C]
+//!   [OFW-4.93 lv1 a:0x2FA6AC-0x2FA6B4].
+//!
+//! The call function takes the SPE's lock at +216
+//! [OFW-4.93 lv1 a:0x31A030-0x31A118]. It then reads the doubleword at
+//! +184:
+//! - Bits 0x0000007000000000 are 0: it calls the method, and returns the
+//!   method's r3 [OFW-4.93 lv1 a:0x31A11C-0x31A18C].
+//! - Bit 0x0000001000000000 is set: it returns `LV1_NO_ENTRY` (-6),
+//!   marked with bit 0 for r3
+//!   [OFW-4.93 lv1 a:0x31A1F0-0x31A200] [OFW-4.93 lv1 a:0x31A338-0x31A344].
+//! - Otherwise it waits until bit 0x0000002000000000 is clear, and reads
+//!   +184 again [OFW-4.93 lv1 a:0x31A240-0x31A334].
+//!
+//! The method [OFW-4.93 lv1 a:0x315688] does these steps in this order:
+//! 1. A doubleword at +184 that is not 0x0002000000000000 returns
+//!    `LV1_WRONG_STATE` (-11), marked with bit 0 for r3
+//!    [OFW-4.93 lv1 a:0x315688-0x3156AC].
+//! 2. It stores r4 at +584 of the SPE, and returns 0
+//!    [OFW-4.93 lv1 a:0x3156B0-0x3156B8].
+//!
+//! The type 1 worker sets +584 to 0
+//! [OFW-4.93 lv1 a:0x315908] [OFW-4.93 lv1 a:0x315958]. The start step
+//! of the SPE reads +584 [OFW-4.93 lv1 a:0x3165B8-0x3165C0]. When it is
+//! not 0, the step adds it to the timebase, and arms a timer for that
+//! deadline [OFW-4.93 lv1 a:0x3165C4-0x316604]. So r4 is the SPE's run
+//! time limit in timebase ticks, and 0 is no limit.
 
 use crate::lv1::status::{zero_extended, LV1_ACCESS_VIOLATION};
 
@@ -368,6 +441,32 @@ pub fn spe_transition_notifier_handler(
         .find(|handler| handler.firmware == firmware)
 }
 
+/// The handler of hypercall 138 in one firmware's lv1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpeRunTimeoutHandler {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The address of the `logical_spu_set_run_timeout` handler.
+    pub handler: u32,
+}
+
+/// Each firmware whose lv1 image shows the handler, ascending.
+///
+/// The address is the entry of hypercall 138 in the live 4.93 hypercall
+/// table ([`super::table::LIVE_TABLE_HANDLERS`]).
+pub const SPE_RUN_TIMEOUT_HANDLERS: &[SpeRunTimeoutHandler] = &[SpeRunTimeoutHandler {
+    firmware: "4.93",
+    handler: 0x31BD54,
+}];
+
+/// The handler of the firmware version `firmware`, or `None` when no lv1
+/// image read shows it.
+pub fn spe_run_timeout_handler(firmware: &str) -> Option<&'static SpeRunTimeoutHandler> {
+    SPE_RUN_TIMEOUT_HANDLERS
+        .iter()
+        .find(|handler| handler.firmware == firmware)
+}
+
 /// The mask bits that `set_spe_transition_notifier` accepts for a type 1
 /// SPE: the type 1 worker sets the doubleword at +160 of the SPE to 7
 /// [OFW-4.93 lv1 a:0x3159C4-0x3159CC].
@@ -461,3 +560,7 @@ mod irq_outlet_tests;
 #[cfg(test)]
 #[path = "tests/spe_transition_notifier_tests.rs"]
 mod transition_notifier_tests;
+
+#[cfg(test)]
+#[path = "tests/spe_run_timeout_tests.rs"]
+mod run_timeout_tests;

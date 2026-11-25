@@ -5,6 +5,7 @@ use cellgov_mem::scheme::{HashedSurface, Stamp};
 
 use super::construct::{self, LogicalSpe, LogicalSpeState};
 use super::irq_outlet;
+use super::run_timeout::{self, RunTimeout, RunTimeoutState};
 use super::transition_notifier::{self, TransitionNotifier, TransitionNotifierState};
 use crate::group::state::StateChange;
 use crate::group::table::Group;
@@ -16,6 +17,7 @@ pub(crate) const GROUP: Group = Group {
         construct::HYPERCALLS,
         irq_outlet::HYPERCALLS,
         transition_notifier::HYPERCALLS,
+        run_timeout::HYPERCALLS,
     ],
     lanes: &[192..=207],
     hashed_surfaces: &[
@@ -29,6 +31,11 @@ pub(crate) const GROUP: Group = Group {
             source: Some(LOGICAL_SPE_NOTIFIER_SOURCE),
             stamp: Stamp::Version(27),
         },
+        HashedSurface {
+            name: "the run time limit of each logical SPE",
+            source: Some(LOGICAL_SPE_RUN_TIMEOUT_SOURCE),
+            stamp: Stamp::Pending,
+        },
     ],
 };
 
@@ -40,12 +47,17 @@ pub(crate) const LOGICAL_SPE_SOURCE: u8 = 192;
 /// object per notifier in spe id order.
 pub(crate) const LOGICAL_SPE_NOTIFIER_SOURCE: u8 = 193;
 
-/// The logical SPE group's state: the partition's logical SPEs and their
-/// transition notifiers.
+/// The lane source of the run time limits of the logical SPEs, one object
+/// per limit that is not 0, in spe id order.
+pub(crate) const LOGICAL_SPE_RUN_TIMEOUT_SOURCE: u8 = 194;
+
+/// The logical SPE group's state: the partition's logical SPEs, their
+/// transition notifiers and their run time limits.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SpeState {
     spes: LogicalSpeState,
     notifiers: TransitionNotifierState,
+    timeouts: RunTimeoutState,
 }
 
 impl SpeState {
@@ -59,20 +71,28 @@ impl SpeState {
         &self.notifiers
     }
 
+    /// The run time limit of each logical SPE.
+    pub fn timeouts(&self) -> &RunTimeoutState {
+        &self.timeouts
+    }
+
     /// Applies `change` to the state.
     pub(crate) fn apply(&mut self, change: SpeChange) {
         match change {
             SpeChange::Constructed(spe) => self.spes.construct(spe),
             SpeChange::NotifierSet(notifier) => self.notifiers.set(notifier),
             SpeChange::NotifierCleared(spe) => self.notifiers.clear(spe),
+            SpeChange::RunTimeoutSet(timeout) => self.timeouts.set(timeout),
         }
     }
 
-    /// The sync-state terms of the logical SPEs and their notifiers.
+    /// The sync-state terms of the logical SPEs, their notifiers and their
+    /// run time limits.
     pub fn sync_term(&self) -> u128 {
         self.spes
             .sync_term()
             .wrapping_add(self.notifiers.sync_term())
+            .wrapping_add(self.timeouts.sync_term())
     }
 }
 
@@ -86,6 +106,8 @@ pub enum SpeChange {
     /// The call removed the transition notifier of the SPE with this spe
     /// id.
     NotifierCleared(u64),
+    /// The call gave an SPE this run time limit.
+    RunTimeoutSet(RunTimeout),
 }
 
 impl From<SpeChange> for StateChange {

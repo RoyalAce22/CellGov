@@ -70,8 +70,8 @@ pub use group::network::{NetworkChange, NetworkState};
 pub use group::partition::repository::RepositoryRead;
 pub use group::partition::{PartitionChange, PartitionState};
 pub use group::spe::{
-    shadow_storage, LogicalSpe, LogicalSpeState, SpeChange, SpeState, TransitionNotifier,
-    TransitionNotifierState, SHADOW_STORAGE_BASE, SHADOW_STORAGE_PAGES,
+    shadow_storage, LogicalSpe, LogicalSpeState, RunTimeout, RunTimeoutState, SpeChange, SpeState,
+    TransitionNotifier, TransitionNotifierState, SHADOW_STORAGE_BASE, SHADOW_STORAGE_PAGES,
 };
 pub use group::state::{GroupStates, StateChange};
 pub use group::storage::{StorageChange, StorageState};
