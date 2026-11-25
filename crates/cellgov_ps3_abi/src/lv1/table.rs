@@ -14,7 +14,8 @@
 ///
 /// `set_lv1_hvcall_table` stores this count (`li r0, 256`) at HSPRG0 -
 /// 0x6FD0, and the table base at HSPRG0 - 0x6FC8. The `sc` vector reads
-/// both, at 0x0c24 and 0x0c30. The count is a constant in each image of
+/// both, at [OFW-4.93 lv1 a:0x0c24] and [OFW-4.93 lv1 a:0x0c30]. The count
+/// is a constant in each image of
 /// [`HYPERCALL_TABLE_SITES`].
 ///
 /// [PS3DEVWIKI-HV-RE s:HV_call] The size of the HV call table is stored at -0x6FD0(HSPRG0).
@@ -112,7 +113,7 @@ pub const LIVE_TABLE_CAPTURE: &str = "tests/micro/lv1_hypercall_table";
 /// problem-state-callable flag. No entry sets the flag. Each number
 /// below [`HYPERCALL_TABLE_ENTRIES`] that is absent here holds the
 /// Invalid HV Call function. The memory calls share the thunk at
-/// 0x2C89CC.
+/// [OFW-4.93 lv1 a:0x2C89CC].
 pub const LIVE_TABLE_HANDLERS: &[(u16, u32)] = &[
     (0, 0x2C89CC),
     (1, 0x2ED1C0),

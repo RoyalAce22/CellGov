@@ -3,8 +3,9 @@ use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::repository::{field, first_field};
 use cellgov_time::GuestTicks;
 
-/// The 4.93 kernel's `bi.rgntotal` read: the wrapper's `sc`, called from
-/// the accessor that discards the second value.
+/// The 4.93 kernel's `bi.rgntotal` read: the wrapper's `sc`
+/// [OFW-4.93 lv2_kernel a:0x800000000000ce3c], called from the accessor
+/// that discards the second value [OFW-4.93 lv2_kernel a:0x800000000000c94c].
 fn rgntotal_read() -> HypercallRequest {
     HypercallRequest {
         unit: UnitId::new(0),

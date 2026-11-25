@@ -5,29 +5,33 @@
 //! - the logical PPE id of the GameOS partition.
 //!
 //! The handler facts come from the 4.93 `lv1.self`, decrypted offline
-//! and read with `cellgov dev disasm`. Each address here is a 4.93 lv1
-//! address. No byte of lv1 is committed; these facts are.
+//! and read with `cellgov dev disasm`. No byte of lv1 is committed;
+//! these facts are.
 //!
 //! The handler returns these registers:
-//! - r3 is 0, `LV1_SUCCESS` (0x2E9024).
+//! - r3 is 0, `LV1_SUCCESS` [OFW-4.93 lv1 a:0x2E9024].
 //! - r4 is the doubleword at +72 of the logical PPE object that the
 //!   calling thread's lv1 context names at HSPRG0 - 0x67F0. The handler
-//!   loads it at 0x2E8FA8 to 0x2E8FC0 and stores it in the return slot
-//!   of r4, HSPRG0 - 0x6A38, at 0x2E8FC4.
+//!   loads it at [OFW-4.93 lv1 a:0x2E8FA8-0x2E8FC0] and stores it in the return slot
+//!   of r4, HSPRG0 - 0x6A38, at [OFW-4.93 lv1 a:0x2E8FC4].
 //! - r5 to r10 are 0. The handler writes no other return slot, and the
-//!   vector's entry zeroes the slots (0x0C08).
+//!   vector's entry zeroes the slots [OFW-4.93 lv1 a:0x0C08].
 //!
 //! The doubleword at +72 is the object's id in its partition's object
 //! table:
-//! - The object constructor at 0x2CC64C gives the table's allocator
-//!   (0x2CA258) the address of +72 (0x2CC6E0, 0x2CC6EC). The allocator
+//! - The object constructor at [OFW-4.93 lv1 a:0x2CC64C] gives the
+//!   table's allocator [OFW-4.93 lv1 a:0x2CA258] the address of +72
+//!   [OFW-4.93 lv1 a:0x2CC6E0] [OFW-4.93 lv1 a:0x2CC6EC]. The allocator
 //!   takes the first free id of the table.
-//! - The logical PPE constructor at 0x2E0DF8 calls it at 0x2E0E58.
-//! - The constructor has two callers, 0x2E7D94 and 0x2E854C. The first
-//!   is in 0x2E7754, which takes a partition that already exists from
-//!   its argument (0x2E796C). The function 0x2994D8 calls 0x2E7754, and
-//!   the table entry at 0x35F780 pairs the number 5 with its function
-//!   descriptor.
+//! - The logical PPE constructor at [OFW-4.93 lv1 a:0x2E0DF8] calls it at
+//!   [OFW-4.93 lv1 a:0x2E0E58].
+//! - The constructor has two callers, [OFW-4.93 lv1 a:0x2E7D94] and
+//!   [OFW-4.93 lv1 a:0x2E854C]. The first is in
+//!   [OFW-4.93 lv1 a:0x2E7754], which takes a partition that already
+//!   exists from its argument [OFW-4.93 lv1 a:0x2E796C]. The function
+//!   [OFW-4.93 lv1 a:0x2994D8] calls [OFW-4.93 lv1 a:0x2E7754], and the
+//!   table entry at [OFW-4.93 lv1 a:0x35F780] pairs the number 5 with its
+//!   function descriptor.
 //!
 //! So the partition's other objects decide the id, and no image read
 //! gives it. The repository gives it; see [`game_os_logical_ppe_id`].

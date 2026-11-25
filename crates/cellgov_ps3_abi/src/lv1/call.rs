@@ -88,8 +88,8 @@ pub const ALLOCATE_MEMORY: u64 = 0;
 /// - r5 is doubleword 0 of the entry.
 /// - r6 is doubleword 1, with the page's logical partition address.
 ///
-/// There is no output. The 4.93 lv1 handler reads the inputs in this
-/// form; see [`super::page_table`].
+/// There is no output. The lv1 handler [OFW-4.93 lv1 a:0x2ED1C0] reads the
+/// inputs in this form; see [`super::page_table`].
 pub const WRITE_HTAB_ENTRY: u64 = 1;
 
 /// `construct_virtual_address_space`: create a virtual address space
@@ -122,14 +122,16 @@ pub const SELECT_VIRTUAL_ADDRESS_SPACE: u64 = 7;
 /// - r5 is the bitmap's logical partition address.
 ///
 /// There is no output. Linux `arch/powerpc/platforms/ps3/interrupt.c`,
-/// `ps3_init_IRQ`, makes the call in this form. The 4.93 lv1 handler
-/// reads the inputs in this form; see [`super::interrupt`].
+/// `ps3_init_IRQ`, makes the call in this form. The lv1 handler
+/// [OFW-4.93 lv1 a:0x2EA35C] reads the inputs in this form; see
+/// [`super::interrupt`].
 pub const CONFIGURE_IRQ_STATE_BITMAP: u64 = 11;
 
 /// `get_logical_ppe_id`: no input, and the id of the caller's logical
 /// PPE in r4. Linux `arch/powerpc/platforms/ps3/repository.c`,
-/// `ps3_repository_read_mm_info`, makes the call in this form. The 4.93
-/// lv1 handler writes the outputs in this form; see [`super::ppe`].
+/// `ps3_repository_read_mm_info`, makes the call in this form. The lv1
+/// handler [OFW-4.93 lv1 a:0x2E8F38] writes the outputs in this form; see
+/// [`super::ppe`].
 pub const GET_LOGICAL_PPE_ID: u64 = 69;
 
 /// `get_logical_partition_id`: no input, and the caller's partition id
@@ -146,43 +148,46 @@ pub const READ_REPOSITORY_NODE: u64 = 91;
 /// The inputs are the vas id in r3, or 0 for the caller's address space,
 /// and the index of the first entry in r4. On success, r4 to r7 hold
 /// doubleword 0 of each entry, and r8 holds the low halfword of
-/// doubleword 1 of each entry. The 4.93 lv1 handler reads the inputs and
-/// writes the outputs in this form; see [`super::page_table`].
+/// doubleword 1 of each entry. The lv1 handler [OFW-4.93 lv1 a:0x2ECAF8]
+/// reads the inputs and writes the outputs in this form; see
+/// [`super::page_table`].
 pub const READ_HTAB_ENTRIES: u64 = 95;
 
 /// `map_htab`: map an address space's page table into the partition's
 /// logical address space.
 ///
 /// The input is the vas id in r3, or 0 for the caller's address space.
-/// On success, r4 holds the mapping's logical partition address. The
-/// 4.93 lv1 worker reads the input and writes the output in this form;
-/// see [`super::page_table::MAP_HTAB_RESOURCE_SHORTAGE_R3`].
+/// On success, r4 holds the mapping's logical partition address. The lv1
+/// worker [OFW-4.93 lv1 a:0x2DDB20] reads the input and writes the output
+/// in this form; see [`super::page_table::MAP_HTAB_RESOURCE_SHORTAGE_R3`].
 pub const MAP_HTAB: u64 = 122;
 
 /// `lv1_comm_dev_logical_console_construct`, by the name psdevwiki
 /// gives 105 [PS3DEVWIKI-HV-SYSCALLS s:HV_Syscalls]. The headers call it
 /// `undocumented_function_105`.
 ///
-/// Firmware reading: the 4.93 kernel's wrapper passes the console id in
-/// r3, and reads r3 alone after the call.
+/// The kernel's wrapper [OFW-4.93 lv2_kernel a:0x800000000000FC54] passes
+/// the console id in r3, and reads r3 alone after the call.
 pub const LOGICAL_CONSOLE_CONSTRUCT: u64 = 105;
 
 /// `lv1_comm_dev_logical_console_send`, by the name psdevwiki gives 107
 /// [PS3DEVWIKI-HV-SYSCALLS s:HV_Syscalls]. The headers call it
 /// `undocumented_function_107`.
 ///
-/// Firmware reading: the 4.93 kernel's send wrappers put the console id
-/// in r3, the byte count in r4 and up to [`LOGICAL_CONSOLE_SEND_MAX`]
-/// bytes in r5 to r8. After a call with r3 = 0, the kernel subtracts r4
-/// from its count of unsent bytes, so r4 is the count the console took.
+/// The kernel's send wrappers [OFW-4.93 lv2_kernel a:0x800000000000FCD8]
+/// [OFW-4.93 lv2_kernel a:0x800000000000FDC0-0x800000000000FEB0] put the
+/// console id in r3, the byte count in r4 and up to
+/// [`LOGICAL_CONSOLE_SEND_MAX`] bytes in r5 to r8. After a call with
+/// r3 = 0, the kernel subtracts r4 from its count of unsent bytes, so r4
+/// is the count the console took.
 pub const LOGICAL_CONSOLE_SEND: u64 = 107;
 
 /// `lv1_comm_dev_logical_console_flush`, by the name psdevwiki gives 109
 /// [PS3DEVWIKI-HV-SYSCALLS s:HV_Syscalls]. The headers call it
 /// `undocumented_function_109`.
 ///
-/// Firmware reading: the 4.93 kernel's wrapper passes the console id in
-/// r3, and reads r3 alone after the call.
+/// The kernel's wrapper [OFW-4.93 lv2_kernel a:0x800000000000FD30] passes
+/// the console id in r3, and reads r3 alone after the call.
 pub const LOGICAL_CONSOLE_FLUSH: u64 = 109;
 
 /// The most bytes one [`LOGICAL_CONSOLE_SEND`] carries: the four

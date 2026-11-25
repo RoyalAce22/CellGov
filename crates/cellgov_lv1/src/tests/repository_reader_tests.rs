@@ -3,10 +3,12 @@ use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::repository::{field, first_field, READ_WRAPPER_SC_4_93};
 use cellgov_time::GuestTicks;
 
-/// The return address of the 4.93 kernel's `bi.rgntotal` accessor.
+/// The return address of the 4.93 kernel's `bi.rgntotal` accessor
+/// [OFW-4.93 lv2_kernel a:0x800000000000c94c].
 const RGNTOTAL_READER: u64 = 0x8000_0000_0000_c94c;
 
-/// The return address of the 4.93 kernel's `be.0.clock` accessor.
+/// The return address of the 4.93 kernel's `be.0.clock` accessor
+/// [OFW-4.93 lv2_kernel a:0x800000000000c85c].
 const BE_CLOCK_READER: u64 = 0x8000_0000_0000_c85c;
 
 fn rgntotal_read_from(pc: u64, lr: u64) -> HypercallRequest {

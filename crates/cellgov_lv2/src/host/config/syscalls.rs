@@ -171,9 +171,12 @@ impl Lv2Host {
     /// no listener id (`lv2_config_listener_shapes`,
     /// `lv2_config_listener_pad_data`). vsh's pad-manager listeners carry
     /// that length; libio's listeners name the user services
-    /// `0x8000000000000001` to `...03` with no buffer (the 4.93
-    /// `libio.sprx` call sites of its `sys_config_add_service_listener`
-    /// export). The kernel accepts a user-service listener with a buffer.
+    /// `0x8000000000000001` to `...03` with no buffer (the call sites of
+    /// the `libio.sprx` `sys_config_add_service_listener` export
+    /// [OFW-4.93 sys/external/libio.sprx a:0x524C]
+    /// [OFW-4.93 sys/external/libio.sprx a:0x8FE0]
+    /// [OFW-4.93 sys/external/libio.sprx a:0xB1A4]). The kernel accepts a
+    /// user-service listener with a buffer.
     ///
     /// # Errors
     ///

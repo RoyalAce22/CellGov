@@ -1,6 +1,6 @@
 //! The thread check held to the console capture of the 4.93 kernel's
 //! per-thread records. The kernel loads a record's +0x10 into r4 of
-//! hypercall 11 (0x8000000000007d70).
+//! hypercall 11 [OFW-4.93 lv2_kernel a:0x8000000000007d70].
 
 use super::*;
 use crate::lv1::boot_record_capture::captured_doubleword_in;

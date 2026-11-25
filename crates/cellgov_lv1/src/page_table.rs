@@ -131,7 +131,7 @@ pub(super) fn named_space<'a>(
     }
     let vas_id = match (request.r(3), spaces.selected()) {
         // lv1 finds the default address space on the caller's PPE object
-        // and answers no entry (0x2D1C90); see HTAB_NO_ENTRY_R3.
+        // and answers no entry [OFW-4.93 lv1 a:0x2D1C90]; see HTAB_NO_ENTRY_R3.
         (0, None) => return Err(NoSpace::Lv1NoEntry),
         (0, Some(selected)) => selected,
         (vas_id, _) => vas_id,
@@ -217,7 +217,7 @@ struct Page {
 ///
 /// The page's address is bits 2:51 of doubleword 1. A large page takes
 /// its size from the address space's page shifts, and its address loses
-/// the large page bits (0x2D38D8 to 0x2D3938).
+/// the large page bits [OFW-4.93 lv1 a:0x2D38D8-0x2D3938].
 fn page_of(space: &AddressSpace, doubleword0: u64, doubleword1: u64) -> Result<Page, u64> {
     let address = doubleword1 & PTE_RPN;
     if !large(doubleword0) {
@@ -295,8 +295,8 @@ fn duplicate(
 /// the reason for the refusal of a page that CellGov does not hold.
 ///
 /// lv1 looks the logical partition address up in the partition's memory
-/// regions and maps the page there (0x2D2510, 0x2D30C4). CellGov models
-/// two kinds of region:
+/// regions and maps the page there [OFW-4.93 lv1 a:0x2D2510]
+/// [OFW-4.93 lv1 a:0x2D30C4]. CellGov models two kinds of region:
 /// - the mapping of a page table that `spaces` holds, whose page lies in
 ///   the page table storage at the same offset;
 /// - the real mode region, which CellGov holds at real address 0 below

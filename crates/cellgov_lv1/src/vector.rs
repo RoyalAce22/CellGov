@@ -29,7 +29,8 @@ fn answered(r3: u64, outputs: Vec<u64>) -> HypercallDisposition {
 /// r4 to r10 as lv1's `hrfid` return path leaves them when no handler
 /// writes them: 0.
 ///
-/// The vector's entry `dcbz` at HSPRG0 - 0x6A80 zeroes the 128-byte
+/// The vector's entry `dcbz` [OFW-4.93 lv1 a:0x0C08] at HSPRG0 - 0x6A80
+/// zeroes the 128-byte
 /// block that holds the return slots of r3 to r10. The return path loads
 /// r4 to r10 from those slots. This assumes that HSPRG0 is 128-byte
 /// aligned.

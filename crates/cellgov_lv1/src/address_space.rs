@@ -20,12 +20,12 @@ use super::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use super::request::HypercallRequest;
 use super::{page_table, vector};
 
-/// The page size count that the 4.93 kernel's `sc` at
-/// 0x800000000005dcf4 passes in r4.
+/// The page size count that the 4.93 kernel's `sc`
+/// [OFW-4.93 lv2_kernel a:0x800000000005dcf4] passes in r4.
 const KERNEL_PAGE_SIZE_COUNT: u64 = 2;
 
-/// The page shifts that the 4.93 kernel's `sc` at 0x800000000005dcf4
-/// passes in r5: 16 and 20.
+/// The page shifts that the 4.93 kernel's `sc`
+/// [OFW-4.93 lv2_kernel a:0x800000000005dcf4] passes in r5: 16 and 20.
 const KERNEL_PAGE_SHIFTS: u64 = 0x1014_0000_0000_0000;
 
 /// One virtual address space that the hypervisor constructed.

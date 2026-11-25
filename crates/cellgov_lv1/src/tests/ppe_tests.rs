@@ -4,7 +4,7 @@ use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::call::GET_LOGICAL_PPE_ID;
 use cellgov_time::GuestTicks;
 
-/// The 4.93 kernel's call: `sc 1` at 0x8000000000007d2c.
+/// The 4.93 kernel's call: `sc 1` [OFW-4.93 lv2_kernel a:0x8000000000007d2c].
 fn request(thread: Option<u8>) -> HypercallRequest {
     HypercallRequest {
         unit: UnitId::new(1),
@@ -18,8 +18,9 @@ fn request(thread: Option<u8>) -> HypercallRequest {
     }
 }
 
-/// lv1 4.93 returns r3 = 0 (0x2E9024) and the id in r4 (0x2E8FC4), and
-/// writes no other slot. The 4.93 boot record capture gives the id, 1.
+/// lv1 returns r3 = 0 [OFW-4.93 lv1 a:0x2E9024] and the id in r4
+/// [OFW-4.93 lv1 a:0x2E8FC4], and writes no other slot. The 4.93 boot
+/// record capture gives the id, 1.
 fn answered_id_1() -> HypercallDisposition {
     HypercallDisposition::Answered(HypercallAnswer::lv1_status(0, vec![1, 0, 0, 0, 0, 0, 0]))
 }

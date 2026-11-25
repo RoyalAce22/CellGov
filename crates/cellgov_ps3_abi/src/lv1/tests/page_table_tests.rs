@@ -8,7 +8,9 @@ use crate::lv1::status::{
 };
 use crate::lv1::table::{table_entry, TableEntry};
 
-/// The page shifts the 4.93 kernel passes to hypercall 2: 16 and 20.
+/// The page shifts the 4.93 kernel passes to hypercall 2
+/// [OFW-4.93 lv2_kernel a:0x800000000005dcc0-0x800000000005dce4]: 16 and
+/// 20.
 const KERNEL_PAGE_SHIFTS: u64 = 0x1014_0000_0000_0000;
 
 fn marked(mark: u64, status: i64) -> u64 {

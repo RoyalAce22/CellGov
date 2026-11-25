@@ -8,14 +8,16 @@ boot.
 ## Where the values sit
 
 The records and their locators are the ones that `lv2_logical_ppe_record`
-reads. In the function that holds the `sc 1` at 0x8000000000007d78, the
-stock 4.93 `lv2_kernel.self`:
+reads. In the function that holds the `sc 1`
+[OFW-4.93 lv2_kernel a:0x8000000000007d78], the shipped 4.93
+`lv2_kernel.self`:
 
-- zeroes the 64 bytes at +0x1C0 of the record (0x8000000000007c98 to
-  0x8000000000007cc4);
-- passes record + 0x1C0 to the function at 0x8000000000077760, which
-  returns the address that the kernel loads into r5 of hypercall 11
-  (0x8000000000007d3c to 0x8000000000007d74);
+- zeroes the 64 bytes at +0x1C0 of the record
+  [OFW-4.93 lv2_kernel a:0x8000000000007c98-0x8000000000007cc4];
+- passes record + 0x1C0 to the function at
+  [OFW-4.93 lv2_kernel a:0x8000000000077760], which returns the address
+  that the kernel loads into r5 of hypercall 11
+  [OFW-4.93 lv2_kernel a:0x8000000000007d3c-0x8000000000007d74];
 - loads +0x08 into r3 and +0x10 into r4.
 
 The kernel's linear map puts the bitmap of record 0 at the partition

@@ -25,17 +25,19 @@ The files under `peek/cech20-cex-493/` hold the words the read returned.
 
 ## Where the table is
 
-lv1 builds its hypercall table at run time. The stock 4.93 `lv1.self`,
+lv1 builds its hypercall table at run time. The shipped 4.93 `lv1.self`,
 decrypted offline and read with `cellgov dev disasm`, gives the
 addresses:
 
-- `set_lv1_hvcall_table` at 0x2C8990 stores the entry count 256
-  (`li r0, 256`) and the table base, from the TOC slot at 0x357AA0.
-- The Invalid HV Call function is at 0x2C8B80. It returns r3 =
-  0x00000000FFFFFFEC and nothing else.
-- The table is 256 doublewords at 0x372D08. Each one is the code address
-  of the number's handler, and its low bit is the problem-state-callable
-  flag. The memory call table, 256 doublewords at 0x373508, follows it.
+- `set_lv1_hvcall_table` [OFW-4.93 lv1 a:0x2C8990] stores the entry
+  count 256 (`li r0, 256`) and the table base, from the TOC slot
+  [OFW-4.93 lv1 a:0x357AA0].
+- The Invalid HV Call function is at [OFW-4.93 lv1 a:0x2C8B80]. It
+  returns r3 = 0x00000000FFFFFFEC and nothing else.
+- The table is 256 doublewords at [OFW-4.93 lv1 a:0x372D08]. Each one is
+  the code address of the number's handler, and its low bit is the
+  problem-state-callable flag. The memory call table, 256 doublewords at
+  [OFW-4.93 lv1 a:0x373508], follows it.
 
 ## Files
 
@@ -52,12 +54,14 @@ addresses:
   function.
 - No entry has its low bit set. So at 4.93 every problem-state `sc 1`
   to a number below 256 gets r3 = 0x00000000FFFFFFFD from the vector.
-- 30 numbers route to the memory call thunk at 0x2C89CC: 0, 6, 13, 15,
+- 30 numbers route to the memory call thunk at
+  [OFW-4.93 lv1 a:0x2C89CC]: 0, 6, 13, 15,
   90 to 93, 105 to 112, 116 to 119, 122 to 126, 135, 136, 182, 183 and
   231. The memory call table holds a descriptor for exactly these 30
   numbers.
 - Every handler address lies in the text segment of the stock image
-  (0x200000 to 0x3C2C00). Every memory call descriptor is stock data
+  [OFW-4.93 lv1 a:0x200000-0x3C2C00]. Every memory call descriptor is
+  stock data
   whose code address lies in that segment.
 
 lv1 fills both tables at run time, and the stock image holds zeros
@@ -66,11 +70,12 @@ set. The capture shows only that the live table names stock code.
 
 ## Comparison with the stock image
 
-The code pages and the TOC page are identical to the stock 4.93 image,
+The code pages and the TOC page are identical to the shipped 4.93 image,
 except one word. At 0x1028, on the vector's return path after the call
-at 0x1024, the stock image holds `addi r1, r1, 112` and the console
-holds 0xFFFF0070. The console runs custom firmware, which can patch lv1.
-This difference is recorded and left unresolved.
+[OFW-4.93 lv1 a:0x1024], the stock image holds `addi r1, r1, 112`
+[OFW-4.93 lv1 a:0x1028] and the console holds 0xFFFF0070. The console
+runs custom firmware, which can patch lv1. This difference is recorded
+and left unresolved.
 
 The table pages are zero in the stock image. Every nonzero word there is
 run-time data.

@@ -21,8 +21,8 @@ use super::request::HypercallRequest;
 use super::vector;
 
 /// The page size exponents that the 4.93 kernel's boot allocations pass,
-/// ascending. Its `sc` at 0x80000000002653c0 passes 20, and its `sc` at
-/// 0x800000000026541c passes 16.
+/// ascending. Its `sc` [OFW-4.93 lv2_kernel a:0x80000000002653c0] passes
+/// 20, and its `sc` [OFW-4.93 lv2_kernel a:0x800000000026541c] passes 16.
 const KERNEL_PAGE_SIZE_EXPS: &[u64] = &[16, 20];
 
 /// One memory region that the hypervisor created.

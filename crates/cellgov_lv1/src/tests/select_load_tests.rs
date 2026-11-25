@@ -25,8 +25,9 @@ fn select_request() -> HypercallRequest {
     }
 }
 
-/// The address space the 4.93 kernel constructs: a 256 KB page table
-/// and page shifts 16 and 20.
+/// The address space the 4.93 kernel constructs
+/// [OFW-4.93 lv2_kernel a:0x800000000005dcf4]: a 256 KB page table and
+/// page shifts 16 and 20.
 fn constructed() -> AddressSpaceState {
     let mut spaces = AddressSpaceState::default();
     spaces.apply(AddressSpaceChange::Constructed(AddressSpace {

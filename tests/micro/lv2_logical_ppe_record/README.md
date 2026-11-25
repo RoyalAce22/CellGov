@@ -7,9 +7,9 @@ that call in a 4.93 kernel boot with the id that this capture reads.
 
 ## Where the values sit
 
-The stock 4.93 `lv2_kernel.self` sets up one 640-byte record per hardware
-thread in the function that holds the `sc 1` at 0x8000000000007d2c. The
-function:
+The shipped 4.93 `lv2_kernel.self` sets up one 640-byte record per
+hardware thread in the function that holds the `sc 1`
+[OFW-4.93 lv2_kernel a:0x8000000000007d2c]. The function:
 
 - loads the record array from the TOC slot at r2 - 32376 and the count
   from the doubleword that the TOC slot at r2 - 32360 points to;
@@ -18,18 +18,20 @@ function:
 - takes the record at array + 640 * count, increments the count, stores
   the old count at +0x00 and puts the record address in SPRG0;
 - zeroes +0x48, +0x50 and +0x60, and calls hypercall 69 with `li r11, 69`;
-- on status 0 stores r4 at +0x08 (0x8000000000007d40), and then cntlzw
-  of CTRL at +0x10 (0x8000000000007d58);
+- on status 0 stores r4 at +0x08 [OFW-4.93 lv2_kernel a:0x8000000000007d40],
+  and then cntlzw of CTRL at +0x10
+  [OFW-4.93 lv2_kernel a:0x8000000000007d58];
 - on a nonzero status goes to the kernel's panic routine.
 
 The function then loads +0x08 and +0x10 into r3 and r4 for hypercall 11,
-`configure_irq_state_bitmap` (0x8000000000007d68 to 0x8000000000007d78).
+`configure_irq_state_bitmap`
+[OFW-4.93 lv2_kernel a:0x8000000000007d68-0x8000000000007d78].
 
 | Address | Stock value | Meaning |
 |---|---|---|
-| 0x8000000000003000 | 0x800000000034fbb0 | r2 |
-| 0x8000000000347d38 | 0x8000000000368f80 | the TOC slot r2 - 32376: the record array |
-| 0x8000000000347d48 | 0x8000000000369488 | the TOC slot r2 - 32360: the count |
+| [OFW-4.93 lv2_kernel a:0x8000000000003000] | 0x800000000034fbb0 | r2 |
+| [OFW-4.93 lv2_kernel a:0x8000000000347d38] | 0x8000000000368f80 | the TOC slot r2 - 32376: the record array |
+| [OFW-4.93 lv2_kernel a:0x8000000000347d48] | 0x8000000000369488 | the TOC slot r2 - 32360: the count |
 
 ## Method
 

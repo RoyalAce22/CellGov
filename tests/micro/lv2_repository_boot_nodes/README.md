@@ -7,8 +7,9 @@ No public source gives them for any firmware a kernel boot logs.
 
 ## Where the values sit
 
-The stock 4.93 `lv2_kernel.self` reads its boot repository nodes in one
-function and stores each value into one static record. The record lies in
+The shipped 4.93 `lv2_kernel.self` reads its boot repository nodes in one
+function [OFW-4.93 lv2_kernel a:0x800000000000cbd4-0x800000000000cd4c]
+and stores each value into one static record. The record lies in
 the zero-fill part of the data segment, so every value in it is written at
 run time. The offsets come from that function's code:
 
@@ -30,19 +31,20 @@ run time. The offsets come from that function's code:
 
 The record is at 0x800000000037a5a0. The kernel finds it through the TOC
 slot at r2 - 31808, and stores its address in the pointer at
-0x800000000037a590. The kernel loads r2 from the doubleword at
-0x8000000000003000.
+[OFW-4.93 lv2_kernel a:0x800000000037a590]. The kernel loads r2 from the
+doubleword at [OFW-4.93 lv2_kernel a:0x8000000000003000].
 
 ## Readers of the second output
 
 A repository read returns two values, in r4 and r5. The record holds only
 the r4 value of each read, so the capture does not observe r5. A static
-analysis of the stock 4.93 kernel (`cellgov dev disasm`) shows that no
+analysis of the shipped 4.93 kernel (`cellgov dev disasm`) shows that no
 boot reader reads r5 back:
 
-- Every boot read goes through one leaf wrapper at 0x800000000000ce04.
-  Its `sc` is at 0x800000000000ce3c. On success it stores r4 through its
-  third argument and r5 through its fourth.
+- Every boot read goes through one leaf wrapper at
+  [OFW-4.93 lv2_kernel a:0x800000000000ce04]. Its `sc` is at
+  [OFW-4.93 lv2_kernel a:0x800000000000ce3c]. On success it stores r4
+  through its third argument and r5 through its fourth.
 - Each node has one leaf accessor that calls the wrapper. The accessor
   passes a stack slot as the fourth argument and does not load that slot
   again. The wrapper makes no call before its `sc`, so the link register
@@ -50,16 +52,16 @@ boot reader reads r5 back:
 
 | Node | Return address of the wrapper call |
 |---|---|
-| lpar 1 `be.0.clock` | 0x800000000000c85c |
-| lpar 1 `plat.id` | 0x800000000000c8d0 |
-| lpar 2 `bi.rgntotal` | 0x800000000000c94c |
-| lpar 2 `bi.pu.<id>.rm_addr` | 0x800000000000ca0c |
-| lpar 2 `bi.pu.<id>.rm_size` | 0x800000000000ca38 |
-| lpar 2 `bi.pu` at index 0 | 0x800000000000caf8 |
-| lpar 2 `bi.pun` | 0x800000000000cba4 |
+| lpar 1 `be.0.clock` | [OFW-4.93 lv2_kernel a:0x800000000000c85c] |
+| lpar 1 `plat.id` | [OFW-4.93 lv2_kernel a:0x800000000000c8d0] |
+| lpar 2 `bi.rgntotal` | [OFW-4.93 lv2_kernel a:0x800000000000c94c] |
+| lpar 2 `bi.pu.<id>.rm_addr` | [OFW-4.93 lv2_kernel a:0x800000000000ca0c] |
+| lpar 2 `bi.pu.<id>.rm_size` | [OFW-4.93 lv2_kernel a:0x800000000000ca38] |
+| lpar 2 `bi.pu` at index 0 | [OFW-4.93 lv2_kernel a:0x800000000000caf8] |
+| lpar 2 `bi.pun` | [OFW-4.93 lv2_kernel a:0x800000000000cba4] |
 
 No other `bl` in the kernel's text calls the wrapper. A CellGov boot of
-the stock 4.93 kernel makes each read from the site in its row
+the shipped 4.93 kernel makes each read from the site in its row
 (`docs/lv2/tables/repository_read.tsv`): a read from another site would
 stop the boot at a refusal. CellGov's
 hypervisor puts 0 in r5 for a node from this capture only when the read
@@ -71,7 +73,7 @@ read of the node from any other site.
 The function that fills the record ends with a read of BP_VR, the
 CBEA-compliant processor version register. BP_VR is a 32-bit register,
 so `mfspr` puts it in the low word of r0. The code at
-0x800000000000cd18 is:
+[OFW-4.93 lv2_kernel a:0x800000000000cd18-0x800000000000cd2c] is:
 
 ```text
 mfspr r0, 1022
@@ -90,15 +92,18 @@ holds the return address of the `be.0.clock` accessor, whose low word is
 
 No other code writes the word:
 
-- One accessor at 0x800000000000cd80 runs the fill function once, behind a
-  byte flag. It is the only code that loads the record's TOC slot.
+- One accessor at [OFW-4.93 lv2_kernel a:0x800000000000cd80] runs the
+  fill function once, behind a byte flag. It is the only code that loads
+  the record's TOC slot.
 - The record's pointer has one more reader, the getter at
-  0x800000000000c7f4. The getter's only caller reads the record and does
-  not write it.
+  [OFW-4.93 lv2_kernel a:0x800000000000c7f4]. The getter's only caller
+  reads the record and does not write it.
 - No data word holds the function descriptor of the getter, the accessor
   or the fill function.
-- The record's two virtual functions, at 0x800000000000cdd4 and
-  0x800000000000cde0, write only its first doubleword.
+- The record's two virtual functions, at
+  [OFW-4.93 lv2_kernel a:0x800000000000cdd4] and
+  [OFW-4.93 lv2_kernel a:0x800000000000cde0], write only its first
+  doubleword.
 
 CellGov's PPU answers a supervisor-state read of BP_VR with this value
 (`cellgov_ps3_abi::hw::ppu::CELL_BP_VR`).
@@ -106,14 +111,15 @@ CellGov's PPU answers a supervisor-state read of BP_VR with this value
 ## The memory allocations
 
 After the fill function, the kernel makes two lv1 `allocate_memory`
-calls (hypercall 0) in the function at 0x8000000000265368. Each call
-takes its size from the record and stores the address that lv1 returns
-in r4 back into the record:
+calls (hypercall 0) in the function at
+[OFW-4.93 lv2_kernel a:0x8000000000265368]. Each call takes its size from
+the record and stores the address that lv1 returns in r4 back into the
+record:
 
 | `sc` | r3, the size | r4, the page size exponent | r4 out stored at |
 |---|---|---|---|
-| 0x80000000002653c0 | +0x90 | 20 | +0x88 |
-| 0x800000000026541c | +0xa0, low 16 bits cleared | 16 | +0x98 |
+| [OFW-4.93 lv2_kernel a:0x80000000002653c0] | +0x90 | 20 | +0x88 |
+| [OFW-4.93 lv2_kernel a:0x800000000026541c] | +0xa0, low 16 bits cleared | 16 | +0x98 |
 
 r5 and r6 are 0 at both calls. The kernel takes the first size from the
 record when +0x70 is greater than 1, and the second when +0x70 is

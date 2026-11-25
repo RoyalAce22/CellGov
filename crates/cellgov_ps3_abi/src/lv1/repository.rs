@@ -226,9 +226,10 @@ const DUMP_FIRMWARE_BEFORE_4_93: &[&str] = &["1.50", "1.94", "3.70"];
 /// The console capture of the 4.93 kernel's boot repository record, on
 /// the reference console.
 ///
-/// The 4.93 kernel stores the values of its boot repository reads in one
-/// record at [`BOOT_RECORD_4_93`]. The capture read each doubleword back
-/// through the CFW's lv2 peek.
+/// The kernel stores the values of its boot repository reads in one
+/// record at [`BOOT_RECORD_4_93`]
+/// [OFW-4.93 lv2_kernel a:0x800000000000CBD4-0x800000000000CD4C]. The
+/// capture read each doubleword back through the CFW's lv2 peek.
 pub const BOOT_RECORD_CAPTURE: &str = "tests/micro/lv2_repository_boot_nodes/ps3/cech20-cex-493";
 
 /// The address of the 4.93 kernel's boot repository record.
@@ -246,8 +247,9 @@ const fn captured(offset: u64) -> NodeSource {
     }
 }
 
-/// The `sc` of the 4.93 kernel's repository read wrapper. Every boot
-/// repository read of the 4.93 kernel goes through it.
+/// The `sc` of the 4.93 kernel's repository read wrapper
+/// [OFW-4.93 lv2_kernel a:0x800000000000CE3C]. Every boot repository read
+/// of the 4.93 kernel goes through it.
 ///
 /// The wrapper stores the first value through its third argument and the
 /// second through its fourth. The README of [`BOOT_RECORD_CAPTURE`] gives
@@ -306,8 +308,9 @@ const fn node(
 /// under [`LPAR_ID_GAME_OS`], the partition the dump comes from and the
 /// partition the kernel names.
 pub const NODES: &[RepositoryNode] = &[
-    // `be.0.clock`: the time base frequency. The 4.93 kernel reads it
-    // with a 0 second word and keeps it at offset 0xb0 of its boot record.
+    // `be.0.clock`: the time base frequency. The kernel reads it with a 0
+    // second word and keeps it at offset 0xb0 of its boot record
+    // [OFW-4.93 lv2_kernel a:0x800000000000CD14].
     node(
         LPAR_ID_PME,
         [first_field(b"be", 0), 0, field(b"clock", 0), 0],
@@ -316,8 +319,8 @@ pub const NODES: &[RepositoryNode] = &[
         CAPTURE_FIRMWARE,
         captured(0xb0),
     ),
-    // `plat.id`: the platform id, 8 bytes of text. The 4.93 kernel keeps
-    // it at offset 0xa8 of its boot record.
+    // `plat.id`: the platform id, 8 bytes of text. The kernel keeps it at
+    // offset 0xa8 of its boot record [OFW-4.93 lv2_kernel a:0x800000000000CD08].
     node(
         LPAR_ID_PME,
         [first_field(b"plat", 0), field(b"id", 0), 0, 0],
@@ -336,8 +339,8 @@ pub const NODES: &[RepositoryNode] = &[
         DUMP_FIRMWARE_BEFORE_4_93,
         GAME_OS_341_DUMP,
     ),
-    // The same node at 4.93: the 4.93 kernel keeps it at offset 0x18 of
-    // its boot record.
+    // The same node at 4.93: the kernel keeps it at offset 0x18 of its boot
+    // record [OFW-4.93 lv2_kernel a:0x800000000000CC78].
     node(
         LPAR_ID_GAME_OS,
         [first_field(b"bi", 0), field(b"pu", 0), 0, 0],
@@ -362,8 +365,8 @@ pub const NODES: &[RepositoryNode] = &[
         DUMP_FIRMWARE_BEFORE_4_93,
         GAME_OS_341_DUMP,
     ),
-    // The same node at 4.93: the 4.93 kernel keeps it at offset 0x30 of
-    // its boot record.
+    // The same node at 4.93: the kernel keeps it at offset 0x30 of its boot
+    // record [OFW-4.93 lv2_kernel a:0x800000000000CC64-0x800000000000CC80].
     node(
         LPAR_ID_GAME_OS,
         [
@@ -392,8 +395,8 @@ pub const NODES: &[RepositoryNode] = &[
         DUMP_FIRMWARE_BEFORE_4_93,
         GAME_OS_341_DUMP,
     ),
-    // The same node at 4.93: the 4.93 kernel keeps it at offset 0x38 of
-    // its boot record.
+    // The same node at 4.93: the kernel keeps it at offset 0x38 of its boot
+    // record [OFW-4.93 lv2_kernel a:0x800000000000CC64-0x800000000000CC80].
     node(
         LPAR_ID_GAME_OS,
         [
@@ -417,8 +420,8 @@ pub const NODES: &[RepositoryNode] = &[
         DUMP_FIRMWARE_BEFORE_4_93,
         GAME_OS_341_DUMP,
     ),
-    // The same node at 4.93: the 4.93 kernel keeps it at offset 0x10 of
-    // its boot record.
+    // The same node at 4.93: the kernel keeps it at offset 0x10 of its boot
+    // record [OFW-4.93 lv2_kernel a:0x800000000000CC1C].
     node(
         LPAR_ID_GAME_OS,
         [first_field(b"bi", 0), field(b"pun", 0), 0, 0],
@@ -428,7 +431,8 @@ pub const NODES: &[RepositoryNode] = &[
         captured(0x10),
     ),
     // `bi.rgntotal`: the total size of the partition's memory regions. The
-    // 4.93 kernel keeps it at offset 0x68 of its boot record.
+    // kernel keeps it at offset 0x68 of its boot record
+    // [OFW-4.93 lv2_kernel a:0x800000000000CD00].
     node(
         LPAR_ID_GAME_OS,
         [first_field(b"bi", 0), field(b"rgntotal", 0), 0, 0],

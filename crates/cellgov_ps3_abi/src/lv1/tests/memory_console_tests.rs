@@ -12,7 +12,7 @@ const FIRST_SIZE: u64 = 0x90;
 const FIRST_ADDRESS: u64 = 0x88;
 /// The low 20 bits of `bi.rgntotal`. The kernel clears the low 16 bits
 /// of this word and passes the result as the size of the second
-/// allocation.
+/// allocation [OFW-4.93 lv2_kernel a:0x800000000026541c].
 const SECOND_SIZE: u64 = 0xa0;
 /// The address the second allocation returned in r4.
 const SECOND_ADDRESS: u64 = 0x98;

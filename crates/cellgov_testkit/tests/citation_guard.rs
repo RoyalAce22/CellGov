@@ -10,9 +10,18 @@
 //! the web sources below, which holds the page's archived snapshot.
 //! The snapshot URL lives only in that table: a raw psdevwiki or
 //! Wayback link anywhere else in the scanned files is a fault.
+//!
+//! A fact read from a firmware image is cited as
+//! `[OFW-<version> <image> a:<addr>[-<addr>]]`. The version is a row of
+//! the archive's PUP table. The image is `lv1`, `lv2_kernel`, or the
+//! `dev_flash` path of a module that the version's PUP ships, such as
+//! `sys/external/liblv2.sprx`. The address is the one
+//! `cellgov dev disasm` prints for that image.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 /// Page-identifier grammar of one cited document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,6 +157,123 @@ const WEB_SOURCES: &[(&str, &str)] = &[
 /// The hosts a raw link may not name outside [`WEB_SOURCES`].
 const ALIASED_HOSTS: &[&str] = &["psdevwiki.com", "web.archive.org"];
 
+/// The key prefix of a firmware citation; the version follows it.
+const FIRMWARE_KEY: &str = "OFW-";
+
+/// The CoreOS images a firmware citation may name besides a module.
+const CORE_OS_IMAGES: &[&str] = &["lv1", "lv2_kernel"];
+
+/// The archive tables a firmware citation is checked against, relative
+/// to the workspace root: the PUP of each firmware version, and every
+/// module the extraction scanned in each PUP.
+const PUP_TABLE: &str = "docs/lv2/tables/pup.tsv";
+const MODULE_TABLE: &str = "docs/lv2/tables/caller_unresolved.tsv";
+
+/// Each firmware version the archive holds a PUP of, with the
+/// `dev_flash` paths of the modules that its PUPs ship.
+fn firmware_modules() -> &'static BTreeMap<String, BTreeSet<String>> {
+    static TABLE: OnceLock<BTreeMap<String, BTreeSet<String>>> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let root = workspace_root();
+        let read = |name: &str| {
+            fs::read_to_string(root.join(name))
+                .unwrap_or_else(|e| panic!("cannot read {name}: {e}"))
+        };
+        let pups = read(PUP_TABLE);
+        let modules = read(MODULE_TABLE);
+        load_firmware_modules(&pups, &modules)
+    })
+}
+
+/// Parses the PUP table and the module table into
+/// [`firmware_modules`]'s map.
+///
+/// # Panics
+///
+/// Panics when a table header is not the expected one, or when a module
+/// row names a PUP that the PUP table does not hold.
+fn load_firmware_modules(pups: &str, modules: &str) -> BTreeMap<String, BTreeSet<String>> {
+    let mut pup_lines = pups.lines();
+    assert!(
+        pup_lines
+            .next()
+            .is_some_and(|h| h.starts_with("pup_sha256\tfw\t")),
+        "{PUP_TABLE} header changed"
+    );
+    let mut firmware_of = BTreeMap::new();
+    let mut table: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for line in pup_lines {
+        let mut cells = line.split('\t');
+        let (Some(sha), Some(fw)) = (cells.next(), cells.next()) else {
+            panic!("{PUP_TABLE} row {line:?} has no fw cell");
+        };
+        firmware_of.insert(sha, fw);
+        table.entry(fw.to_string()).or_default();
+    }
+    let mut module_lines = modules.lines();
+    assert!(
+        module_lines
+            .next()
+            .is_some_and(|h| h.starts_with("pup_sha256\tmodule\t")),
+        "{MODULE_TABLE} header changed"
+    );
+    for line in module_lines {
+        let mut cells = line.split('\t');
+        let (Some(sha), Some(module)) = (cells.next(), cells.next()) else {
+            panic!("{MODULE_TABLE} row {line:?} has no module cell");
+        };
+        let fw = firmware_of
+            .get(sha)
+            .unwrap_or_else(|| panic!("{MODULE_TABLE} names PUP {sha}, which {PUP_TABLE} lacks"));
+        table
+            .get_mut(*fw)
+            .expect("every PUP's version has an entry")
+            .insert(module.to_string());
+    }
+    table
+}
+
+/// A `0x`-prefixed hexadecimal address of at most 16 digits.
+fn parse_address(text: &str) -> Option<u64> {
+    let digits = text.strip_prefix("0x")?;
+    if digits.is_empty() || digits.len() > 16 || !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    u64::from_str_radix(digits, 16).ok()
+}
+
+/// A firmware citation's fault, or `None` for a well-formed one.
+fn check_firmware_tag(body: &str) -> Option<Fault> {
+    let malformed = || Some(Fault::MalformedFirmwareTag(body.to_string()));
+    let mut words = body.split_whitespace();
+    let Some(version) = words.next().and_then(|w| w.strip_prefix(FIRMWARE_KEY)) else {
+        return malformed();
+    };
+    let (Some(image), Some(field), None) = (words.next(), words.next(), words.next()) else {
+        return malformed();
+    };
+    let Some(modules) = firmware_modules().get(version) else {
+        return Some(Fault::UnknownFirmware(version.to_string()));
+    };
+    if !CORE_OS_IMAGES.contains(&image) && !modules.contains(image) {
+        return Some(Fault::UnknownImage {
+            firmware: version.to_string(),
+            image: image.to_string(),
+        });
+    }
+    let Some(window) = field.strip_prefix("a:") else {
+        return malformed();
+    };
+    let (start, end) = window.split_once('-').unwrap_or((window, window));
+    let (Some(start), Some(end)) = (parse_address(start), parse_address(end)) else {
+        return Some(Fault::BadAddress(window.to_string()));
+    };
+    if end < start {
+        return Some(Fault::BackwardWindow(window.to_string()));
+    }
+    None
+}
+
 /// Floor on the population the guard validates. The tree carries
 /// several hundred citations; a collapse below this means the scanner
 /// stopped recognising the tag.
@@ -196,7 +322,7 @@ fn page_matches(grammar: PageGrammar, page: &str) -> bool {
 }
 
 /// What the scanner found wrong with one tag.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Fault {
     UnknownKey(String),
     NoPage(String),
@@ -204,12 +330,27 @@ enum Fault {
     DeprecatedForm(String),
     NoSection(String),
     RawWebLink(String),
+    MalformedFirmwareTag(String),
+    UnknownFirmware(String),
+    UnknownImage { firmware: String, image: String },
+    BadAddress(String),
+    BackwardWindow(String),
+    PlainFirmwareCitation(String),
+}
+
+/// Whether a key word opens a firmware citation, the operator's
+/// spaced `OFW v4.93` sketch included.
+fn is_firmware_key(word: &str) -> bool {
+    word.starts_with(FIRMWARE_KEY) || word == "OFW"
 }
 
 /// A tag's fault, or `None` for a well-formed one.
 fn check_tag(body: &str) -> Option<Fault> {
     let mut words = body.split_whitespace();
     let key = words.next().unwrap_or_default();
+    if is_firmware_key(key) {
+        return check_firmware_tag(body);
+    }
     if WEB_SOURCES.iter().any(|(name, _)| *name == key) {
         let section = words.next().and_then(|w| w.strip_prefix("s:"));
         return match section {
@@ -239,14 +380,15 @@ fn check_tag(body: &str) -> Option<Fault> {
 }
 
 /// Whether a bracket body looks like a citation attempt: its first word
-/// names a document or carries the web-source alias prefix, or a later
-/// word is a `p:` page.
+/// names a document or carries the web-source alias or firmware key
+/// prefix, or a later word is a `p:` page.
 fn looks_like_citation(body: &str) -> bool {
     let mut words = body.split_whitespace();
     let first = words.next().unwrap_or_default();
     DOCUMENTS.iter().any(|(name, _)| *name == first)
         || WEB_SOURCES.iter().any(|(name, _)| *name == first)
         || first.starts_with("PS3DEVWIKI-")
+        || is_firmware_key(first)
         || body.split_whitespace().skip(1).any(|w| w.starts_with("p:"))
 }
 
@@ -272,6 +414,120 @@ fn deprecated_prose(line: &str) -> Option<String> {
     None
 }
 
+/// The words that name a firmware image in prose.
+const IMAGE_WORDS: &[&str] = &[
+    "lv1",
+    "lv1's",
+    "lv1.self",
+    "lv2_kernel",
+    "lv2_kernel.self",
+    "kernel",
+    "kernel's",
+    "hypervisor",
+    "hypervisor's",
+    "image",
+];
+
+/// The image words that the "image at address" form looks for. `image`
+/// is left out, because a PUP's `image 0x...` version word is no
+/// address.
+const CODE_IMAGE_WORDS: &[&str] = &[
+    "lv1",
+    "lv1's",
+    "lv2_kernel",
+    "kernel",
+    "kernel's",
+    "hypervisor",
+    "hypervisor's",
+];
+
+/// `line` with each firmware tag removed, so that an address inside a
+/// tag is not a prose address.
+fn without_firmware_tags(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(open) = rest.find('[') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        let first = after.split_whitespace().next().unwrap_or_default();
+        match after.find(']') {
+            Some(close) if is_firmware_key(first) => rest = &after[close + 1..],
+            _ => {
+                out.push('[');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// A prose word without its surrounding quotes and punctuation.
+fn bare(word: &str) -> &str {
+    word.trim_matches(|c: char| {
+        matches!(
+            c,
+            '`' | '(' | ')' | '[' | ']' | ',' | '.' | ';' | ':' | '"' | '*'
+        )
+    })
+}
+
+/// A firmware fact cited in prose rather than by a tag: the form that
+/// matched, or `None`. The forms are the ones the tag replaced:
+/// - `stock <version> <image>`;
+/// - `Firmware reading` on a line that names a version;
+/// - `<version> <image>` or `<image> <version>` on a line with a prose
+///   address;
+/// - `<image> <address>` or `<image> at <address>`;
+/// - `at <version> <address>`.
+///
+/// An address is `0x` and at least four hexadecimal digits that are not
+/// an offset (`+0x1C0`, `HSPRG0 - 0x6A80`).
+fn plain_firmware_citation(line: &str) -> Option<String> {
+    let prose = without_firmware_tags(line);
+    let words: Vec<&str> = prose.split_whitespace().collect();
+    let versions = firmware_modules();
+    let is_version = |w: &str| versions.contains_key(bare(w));
+    let is_image = |w: &str| IMAGE_WORDS.contains(&bare(w));
+    let is_code_image = |w: &str| CODE_IMAGE_WORDS.contains(&bare(w));
+    let is_address = |i: usize| {
+        let Some(word) = words.get(i) else {
+            return false;
+        };
+        let offset = i > 0 && matches!(words[i - 1], "-" | "+");
+        let digits = bare(word).strip_prefix("0x");
+        !offset
+            && !word.starts_with(['+', '-'])
+            && digits.is_some_and(|d| d.len() >= 4 && d.bytes().all(|b| b.is_ascii_hexdigit()))
+    };
+    let has_address = (0..words.len()).any(is_address);
+    let has_version = words.iter().any(|w| is_version(w));
+    let shown = |from: usize, count: usize| words[from..(from + count).min(words.len())].join(" ");
+    for (i, word) in words.iter().enumerate() {
+        let next = |k: usize| words.get(i + k).copied().unwrap_or_default();
+        if bare(word).eq_ignore_ascii_case("stock") && is_version(next(1)) && is_image(next(2)) {
+            return Some(shown(i, 3));
+        }
+        if *word == "Firmware" && bare(next(1)) == "reading" && has_version {
+            return Some(shown(i, 2));
+        }
+        let paired =
+            (is_version(word) && is_image(next(1))) || (is_image(word) && is_version(next(1)));
+        if paired && has_address {
+            return Some(shown(i, 2));
+        }
+        if is_code_image(word)
+            && (is_address(i + 1) || (bare(next(1)) == "at" && is_address(i + 2)))
+        {
+            return Some(shown(i, if is_address(i + 1) { 2 } else { 3 }));
+        }
+        if bare(word) == "at" && is_version(next(1)) && is_address(i + 2) {
+            return Some(shown(i, 3));
+        }
+    }
+    None
+}
+
 /// Scan one line: `(valid tags, faults)`.
 ///
 /// A tag's key and page sit on the line that opens it, so the scanner
@@ -285,6 +541,9 @@ fn scan_line(line: &str) -> (usize, Vec<Fault>) {
     }
     if let Some(host) = ALIASED_HOSTS.iter().find(|host| line.contains(*host)) {
         faults.push(Fault::RawWebLink((*host).to_string()));
+    }
+    if let Some(form) = plain_firmware_citation(line) {
+        faults.push(Fault::PlainFirmwareCitation(form));
     }
     let mut rest = line;
     while let Some(open) = rest.find('[') {
@@ -346,8 +605,9 @@ fn defines_a_rule(path: &Path) -> bool {
         .is_some_and(|n| n.to_string_lossy().ends_with("_guard.rs"))
 }
 
-/// Shipped Rust plus the public documents: `README.md` and `docs/`
-/// without its `dev/` subtree, which git does not track.
+/// Shipped Rust plus the public documents: `README.md`, `docs/`
+/// without its `dev/` subtree, which git does not track, and each
+/// microtest's `README.md`.
 fn scanned_files(root: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let rust = |p: &Path| p.extension().is_some_and(|e| e == "rs") && !defines_a_rule(p);
@@ -369,6 +629,18 @@ fn scanned_files(root: &Path) -> Vec<PathBuf> {
             files_under(&path, &markdown, &mut found);
         } else if markdown(&path) {
             found.push(path);
+        }
+    }
+    let micro = root.join("tests").join("micro");
+    let entries =
+        fs::read_dir(&micro).unwrap_or_else(|e| panic!("cannot read {}: {e}", micro.display()));
+    for entry in entries {
+        let readme = entry
+            .unwrap_or_else(|e| panic!("cannot read entry under {}: {e}", micro.display()))
+            .path()
+            .join("README.md");
+        if readme.is_file() {
+            found.push(readme);
         }
     }
     found.push(root.join("README.md"));
@@ -744,6 +1016,257 @@ fn every_web_source_holds_one_dated_wayback_snapshot_of_a_psdevwiki_page() {
 }
 
 #[test]
+fn a_firmware_tag_needs_a_known_version_a_shipped_image_and_a_forward_address() {
+    let fault = |line: &str| {
+        let (valid, faults) = scan_line(line);
+        assert!(faults.len() <= 1, "{line}: {faults:?}");
+        (valid, faults.into_iter().next())
+    };
+    // Each rule: one line that passes it and one that fails it.
+    let cases: &[(&str, &str, Option<Fault>)] = &[
+        ("version", "/// [OFW-1.50 lv1 a:0x2B9CE0]", None),
+        (
+            "version",
+            "/// [OFW-4.94 lv1 a:0x2EA35C]",
+            Some(Fault::UnknownFirmware("4.94".to_string())),
+        ),
+        (
+            "core image",
+            "/// [OFW-4.93 lv2_kernel a:0x8000000000007D2C]",
+            None,
+        ),
+        (
+            "core image",
+            "/// [OFW-4.93 kernel a:0x8000000000007D2C]",
+            Some(Fault::UnknownImage {
+                firmware: "4.93".to_string(),
+                image: "kernel".to_string(),
+            }),
+        ),
+        (
+            "module",
+            "/// [OFW-1.50 vsh/module/game_plugin.sprx a:0x0]",
+            None,
+        ),
+        (
+            "module",
+            "/// [OFW-4.93 vsh/module/game_plugin.sprx a:0x0]",
+            Some(Fault::UnknownImage {
+                firmware: "4.93".to_string(),
+                image: "vsh/module/game_plugin.sprx".to_string(),
+            }),
+        ),
+        ("address", "/// [OFW-4.93 lv1 a:0x2ea35c]", None),
+        (
+            "address",
+            "/// [OFW-4.93 lv1 a:2EA35C]",
+            Some(Fault::BadAddress("2EA35C".to_string())),
+        ),
+        (
+            "address",
+            "/// [OFW-4.93 lv1 a:0x2EA3G0]",
+            Some(Fault::BadAddress("0x2EA3G0".to_string())),
+        ),
+        (
+            "address",
+            "/// [OFW-4.93 lv1 a:0x10000000000000000]",
+            Some(Fault::BadAddress("0x10000000000000000".to_string())),
+        ),
+        ("window", "/// [OFW-4.93 lv1 a:0x2EA35C-0x2EA3A0]", None),
+        (
+            "window",
+            "/// [OFW-4.93 lv1 a:0x2EA3A0-0x2EA35C]",
+            Some(Fault::BackwardWindow("0x2EA3A0-0x2EA35C".to_string())),
+        ),
+        (
+            "window",
+            "/// [OFW-4.93 lv1 a:0x2EA35C-]",
+            Some(Fault::BadAddress("0x2EA35C-".to_string())),
+        ),
+        (
+            "shape",
+            "/// the vector [OFW-4.93 lv1 a:0xC24] reads it",
+            None,
+        ),
+        (
+            "shape",
+            "/// [OFW v4.93 (0x2EA35C)]",
+            Some(Fault::MalformedFirmwareTag(
+                "OFW v4.93 (0x2EA35C)".to_string(),
+            )),
+        ),
+        (
+            "shape",
+            "/// [OFW-4.93 lv1 0x2EA35C]",
+            Some(Fault::MalformedFirmwareTag(
+                "OFW-4.93 lv1 0x2EA35C".to_string(),
+            )),
+        ),
+        (
+            "shape",
+            "/// [OFW-4.93 lv1]",
+            Some(Fault::MalformedFirmwareTag("OFW-4.93 lv1".to_string())),
+        ),
+        (
+            "shape",
+            "/// [OFW-4.93 lv1 a:0x2EA35C s:handler]",
+            Some(Fault::MalformedFirmwareTag(
+                "OFW-4.93 lv1 a:0x2EA35C s:handler".to_string(),
+            )),
+        ),
+    ];
+    for rule in [
+        "version",
+        "core image",
+        "module",
+        "address",
+        "window",
+        "shape",
+    ] {
+        let rows: Vec<_> = cases.iter().filter(|(r, _, _)| *r == rule).collect();
+        assert!(
+            rows.iter().any(|(_, _, f)| f.is_none()),
+            "{rule} has no pass"
+        );
+        assert!(
+            rows.iter().any(|(_, _, f)| f.is_some()),
+            "{rule} has no fail"
+        );
+    }
+    for (rule, line, expected) in cases {
+        let (valid, got) = fault(line);
+        assert_eq!(&got, expected, "{rule}: {line}");
+        assert_eq!(valid, usize::from(expected.is_none()), "{rule}: {line}");
+    }
+}
+
+#[test]
+fn a_firmware_fact_cited_in_prose_is_a_fault_and_its_tag_form_is_not() {
+    let plain = |form: &str| Some(Fault::PlainFirmwareCitation(form.to_string()));
+    // Each form: one line that passes it and one that fails it.
+    let cases: &[(&str, &str, Option<Fault>)] = &[
+        (
+            "stock",
+            "/// The shipped 4.93 `lv2_kernel.self` sets up one record per thread.",
+            None,
+        ),
+        (
+            "stock",
+            "/// The stock 4.93 `lv2_kernel.self` sets up one record per thread.",
+            plain("stock 4.93 `lv2_kernel.self`"),
+        ),
+        (
+            "stock",
+            "/// identical to the stock 4.93 image, except one word.",
+            plain("stock 4.93 image,"),
+        ),
+        (
+            "reading",
+            "/// The kernel's wrapper [OFW-4.93 lv2_kernel a:0x800000000000FC54] passes r3.",
+            None,
+        ),
+        (
+            "reading",
+            "/// Firmware reading: the 4.93 kernel's wrapper passes r3.",
+            plain("Firmware reading:"),
+        ),
+        (
+            "version and image",
+            "/// The 4.93 kernel's `sc` [OFW-4.93 lv2_kernel a:0x800000000005dcf4] passes r5.",
+            None,
+        ),
+        (
+            "version and image",
+            "/// The bitmap of the 4.93 kernel's thread 0: +0x1C0 of its record.",
+            None,
+        ),
+        (
+            "version and image",
+            "/// The 4.93 kernel's `sc` at 0x800000000005dcf4 passes r5.",
+            plain("4.93 kernel's"),
+        ),
+        (
+            "version and image",
+            "/// lv1's 4.93 handler (0x2EA35C) reads three inputs.",
+            plain("lv1's 4.93"),
+        ),
+        (
+            "image and address",
+            "/// the kernel at [OFW-4.93 lv2_kernel a:0x8000000000007D2C] calls lv1",
+            None,
+        ),
+        (
+            "image and address",
+            "/// the call from kernel 0x7d2c reaches the handler",
+            plain("kernel 0x7d2c"),
+        ),
+        (
+            "image and address",
+            "/// the handler in lv1 at 0x2EA35C reads three inputs",
+            plain("lv1 at 0x2EA35C"),
+        ),
+        (
+            "image and address",
+            "[\"fw 1.00, size 10, image 0x0000000000000001\"]",
+            None,
+        ),
+        (
+            "at version",
+            "/// 1. the size, at [OFW-4.93 lv1 a:0x2DEF60];",
+            None,
+        ),
+        (
+            "at version",
+            "/// 1. the size, at 4.93 0x2DEF60;",
+            plain("at 4.93 0x2DEF60;"),
+        ),
+    ];
+    for form in [
+        "stock",
+        "reading",
+        "version and image",
+        "image and address",
+        "at version",
+    ] {
+        let rows: Vec<_> = cases.iter().filter(|(f, _, _)| *f == form).collect();
+        assert!(
+            rows.iter().any(|(_, _, f)| f.is_none()),
+            "{form} has no pass"
+        );
+        assert!(
+            rows.iter().any(|(_, _, f)| f.is_some()),
+            "{form} has no fail"
+        );
+    }
+    for (form, line, expected) in cases {
+        let (_, faults) = scan_line(line);
+        let got: Vec<_> = faults
+            .into_iter()
+            .filter(|f| matches!(f, Fault::PlainFirmwareCitation(_)))
+            .collect();
+        assert_eq!(
+            got,
+            expected.iter().cloned().collect::<Vec<_>>(),
+            "{form}: {line}"
+        );
+    }
+}
+
+#[test]
+fn the_firmware_table_maps_each_pup_version_to_the_module_paths_it_ships() {
+    let pups = "pup_sha256\tfw\tsize_bytes\naa\t4.93\t1\nbb\t1.50\t1\ncc\t4.93\t1\n";
+    let modules = "pup_sha256\tmodule\tsites\naa\tsys/external/liblv2.sprx\tnone\n\
+                   cc\tvsh/module/vsh_plugin.sprx\tnone\n";
+    let table = load_firmware_modules(pups, modules);
+    assert_eq!(table.keys().collect::<Vec<_>>(), ["1.50", "4.93"]);
+    assert!(table["1.50"].is_empty());
+    assert_eq!(
+        table["4.93"].iter().collect::<Vec<_>>(),
+        ["sys/external/liblv2.sprx", "vsh/module/vsh_plugin.sprx"]
+    );
+}
+
+#[test]
 fn a_tag_whose_section_text_wraps_past_the_line_is_still_checked() {
     let (valid, faults) = scan_line("//! walk per [CBE-Handbook p:398 s:14.3.1.3 Figure 14-3");
     assert_eq!((valid, faults.len()), (1, 0));
@@ -812,9 +1335,10 @@ fn every_citation_names_a_known_document_and_a_page_in_its_grammar() {
         violations.is_empty(),
         "{} citation(s) do not follow `[DOC-KEY p:PAGE s:SECTION]` with a known key and that \
          document's page grammar (integer; Roman or integer for the PPC books; chapter-page \
-         for the AltiVec manuals; I/II/III/App-prefixed for the Power ISA), or \
+         for the AltiVec manuals; I/II/III/App-prefixed for the Power ISA), \
          `[WEB-KEY s:SECTION]` with a web source alias in place of a raw psdevwiki or \
-         Wayback link:\n{}",
+         Wayback link, or `[OFW-<version> <image> a:<addr>[-<addr>]]` with a version of \
+         {PUP_TABLE}, an image that version ships, and a forward hexadecimal window:\n{}",
         violations.len(),
         violations.concat()
     );

@@ -6,7 +6,9 @@ use cellgov_exec::YieldReason;
 use cellgov_ps3_abi::hw::ppu_interrupt::VECTOR_SYSTEM_CALL;
 use cellgov_ps3_abi::hw::ppu_supervisor::{SPR_SPRG0, SPR_SRR0, SPR_SRR1};
 
-/// The 4.93 kernel's system call handler, which its 0xC00 vector enters.
+/// The 4.93 kernel's system call handler
+/// [OFW-4.93 lv2_kernel a:0x8000000000275A90], which its 0xC00 vector
+/// enters.
 const HANDLER: u64 = 0x8000_0000_0027_5A90;
 /// The real address that holds [`HANDLER`]'s effective address for the
 /// stub's `ld`.

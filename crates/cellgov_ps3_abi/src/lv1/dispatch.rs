@@ -9,13 +9,18 @@
 //! `cellgov dev disasm`. No byte of lv1 is committed; these facts are.
 //!
 //! The vector is at the system-call interrupt address 0x0c00. Its entry
-//! block, 0x0c00 to 0x0c58, is byte-identical in the lv1 images of 3.15,
-//! 3.41, 3.70 and 4.93. The 1.94 block differs only in the targets of
-//! its branches at 0x0c20 and 0x0c40. The 1.50 block also reads the
-//! table's count and base at other offsets from HSPRG0. The dispatch
-//! block after it differs by version. At 3.15 and later each version
-//! loads its own TOC address into r2 at 0x0fa4 and 0x0fac: 3.15
-//! 0x350470, 3.41 0x34E0E0, 3.70 0x35A548 and 4.93 0x35A038.
+//! block is byte-identical in the lv1 images of 3.15
+//! [OFW-3.15 lv1 a:0x0c00-0x0c58], 3.41 [OFW-3.41 lv1 a:0x0c00-0x0c58],
+//! 3.70 [OFW-3.70 lv1 a:0x0c00-0x0c58] and 4.93
+//! [OFW-4.93 lv1 a:0x0c00-0x0c58]. The 1.94 block differs only in the
+//! targets of its branches [OFW-1.94 lv1 a:0x0c20] [OFW-1.94 lv1 a:0x0c40].
+//! The 1.50 block also reads the table's count and base at other offsets
+//! from HSPRG0 [OFW-1.50 lv1 a:0x0c24-0x0c30]. The dispatch block after it
+//! differs by version. At 3.15 and later each version loads its own TOC
+//! address into r2: 3.15 0x350470 [OFW-3.15 lv1 a:0x0fa4-0x0fac], 3.41
+//! 0x34E0E0 [OFW-3.41 lv1 a:0x0fa4-0x0fac], 3.70 0x35A548
+//! [OFW-3.70 lv1 a:0x0fa4-0x0fac] and 4.93 0x35A038
+//! [OFW-4.93 lv1 a:0x0fa4-0x0fac].
 //!
 //! The vector returns each of its own statuses zero-extended: a `li r3`
 //! of the status, then `clrldi r3, r3, 32`. So r3 holds the status in
@@ -25,11 +30,13 @@
 /// hypercall table: `LV1_NOT_IMPLEMENTED` (-20), zero-extended.
 ///
 /// The vector compares the number in r11 against the table's entry count
-/// (`cmpld r11, r0` at 0x0c34). For a number that is not less than the
-/// count, it runs `li r3, -20` at 0x0c44 and `clrldi r3, r3, 32` at
-/// 0x0c50, then `rfid`. The instructions at 0x0c34, 0x0c44 and 0x0c50
-/// are identical in the lv1 images of 1.50, 1.94, 3.15, 3.41, 3.70 and
-/// 4.93.
+/// (`cmpld r11, r0` [OFW-4.93 lv1 a:0x0c34]). For a number that is not
+/// less than the count, it runs `li r3, -20` [OFW-4.93 lv1 a:0x0c44] and
+/// `clrldi r3, r3, 32` [OFW-4.93 lv1 a:0x0c50], then `rfid`. These
+/// instructions are identical in the lv1 images of 1.50
+/// [OFW-1.50 lv1 a:0x0c34-0x0c50], 1.94 [OFW-1.94 lv1 a:0x0c34-0x0c50],
+/// 3.15 [OFW-3.15 lv1 a:0x0c34-0x0c50], 3.41
+/// [OFW-3.41 lv1 a:0x0c34-0x0c50] and 3.70 [OFW-3.70 lv1 a:0x0c34-0x0c50].
 ///
 /// The range check runs before the problem-state check. So a number past
 /// the end gets this value from either processor state. This path
@@ -47,10 +54,16 @@ pub const UNKNOWN_HYPERCALL_R3: u64 = 0x0000_0000_FFFF_FFEC;
 /// problem-state call is answered, never stopped.
 ///
 /// Addresses by firmware:
-/// - 3.15, 3.41, 3.70, 4.93: SRR1 read 0x0f64, PR extract 0x0f90,
-///   status 0x1088, zero-extension 0x108c.
-/// - 1.50, 1.94: dispatch at 0x09b0; SRR1 read 0x09b4, PR extract
-///   0x09e0, status 0x0ad0.
+/// - 4.93: SRR1 read [OFW-4.93 lv1 a:0x0f64], PR extract
+///   [OFW-4.93 lv1 a:0x0f90], status [OFW-4.93 lv1 a:0x1088],
+///   zero-extension [OFW-4.93 lv1 a:0x108c]. The 3.15
+///   [OFW-3.15 lv1 a:0x0f64-0x108c], 3.41 [OFW-3.41 lv1 a:0x0f64-0x108c]
+///   and 3.70 [OFW-3.70 lv1 a:0x0f64-0x108c] blocks hold them at the same
+///   addresses.
+/// - 1.50: dispatch [OFW-1.50 lv1 a:0x09b0]; SRR1 read
+///   [OFW-1.50 lv1 a:0x09b4], PR extract [OFW-1.50 lv1 a:0x09e0], status
+///   [OFW-1.50 lv1 a:0x0ad0]. The 1.94 block
+///   [OFW-1.94 lv1 a:0x09b0-0x0ad0] holds them at the same addresses.
 pub const PROBLEM_STATE_DENIED_R3: u64 = 0x0000_0000_FFFF_FFFD;
 
 #[cfg(test)]

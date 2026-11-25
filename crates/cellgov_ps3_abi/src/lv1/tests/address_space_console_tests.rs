@@ -13,14 +13,16 @@ const RECORD: u64 = 0x8000_0000_003e_3a80;
 
 /// The vas id, r4 out of hypercall 2.
 const VAS_ID: u64 = 0x30;
-/// A constant the kernel stores, 0x800000000f000000.
+/// A constant the kernel stores [OFW-4.93 lv2_kernel a:0x800000000005dccc],
+/// 0x800000000f000000.
 const MARK: u64 = 0x40;
 /// The page table size, r5 out of hypercall 2.
 const HTAB_SIZE: u64 = 0x48;
 /// The page table size shifted right by 7.
 const HTAB_GROUPS: u64 = 0x50;
 
-/// The r3 that the 4.93 kernel passes to hypercall 2.
+/// The r3 that the 4.93 kernel passes to hypercall 2
+/// [OFW-4.93 lv2_kernel a:0x800000000005dce8].
 const KERNEL_HTAB_SIZE_EXP: u64 = 0;
 
 fn record(offset: u64) -> u64 {

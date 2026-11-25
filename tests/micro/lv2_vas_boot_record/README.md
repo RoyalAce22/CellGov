@@ -8,10 +8,11 @@ id that lv1 returns.
 
 ## Where the values sit
 
-The stock 4.93 `lv2_kernel.self` constructs its virtual address space in
-the function at 0x800000000005dc98. Its only caller, at
-0x800000000005dd54, passes the record address that it loads from the TOC
-slot at r2 - 25760. The function stores these words in the record:
+The shipped 4.93 `lv2_kernel.self` constructs its virtual address space
+in the function at [OFW-4.93 lv2_kernel a:0x800000000005dc98]. Its only
+caller, at [OFW-4.93 lv2_kernel a:0x800000000005dd54], passes the record
+address that it loads from the TOC slot at r2 - 25760. The function
+stores these words in the record:
 
 | Offset | Value | How the kernel gets it |
 |---|---|---|
@@ -20,7 +21,8 @@ slot at r2 - 25760. The function stores these words in the record:
 | +0x48 | the hash table size | r5 out of hypercall 2 |
 | +0x50 | the hash table size >> 7 | derived from r5 |
 
-Before the `sc` at 0x800000000005dcf4, the function stores 0 to +0x30,
+Before the `sc` at [OFW-4.93 lv2_kernel a:0x800000000005dcf4], the
+function stores 0 to +0x30,
 +0x38, +0x48 and +0x50. It calls hypercall 2 with r3 = 0, r4 = 2 and
 r5 = 0x1014000000000000, which names the page shifts 16 and 20. On
 status 0 it stores r4 and r5, and then calls hypercall 7,
@@ -28,14 +30,14 @@ status 0 it stores r4 and r5, and then calls hypercall 7,
 from either call goes to the kernel's panic routine.
 
 The record is at 0x80000000003e3a80. The kernel loads r2 from the
-doubleword at 0x8000000000003000.
+doubleword at [OFW-4.93 lv2_kernel a:0x8000000000003000].
 
 These facts make the record words the outputs of the boot call:
 
 - In the kernel's text, the only load of the record's TOC slot is at
-  0x800000000005dd60, in the caller.
+  [OFW-4.93 lv2_kernel a:0x800000000005dd60], in the caller.
 - The only `sc 1` that follows a `li r11, 2` within six instructions is
-  the one at 0x800000000005dcf4.
+  the one at [OFW-4.93 lv2_kernel a:0x800000000005dcf4].
 - The caller also stores the record address in the pointer at TOC slot
   r2 - 25896, so other code can reach the record. That analysis does not
   show which words that code writes. The word at +0x38 is 0 after the
@@ -64,11 +66,13 @@ two locator words and the record's first 12 doublewords.
 
 ## Cross-checks
 
-- The constant at +0x40 is the value that the stock function stores, so
-  the probe read the record that the function wrote.
+- The constant at +0x40 is the value that the stock function stores
+  [OFW-4.93 lv2_kernel a:0x800000000005dccc], so the probe read the
+  record that the function wrote.
 - The word at +0x50 is the word at +0x48 shifted right by 7, as the
   function computes it.
-- The hash table size agrees with the 4.93 lv1 handler of hypercall 2.
+- The hash table size agrees with the lv1 handler of hypercall 2
+  [OFW-4.93 lv1 a:0x2EC554].
   The handler raises an exponent below 18 to 18, and returns 2 to the
   power of the exponent in r5 (`cellgov_ps3_abi::lv1::address_space`).
   The kernel passes 0.

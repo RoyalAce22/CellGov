@@ -4,7 +4,8 @@ use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::call::{CONSTRUCT_VIRTUAL_ADDRESS_SPACE, SELECT_VIRTUAL_ADDRESS_SPACE};
 use cellgov_time::GuestTicks;
 
-/// The `sc` of the 4.93 kernel's construction.
+/// The `sc` of the 4.93 kernel's construction
+/// [OFW-4.93 lv2_kernel a:0x800000000005dcf4].
 const PC: u64 = 0x8000_0000_0005_dcf4;
 
 /// The vas id and the page table size that the console capture
@@ -32,8 +33,9 @@ fn construct_request(r3: u64, r4: u64, r5: u64) -> HypercallRequest {
     request(CONSTRUCT_VIRTUAL_ADDRESS_SPACE, [r3, r4, r5])
 }
 
-/// The call the 4.93 kernel makes: r3 = 0, two page sizes, shifts 16
-/// and 20.
+/// The call the 4.93 kernel makes
+/// [OFW-4.93 lv2_kernel a:0x800000000005dcc0-0x800000000005dcf4]: r3 = 0,
+/// two page sizes, shifts 16 and 20.
 fn kernel_call() -> HypercallRequest {
     construct_request(0, KERNEL_PAGE_SIZE_COUNT, KERNEL_PAGE_SHIFTS)
 }

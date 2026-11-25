@@ -19,7 +19,7 @@ fn storage() -> GuestMemory {
     GuestMemory::new(0x0037_0000)
 }
 
-/// The 4.93 kernel's call: `sc 1` at 0x8000000000007d78, with the
+/// The 4.93 kernel's call: `sc 1` [OFW-4.93 lv2_kernel a:0x8000000000007d78], with the
 /// logical PPE id 1 in r3, and r4 and r5 for hardware thread `thread`.
 fn request(thread: u8) -> HypercallRequest {
     let bitmap = [THREAD_0_BITMAP, THREAD_1_BITMAP][usize::from(thread)];
@@ -64,8 +64,9 @@ fn refused(r: &HypercallRequest, what: &'static str) -> HypercallDisposition {
     })
 }
 
-/// lv1 4.93 returns r3 = 0 and writes no return slot, and copies the
-/// thread's 32-byte status shadow, 0, to the bitmap (0x2C413C).
+/// lv1 returns r3 = 0 [OFW-4.93 lv1 a:0x2EA598] and writes no return
+/// slot, and copies the
+/// thread's 32-byte status shadow, 0, to the bitmap [OFW-4.93 lv1 a:0x2C413C].
 fn registered(r: &HypercallRequest, thread: u8, bitmap: u64) -> HypercallDisposition {
     let mut answer = HypercallAnswer::lv1_status(0, vec![0; 7]);
     answer.effects.push(Effect::SharedWriteIntent {
@@ -120,7 +121,7 @@ fn values_in_r6_to_r10_do_not_change_the_answer() {
     assert_eq!(fresh(&r), registered(&r, 0, THREAD_0_BITMAP));
 }
 
-/// The object table lookup at 0x2EA440 to 0x2EA628.
+/// The object table lookup at [OFW-4.93 lv1 a:0x2EA440-0x2EA628].
 #[test]
 fn an_r3_other_than_the_logical_ppe_id_gets_lv1s_r3_marked_no_entry() {
     for ppe_id in [0, 2, 3, u64::MAX] {
@@ -129,7 +130,7 @@ fn an_r3_other_than_the_logical_ppe_id_gets_lv1s_r3_marked_no_entry() {
     }
 }
 
-/// The compare with 2 at 0x2EA634.
+/// The compare with 2 at [OFW-4.93 lv1 a:0x2EA634].
 #[test]
 fn an_r4_not_below_2_gets_lv1s_r4_marked_no_entry() {
     for thread in [2, 255, 256, 1 << 32, u64::MAX] {
@@ -138,7 +139,7 @@ fn an_r4_not_below_2_gets_lv1s_r4_marked_no_entry() {
     }
 }
 
-/// The +128 check at 0x2EA98C.
+/// The +128 check at [OFW-4.93 lv1 a:0x2EA98C].
 #[test]
 fn an_r5_of_0_with_no_bitmap_held_gets_lv1s_wrong_state() {
     let r = with(&request(0), 5, 0);
@@ -162,7 +163,7 @@ fn an_r5_of_0_after_a_registration_of_either_thread_is_refused() {
     );
 }
 
-/// The low 3 bits check at 0x2EA648.
+/// The low 3 bits check at [OFW-4.93 lv1 a:0x2EA648].
 #[test]
 fn an_r5_that_is_not_8_byte_aligned_gets_lv1s_r5_marked_illegal_parameter() {
     for offset in [1, 2, 4, 7] {
@@ -177,8 +178,8 @@ fn an_8_byte_aligned_r5_off_a_64_byte_boundary_registers() {
     assert_eq!(fresh(&r), registered(&r, 0, THREAD_0_BITMAP + 8));
 }
 
-/// The region lookup returns no region at 0x2CE7A4, and the handler
-/// answers at 0x2EA964.
+/// The region lookup returns no region at [OFW-4.93 lv1 a:0x2CE7A4], and the handler
+/// answers at [OFW-4.93 lv1 a:0x2EA964].
 #[test]
 fn an_r5_at_or_past_the_real_mode_size_gets_lv1s_r5_marked_no_entry() {
     for address in [RM_SIZE, RM_SIZE + 0x40, (1 << 42) - 8] {
@@ -187,7 +188,7 @@ fn an_r5_at_or_past_the_real_mode_size_gets_lv1s_r5_marked_no_entry() {
     }
 }
 
-/// The region end check at 0x2EA6BC.
+/// The region end check at [OFW-4.93 lv1 a:0x2EA6BC].
 #[test]
 fn a_bitmap_that_passes_the_real_mode_region_end_gets_lv1s_r5_marked_type_mismatch() {
     for address in [RM_SIZE - 8, RM_SIZE - 56] {

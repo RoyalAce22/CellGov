@@ -39,7 +39,9 @@ fn call(rt: &mut Runtime, number: u64, inputs: [u64; 3]) {
     );
 }
 
-/// The 4.93 kernel's construction: r3 = 0, page shifts 16 and 20.
+/// The 4.93 kernel's construction
+/// [OFW-4.93 lv2_kernel a:0x800000000005dcc0-0x800000000005dcf4]: r3 = 0,
+/// page shifts 16 and 20.
 fn construct(rt: &mut Runtime) {
     call(
         rt,
