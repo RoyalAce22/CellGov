@@ -18,23 +18,23 @@ use crate::state::PpuState;
 use crate::store_buffer::StoreBuffer;
 
 /// The kernel's MSR at its entry: 64-bit, privileged, translation off.
-const KERNEL_MSR: u64 = MSR_SF;
+pub(super) const KERNEL_MSR: u64 = MSR_SF;
 
 fn word(primary: u32, xo: u32, t: u32, a: u32, b: u32) -> u32 {
     (primary << 26) | (t << 21) | (a << 16) | (b << 11) | (xo << 1)
 }
 
-fn mfspr(rt: u32, spr: u16) -> u32 {
+pub(super) fn mfspr(rt: u32, spr: u16) -> u32 {
     let spr = u32::from(spr);
     word(31, 339, rt, spr & 0x1F, spr >> 5)
 }
 
-fn mtspr(spr: u16, rs: u32) -> u32 {
+pub(super) fn mtspr(spr: u16, rs: u32) -> u32 {
     let spr = u32::from(spr);
     word(31, 467, rs, spr & 0x1F, spr >> 5)
 }
 
-fn kernel_state() -> PpuState {
+pub(super) fn kernel_state() -> PpuState {
     let mut state = PpuState::new();
     state.set_supervisor(Some(SupervisorState::new(KERNEL_MSR)));
     state
@@ -42,7 +42,7 @@ fn kernel_state() -> PpuState {
 
 /// Execute `raw` on `state`, assert that it queued no effect or store
 /// and kept the hash current, and return its verdict.
-fn run(state: &mut PpuState, raw: u32) -> ExecuteVerdict {
+pub(super) fn run(state: &mut PpuState, raw: u32) -> ExecuteVerdict {
     let insn = crate::decode::decode(raw).unwrap_or_else(|e| panic!("0x{raw:08x}: {e:?}"));
     let page = [0u8; 0x1000];
     let views = [cellgov_mem::RegionView::plain(0, &page)];

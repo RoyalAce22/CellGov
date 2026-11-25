@@ -1,6 +1,7 @@
 use cellgov_event::UnitId;
 use cellgov_lv2::hypervisor::{HypercallRefusal, RepositoryRead};
 use cellgov_ps3_abi::format::core_os::LV2_KERNEL_LINK_BASE;
+use cellgov_ps3_abi::hw::ppu::CELL_BP_VR;
 use cellgov_ps3_abi::lv1::repository::{field, first_field, RepositoryKey};
 
 use super::map::KERNEL_SPAN_LIMIT;
@@ -113,19 +114,43 @@ fn a_read_of_a_node_with_no_row_stops_the_kernel_at_a_refusal_that_names_the_key
     );
 }
 
-/// `mfspr r0, 1022` reads BP_VR [CBEA p:281 s:23.1], which the PPU
-/// does not implement: the unit faults instead of taking an interrupt.
-/// The floor kernels stop on this read once their repository reads end.
+/// `mfspr r0, 287` reads the PVR, which the PPU does not model in
+/// supervisor state: the unit faults instead of taking an interrupt.
+const MFSPR_R0_PVR: u32 = 0x7c1f_42a6;
+
+/// `mfspr r0, 1022` reads BP_VR [CBEA p:281 s:23.1].
 const MFSPR_R0_BP_VR: u32 = 0x7c1e_faa6;
 
 #[test]
 fn a_kernel_fault_stops_the_run_at_the_faulting_pc_and_the_sibling_runs_no_further() {
-    let run = run_kernel_from_entry(&kernel_elf(&[LI_R3_2, MFSPR_R0_BP_VR]), FW, 10_000).unwrap();
+    let run = run_kernel_from_entry(&kernel_elf(&[LI_R3_2, MFSPR_R0_PVR]), FW, 10_000).unwrap();
     let KernelRunStop::Fault { pc, .. } = run.stop else {
         panic!("the run stopped at {:?}", run.stop);
     };
     assert_eq!(pc, Some(ENTRY + 4));
     assert!(run.steps < 10_000, "{} steps", run.steps);
+}
+
+/// `cmpdi cr0, r0, CELL_BP_VR`.
+const CMPDI_R0_BP_VR: u32 = 0x2c20_0000 | CELL_BP_VR;
+const _: () = assert!(
+    CELL_BP_VR < 0x8000,
+    "the value fits SI as a positive immediate"
+);
+/// `bne +8`.
+const BNE_8: u32 = 0x4082_0008;
+
+#[test]
+fn a_kernel_reads_bp_vr_without_an_interrupt_and_gets_the_modelled_value() {
+    // A wrong value branches to the `b .` and runs to the step cap. An
+    // interrupt leaves for the program vector. Only the right value
+    // reaches the unmodelled PVR read.
+    let code = &[MFSPR_R0_BP_VR, CMPDI_R0_BP_VR, BNE_8, MFSPR_R0_PVR, B_SELF];
+    let run = run_kernel_from_entry(&kernel_elf(code), FW, 10_000).unwrap();
+    let KernelRunStop::Fault { pc, .. } = run.stop else {
+        panic!("the run stopped at {:?}", run.stop);
+    };
+    assert_eq!(pc, Some(ENTRY + 12));
 }
 
 #[test]

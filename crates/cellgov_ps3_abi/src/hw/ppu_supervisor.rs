@@ -159,6 +159,11 @@ pub const SPR_SRR1: u16 = 27;
 /// SPR number of SPRG0; SPRG`k` is `SPR_SPRG0 + k`. See [`SPR_DSISR`].
 pub const SPR_SPRG0: u16 = 272;
 
+/// SPR number of BP_VR, the CBEA-compliant processor version register.
+///
+/// [CBEA p:281 s:23.1] BP_VR is PPE SPR x'3FE', a 32-bit read-only register; read access is privileged and write access is not provided.
+pub const SPR_BP_VR: u16 = 0x3FE;
+
 #[cfg(test)]
 #[path = "tests/ppu_supervisor_tests.rs"]
 mod tests;

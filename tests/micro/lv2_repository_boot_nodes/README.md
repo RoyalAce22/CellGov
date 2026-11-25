@@ -26,6 +26,7 @@ run time. The offsets come from that function's code:
 | +0xa0 | `bi.rgntotal` & 0xfffff, when it is not 0 | derived |
 | +0xa8 | lpar 1 `plat.id` | hypercall 91 |
 | +0xb0 | lpar 1 `be.0.clock` | hypercall 91 |
+| +0xb8 | BP_VR, the processor version register (a word) | `mfspr` of SPR 1022 |
 
 The record is at 0x800000000037a5a0. The kernel finds it through the TOC
 slot at r2 - 31808, and stores its address in the pointer at
@@ -65,6 +66,43 @@ hypervisor puts 0 in r5 for a node from this capture only when the read
 comes from the `sc` and return address of that node's row. It refuses a
 read of the node from any other site.
 
+## The processor version word
+
+The function that fills the record ends with a read of BP_VR, the
+CBEA-compliant processor version register. BP_VR is a 32-bit register,
+so `mfspr` puts it in the low word of r0. The code at
+0x800000000000cd18 is:
+
+```text
+mfspr r0, 1022
+stw   r0, 112(r1)
+isync
+lwz   r0, 112(r1)
+stw   r0, 184(r31)
+```
+
+r31 holds the record address, so the word at +0xb8 is the whole register,
+with no bit lost. The word at +0xbc stays zero fill.
+
+The read is not a no-op, and it does not return 0. Before the `mfspr`, r0
+holds the return address of the `be.0.clock` accessor, whose low word is
+0x0000cd14. The capture reads 0x00002100.
+
+No other code writes the word:
+
+- One accessor at 0x800000000000cd80 runs the fill function once, behind a
+  byte flag. It is the only code that loads the record's TOC slot.
+- The record's pointer has one more reader, the getter at
+  0x800000000000c7f4. The getter's only caller reads the record and does
+  not write it.
+- No data word holds the function descriptor of the getter, the accessor
+  or the fill function.
+- The record's two virtual functions, at 0x800000000000cdd4 and
+  0x800000000000cde0, write only its first doubleword.
+
+CellGov's PPU answers a supervisor-state read of BP_VR with this value
+(`cellgov_ps3_abi::hw::ppu::CELL_BP_VR`).
+
 ## Method
 
 - Firmware 4.93, the `cech20-cex-493` reference profile; captured
@@ -100,6 +138,7 @@ read of the node from any other site.
 | 0x800000000037a640 | 0x00000000000a0000 | 0x0f9a0000 & 0xfffff |
 | 0x800000000037a648 | 0x436f6b4731310000 | `plat.id` = "CokG11" |
 | 0x800000000037a650 | 0x0000000004c1a6c0 | `be.0.clock` = 79 800 000 |
+| 0x800000000037a658 | 0x0000210000000000 | BP_VR = 0x00002100 in the high word |
 
 `cgov_frame.bin` holds all 27 reads as (address, doubleword) pairs.
 

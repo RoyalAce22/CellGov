@@ -1,5 +1,5 @@
-//! Cell Broadband Engine PPU constants: timebase, cache geometry,
-//! register-file sizes and the real-address limit.
+//! Cell Broadband Engine PPU constants: timebase, processor version,
+//! cache geometry, register-file sizes and the real-address limit.
 //!
 //! Reported to titles via `sys_time_get_timebase_frequency` and used
 //! internally by reservation tracking, dcbz, and PowerPC atomic ops.
@@ -26,6 +26,17 @@ pub const CELL_PPU_TIMEBASE_HZ: u64 = 79_800_000;
 /// the count when the run starts, so a title reads the time since its own
 /// start.
 pub const PPU_TIME_BASE_ORIGIN: u64 = 0;
+
+/// The value of BP_VR, the CBEA-compliant processor version register, on
+/// the reference console: version 0x0000, revision 0x2100.
+///
+/// [CBEA p:281 s:23.1] BP_VR bits 0:15 hold the processor version and bits 16:31 its revision.
+///
+/// The 4.93 kernel stores the word its boot `mfspr` of BP_VR reads at
+/// offset 0xb8 of its boot repository record. The console capture
+/// `lv2_repository_boot_nodes` reads 0x00002100 there. The README of the
+/// capture gives the analysis.
+pub const CELL_BP_VR: u32 = 0x0000_2100;
 
 /// Gives the effective-address offset of the PowerPC System Call interrupt vector.
 ///
@@ -192,3 +203,7 @@ pub const PPU_USER_MSR: UserMsr = UserMsr {
 /// [CBE-Handbook p:51 s:2.1] PPE MMU address-space sizes: real address 2^42
 /// bytes, effective address 2^64 bytes, virtual address 2^65 bytes.
 pub const CELL_EA_LIMIT: u64 = 0x0000_03FF_FFFF_FFFF;
+
+#[cfg(test)]
+#[path = "tests/ppu_bp_vr_console_tests.rs"]
+mod bp_vr_console_tests;

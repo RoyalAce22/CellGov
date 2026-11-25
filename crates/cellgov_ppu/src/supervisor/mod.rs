@@ -10,3 +10,7 @@ pub use state::{SlbEntry, SupervisorState};
 #[cfg(test)]
 #[path = "tests/exec_tests.rs"]
 mod exec_tests;
+
+#[cfg(test)]
+#[path = "tests/bp_vr_tests.rs"]
+mod bp_vr_tests;

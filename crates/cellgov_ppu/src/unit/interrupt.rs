@@ -311,6 +311,10 @@ mod interrupt_support;
 mod interrupt_class_tests;
 
 #[cfg(test)]
+#[path = "tests/interrupt_bp_vr_tests.rs"]
+mod interrupt_bp_vr_tests;
+
+#[cfg(test)]
 #[path = "tests/interrupt_batch_tests.rs"]
 mod interrupt_batch_tests;
 

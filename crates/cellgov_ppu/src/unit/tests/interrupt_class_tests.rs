@@ -164,7 +164,8 @@ fn an_alignment_interrupt_vectors_with_dar_and_leaves_dsisr() {
     );
 }
 
-/// [PPC-Book3 p:72 s:5.5.9] A program interrupt sets SRR0 to the instruction that caused it, and SRR1 bit 44 for an illegal instruction, 45 for a privileged one and 46 for a trap.
+/// [PPC-Book3 p:71 s:5.5.9] A program interrupt sets SRR0 to the instruction that caused it.
+/// [PPC-Book3 p:72 s:5.5.9] A program interrupt sets SRR1 bit 44 for an illegal instruction, 45 for a privileged one and 46 for a trap.
 #[test]
 fn a_program_interrupt_vectors_with_its_cause_bit_and_the_msr_copy() {
     let cases = [

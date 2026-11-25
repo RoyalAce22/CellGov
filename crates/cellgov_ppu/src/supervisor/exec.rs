@@ -1,9 +1,10 @@
 //! The privileged forms a thread in supervisor state executes.
 
+use cellgov_ps3_abi::hw::ppu::CELL_BP_VR;
 use cellgov_ps3_abi::hw::ppu_supervisor::{
     MSR_BIT1, MSR_DR, MSR_EE, MSR_HV, MSR_IR, MSR_ME, MSR_PR, MSR_RI, MSR_SF, PPE_SLB_INDEX,
-    PPE_SLB_VSID_FLAGS, SLB_ESID, SLB_VALID, SPR_DAR, SPR_DEC, SPR_DSISR, SPR_SPRG0, SPR_SRR0,
-    SPR_SRR1,
+    PPE_SLB_VSID_FLAGS, SLB_ESID, SLB_VALID, SPR_BP_VR, SPR_DAR, SPR_DEC, SPR_DSISR, SPR_SPRG0,
+    SPR_SRR0, SPR_SRR1,
 };
 
 use super::state::SupervisorState;
@@ -186,6 +187,7 @@ fn move_from_spr(
         SPR_SRR0 => s.srr0,
         SPR_SRR1 => s.srr1,
         _ if (SPR_SPRG0..SPR_SPRG0 + 4).contains(&spr) => s.sprg[usize::from(spr - SPR_SPRG0)],
+        SPR_BP_VR => u64::from(CELL_BP_VR),
         _ => return unmodelled(mnemonic),
     };
     state.set_gpr(rt, v);
@@ -199,6 +201,11 @@ fn move_to_spr(
     spr: u16,
     mnemonic: &'static str,
 ) -> ExecuteVerdict {
+    // [CBEA p:281 s:23.1] BP_VR provides no write access.
+    // [CBEA p:312 s:Appendix E] E.4: in privileged state, an access to an inaccessible SPR executes as a no-op.
+    if spr == SPR_BP_VR {
+        return ExecuteVerdict::Continue;
+    }
     let v = state.gpr[rs];
     let tb = state.tb;
     let modelled = matches!(spr, SPR_DSISR | SPR_DAR | SPR_DEC | SPR_SRR0 | SPR_SRR1)
