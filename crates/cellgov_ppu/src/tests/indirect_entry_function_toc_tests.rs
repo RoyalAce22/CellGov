@@ -5,8 +5,10 @@ use super::toc_tests::{build_from_toc, descriptor_bytes, DATA, TOC};
 use super::*;
 use cellgov_ps3_abi::hw::ppc_isa::PPC_NOP;
 
-/// A second TOC, which builds the address one word past the one that
-/// [`TOC`] builds.
+/// A second TOC, one word above [`TOC`].
+///
+/// With r2 at this TOC, the words of [`branch_through`] for [`TOC`] build
+/// an address one word higher.
 pub(super) const OTHER_TOC: u64 = TOC + 4;
 
 /// The bound of an image with the code `words` and one descriptor for

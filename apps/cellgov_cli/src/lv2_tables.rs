@@ -30,7 +30,7 @@ pub(crate) fn committed_pup_rows() -> Result<Vec<PupRow>, CommittedPupError> {
     Ok(archive::checked_pup_rows(PUP_TSV)?)
 }
 
-/// Why a kernel ELF is not the kernel `kernel.tsv` names for a PUP.
+/// Why [`check_committed_kernel`] refuses a kernel ELF.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum CommittedKernelError {
     #[error("parse compiled kernel.tsv: {source}")]
@@ -45,7 +45,7 @@ pub(crate) enum CommittedKernelError {
 /// Refuses `elf` unless `kernel.tsv` names it as the kernel of
 /// `pup_sha256`.
 ///
-/// This keeps a PUP's rows to its own kernel.
+/// The check is [`archive::check_kernel_elf`] over the compiled-in table.
 ///
 /// # Errors
 ///

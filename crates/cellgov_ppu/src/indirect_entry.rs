@@ -35,10 +35,7 @@
 //!   prove: a CTR after a call, or after a decrement of a constant that
 //!   the scan records.
 //!
-//! The CTR paths go across direct branches as well as fall-throughs, so
-//! a branch to a later word brings its CTR to that word. They also
-//! follow a copy of CTR in a GPR, so an `mfctr` and an `mtctr` of the
-//! copy keep what CTR held.
+//! [`CtrFlow`] gives the paths that bring CTR to a `bcctr`.
 //!
 //! A second scan finds where an `rfid`, `mtmsr` or `mtmsrd` can put
 //! control into real mode. It forgets each constant at a word that
@@ -55,7 +52,7 @@ use cellgov_ps3_abi::hw::ppu_mmu::REAL_MODE_IGNORED_EA;
 use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_BIT1, MSR_IR, MSR_PR, MSR_SF, SPR_SRR0, SPR_SRR1};
 
 use crate::caller_census::{written_gprs, CallerScanError};
-use crate::hypercall_cfg::{branch_target, Code, CodeSegment};
+use crate::hypercall_cfg::{branch_target, real_indirect_words, Code, CodeSegment};
 use crate::instruction::{spr_number, PpuInstruction};
 use crate::local_cfg::falls_through;
 
@@ -314,7 +311,7 @@ impl WordTocs {
 ///
 /// The walk errs wide: a word that gets a TOC in error can only add
 /// words to the bound. An indirect branch reaches each named word, so
-/// the walk goes on as the named words grow.
+/// the walk continues as the named words grow.
 struct FunctionWords<'a> {
     code: &'a Code,
     tocs: WordTocs,
@@ -356,10 +353,8 @@ impl<'a> FunctionWords<'a> {
             let code = self.code;
             for raw in code.words_at(at) {
                 let steps = FunctionSteps::of(at, raw);
-                if steps.next {
-                    if let Some(next) = at.checked_add(4) {
-                        self.reach(next, toc);
-                    }
+                if let Some(next) = at.checked_add(4).filter(|_| steps.next) {
+                    self.reach(next, toc);
                 }
                 if let Some(target) = steps.target {
                     self.reach(target, toc);
@@ -604,11 +599,6 @@ impl Switches {
 
     /// The switches of `code`, when control enters each word of `joins`
     /// with no constant that the scan knows.
-    ///
-    /// A call can change each register before it returns, so the scan
-    /// also forgets each constant after a branch that links. A `b` or a
-    /// `bc` that links to the next word calls nothing, so the scan keeps
-    /// the constants there.
     fn scan(code: &Code, tocs: &WordTocs, every: &Value, joins: &BTreeSet<u64>) -> Self {
         let mut switches = Self::default();
         for (index, segment) in code.segments().iter().enumerate() {
@@ -626,9 +616,6 @@ impl Switches {
                     }
                 }
                 constants.step(address, raw);
-                if calls(address, raw) {
-                    constants = Constants::default();
-                }
             }
         }
         switches
@@ -639,13 +626,19 @@ impl Switches {
 /// fall-through, apart from the switch targets:
 /// - each word of `entries`;
 /// - each target of a direct branch;
-/// - each target that `targets` gives.
+/// - each target that `targets` gives;
+/// - the word after each branch that links, where a `bclr` can return
+///   with other registers.
 ///
 /// Real mode ignores EA bits 0 and 1, so the set also holds each word at
-/// the real address of each of these. The set omits the word after a
-/// direct branch as a target of that branch. The branch reaches that
-/// word with the constants of the fall-through.
+/// the real address of each of these. Apart from the direct targets,
+/// these are the words that [`real_indirect_words`] gives. The set omits
+/// the word after a direct branch as a target of that branch. The branch
+/// reaches that word with the constants of the fall-through. A branch
+/// that links still makes that word a join, as a return point.
 ///
+/// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.
+/// [PPC-Book1 p:25 s:2.4] `bclr` branches to LR 0:61 || 0b00.
 /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
 fn joins(
     code: &Code,
@@ -664,10 +657,7 @@ fn joins(
                 .flat_map(|target| code.real_aliases(target))
                 .filter(move |&alias| Some(alias) != next)
         });
-    entries
-        .iter()
-        .chain(targets.values().flatten())
-        .flat_map(|&address| code.real_aliases(address))
+    real_indirect_words(code, entries, targets)
         .chain(direct)
         .collect()
 }
@@ -684,11 +674,30 @@ fn joins(
 fn calls(address: u64, raw: u32) -> bool {
     match crate::decode::decode(raw) {
         Ok(PpuInstruction::B { link, .. } | PpuInstruction::Bc { link, .. }) => {
-            link && FunctionSteps::of(address, raw).target != address.checked_add(4)
+            link && !links_to_next_word(address, raw)
         }
         Ok(PpuInstruction::Bclr { link, .. } | PpuInstruction::Bcctr { link, .. }) => link,
         _ => false,
     }
+}
+
+/// Whether the word `raw` at `address` is a `b` or a `bc` that links to
+/// the next word.
+fn links_to_next_word(address: u64, raw: u32) -> bool {
+    matches!(
+        crate::decode::decode(raw),
+        Ok(PpuInstruction::B { link: true, .. } | PpuInstruction::Bc { link: true, .. })
+    ) && FunctionSteps::of(address, raw).target == address.checked_add(4)
+}
+
+/// The address of the word after each `b` or `bc` of `code` that links
+/// to the next word.
+fn after_next_word_links(code: &Code) -> impl Iterator<Item = u64> + '_ {
+    code.segments()
+        .iter()
+        .flat_map(CodeSegment::addressed)
+        .filter(|&(address, raw)| links_to_next_word(address, raw))
+        .filter_map(|(address, _)| address.checked_add(4))
 }
 
 /// Where one `rfid`, `mtmsr` or `mtmsrd` can put control into real mode.
@@ -994,9 +1003,13 @@ impl Constants {
         )
     }
 
-    /// The MSR constants that the word `raw` at `address` sets MSR\[IR\]
-    /// from, the address of the next fetch, and whether the word also
-    /// sets MSR\[SF\], or `None` for a word that does not set MSR\[IR\].
+    /// What the word `raw` at `address` does to MSR and to the next fetch.
+    ///
+    /// The result is `None` for a word that does not set MSR\[IR\]. Else
+    /// it holds:
+    /// - the MSR constants that the word sets MSR\[IR\] from;
+    /// - the address of the next fetch;
+    /// - whether the word also sets MSR\[SF\].
     ///
     /// The MSR constants or the address are `None` when the scan does
     /// not know them.
@@ -1209,7 +1222,8 @@ impl Ctr {
 
     /// CTR after the word at `by` copies this copy of CTR back into CTR.
     ///
-    /// The word at `by` is then the word that wrote each constant.
+    /// The result records the word at `by` as the word that wrote each
+    /// constant.
     fn rewritten(&self, by: u64) -> Self {
         let known = self
             .known
@@ -1329,23 +1343,30 @@ fn surely_written_gprs(decoded: &PpuInstruction) -> u32 {
 /// A path goes from a word to these words:
 /// - the next word, when the word can fall through;
 /// - each word at the real address of the target of a direct branch
-///   that is not a call.
+///   that is not a call;
+/// - from a `bclr`, each word at the real address of the word after a
+///   `b` or a `bc` that links to the next word.
 ///
-/// So a branch to a later word brings its CTR there. The flow does not
-/// follow CTR into the routine that a call runs, or to the target of an
-/// indirect branch, an `rfid` or an interrupt. Such a path brings a CTR
-/// that the bound takes to hold a named address. The word after a call
-/// gets a CTR that the scan cannot prove. The word after an `sc` gets
-/// the CTR before the `sc`, so the flow takes the handler to return
-/// with CTR unchanged.
+/// The flow does not follow CTR or a copy of it to these words:
+/// - the first word of the routine that a call runs;
+/// - the target of an indirect branch, an `rfid` or an interrupt.
+///
+/// A path to one of these words brings a CTR that the bound takes to
+/// hold a named address. The word after a call gets a CTR that the scan
+/// cannot prove. The word after an `sc` gets the CTR before the `sc`, so
+/// the flow takes the handler to return with CTR unchanged.
+///
+/// A `b` or a `bc` that links to the next word calls no routine, so the
+/// next word gets the CTR before the branch. A `bclr` can return there
+/// later with another CTR, so that word also gets what each `bclr`
+/// brings.
 ///
 /// The flow also follows each copy of CTR in a GPR on the same paths. An
 /// `mtctr` of a GPR that holds a copy puts the copy back into CTR, so a
 /// CTR that the scan cannot prove stays so through the copy. A call
 /// keeps each copy, because its routine can return the GPR unchanged.
-/// The flow does not follow a copy into the routine that a call runs.
 ///
-/// The flow joins the CTR of each path to a word, and goes on until no
+/// The flow joins the CTR of each path to a word, and continues until no
 /// word changes. Each state only grows, from finite sets of constants,
 /// so the flow ends.
 ///
@@ -1375,39 +1396,73 @@ impl<'a> CtrFlow<'a> {
     }
 
     /// Steps from each word until no word changes.
+    ///
+    /// The flow joins what each `bclr` brings into one state. When that
+    /// state changes, the flow joins it into the word after each link to
+    /// the next word. So each `bclr` costs one join.
     fn run(&mut self) {
         let code = self.code;
-        let mut queued: Vec<Vec<bool>> = code
-            .segments()
-            .iter()
-            .map(|segment| vec![true; segment.words.len()])
+        let returns: Vec<(usize, usize)> = after_next_word_links(code)
+            .flat_map(|address| code.real_aliases(address))
+            .flat_map(|alias| positions(code, alias))
             .collect();
-        let mut pending: Vec<(usize, usize)> = code
-            .segments()
-            .iter()
-            .enumerate()
-            .flat_map(|(index, segment)| (0..segment.words.len()).map(move |word| (index, word)))
-            .rev()
-            .collect();
-        while let Some((index, word)) = pending.pop() {
-            queued[index][word] = false;
+        let mut returned = CtrState::default();
+        let mut work = Worklist::new(code);
+        while let Some((index, word)) = work.pop() {
             let segment = &code.segments()[index];
             let address = segment.vaddr + (word as u64) * 4;
-            let (next, taken) = self.steps((index, word), address, segment.words[word]);
+            let raw = segment.words[word];
+            let (next, taken) = self.steps((index, word), address, raw);
             let next = next.and_then(|ctr| Some((address.checked_add(4)?, ctr)));
             let taken = taken.into_iter().flat_map(|(target, ctr)| {
                 code.real_aliases(target)
                     .map(move |alias| (alias, ctr.clone()))
             });
             for (to, ctr) in next.into_iter().chain(taken) {
-                for (to_index, to_word) in positions(code, to) {
-                    if self.at[to_index][to_word].join(&ctr) && !queued[to_index][to_word] {
-                        queued[to_index][to_word] = true;
-                        pending.push((to_index, to_word));
-                    }
+                for position in positions(code, to) {
+                    self.join_into(position, &ctr, &mut work);
+                }
+            }
+            let Some(brought) = self.returned((index, word), raw) else {
+                continue;
+            };
+            if returned.join(&brought) {
+                for &position in &returns {
+                    self.join_into(position, &returned, &mut work);
                 }
             }
         }
+    }
+
+    /// Joins `state` into the word at `position`, and queues the word
+    /// when its state changes.
+    fn join_into(&mut self, position: (usize, usize), state: &CtrState, work: &mut Worklist) {
+        let (index, word) = position;
+        if self.at[index][word].join(state) {
+            work.push(position);
+        }
+    }
+
+    /// The state that the word `raw` at `position` brings to the word
+    /// where LR points, or `None` when the word is not a `bclr`.
+    ///
+    /// [PPC-Book1 p:25 s:2.4] `bclr` branches to LR 0:61 || 0b00.
+    /// [PPC-Book1 p:24 s:2.4] A `bc` with BO bit 2 at 0 decrements CTR.
+    fn returned(&self, position: (usize, usize), raw: u32) -> Option<CtrState> {
+        let Ok(PpuInstruction::Bclr { bo, .. }) = crate::decode::decode(raw) else {
+            return None;
+        };
+        let (index, word) = position;
+        let state = &self.at[index][word];
+        let ctr = if bo & PPC_BO_BIT2 == 0 {
+            state.ctr.unproved()
+        } else {
+            state.ctr.clone()
+        };
+        Some(CtrState {
+            ctr,
+            copies: state.copies.clone(),
+        })
     }
 
     /// The state that the word `raw` at `address` passes to the next word,
@@ -1580,6 +1635,53 @@ fn branched(address: u64, raw: u32, bo: u8, link: bool, ctr: &Ctr) -> Option<Ctr
     })
 }
 
+/// The words that [`CtrFlow::run`] has yet to step from, by the index of
+/// the segment and of the word there.
+struct Worklist {
+    /// Whether each word is in `pending`, in one vector for each segment.
+    queued: Vec<Vec<bool>>,
+    pending: Vec<(usize, usize)>,
+}
+
+impl Worklist {
+    /// A worklist that holds each word of `code`, with the first word
+    /// next.
+    fn new(code: &Code) -> Self {
+        Self {
+            queued: code
+                .segments()
+                .iter()
+                .map(|segment| vec![true; segment.words.len()])
+                .collect(),
+            pending: code
+                .segments()
+                .iter()
+                .enumerate()
+                .flat_map(|(index, segment)| {
+                    (0..segment.words.len()).map(move |word| (index, word))
+                })
+                .rev()
+                .collect(),
+        }
+    }
+
+    /// Takes the next word.
+    fn pop(&mut self) -> Option<(usize, usize)> {
+        let (index, word) = self.pending.pop()?;
+        self.queued[index][word] = false;
+        Some((index, word))
+    }
+
+    /// Queues the word at `position`, unless it is in the list.
+    fn push(&mut self, position: (usize, usize)) {
+        let (index, word) = position;
+        if !self.queued[index][word] {
+            self.queued[index][word] = true;
+            self.pending.push(position);
+        }
+    }
+}
+
 /// The index of the segment and of the word of each segment that holds a
 /// word at `address`.
 fn positions(code: &Code, address: u64) -> impl Iterator<Item = (usize, usize)> + '_ {
@@ -1656,8 +1758,9 @@ fn fetch_address(address: u64, msr: u64) -> u64 {
 /// handler can emulate keeps the path. A word that the PPE does not
 /// implement is such a word.
 ///
-/// An `rfid` with SRR0 at the next word falls through. The reset there
-/// is safe, because no constant is seen to cross an `rfid`.
+/// An `rfid` with SRR0 at the next word falls through. The scan forgets
+/// each constant there. That loses no named word, because no image read
+/// shows a constant that crosses an `rfid`.
 ///
 /// [PPC-Book3 p:119 s:Appendix G] `rfid` and `hrfid` are XL-form words with primary opcode 19 and extended opcodes 18 and 274.
 /// [PPC-Book3 p:13 s:2.3] `rfid` and `hrfid` fetch the next instruction from SRR0 or HSRR0.

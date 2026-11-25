@@ -103,25 +103,29 @@ pub fn scan_syscalls(elf: &[u8]) -> Result<Vec<CallerSite>, CallerScanError> {
 /// - the ELF entry or an interrupt vector;
 /// - an `rfid`, `mtmsr` or `mtmsrd` that can clear MSR\[IR\].
 ///
-/// That control can cross an indirect branch whose CTR or LR the code
-/// builds as a constant. When an `rfid` can clear MSR\[IR\] at an SRR0
-/// that the scan does not know, every branch may run in real mode. An
-/// absolute branch that may run in real mode also reaches
-/// the word at the real address of its target. A site stays unresolved
-/// when control can enter a word between the load and `sc` in one of
-/// these other ways:
+/// The path to the branch may cross an indirect branch whose CTR or LR
+/// the code builds as a constant. When an `rfid` can clear MSR\[IR\] at
+/// an SRR0 that the scan does not know, every branch may run in real
+/// mode. An absolute branch that may run in real mode also reaches the
+/// word at the real address of its target. A site stays unresolved when
+/// control can enter a word between the load and `sc` in one of these
+/// other ways:
 /// - the ELF entry;
 /// - an interrupt vector;
 /// - an indirect branch to an address that the image names, or to the
-///   constant that the code builds in its CTR or LR, with bits 62 and 63
-///   at 0;
+///   constant that the code builds in its CTR or LR with its bits 62 and
+///   63 set to 0;
 /// - an indirect branch that may run in real mode, to the word at the
-///   real address of the constant that the code builds in its CTR or LR;
+///   real address of an address that the image names, of a constant that
+///   the code builds in its CTR or LR, or of the word after a branch that
+///   links;
 /// - an `rfid`, `mtmsr` or `mtmsrd` that can clear MSR\[IR\], to the word
 ///   at the real address where it puts control;
 /// - an `rfid` that can clear MSR\[IR\] at an SRR0 that the scan does not
 ///   know, to the word at the real address of each address that the
-///   image names.
+///   image names;
+/// - a `bcctr` that can reach an address that the scan does not know,
+///   which can enter any word.
 ///
 /// The segments may lie anywhere in the 64-bit address space, as a
 /// kernel's do.

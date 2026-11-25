@@ -101,8 +101,6 @@ pub(super) fn shift_left(rt: u8, sh: u8) -> u32 {
     })
 }
 
-/// `rfid`.
-///
 /// [PPC-Book3 p:119 s:Appendix G] `rfid` is an XL-form word with primary opcode 19 and extended opcode 18.
 pub(super) const RFID: u32 = (19 << 26) | (18 << 1);
 

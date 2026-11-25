@@ -35,7 +35,7 @@ fn load(entries: u64) -> u64 {
     START + 4 * (entries + 1)
 }
 
-/// The target has bit 62 or 63 set, and with them cleared it names the
+/// The target has bit 62 or 63 set. With them cleared, it names the
 /// window's `nop`, which lies between its `li r11` and its `sc`.
 ///
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.

@@ -98,9 +98,9 @@ fn a_named_doubleword_with_low_bits_set_enters_its_word() {
     assert_eq!(sites(vec![named]), [(SC, None), (QUIET_SC, Some(77))]);
 }
 
-/// The `bdnz` falls through only when the decremented CTR is 0, so the
-/// `bctr` reaches address 0, between the `li r11` at [`LOADER`] and the
-/// `sc` at 4. No address that the image names is 0.
+/// The `bdnz` falls through only when the decremented CTR is 0. The
+/// `bctr` then reaches address 0, between the `li r11` at [`LOADER`] and
+/// the `sc` at 4. No address that the image names is 0.
 ///
 /// [PPC-Book1 p:20 s:2.4.1] BO 1a00t decrements CTR, then branches if CTR M:63 is not 0, with M = 0 in 64-bit mode and M = 32 in 32-bit mode.
 #[test]
@@ -123,8 +123,8 @@ fn a_bctr_outside_real_mode_after_a_bdnz_falls_through_enters_address_zero() {
 }
 
 /// Eight `bdnz` to the next word take CTR from 0x800000000000300C to the
-/// window's `nop`, but a loop can run a `bdnz` more than once, so the
-/// `bctr` can reach any word.
+/// window's `nop`. A loop can run a `bdnz` more than once, so the `bctr`
+/// can reach any word.
 ///
 /// [PPC-Book1 p:20 s:2.4.1] BO 1a00t decrements CTR, then branches if CTR M:63 is not 0, with M = 0 in 64-bit mode and M = 32 in 32-bit mode.
 #[test]

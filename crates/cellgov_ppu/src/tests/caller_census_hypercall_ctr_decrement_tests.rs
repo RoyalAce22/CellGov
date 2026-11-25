@@ -104,9 +104,9 @@ fn a_real_mode_bctr_after_a_bdnz_to_the_next_word_leaves_every_site_unresolved()
     assert_eq!(ordinals(0, &segments), [(SC, None), (QUIET_SC, None)]);
 }
 
-/// The `bdnz` skips the `nop` to the `bctr` while the decremented CTR is
-/// not 0, so the `bctr` also reaches real address 0x3004, the window's
-/// `nop`.
+/// While the decremented CTR is not 0, the `bdnz` skips the `nop` to the
+/// `bctr`. The `bctr` thus also reaches real address 0x3004, the
+/// window's `nop`.
 ///
 /// [PPC-Book1 p:20 s:2.4.1] BO 1a00t decrements CTR, then branches if CTR M:63 is not 0, with M = 0 in 64-bit mode and M = 32 in 32-bit mode.
 #[test]
@@ -119,9 +119,9 @@ fn a_real_mode_bctr_that_a_bdnz_skips_to_leaves_every_site_unresolved() {
     assert_eq!(ordinals(0, &segments), [(SC, None), (QUIET_SC, None)]);
 }
 
-/// The stub runs from the ELF entry across a 4 GB boundary, so the
-/// `bdnz` target has low-order 32 bits below those of the `bdnz`, but is
-/// still the `bctr` after it.
+/// The stub runs from the ELF entry across a 4 GB boundary. The
+/// low-order 32 bits of the `bdnz` target are below those of the `bdnz`,
+/// but the target is still the `bctr` after it.
 ///
 /// [PPC-Book1 p:24 s:2.4] `b` and `bc` reach CIA + EXTS(displacement), or EXTS(displacement) when AA = 1.
 /// [PPC-Book1 p:20 s:2.4.1] BO 1a00t decrements CTR, then branches if CTR M:63 is not 0, with M = 0 in 64-bit mode and M = 32 in 32-bit mode.
@@ -175,9 +175,9 @@ fn a_real_mode_bctr_after_a_linking_bdnz_leaves_every_site_unresolved() {
     assert_eq!(ordinals(0, &segments), [(SC, None), (QUIET_SC, None)]);
 }
 
-/// The `bdz` branches off the stub, so the `bctr` runs only when the
-/// `bdz` falls through with the decremented CTR not 0, a value that the
-/// scan cannot prove.
+/// The `bdz` branches off the stub. The `bctr` runs only when the `bdz`
+/// falls through with the decremented CTR not 0, a value that the scan
+/// cannot prove.
 ///
 /// [PPC-Book1 p:20 s:2.4.1] BO 1a01t decrements CTR, then branches if the decremented CTR M:63 is 0.
 #[test]

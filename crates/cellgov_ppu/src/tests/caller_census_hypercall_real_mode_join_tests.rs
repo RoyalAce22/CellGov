@@ -161,12 +161,21 @@ fn a_word_between_the_srr1_write_and_rfid_at_the_real_address_of_a_bcctr_target_
     assert_eq!(ordinals(0, &between), [(SC, None)]);
 }
 
+/// The `bl` sets LR to the `mtmsrd`, so a `blr` can return there with
+/// another RS, whether the `bl` reaches a routine or the next word.
+///
+/// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.
+/// [PPC-Book1 p:25 s:2.4] `bclr` branches to LR 0:61 || 0b00.
 #[test]
-fn a_call_between_the_msr_build_and_mtmsrd_forgets_rs_and_a_link_to_the_next_word_keeps_it() {
+fn a_call_or_a_link_to_the_next_word_between_the_msr_build_and_mtmsrd_forgets_rs() {
     let [lis, ori_ir] = [lis_sf(5), ori(5, MSR_IR)];
     let after = |call| msr_stub(&[lis, ori_ir, call], mtmsrd(5, false));
+    assert_eq!(
+        site(76, msr_stub(&[lis, ori_ir], mtmsrd(5, false))),
+        [(SC, Some(75))]
+    );
     assert_eq!(site(76, after(bl(0x100))), [(SC, None)]);
-    assert_eq!(site(76, after(bl(4))), [(SC, Some(75))]);
+    assert_eq!(site(76, after(bl(4))), [(SC, None)]);
 }
 
 /// The first `rfid` enters word 0 or word 1 of the second stub at the

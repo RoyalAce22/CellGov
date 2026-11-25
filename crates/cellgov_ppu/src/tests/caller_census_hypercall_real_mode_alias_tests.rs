@@ -84,8 +84,8 @@ const WINDOW: u64 = KERNEL + 0x3000;
 /// a number and branches to the real address of the window's `nop`.
 const PAST: u64 = WINDOW + 0x10;
 
-/// The site of the window at [`WINDOW`], with `other` on the path at
-/// [`PAST`], which [`naming`] names, and with `stub` at `at`.
+/// The site of the window at [`WINDOW`], with a path at [`PAST`] that
+/// loads `other` and that [`naming`] names, and with `stub` at `at`.
 ///
 /// [PPC-Book1 p:24 s:2.4] `b` with AA = 1 reaches EXTS(displacement).
 fn past_site(at: u64, other: i16, stub: &[u32]) -> Vec<(u64, Option<u16>)> {

@@ -12,7 +12,7 @@ const SECOND: u64 = OUTSIDE + 0x1000;
 /// The address of the `mtmsrd` in [`mtmsrd_stub`].
 const MTMSRD: u64 = SECOND + 4;
 
-/// `lis r3,-32768; rldicr r3,r3,32,31; ori r3,r3,low`: `address` in r3,
+/// `lis r3,-32768; rldicr r3,r3,32,31; ori r3,r3,address & 0xFFFF`: `address` in r3,
 /// for a kernel address whose bits 0:47 are those of the kernel base.
 fn build_kernel(address: u64) -> [u32; 3] {
     [

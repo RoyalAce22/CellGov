@@ -143,10 +143,11 @@ fn a_copy_of_ctr_that_a_branch_brings_past_a_built_address_leaves_every_site_unr
     );
 }
 
-/// A real-mode stub copies CTR, with real address 0x5000, into r4 and
-/// back. A later path copies CTR, with real address 0x3010, into r4 and
-/// branches back to the same `mtctr r4`, so the `bctr` reaches both
-/// addresses. 0x3010 is the path past the window's `blr`.
+/// A real-mode stub writes the real address 0x5000 into CTR, then copies
+/// CTR into r4 and back. A later path writes the real address 0x3010
+/// into CTR, copies CTR into r4 and branches back to the same
+/// `mtctr r4`. The `bctr` thus reaches both addresses. 0x3010 is the
+/// path past the window's `blr`.
 ///
 /// [PPC-Book1 p:82 s:3.3.13] `mfctr`, a form of `mfspr`, copies CTR into RT.
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.

@@ -136,8 +136,6 @@ fn a_real_mode_bctr_whose_mtctr_runs_outside_real_mode_puts_its_absolute_branch_
     assert_eq!(site(75, vec![vector(), built()]), [(SC, Some(75))]);
 }
 
-/// A real-mode `mtctr`, then `bdnz` to the next word, then `bctr`.
-///
 /// [PPC-Book1 p:20 s:2.4.1] BO 1a00t decrements CTR, then branches if CTR is not 0.
 #[test]
 fn a_bdnz_to_the_next_word_between_mtctr_and_bctr_leaves_the_site_unresolved() {
