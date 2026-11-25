@@ -63,7 +63,8 @@ fn a_raised_bit_stays_while_shared_and_clears_once_the_bytes_are_read() {
 }
 
 /// The receive bit decides the step when the mask holds the transmit bit
-/// too: any shared bit sets the port's one shadow bit.
+/// too: any shared bit sets the port's one shadow bit
+/// [OFW-4.93 lv1 a:0x2F221C-0x2F224C].
 #[test]
 fn a_reply_under_the_receive_and_transmit_bits_raises_the_shadow_bit() {
     assert_eq!(
@@ -115,7 +116,9 @@ fn a_mask_call_on_a_port_whose_buffer_holds_bytes_raises_its_shadow_bit() {
     };
     let mut uart = UartState::default();
     uart.apply(UartChange::PortParamsSet(params(size() - 1, 0)));
-    assert!(matches!(set(&uart), HypercallDisposition::Answered(_)));
+    let mut empty = HypercallAnswer::lv1_status(0, [0; 7]);
+    empty.push_change(UartChange::PortParamsSet(params(size() - 1, 2)));
+    assert_eq!(set(&uart), HypercallDisposition::Answered(empty));
     uart.apply(UartChange::ReceiveBufferSet(ReceivedBytes {
         port: PORT,
         bytes: vec![0; 0x48],

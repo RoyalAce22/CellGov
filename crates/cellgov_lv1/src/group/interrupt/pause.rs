@@ -128,15 +128,15 @@ fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDispositio
 
 /// Hypercall 9: pauses the calling thread in the mode r3.
 ///
-/// For mode 0 or 1, the answer is r3 = 0 with r4 to r10 cleared. lv1's
-/// pause step ends the call with no pause when the caller's status shadow
-/// holds a bit that its mask holds [OFW-4.93 lv1 a:0x2C6930-0x2C695C].
+/// For mode 0 or 1, the answer is r3 = 0 with r4 to r10 cleared. lv1
+/// ends the call with no pause in these cases:
+/// - the caller's status shadow holds a bit that its mask holds
+///   [OFW-4.93 lv1 a:0x2C6930-0x2C695C];
+/// - in mode 0, a decrementer interrupt is pending in the byte at +1830.
+///   CellGov's hypervisor keeps no such byte.
+///
 /// Otherwise the caller pauses: the answer carries the paused thread and
 /// its wake flag, and the hypervisor keeps them.
-///
-/// lv1 also ends a mode 0 call with no pause while a decrementer
-/// interrupt is pending in the byte at +1830. CellGov's hypervisor keeps
-/// no such byte.
 ///
 /// Any other mode gets [`PAUSE_MODE_R3`] with r4 to r10 cleared, and the
 /// caller does not pause.

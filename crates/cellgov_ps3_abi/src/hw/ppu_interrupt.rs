@@ -137,6 +137,17 @@ pub const SRR1_PROGRAM_TRAP: u64 = doubleword_bit(46);
 /// [CBE-Handbook p:257 s:9.5.14] Table 9-16: a trace interrupt sets SRR1 bit 43 and clears bits 33:36, 42 and 44:47.
 pub const SRR1_TRACE: u64 = doubleword_bit(43);
 
+/// SRR1 bits 33 and 42 of a mediated external interrupt, as the PPE
+/// saves them in HSRR1.
+///
+/// Bit 42 needs HID0\[extr_hsrr\] = 1 and LPCR\[RMI\] = 0. lv1 saves the
+/// interrupted state from HSRR0 and HSRR1, which shows extr_hsrr = 1.
+/// CellGov takes RMI = 0: no image read gives lv1's LPCR value.
+///
+/// [CBE-Handbook p:277 s:9.8] Table 9-27: HSRR1 bit 42 is 1 for an external interrupt that LPCR\[MER\] caused, and HSRR1 bit 33 is 1 for every external interrupt.
+/// [CBE-Handbook p:276 s:9.7] HSRR1 bit 42 is 1 for a mediated external interrupt when LPCR\[LPES\] bit 0 is 0.
+pub const SRR1_MEDIATED_EXTERNAL: u64 = doubleword_bit(33) | doubleword_bit(42);
+
 /// DSISR bit 1: the access found no translation.
 ///
 /// [PPC-Book3 p:67 s:5.5.3] A data storage interrupt sets DSISR bit 1 when no translation is found, bit 4 when storage protection refuses the access, and bit 6 for a store or `dcbz`.

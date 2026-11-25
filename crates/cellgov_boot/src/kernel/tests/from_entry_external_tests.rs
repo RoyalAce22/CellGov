@@ -103,6 +103,11 @@ fn raising_kernel() -> Vec<u8> {
     raise.push(MFSPR_R0_PVR);
     let start = construct_sc - 1;
     words[start..start + raise.len()].copy_from_slice(&raise);
+    // The setup, the handler and the raise hold disjoint words.
+    assert!(
+        branch < vector && vector + handler.len() <= start,
+        "the kernel's words overlap"
+    );
 
     elf_image(BASE, 0, &words, 0x104)
 }

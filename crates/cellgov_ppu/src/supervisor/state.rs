@@ -72,12 +72,19 @@ pub struct SupervisorState {
     ///
     /// [PPC-Book3 p:69 s:5.5.7] The external interrupt does not cause the external exception to cease to exist.
     pub external: bool,
+    /// A mediated external exception exists for the thread: CellGov's
+    /// hypervisor set LPCR\[MER\] for it. CellGov's hypervisor sets it
+    /// and clears it.
+    ///
+    /// [CBE-Handbook p:276 s:9.7] Mediated external interrupts are enabled when MSR\[EE\] & (^(MSR\[HV\]) | MSR\[PR\]) is 1.
+    pub mediated: bool,
 }
 
 impl SupervisorState {
     /// The registers at the entry of supervisor code: `msr` as given,
     /// every other register 0, every SLB entry invalid, the partition at
-    /// [`Partition::INITIAL`], and no external exception.
+    /// [`Partition::INITIAL`], and no external or mediated external
+    /// exception.
     pub fn new(msr: u64) -> Self {
         Self {
             msr,
@@ -91,6 +98,7 @@ impl SupervisorState {
             slb: [SlbEntry::default(); PPE_SLB_ENTRIES],
             partition: Partition::INITIAL,
             external: false,
+            mediated: false,
         }
     }
 
@@ -122,7 +130,8 @@ impl SupervisorState {
     /// 3. the real mode offset
     /// 4. HID6\[LB\]
     ///
-    /// The last word is 1 while an external exception exists, else 0.
+    /// The last word has bit 0 set while an external exception exists,
+    /// and bit 1 set while a mediated external exception exists.
     pub fn words(&self) -> [u64; SUPERVISOR_WORDS] {
         let mut out = [0u64; SUPERVISOR_WORDS];
         let head = [
@@ -149,7 +158,7 @@ impl SupervisorState {
             p.rm_limit(),
             p.rm_offset(),
             u64::from(p.lb()),
-            u64::from(self.external),
+            u64::from(self.external) | (u64::from(self.mediated) << 1),
         ];
         out[SUPERVISOR_WORDS - tail.len()..].copy_from_slice(&tail);
         out

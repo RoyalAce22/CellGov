@@ -45,7 +45,7 @@ fn the_null_backend_counts_each_numbers_hits_and_first_tick_and_keeps_the_first_
         panic!("hypercall 5 has no handler");
     };
     assert_eq!(hv.refusal(), Some(refusal));
-    assert_eq!(refusal.number(), 5);
+    assert_eq!(refusal.number(), Some(5));
 }
 
 #[test]
@@ -73,5 +73,5 @@ fn a_repository_refusal_stops_the_run_and_counts_no_witness() {
         HypercallDisposition::Refused(HypercallRefusal::RepositoryNode { .. })
     ));
     assert!(hv.witnesses().is_empty());
-    assert_eq!(hv.refusal().map(|r| r.number()), Some(91));
+    assert_eq!(hv.refusal().and_then(|r| r.number()), Some(91));
 }

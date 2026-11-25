@@ -102,7 +102,7 @@
 //!   [OFW-4.93 lv1 a:0x3588B0]. The vtable's slot at +16
 //!   [OFW-4.93 lv1 a:0x362650] holds the function descriptor
 //!   [OFW-4.93 lv1 a:0x3495C0] of the method [OFW-4.93 lv1 a:0x2F0B78].
-//! - +8 holds the partition's virtual UART interrupt object.
+//! - +8 holds the interrupt object of the partition's virtual UART.
 //! - +16 holds the function descriptor in the TOC slot at r2 - 6016
 //!   [OFW-4.93 lv1 a:0x3588B8]. That descriptor [OFW-4.93 lv1 a:0x349800]
 //!   names the function [OFW-4.93 lv1 a:0x2F118C].
@@ -110,7 +110,7 @@
 //!
 //! The method calls the function at +16 with the object at +8 and the
 //! port [OFW-4.93 lv1 a:0x2F0B78-0x2F0BF8]. That function takes the lock
-//! at +8 of the virtual UART interrupt object. It gives the port to the
+//! at +8 of that interrupt object. It gives the port to the
 //! event function when the count of set shadow bits at +2200 is above 0
 //! [OFW-4.93 lv1 a:0x2F11D0-0x2F11E0]. So while a port's bit is set in
 //! the virtual UART's shadow, the call sets the pending byte again and
@@ -180,7 +180,7 @@ pub const END_OF_INTERRUPT_PLUG_R3: u64 = 0x0000_0004_FFFF_FFFA;
 ///
 /// A port in a plug's slot that is not live or has no connection gives
 /// the same r3. A port that CellGov holds is live, and a port in a slot
-/// is connected; see [`super::irq_plug`].
+/// has a connection; see [`super::irq_plug`].
 pub const END_OF_INTERRUPT_WRONG_STATE_R3: u64 = 0x0000_0004_FFFF_FFF5;
 
 /// The r3 of `end_of_interrupt_ext` for a port whose pending byte is 0:

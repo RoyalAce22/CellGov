@@ -43,8 +43,8 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 ///
 /// For the calling thread, the answer is r3 = 0 with r4 to r10 cleared,
 /// and no change. The hypervisor's return then tests the thread's status
-/// shadow against the new mask, as lv1's return does, and raises the
-/// external interrupt for a shared bit.
+/// shadow against the new mask, as lv1's return does. It raises the
+/// external interrupt for a bit that the shadow and the mask both hold.
 ///
 /// A call that fails one of lv1's checks gets lv1's own r3, with r4 to
 /// r10 cleared. See [`INTERRUPT_MASK_PPE_ID_R3`] for the checks and their

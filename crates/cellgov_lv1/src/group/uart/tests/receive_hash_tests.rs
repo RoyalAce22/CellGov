@@ -46,8 +46,8 @@ fn a_buffer_with_no_byte_removes_the_entry_and_adds_no_term() {
     assert!(state.received(10).is_empty());
 }
 
-/// A trailing 0 byte changes only the count lane, so the count tells the
-/// two buffers apart.
+/// Both buffers give the same bytes lane, so only the count lane tells
+/// them apart.
 #[test]
 fn a_trailing_zero_byte_changes_the_count_lane() {
     let short = with_received(&[received(10, &[7])]).sync_term();
@@ -56,7 +56,6 @@ fn a_trailing_zero_byte_changes_the_count_lane() {
     assert_eq!(long.wrapping_sub(short), lane(2).wrapping_sub(lane(1)));
 }
 
-/// The second port is the object with key 1 of the lane source.
 #[test]
 fn each_buffer_is_one_object_keyed_by_its_index_in_port_order() {
     let state = with_received(&[received(10, &[7]), received(2, &[7])]);

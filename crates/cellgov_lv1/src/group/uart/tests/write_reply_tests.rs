@@ -6,7 +6,9 @@ use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_mem::{PageSize, Region};
 use cellgov_ps3_abi::lv1::call::READ_VIRTUAL_UART;
-use cellgov_ps3_abi::lv1::uart::{game_os_dispatcher_reply, GAME_OS_VIRTUAL_UART_PORTS};
+use cellgov_ps3_abi::lv1::uart::{
+    game_os_dispatcher_reply, GAME_OS_VIRTUAL_UART_PORTS, VIRTUAL_UART_PORT_MASK_CAPTURE,
+};
 use cellgov_time::GuestTicks;
 
 /// The `sc` of the 4.93 kernel's write
@@ -64,6 +66,45 @@ fn rx_buffer_size() -> u64 {
         .find(|row| row.firmware == "4.93" && row.port == PORT)
         .expect("a row for the port")
         .rx_buffer_size
+}
+
+/// The interrupt mask that the 4.93 kernel keeps for [`PORT`].
+///
+/// The value is the mask of [`PORT`]'s record in the committed file of
+/// the capture `lv2_vuart_port_mask`.
+fn kernel_mask() -> u64 {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(VIRTUAL_UART_PORT_MASK_CAPTURE)
+        .join("peek/cech20-cex-493/vuart_masks.tsv");
+    let name = path.display().to_string();
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
+    let mut lines = text.lines();
+    assert_eq!(
+        lines.next(),
+        Some("address\tfield\twidth\treads\tagree\tvalue"),
+        "{name}: header"
+    );
+    let rows: Vec<(&str, u64)> = lines
+        .map(|line| {
+            let row: Vec<&str> = line.split('\t').collect();
+            assert_eq!(row.len(), 6, "{name}: {line}");
+            assert_eq!(row[4], "yes", "{name}: {line}");
+            let value = u64::from_str_radix(row[5].trim_start_matches("0x"), 16)
+                .unwrap_or_else(|e| panic!("{name}: {line}: {e}"));
+            (row[1], value)
+        })
+        .collect();
+    let value = |field: &str| {
+        rows.iter()
+            .find(|(f, _)| *f == field)
+            .map(|&(_, value)| value)
+    };
+    let record = (0..3)
+        .find(|n| value(&format!("record{n}_port")) == Some(PORT))
+        .unwrap_or_else(|| panic!("{name}: no record of port {PORT}"));
+    value(&format!("record{record}_mask"))
+        .unwrap_or_else(|| panic!("{name}: no record{record}_mask"))
 }
 
 fn request(number: u64, pc: u64, address: u64, size: u64) -> HypercallRequest {
@@ -170,22 +211,22 @@ fn the_kernel_s_completing_write_writes_0x38_bytes_and_queues_the_reply_under_ma
 
 /// The kernel's read sets the mask 2 after a read of 0 bytes
 /// [OFW-4.93 lv2_kernel a:0x8000000000016b9c-0x8000000000016bc4], and its
-/// open sets the receive trigger to the buffer size less 1. The console
-/// capture `lv2_vuart_port_mask` shows the mask 2 on port 10.
+/// open sets the receive trigger to the buffer size less 1. The test reads
+/// the mask of port 10 from the console capture `lv2_vuart_port_mask`.
 #[test]
-fn the_kernel_s_mask_2_makes_the_completing_write_raise_the_port_s_shadow_bit() {
-    let uart = after_header(params(rx_buffer_size() - 1, 2), &[]);
+fn the_kernel_s_captured_mask_makes_the_completing_write_raise_the_port_s_shadow_bit() {
+    let uart = after_header(params(rx_buffer_size() - 1, kernel_mask()), &[]);
     assert_eq!(complete(&uart), raised(queued(0x38, kernel_reply())));
 }
 
 /// The status has the receive bit only when the free bytes are not above
 /// the receive trigger [OFW-4.93 lv1 a:0x2F2208-0x2F2210].
 #[test]
-fn mask_2_raises_the_shadow_bit_only_once_the_free_bytes_reach_the_receive_trigger() {
+fn the_captured_mask_raises_the_shadow_bit_only_once_the_free_bytes_reach_the_receive_trigger() {
     let free = rx_buffer_size() - kernel_reply().len() as u64;
-    let below = after_header(params(free - 1, 2), &[]);
+    let below = after_header(params(free - 1, kernel_mask()), &[]);
     assert_eq!(complete(&below), queued(0x38, kernel_reply()));
-    let at = after_header(params(free, 2), &[]);
+    let at = after_header(params(free, kernel_mask()), &[]);
     assert_eq!(complete(&at), raised(queued(0x38, kernel_reply())));
 }
 
@@ -195,7 +236,7 @@ fn mask_2_raises_the_shadow_bit_only_once_the_free_bytes_reach_the_receive_trigg
 /// event.
 fn raised(queued: HypercallDisposition) -> HypercallDisposition {
     let HypercallDisposition::Answered(mut answer) = queued else {
-        return queued;
+        panic!("an answer to raise: {queued:?}");
     };
     answer.push_change(UartChange::ShadowSet(crate::VirtualUartShadowWrite {
         index: 0,
@@ -215,7 +256,10 @@ fn the_reply_follows_the_bytes_that_the_receive_buffer_holds() {
 fn a_reply_past_the_free_bytes_of_the_receive_buffer_is_a_refusal() {
     let room = rx_buffer_size() as usize - kernel_reply().len();
     let fits = after_header(params(0, 0), &vec![0; room]);
-    assert!(matches!(complete(&fits), HypercallDisposition::Answered(_)));
+    assert_eq!(
+        complete(&fits),
+        queued(0x38, [vec![0; room], kernel_reply()].concat())
+    );
     let full = after_header(params(0, 0), &vec![0; room + 1]);
     assert_eq!(
         complete(&full),
@@ -242,8 +286,6 @@ fn write_after(uart: &UartState, bytes: &[u8]) -> HypercallDisposition {
     )
 }
 
-/// Each reason that `dispatcher_reply` gives no reply reaches the
-/// handler's refusal with its own name.
 #[test]
 fn a_completing_write_with_no_reply_gets_the_refusal_that_names_its_reason() {
     let request = kernel_request();
@@ -290,8 +332,11 @@ fn the_hypervisor_queues_the_reply_and_the_kernel_s_reads_take_it_in_order() {
         dispatch(&mut hv, &write_request(HEADER_ADDRESS, 16)).outputs(),
         Some([16, 0, 0, 0, 0, 0, 0])
     );
+    let header_kept = PendingRequest::empty(PORT).with(&KERNEL_HEADER);
+    assert_eq!(hv.groups().uart().pending_request(PORT), header_kept);
     let empty = dispatch(&mut hv, &read(16));
     assert_eq!((empty.outputs(), empty.effects.len()), (Some([0; 7]), 0));
+    assert_eq!(hv.groups().uart().pending_request(PORT), header_kept);
     assert_eq!(
         dispatch(&mut hv, &write_request(REQUEST_ADDRESS, 0x38)).outputs(),
         Some([0x38, 0, 0, 0, 0, 0, 0])

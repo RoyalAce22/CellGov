@@ -27,7 +27,13 @@ fn a_shadow_with_no_set_bit_adds_no_term() {
     assert_eq!(with_shadow(0, 0).sync_term(), 0);
 }
 
+/// Doubleword 3 is field 4 of the one object with key 0.
 #[test]
 fn each_shadow_doubleword_takes_its_own_lane() {
+    let lane = |field, value| contribution(LaneIndex::new(244, 0, field, 0), value);
     assert_ne!(with_shadow(0, 1).sync_term(), with_shadow(3, 1).sync_term());
+    assert_eq!(
+        with_shadow(3, 1).sync_term(),
+        lane(0, 1).wrapping_add(lane(4, 1))
+    );
 }

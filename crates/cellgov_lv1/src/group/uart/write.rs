@@ -285,17 +285,18 @@ fn dispatcher_write(
 ///
 /// The dispatcher manager writes its reply to the port after the service
 /// answers, at a time that no image read gives. CellGov puts the reply in
-/// the port's receive buffer at this write. The answer is r3 = 0 with the
-/// bytes written in r4. It carries these changes:
-/// - the port holds no request that is not complete;
-/// - the port's receive buffer holds the reply after its earlier bytes;
-/// - the status step for the filled buffer; see [`shadow::status_step`].
-///
-/// lv1's endpoint write function calls the port's listeners after it
+/// the port's receive buffer at this write. lv1's endpoint write function
+/// calls the port's listeners after it
 /// copies bytes to the port's receive buffer
 /// [OFW-4.93 lv1 a:0x2F0324-0x2F03AC]. A raise of the port's shadow bit
 /// can give the irq outlet an event, which raises the plug's bit of the
 /// outlet's thread.
+///
+/// The answer is r3 = 0 with the bytes written in r4. It carries these
+/// changes:
+/// - the port holds no request that is not complete;
+/// - the port's receive buffer holds the reply after its earlier bytes;
+/// - the status step for the filled buffer; see [`shadow::status_step`].
 ///
 /// The call is a refusal in these cases, in this order:
 /// - [`reply::dispatcher_reply`] gives no reply;

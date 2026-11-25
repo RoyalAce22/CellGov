@@ -101,8 +101,8 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// the 32 bytes of the bitmap, as lv1 copies it there. The answer carries
 /// the outlet with no connection, and the interrupt configuration. The
 /// hypervisor keeps both. For a shadow with a set bit, lv1 gives the
-/// outlet to the event function, and the answer carries the outlet's
-/// pending event; the new outlet has no plug to raise.
+/// outlet to the event function. The new outlet has no plug, so the
+/// answer only marks the outlet's event as pending.
 ///
 /// A call that fails one of lv1's checks gets lv1's own r3, with r4 to
 /// r10 cleared. See [`CONFIGURE_VIRTUAL_UART_IRQ_NO_REGION_R3`] for the

@@ -9,7 +9,7 @@ use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
 use crate::group::state::StateChange;
 use crate::request::HypercallRequest;
-use crate::return_path::{self, ExternalDelivery, ReturnRegisters};
+use crate::return_path::{self, ExternalRaise, ReturnRegisters};
 
 /// The values for r4 to r10, in register order.
 pub type OutputRegisters = [u64; MAX_OUTPUTS as usize];
@@ -60,7 +60,7 @@ pub struct HypercallAnswer {
     /// The external interrupt that lv1's return raises for the caller,
     /// or `None` when it raises none. The hypervisor sets it as it
     /// dispatches the call.
-    pub external: Option<ExternalDelivery>,
+    pub external: Option<ExternalRaise>,
     /// Each paused thread that the call woke, which returns from its
     /// `pause`. The hypervisor sets it as it dispatches the call.
     pub resumed: Vec<ThreadResume>,
@@ -73,7 +73,7 @@ pub struct ThreadResume {
     /// The PPE hardware thread.
     pub thread: u8,
     /// The external interrupt of its return, or `None`.
-    pub external: Option<ExternalDelivery>,
+    pub external: Option<ExternalRaise>,
 }
 
 /// How lv1's vector returns to the caller.
@@ -148,14 +148,16 @@ impl HypercallAnswer {
     /// What lv1's return leaves in r0, r11, r12 and CR for `request`,
     /// from a hypervisor for the firmware version `firmware`.
     ///
-    /// A return that raises the external interrupt leaves the registers
-    /// of [`return_path::delivering_table`].
+    /// A return that enters the vector leaves the vector in r11 and the new
+    /// MSR in r12; see [`ExternalRaise::Deliver`]. A return that sets
+    /// LPCR\[MER\] changes no saved register [OFW-4.93 lv1 a:0x191C-0x1928].
     pub fn return_registers(
         &self,
         request: &HypercallRequest,
         firmware: Option<&str>,
     ) -> ReturnRegisters {
-        match (self.path, self.external) {
+        let delivery = self.external.and_then(ExternalRaise::delivery);
+        match (self.path, delivery) {
             (ReturnPath::Table(_), None) => return_path::table(request.problem_state, firmware),
             (ReturnPath::Table(_), Some(delivery)) => {
                 return_path::delivering_table(request.problem_state, firmware, delivery)
@@ -184,10 +186,12 @@ impl HypercallAnswer {
     }
 }
 
-/// Why CellGov's hypervisor stops the run at a hypercall.
+/// Why CellGov's hypervisor stops the run at a hypercall, or at a
+/// thread's take of a mediated external interrupt.
 ///
-/// A refusal answers nothing: the caller sees no r3 and does not step
-/// past `sc`.
+/// A hypercall refusal answers nothing: the caller sees no r3 and does
+/// not step past `sc`. A take refusal stops the run after the thread
+/// entered the vector.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum HypercallRefusal {
     /// No handler answers the number: the null backend.
@@ -259,39 +263,57 @@ pub enum HypercallRefusal {
         /// The link register at the `sc`.
         lr: u64,
     },
+    /// A thread took a mediated external interrupt in a case where lv1's
+    /// handler enters no vector, or enters it with other registers.
+    #[error(
+        "the mediated external interrupt that {unit:?} took at pc 0x{pc:016x}: CellGov does not \
+         model {what}"
+    )]
+    MediatedExternal {
+        /// The unit that took the interrupt.
+        unit: UnitId,
+        /// The address that the interrupt saved in SRR0.
+        pc: u64,
+        /// The case that the model does not cover.
+        what: &'static str,
+    },
 }
 
 impl HypercallRefusal {
-    /// The hypercall number the refusal names.
-    pub fn number(&self) -> u64 {
+    /// The hypercall number the refusal names, or `None` for the take of
+    /// a mediated external interrupt.
+    pub fn number(&self) -> Option<u64> {
         match self {
             Self::Unmodelled { number, .. }
             | Self::ProblemState { number, .. }
-            | Self::UnmodelledInput { number, .. } => *number,
+            | Self::UnmodelledInput { number, .. } => Some(*number),
             Self::RepositoryNode { .. } | Self::RepositorySecondValueUnobserved { .. } => {
-                cellgov_ps3_abi::lv1::call::READ_REPOSITORY_NODE
+                Some(cellgov_ps3_abi::lv1::call::READ_REPOSITORY_NODE)
             }
+            Self::MediatedExternal { .. } => None,
         }
     }
 }
 
-/// Inputs that a step of a handler finds and that CellGov does not model.
-/// The handler refuses the call with
-/// [`HypercallRefusal::UnmodelledInput`], which names `what`.
+/// A case that CellGov does not model, which a call or a take finds.
+///
+/// The refusal of a call is [`HypercallRefusal::UnmodelledInput`]. The
+/// refusal of a take is [`HypercallRefusal::MediatedExternal`]. Each
+/// refusal names `what`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("the model does not cover {what}")]
 pub(crate) struct UnmodelledError {
-    /// The inputs, as the refusal names them.
+    /// The case, as the refusal names it.
     pub(crate) what: &'static str,
 }
 
 impl UnmodelledError {
-    /// The error for the inputs `what`.
+    /// The error for the case `what`.
     pub(crate) const fn new(what: &'static str) -> Self {
         Self { what }
     }
 
-    /// The refusal of `request` for these inputs.
+    /// The refusal of `request` for this case.
     pub(crate) fn refusal(self, request: &HypercallRequest) -> HypercallDisposition {
         HypercallDisposition::Refused(HypercallRefusal::UnmodelledInput {
             number: request.number,

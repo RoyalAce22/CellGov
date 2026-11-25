@@ -1,7 +1,9 @@
 //! The interrupt mask update of a logical PPE thread:
 //! - the handler of `did_update_interrupt_mask` (hypercall 31);
 //! - its argument checks and the r3 of each;
-//! - what lv1 does for the thread that the call names.
+//! - what lv1 does for the thread that the call names;
+//! - the external interrupt that lv1's return raises, and the mediated
+//!   external interrupt that lv1's handler takes.
 //!
 //! The facts come from the 4.93 `lv1.self`, decrypted offline and read
 //! with `cellgov dev disasm`. The repository holds no byte of lv1, only
@@ -66,16 +68,29 @@
 //! the shadow and the mask again. So a mask change raises the external
 //! interrupt only for a bit that is set in the status shadow.
 //!
-//! lv1 has a second copy of the test for a return from an interrupt that
-//! the thread took while it ran [OFW-4.93 lv1 a:0x1A84-0x1AD4]. Its
-//! function [OFW-4.93 lv1 a:0x1870] enters no vector in these cases. It
-//! sets [`LPCR_MER`] in the LPCR, as it does for a saved `MSR[EE]` of 0
-//! [OFW-4.93 lv1 a:0x187C] [OFW-4.93 lv1 a:0x18D0-0x18DC]. No image read
-//! gives the meaning of these cases:
+//! # The mediated external interrupt
+//!
+//! With [`LPCR_MER`] set, the thread takes an external interrupt into
+//! lv1 once its `MSR[EE]` is 1 outside hypervisor state. lv1's handler
+//! saves HSRR0 and HSRR1 at +16 and +24 of a frame at HSPRG0 - 28544
+//! [OFW-4.93 lv1 a:0x1974-0x19BC]. It then reloads the LPCR from +504,
+//! which clears [`LPCR_MER`] [OFW-4.93 lv1 a:0x1A40]
+//! [OFW-4.93 lv1 a:0x1A5C].
+//!
+//! The handler has a second copy of the shadow test
+//! [OFW-4.93 lv1 a:0x1A84-0x1AD4]. For a nonzero result, its function
+//! [OFW-4.93 lv1 a:0x1870] enters the vector at +496 with the MSR of
+//! [`external_interrupt_msr`], and gives the guest's SRR0 and SRR1 the
+//! saved HSRR0 and HSRR1 [OFW-4.93 lv1 a:0x188C-0x18C0]. The handler's
+//! `hrfid` loads these registers [OFW-4.93 lv1 a:0x1AF0-0x1B84].
+//!
+//! The function enters no vector, and sets [`LPCR_MER`] again
+//! [OFW-4.93 lv1 a:0x18D0-0x18DC], in these cases:
+//! - the saved `MSR[EE]` is 0 [OFW-4.93 lv1 a:0x187C];
 //! - the bytes at +1832 and +1833 of the context are both set
-//!   [OFW-4.93 lv1 a:0x1880-0x1888] [OFW-4.93 lv1 a:0x18C4-0x18CC];
-//! - the saved pc is the trampoline slot 0x28B8
-//!   [OFW-4.93 lv1 a:0x188C-0x18A8].
+//!   [OFW-4.93 lv1 a:0x1880-0x1888] [OFW-4.93 lv1 a:0x18C4-0x18CC]. No
+//!   image read gives the meaning of these bytes;
+//! - the saved pc is [`MEDIATED_UNDELIVERED_PC`].
 //!
 //! # The kernel's calls
 //!
@@ -159,12 +174,21 @@ pub fn interrupt_mask_handler(firmware: &str) -> Option<&'static InterruptMaskHa
 /// No code restores 0x500 in those contexts.
 pub const EXTERNAL_INTERRUPT_VECTOR: u64 = 0x500;
 
-/// The bits of the LPCR that lv1 sets for an external interrupt of a
+/// The LPCR bit that lv1 sets for an external interrupt of a
 /// thread whose saved `MSR[EE]` is 0: bit 52, MER.
 ///
 /// [CBE-Handbook p:306 s:10.4.3] LPCR bit 52 is MER, the mediated external exception request, which each thread holds.
 /// [CBE-Handbook p:275 s:9.7] For a direct external interrupt and a partition with MSR\[EE\] = 0, the hypervisor returns to the partition and sets LPCR\[MER\] to 1.
 pub const LPCR_MER: u64 = 0x800;
+
+/// The saved pc of a mediated external interrupt for which lv1 enters no
+/// vector: 0x28B8, a trampoline slot of lv1.
+///
+/// lv1 compares the saved pc with the doubleword at r2 - 9856
+/// [OFW-4.93 lv1 a:0x188C-0x18A8], which holds 0x28B8
+/// [OFW-4.93 lv1 a:0x3579B8]. lv1 sends its own interrupted wait to
+/// that slot [OFW-4.93 lv1 a:0x1840-0x1860].
+pub const MEDIATED_UNDELIVERED_PC: u64 = 0x28B8;
 
 /// The MSR bits 48 to 63, which lv1's raise clears in the saved MSR
 /// [OFW-4.93 lv1 a:0x1904].

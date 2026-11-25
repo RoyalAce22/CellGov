@@ -83,13 +83,9 @@ pub(crate) struct PlugState<'a> {
 /// Hypercall 12: connects the port or irq outlet r6 to plug r5 of thread r4 of the logical PPE r3.
 ///
 /// The answer clears r4 to r10. It carries the port or the outlet with
-/// its connection and its plug, and the hypervisor keeps it. lv1 takes
-/// the clear path for a port with no pending event:
-/// - It clears the plug's bit in the thread's status shadow. The answer
-///   carries the cleared doubleword when the bit was set.
-/// - It stores the shadow doubleword in the status doubleword that holds
-///   the plug's bit. The answer writes it there for a thread with a
-///   registered bitmap.
+/// its connection and its plug, and the hypervisor keeps it. For a port
+/// with no pending event, lv1 takes the clear path, and the answer
+/// carries lv1's clear of the plug's bit; see [`raise::clear`].
 ///
 /// A call that fails one of lv1's checks gets lv1's own r3, with r4 to
 /// r10 cleared. See [`IRQ_PLUG_PPE_ID_R3`] for the checks and their

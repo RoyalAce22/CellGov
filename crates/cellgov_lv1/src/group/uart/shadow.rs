@@ -2,10 +2,10 @@
 //! status function sets while the port's status and mask share a bit and
 //! clears otherwise; see [`cellgov_ps3_abi::lv1::uart`].
 //!
-//! lv1 keeps the shadow at +56 of the partition's virtual UART object and
-//! stores each changed doubleword at the address that +48 holds: the
-//! bitmap of `configure_virtual_uart_irq`, or the object's own doublewords
-//! before that call. When a raise takes the count of set bits from 0 to
+//! lv1 keeps the shadow at +56 of the partition's virtual UART object. It
+//! stores each changed doubleword at the address in +48: the bitmap of
+//! `configure_virtual_uart_irq`, or the object's own doublewords before
+//! that call. When a raise takes the count of set bits from 0 to
 //! 1, lv1 gives the irq outlet to the event function. So a port's
 //! interrupt reaches the thread that the outlet's plug names.
 
@@ -24,13 +24,13 @@ use crate::request::HypercallRequest;
 /// The number of doublewords in the virtual UART's shadow.
 pub const UART_SHADOW_DOUBLEWORDS: usize = (VIRTUAL_UART_IRQ_BITMAP_BYTES / 8) as usize;
 
-/// The bytes of one shadow doubleword.
+/// The size in bytes of one shadow doubleword.
 const DOUBLEWORD_BYTES: u64 = std::mem::size_of::<u64>() as u64;
 
 /// One doubleword of the virtual UART's shadow, as a call leaves it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VirtualUartShadowWrite {
-    /// The doubleword, below [`UART_SHADOW_DOUBLEWORDS`].
+    /// The doubleword's index, below [`UART_SHADOW_DOUBLEWORDS`].
     pub index: u8,
     /// The doubleword's new value.
     pub value: u64,

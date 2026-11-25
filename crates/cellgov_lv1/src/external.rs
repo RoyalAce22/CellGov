@@ -17,26 +17,28 @@ use crate::group::interrupt::raise::unmasked;
 use crate::group::interrupt::{InterruptChange, InterruptGroupState};
 use crate::group::state::{GroupStates, StateChange};
 use crate::request::HypercallRequest;
-use crate::return_path::{external_delivery, ExternalDelivery, SavedMsrs};
+use crate::return_path::{external_raise, ExternalRaise, SavedMsrs};
 
 /// `answer` with the external interrupt of each return that it causes,
 /// or the refusal of `request` when CellGov does not model one of them.
 ///
 /// The test reads the interrupt state that `groups` holds after the
-/// answer's changes, and the mask doublewords in `storage`:
+/// answer's changes, and the mask doublewords in `storage`. It covers
+/// these returns:
 /// - the caller's return, for an answer through `hrfid` that does not
 ///   pause the caller [OFW-4.93 lv1 a:0x0FC4-0x101C];
 /// - the return of each thread that the answer wakes. The thread returns
 ///   from `pause` through the same vector.
 ///
 /// The `rfid` return for a number past the table makes no test
-/// [OFW-4.93 lv1 a:0x0C44-0x0C58].
+/// [OFW-4.93 lv1 a:0x0C44-0x0C58]. A firmware whose logical PPE id no
+/// table gives makes no test either.
 ///
 /// The disposition is a refusal in these cases:
 /// - the shadow test refuses; see [`unmasked`];
 /// - a return raises the interrupt, and `msrs` gives no saved MSR for its
 ///   thread;
-/// - a return raises the interrupt, and [`external_delivery`] refuses.
+/// - a return raises the interrupt, and [`external_raise`] refuses.
 pub(crate) fn returns(
     request: &HypercallRequest,
     firmware: Option<&str>,
@@ -81,7 +83,7 @@ struct ReturnTest<'a> {
 
 impl ReturnTest<'_> {
     /// The external interrupt of the return of `thread`, or `None`.
-    fn delivery(&self, thread: u8) -> Result<Option<ExternalDelivery>, UnmodelledError> {
+    fn delivery(&self, thread: u8) -> Result<Option<ExternalRaise>, UnmodelledError> {
         let key = IrqStateBitmapKey {
             ppe_id: self.ppe_id,
             thread,
@@ -92,16 +94,16 @@ impl ReturnTest<'_> {
         let msr = self.msrs.of(thread).ok_or(UnmodelledError::new(
             "an external interrupt on the return to a thread whose unit gives no saved MSR",
         ))?;
-        external_delivery(msr).map(Some)
+        external_raise(msr).map(Some)
     }
 
-    /// The interrupt of the return of `caller`, and the return of each
-    /// thread in `woken`.
+    /// The interrupt of the return of `caller`, and the [`ThreadResume`]
+    /// of each thread in `woken`.
     fn deliveries(
         &self,
         caller: Option<u8>,
         woken: &[u8],
-    ) -> Result<(Option<ExternalDelivery>, Vec<ThreadResume>), UnmodelledError> {
+    ) -> Result<(Option<ExternalRaise>, Vec<ThreadResume>), UnmodelledError> {
         let external = match caller {
             Some(thread) => self.delivery(thread)?,
             None => None,
@@ -117,7 +119,6 @@ impl ReturnTest<'_> {
     }
 }
 
-/// The thread that `change` wakes, or `None`.
 fn woken_thread(change: &StateChange) -> Option<u8> {
     match change {
         StateChange::Interrupt(change) => match **change {

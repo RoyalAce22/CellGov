@@ -49,7 +49,7 @@ pub(crate) struct RaiseState<'a> {
 /// 3. For a connected object, it raises the plug's bit in the shadow of
 ///    the plug's thread [OFW-4.93 lv1 a:0x2DF8BC-0x2DF8C8]; see [`raise`].
 ///
-/// `id` names an object that the hypervisor holds.
+/// The caller gives an `id` that names an object the hypervisor holds.
 ///
 /// # Errors
 ///
@@ -205,10 +205,12 @@ pub(crate) fn clear(
 }
 
 /// Whether the status shadow of the thread `key` holds a bit that the
-/// thread's mask holds: the test of lv1's return
-/// [OFW-4.93 lv1 a:0x0FC4-0x1010], of its pause step
-/// [OFW-4.93 lv1 a:0x2C6930-0x2C695C] and of its wake check
-/// [OFW-4.93 lv1 a:0x2C6B40-0x2C6B70].
+/// thread's mask holds.
+///
+/// lv1 makes this test in these places:
+/// - its return [OFW-4.93 lv1 a:0x0FC4-0x1010];
+/// - its pause step [OFW-4.93 lv1 a:0x2C6930-0x2C695C];
+/// - its wake check [OFW-4.93 lv1 a:0x2C6B40-0x2C6B70].
 ///
 /// The mask doublewords follow the status doublewords of the thread's
 /// bitmap; see [`cellgov_ps3_abi::lv1::interrupt`]. A shadow of 0 holds

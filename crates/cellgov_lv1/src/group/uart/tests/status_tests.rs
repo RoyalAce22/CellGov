@@ -131,7 +131,7 @@ fn mask_2_on_an_empty_service_port_raises_the_shadow_bit_only_once_the_receive_t
 /// The traffic gives the peer's receive buffer no byte, which is not above
 /// any transmit trigger.
 #[test]
-fn the_transmit_bit_on_a_service_port_raises_for_each_transmit_trigger() {
+fn the_transmit_bit_on_a_service_port_gets_the_transmit_refusal_for_each_transmit_trigger() {
     for (port, size) in SERVICE_PORTS {
         for mask in [1, 3, 5, 7] {
             for tx in [0, size - 1, u64::MAX] {

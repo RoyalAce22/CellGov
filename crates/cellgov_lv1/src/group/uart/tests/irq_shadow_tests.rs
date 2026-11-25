@@ -10,7 +10,9 @@ use cellgov_time::GuestTicks;
 /// [OFW-4.93 lv2_kernel a:0x8000000000017b0c].
 const KERNEL_SC: u64 = 0x8000_0000_0001_7b0c;
 
-/// The kernel's bitmap, in the real mode region.
+/// The kernel's bitmap, in the real mode region: +0x28 of its virtual
+/// UART record, which the capture `lv2_vuart_irq_outlet` places at
+/// 0x800000000037dc40.
 const KERNEL_BITMAP: u64 = 0x0037_dc68;
 
 /// Port 10 is bit 63 - 10 of shadow doubleword 0

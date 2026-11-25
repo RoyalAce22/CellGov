@@ -14,11 +14,11 @@
 //! connects a port; see [`cellgov_ps3_abi::lv1::spe`]. So the state also
 //! keeps the outlets, apart from the ports, and hashes them.
 //!
-//! `send_event_locally` sets the pending byte of a port, and a later call
-//! reads it; see [`cellgov_ps3_abi::lv1::send_event`].
+//! An event sets the pending byte of a port or irq outlet, and a later
+//! call reads it; see [`cellgov_ps3_abi::lv1::send_event`].
 //! `end_of_interrupt_ext` clears it; see
 //! [`cellgov_ps3_abi::lv1::end_of_interrupt`]. So the state keeps the
-//! ports with a pending event, and hashes them.
+//! ports and irq outlets with a pending event, and hashes them.
 //!
 //! Console captures give the port id of each call of the GameOS kernel's
 //! boot, by the call's hardware thread and its `sc` address. So
@@ -97,7 +97,7 @@ impl LaneValue for EventReceivePort {
     }
 }
 
-/// A port with a pending event. Field 1 is the port id.
+/// A port or irq outlet with a pending event. Field 1 is its id.
 struct PendingPort(u64);
 
 impl LaneValue for PendingPort {
@@ -107,7 +107,7 @@ impl LaneValue for PendingPort {
 }
 
 /// The partition's event receive ports and its irq outlets, each by its
-/// id, and the ports that hold a pending event.
+/// id, and the ports and outlets that hold a pending event.
 ///
 /// `set_spe_transition_notifier` takes a port and refuses an outlet, so
 /// the state keeps the two apart.
@@ -115,7 +115,7 @@ impl LaneValue for PendingPort {
 pub struct EventReceivePortState {
     ports: BTreeMap<u64, EventReceivePort>,
     outlets: BTreeMap<u64, EventReceivePort>,
-    /// The id of each port whose pending byte at +149 is set.
+    /// The id of each port or outlet whose pending byte at +149 is set.
     pending: BTreeSet<u64>,
 }
 
@@ -173,17 +173,18 @@ impl EventReceivePortState {
         self.outlets.insert(outlet.id, outlet);
     }
 
-    /// Whether the port with the id `id` holds a pending event.
+    /// Whether the port or irq outlet with the id `id` holds a pending
+    /// event.
     pub fn is_pending(&self, id: u64) -> bool {
         self.pending.contains(&id)
     }
 
-    /// Sets the pending byte of the port with the id `id`.
+    /// Sets the pending byte of the port or irq outlet with the id `id`.
     pub(crate) fn set_pending(&mut self, id: u64) {
         self.pending.insert(id);
     }
 
-    /// Clears the pending byte of the port with the id `id`.
+    /// Clears the pending byte of the port or irq outlet with the id `id`.
     pub(crate) fn clear_pending(&mut self, id: u64) {
         self.pending.remove(&id);
     }
@@ -194,7 +195,7 @@ impl EventReceivePortState {
     /// The objects are of these lane sources:
     /// - each port is one object of `EVENT_RECEIVE_PORT_SOURCE`;
     /// - each outlet is one object of `IRQ_OUTLET_SOURCE`;
-    /// - each port with a pending event is one object of
+    /// - each port or outlet with a pending event is one object of
     ///   `PENDING_EVENT_SOURCE`.
     ///
     /// Each object's key is its index in id order. A state with no port,

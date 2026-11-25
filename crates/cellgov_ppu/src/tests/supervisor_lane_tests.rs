@@ -89,6 +89,15 @@ fn supervisor_lane_wire_format_golden() {
         counting,
         "the word order is part of the hash scheme"
     );
+    let both = SupervisorState {
+        mediated: true,
+        ..counting_block()
+    };
+    assert_eq!(
+        both.words()[SUPERVISOR_WORDS - 1],
+        0b11,
+        "bit 0 is the external exception, bit 1 the mediated one"
+    );
     assert_eq!(
         SupervisorState::new(0).digest(),
         0xCF68_A661_5791_8C6F,
@@ -140,6 +149,7 @@ fn field_flips() -> Vec<FieldFlip> {
         field("dec".into(), 32, |s, b| s.dec ^= 1u32 << b),
         field("dec_tb".into(), 64, |s, b| s.dec_tb ^= 1u64 << b),
         field("external".into(), 1, |s, _| s.external = !s.external),
+        field("mediated".into(), 1, |s, _| s.mediated = !s.mediated),
     ];
     for k in 0..4 {
         out.push(field(format!("sprg{k}"), 64, move |s, b| {
@@ -191,10 +201,11 @@ fn every_bit_of_every_supervisor_field_moves_the_state_hash() {
     }
     assert_eq!(ignored, 2, "MSR[ILE] and MSR[LE]");
     // Nine 64-bit registers less the MSR bits the PPE ignores, DSISR and
-    // DEC, the external exception, and two words per SLB entry.
+    // DEC, the external and mediated external exceptions, and two words
+    // per SLB entry.
     assert_eq!(
         hashes.len(),
-        1 + 9 * 64 - PPE_MSR_IGNORED.count_ones() as usize + 2 * 32 + 1 + 2 * 64 * PPE_SLB_ENTRIES
+        1 + 9 * 64 - PPE_MSR_IGNORED.count_ones() as usize + 2 * 32 + 2 + 2 * 64 * PPE_SLB_ENTRIES
     );
     let n = hashes.len();
     hashes.sort_unstable();

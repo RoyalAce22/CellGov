@@ -168,6 +168,14 @@ impl ExecutionUnit for PpuExecutionUnit {
         PpuExecutionUnit::clear_external_exception(self)
     }
 
+    fn raise_mediated_external_exception(&mut self) -> bool {
+        PpuExecutionUnit::raise_mediated_external_exception(self)
+    }
+
+    fn clear_mediated_external_exception(&mut self) -> bool {
+        PpuExecutionUnit::clear_mediated_external_exception(self)
+    }
+
     fn time_base_read(&self) -> Option<u64> {
         self.state.clock_read.then_some(self.state.tb)
     }

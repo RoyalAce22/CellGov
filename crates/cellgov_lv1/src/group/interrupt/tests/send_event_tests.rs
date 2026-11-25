@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    answered_numbers, AddressSpace, AddressSpaceChange, ExternalDelivery, Hypervisor, SavedMsrs,
-    ThreadResume,
+    answered_numbers, AddressSpace, AddressSpaceChange, ExternalDelivery, ExternalRaise,
+    Hypervisor, SavedMsrs, ThreadResume,
 };
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
@@ -26,12 +26,12 @@ const KERNEL_MSR: u64 = 0x8000_0000_0000_8032;
 
 /// The external interrupt that the return of a woken thread with
 /// [`KERNEL_MSR`] raises [OFW-4.93 lv1 a:0x18FC-0x1914].
-const DELIVERY: ExternalDelivery = ExternalDelivery {
+const DELIVERY: ExternalRaise = ExternalRaise::Deliver(ExternalDelivery {
     vector: 0x500,
     msr: 0x8000_0000_0000_0000,
-};
+});
 
-/// The disposition of `r` from threads that both saved [`KERNEL_MSR`].
+/// The disposition of `r` when both threads saved [`KERNEL_MSR`].
 fn dispatch(
     hv: &mut Hypervisor,
     r: &HypercallRequest,
@@ -159,7 +159,8 @@ fn raised(woken: bool) -> HypercallDisposition {
 
 /// The answer of a raise on paused thread 1 through the port `id`: the
 /// pending event, the write of `value` to status doubleword `index`, and
-/// that shadow doubleword.
+/// that shadow doubleword. With `woken`, it also carries lv1's wake and
+/// thread 1's resume with [`DELIVERY`].
 fn raise_answer(id: u64, index: u8, value: u64, woken: bool) -> HypercallDisposition {
     let mut answer = success();
     answer.push_change(InterruptChange::EventPending(id));
@@ -423,7 +424,13 @@ fn a_masked_raise_carries_no_wake_for_an_unmasked_bit_already_in_the_shadow() {
         dispatch(&mut hv, &send(ids[1], 0), &plug_9_unmasked),
         raise_answer(ids[1], 0, PLUG_BIT | PLUG_10_BIT, false)
     );
-    assert!(hv.groups().interrupt().paused().thread(1).is_some());
+    assert_eq!(
+        hv.groups().interrupt().paused().thread(1),
+        Some(PausedThread {
+            thread: 1,
+            decrementer_wakes: true,
+        })
+    );
 }
 
 #[test]
@@ -684,18 +691,4 @@ fn pending_event_sync_term_lane_vector_golden() {
         ports.sync_term(),
         lane(146, 0, 1).wrapping_add(lane(146, 1, 3))
     );
-}
-
-/// A wake ends the pause, so the paused threads add no term again.
-#[test]
-fn a_wake_removes_the_paused_thread_term() {
-    let mut paused = PausedThreadState::default();
-    paused.pause(PausedThread {
-        thread: 1,
-        decrementer_wakes: true,
-    });
-    assert_ne!(paused.sync_term(), 0);
-    paused.wake(1);
-    assert_eq!(paused.sync_term(), 0);
-    assert_eq!(paused, PausedThreadState::default());
 }

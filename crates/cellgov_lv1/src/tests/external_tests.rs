@@ -1,7 +1,7 @@
-use crate::return_path::{ExternalDelivery, ReturnPair, SavedMsrs};
+use crate::return_path::{ExternalDelivery, ExternalRaise, ReturnPair, SavedMsrs};
 use crate::{
     HypercallAnswer, HypercallDisposition, HypercallRefusal, HypercallRequest, Hypervisor,
-    IrqStateBitmapKey, ThreadResume,
+    IrqStateBitmapKey, ReturnPath, ThreadResume,
 };
 use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
@@ -10,6 +10,7 @@ use cellgov_ps3_abi::lv1::call::{
     SEND_EVENT_LOCALLY,
 };
 use cellgov_ps3_abi::lv1::interrupt::IRQ_MASK_OFFSET;
+use cellgov_ps3_abi::lv1::table::HYPERCALL_TABLE_ENTRIES;
 use cellgov_time::GuestTicks;
 
 /// The `sc` of the kernel's port call in the setup of a thread's record
@@ -35,10 +36,10 @@ const KERNEL_MSR: u64 = 0x8000_0000_0000_8032;
 /// lv1's raise clears bits 48 to 63 of [`KERNEL_MSR`] and keeps SF
 /// [OFW-4.93 lv1 a:0x18FC-0x1914], and enters 0x500
 /// [OFW-4.93 lv1 a:0x2C3DB8].
-const DELIVERY: ExternalDelivery = ExternalDelivery {
+const DELIVERY: ExternalRaise = ExternalRaise::Deliver(ExternalDelivery {
     vector: 0x500,
     msr: 0x8000_0000_0000_0000,
-};
+});
 
 fn call(number: u64, args: &[u64], thread: u8) -> HypercallRequest {
     let mut inputs = [0; 8];
@@ -144,23 +145,40 @@ fn a_raise_on_a_masked_plug_of_the_caller_delivers_nothing() {
     assert_eq!(hv.irq_state_bitmaps().shadow(thread_1())[0], PLUG_BIT);
 }
 
-/// With `MSR[EE]` = 0 lv1 sets LPCR[MER] [OFW-4.93 lv1 a:0x191C-0x1928].
-/// The refusal answers nothing, so the shadow keeps its value.
+/// With `MSR[EE]` = 0 lv1 sets LPCR\[MER\] [OFW-4.93 lv1 a:0x191C-0x1928]
+/// and changes no saved register, so r11 and r12 hold the saved SRR0 and
+/// SRR1.
 #[test]
-fn a_delivery_to_a_caller_with_ee_clear_is_a_refusal_that_changes_nothing() {
+fn a_raise_on_a_caller_with_ee_clear_sets_the_mediated_request() {
     let storage = storage(PLUG_BIT);
     let mut hv = booted(&storage);
     let send = call(SEND_EVENT_LOCALLY, &[PORT], 1);
     let msr = KERNEL_MSR & !0x8000;
+    let answer = answered(hv.dispatch_returning(&send, &storage, &msrs(None, Some(msr))));
+    assert_eq!(answer.external, Some(ExternalRaise::Mediated));
     assert_eq!(
-        hv.dispatch_returning(&send, &storage, &msrs(None, Some(msr))),
-        refused(
-            &send,
-            "an external interrupt on the return to a thread whose saved MSR[EE] is 0, for which \
-             lv1 sets LPCR[MER]"
-        )
+        answer.return_registers(&send, Some("4.93")).r11_r12,
+        ReturnPair::SaveRestore
     );
-    assert_eq!(hv.irq_state_bitmaps().shadow(thread_1()), [0; 4]);
+    assert_eq!(hv.irq_state_bitmaps().shadow(thread_1())[0], PLUG_BIT);
+}
+
+#[test]
+fn a_raise_that_wakes_a_paused_thread_with_ee_clear_gives_it_the_mediated_request() {
+    let storage = storage(PLUG_BIT);
+    let mut hv = booted(&storage);
+    answered(hv.dispatch_with(&call(PAUSE, &[0], 1), &storage));
+    let send = call(SEND_EVENT_LOCALLY, &[PORT], 0);
+    let saved = msrs(Some(KERNEL_MSR), Some(KERNEL_MSR & !0x8000));
+    let answer = answered(hv.dispatch_returning(&send, &storage, &saved));
+    assert_eq!(answer.external, None);
+    assert_eq!(
+        answer.resumed,
+        vec![ThreadResume {
+            thread: 1,
+            external: Some(ExternalRaise::Mediated),
+        }]
+    );
 }
 
 /// lv1 clears ME, bit 51 [OFW-4.93 lv1 a:0x1904], and the PPU's entry
@@ -178,6 +196,44 @@ fn a_delivery_to_a_caller_with_me_set_is_a_refusal() {
              63 that lv1 clears and the PPU's interrupt entry keeps"
         )
     );
+}
+
+/// lv1 gives SRR1 the whole saved MSR, and the PPU's interrupt entry
+/// loads SRR1 bits 33 to 36 and 42 to 47 with its own information
+/// [PPC-Book3 p:62 s:5.4]. A saved MSR with bit 33 set is a refusal.
+#[test]
+fn a_delivery_to_a_caller_whose_msr_holds_an_srr1_information_bit_is_a_refusal() {
+    let storage = storage(PLUG_BIT);
+    let mut hv = booted(&storage);
+    let send = call(SEND_EVENT_LOCALLY, &[PORT], 1);
+    let msr = KERNEL_MSR | 0x4000_0000;
+    assert_eq!(
+        hv.dispatch_returning(&send, &storage, &msrs(None, Some(msr))),
+        refused(
+            &send,
+            "an external interrupt on the return to a thread whose saved MSR holds a bit that lv1 \
+             gives SRR1 and the PPU's interrupt entry clears"
+        )
+    );
+}
+
+/// The `rfid` return for a number past the table makes no shadow test
+/// [OFW-4.93 lv1 a:0x0C44-0x0C58], so an unmasked raised bit stays
+/// undelivered.
+#[test]
+fn a_return_for_a_number_past_the_table_delivers_no_external_interrupt() {
+    let storage = storage(PLUG_BIT);
+    let mut hv = booted(&storage);
+    let saved = msrs(None, Some(KERNEL_MSR));
+    let send = call(SEND_EVENT_LOCALLY, &[PORT], 1);
+    let sent = answered(hv.dispatch_returning(&send, &storage, &saved));
+    assert_eq!(sent.external, Some(DELIVERY));
+    assert_eq!(hv.irq_state_bitmaps().shadow(thread_1())[0], PLUG_BIT);
+    let past = call(HYPERCALL_TABLE_ENTRIES, &[], 1);
+    let answer = answered(hv.dispatch_returning(&past, &storage, &saved));
+    assert!(matches!(answer.path, ReturnPath::PastTheTable(_)));
+    assert_eq!(answer.external, None);
+    assert_eq!(answer.resumed, Vec::<ThreadResume>::new());
 }
 
 #[test]

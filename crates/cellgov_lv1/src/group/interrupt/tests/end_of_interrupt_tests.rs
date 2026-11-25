@@ -5,7 +5,7 @@ use crate::group::interrupt::bitmap::{IrqStateBitmapRegistration, StatusShadowWr
 use crate::group::interrupt::event_port::EventReceivePort;
 use crate::group::state::GroupStates;
 use crate::group::uart::{UartChange, VirtualUartIrq, VirtualUartShadowWrite};
-use crate::{answered_numbers, ExternalDelivery, Hypervisor, SavedMsrs};
+use crate::{answered_numbers, ExternalDelivery, ExternalRaise, Hypervisor, SavedMsrs};
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr};
@@ -62,10 +62,10 @@ const KERNEL_MSR: u64 = 0x8000_0000_0000_8032;
 
 /// The external interrupt that a return with [`KERNEL_MSR`] raises
 /// [OFW-4.93 lv1 a:0x18FC-0x1914].
-const DELIVERY: ExternalDelivery = ExternalDelivery {
+const DELIVERY: ExternalRaise = ExternalRaise::Deliver(ExternalDelivery {
     vector: 0x500,
     msr: 0x8000_0000_0000_0000,
-};
+});
 
 fn thread_1() -> IrqStateBitmapKey {
     IrqStateBitmapKey {
@@ -104,9 +104,10 @@ fn storage(mask: u64) -> GuestMemory {
     storage
 }
 
-/// Thread 1's bitmap, and the object `id` on [`PLUG`] of thread 1. An
-/// outlet when `outlet` is set, a port otherwise. `pending` sets its
-/// pending byte, and `shadow` is status shadow doubleword 0.
+/// Thread 1's bitmap, and the object `id` on [`PLUG`] of thread 1. The
+/// object is an outlet when `outlet` is set, and a port otherwise.
+/// `pending` sets its pending byte, and `shadow` is status shadow
+/// doubleword 0.
 fn interrupt(id: u64, outlet: bool, pending: bool, shadow: u64) -> InterruptGroupState {
     let mut state = InterruptGroupState::default();
     state.apply(InterruptChange::BitmapRegistered(
@@ -474,8 +475,8 @@ fn dispatch(hv: &mut Hypervisor, r: &HypercallRequest, storage: &GuestMemory) ->
     answered(hv.dispatch_returning(r, storage, &SavedMsrs([Some(KERNEL_MSR); 2])))
 }
 
-/// The send's return raises the interrupt for the masked bit. The end of
-/// interrupt clears the bit, so its return raises none.
+/// The send's return raises the interrupt for the bit that the mask
+/// holds. The end of interrupt clears the bit, so its return raises none.
 #[test]
 fn the_return_after_a_port_s_end_of_interrupt_raises_no_external_interrupt() {
     let storage = storage(PLUG_BIT);

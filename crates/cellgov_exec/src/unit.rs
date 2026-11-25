@@ -411,6 +411,24 @@ pub trait ExecutionUnit {
         false
     }
 
+    /// Raises a mediated external exception for the thread, as the
+    /// hypervisor's LPCR\[MER\] = 1 does, and returns whether the thread
+    /// took it.
+    ///
+    /// The exception exists until
+    /// [`Self::clear_mediated_external_exception`]. A unit with no
+    /// supervisor registers takes nothing.
+    fn raise_mediated_external_exception(&mut self) -> bool {
+        false
+    }
+
+    /// Clears the thread's mediated external exception, and returns
+    /// whether the thread holds supervisor registers. A unit with none
+    /// changes nothing.
+    fn clear_mediated_external_exception(&mut self) -> bool {
+        false
+    }
+
     /// What this PPE thread's recent stalls at the issue point the PPE's
     /// threads share add to each instruction of another one.
     ///

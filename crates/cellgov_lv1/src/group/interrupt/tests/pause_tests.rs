@@ -1,10 +1,50 @@
 use super::*;
-use crate::group::interrupt::bitmap::IrqStateBitmapState;
+use crate::group::interrupt::bitmap::{
+    IrqStateBitmapRegistration, IrqStateBitmapState, StatusShadowWrite,
+};
 use crate::{answered_numbers, Hypervisor};
 use cellgov_event::UnitId;
 use cellgov_mem::lanes::{contribution, LaneIndex};
-use cellgov_mem::GuestMemory;
+use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
+use cellgov_ps3_abi::lv1::interrupt::IRQ_MASK_OFFSET;
 use cellgov_time::GuestTicks;
+
+/// A bitmap address in the real mode region, 8-byte aligned.
+const BITMAP: u64 = 0x0036_9200;
+
+/// Plug 9 is bit 63 - 9 of status doubleword 0 (`plug_status_bit`).
+const PLUG_9_BIT: u64 = 1 << 54;
+
+/// The 4.93 bitmap state where thread 0 registered [`BITMAP`] and holds
+/// [`PLUG_9_BIT`] in its status shadow.
+fn raised_on_thread_0() -> IrqStateBitmapState {
+    let key = IrqStateBitmapKey {
+        ppe_id: game_os_logical_ppe_id("4.93").expect("the 4.93 logical PPE id"),
+        thread: 0,
+    };
+    let mut bitmaps = IrqStateBitmapState::default();
+    bitmaps.register(IrqStateBitmapRegistration {
+        key,
+        lpar_address: BITMAP,
+    });
+    bitmaps.write_shadow(StatusShadowWrite {
+        key,
+        index: 0,
+        value: PLUG_9_BIT,
+    });
+    bitmaps
+}
+
+/// Storage that holds `mask` in mask doubleword 0 of [`BITMAP`].
+fn masked(mask: u64) -> GuestMemory {
+    let mut storage = GuestMemory::new(0x0037_0000);
+    let range =
+        ByteRange::new(GuestAddr::new(BITMAP + IRQ_MASK_OFFSET), 8).expect("the mask doubleword");
+    storage
+        .apply_commit(range, &mask.to_be_bytes())
+        .expect("the mask write");
+    storage
+}
 
 /// The `sc` of the 4.93 kernel's idle thread
 /// [OFW-4.93 lv2_kernel a:0x8000000000265184].
@@ -179,6 +219,68 @@ fn an_illegal_mode_leaves_the_hypervisor_unchanged() {
     let before = hv.clone();
     hv.dispatch(&request(Some(0), 2));
     assert_eq!(hv, before);
+}
+
+#[test]
+fn a_shadow_bit_that_the_mask_holds_ends_the_call_with_r3_0_and_no_pause() {
+    for mode in [PAUSE_MODE_DECREMENTER_WAKES, PAUSE_MODE_DECREMENTER_IGNORED] {
+        let r = request(Some(0), mode);
+        assert_eq!(
+            pause(&r, Some("4.93"), &raised_on_thread_0(), &masked(PLUG_9_BIT)),
+            HypercallDisposition::Answered(HypercallAnswer::lv1_status(0, [0; 7])),
+            "mode {mode}"
+        );
+    }
+}
+
+/// The test reads the caller's own shadow and mask. So the caller pauses
+/// for a masked bit of its own and for a bit of another thread.
+#[test]
+fn a_masked_shadow_bit_or_a_bit_of_another_thread_lets_the_caller_pause() {
+    let r = request(Some(0), PAUSE_MODE_DECREMENTER_WAKES);
+    assert_eq!(
+        pause(
+            &r,
+            Some("4.93"),
+            &raised_on_thread_0(),
+            &masked(!PLUG_9_BIT)
+        ),
+        paused_answer(0, true)
+    );
+    let r = request(Some(1), PAUSE_MODE_DECREMENTER_WAKES);
+    assert_eq!(
+        pause(&r, Some("4.93"), &raised_on_thread_0(), &masked(PLUG_9_BIT)),
+        paused_answer(1, true)
+    );
+}
+
+/// A bitmap registration checks only the status doublewords, so the
+/// mask doublewords of a registered bitmap can lie past the storage.
+#[test]
+fn a_raised_bit_whose_mask_doublewords_lie_past_storage_is_a_refusal() {
+    let r = request(Some(0), PAUSE_MODE_DECREMENTER_WAKES);
+    let storage = GuestMemory::new((BITMAP + IRQ_MASK_OFFSET) as usize);
+    assert_eq!(
+        pause(&r, Some("4.93"), &raised_on_thread_0(), &storage),
+        refused(
+            &r,
+            "a raised status shadow bit of a thread whose mask doublewords CellGov holds no \
+             storage for"
+        )
+    );
+}
+
+#[test]
+fn a_wake_removes_the_paused_thread_and_its_term() {
+    let mut paused = PausedThreadState::default();
+    paused.pause(PausedThread {
+        thread: 1,
+        decrementer_wakes: true,
+    });
+    assert_ne!(paused.sync_term(), 0);
+    paused.wake(1);
+    assert_eq!(paused.sync_term(), 0);
+    assert_eq!(paused, PausedThreadState::default());
 }
 
 #[test]

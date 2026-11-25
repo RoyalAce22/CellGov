@@ -137,8 +137,8 @@ impl UartState {
     /// The bytes in the receive buffer of port `port`, first byte to read
     /// first.
     ///
-    /// A port with no entry holds no byte. A buffer with no byte removes
-    /// the entry.
+    /// The state holds no entry for a port whose receive buffer holds no
+    /// byte.
     pub fn received(&self, port: u64) -> &[u8] {
         self.received
             .get(&port)

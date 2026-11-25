@@ -300,7 +300,11 @@ pub fn run_kernel_from_entry(
 /// - The real mode limit is `bi.pu.1.rm_size` from the repository rows.
 /// - The real mode offset is 0, the partition address of the region,
 ///   `bi.pu.1.rm_addr`. A CellGov real address is a partition address.
-/// - SDR1 and HID6\[LB\] are those of [`Partition::INITIAL`].
+/// - SDR1 and HID6\[LB\] are those of [`Partition::INITIAL`]. Until the
+///   kernel selects an address space, lv1's page table for the PPE is in
+///   lv1's own memory, at an address that no committed source gives. No
+///   access reads SDR1 in that time, because the threads start with
+///   translation off.
 ///
 /// lv1 loads these resources when it switches a thread to the PPE:
 /// - LPCR from the thread's lv1 context and RMOR from the PPE object
@@ -309,11 +313,6 @@ pub fn run_kernel_from_entry(
 ///   [OFW-4.93 lv1 a:0x2C47BC-0x2C47D0].
 ///
 /// [CBE-Handbook p:336 s:11.2] LPCR\[RMLS\] selects the real mode limit, from the sizes of Table 11-1.
-///
-/// Before the kernel selects an address space, that page table is one
-/// in lv1's own memory. No committed source gives its address, and
-/// CellGov does not model that address space. The threads start with
-/// translation off, so no access reads SDR1 until a selection loads it.
 ///
 /// # Errors
 ///

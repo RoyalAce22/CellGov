@@ -33,7 +33,7 @@ pub(super) enum ShadowStep {
 }
 
 /// lv1's step for the port's values `params`, with `received` bytes in
-/// the port's receive buffer, when the port's shadow bit is `raised`.
+/// the port's receive buffer, when `raised_bit` is the port's shadow bit.
 ///
 /// The status function changes nothing for a bit already in the state
 /// that the status gives [OFW-4.93 lv1 a:0x2F2250-0x2F2258]
@@ -111,8 +111,9 @@ fn raised(firmware: &str, params: &VirtualUartPortParams, received: u64) -> Opti
 ///   complete.
 ///
 /// The traffic gives the peer 0 bytes. lv1 sets the transmit bit for 0
-/// bytes, so a mask with the transmit bit gets a refusal: lv1 can raise the
-/// interrupt. A peer with more bytes changes only the transmit bit.
+/// bytes, so a mask with the transmit bit and no shared receive bit gets a
+/// refusal; see [`shadow_step`]. A peer with more bytes changes only the
+/// transmit bit.
 fn service_port_traffic(firmware: &str, port: u64, received: u64) -> Option<VirtualUartTraffic> {
     game_os_service_port(firmware, port)?;
     let row = game_os_virtual_uart_port(firmware, port)?;

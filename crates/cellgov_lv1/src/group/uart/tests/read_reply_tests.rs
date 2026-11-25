@@ -68,11 +68,20 @@ fn read_with(
     uart: &UartState,
     storage: &GuestMemory,
 ) -> HypercallDisposition {
+    read_in(r, uart, &MemoryState::default(), storage)
+}
+
+fn read_in(
+    r: &HypercallRequest,
+    uart: &UartState,
+    memory: &MemoryState,
+    storage: &GuestMemory,
+) -> HypercallDisposition {
     read_port(
         r,
         &ReadInput {
             firmware: Some("4.93"),
-            memory: &MemoryState::default(),
+            memory,
             uart,
             interrupt: &InterruptGroupState::default(),
             storage,
@@ -80,10 +89,18 @@ fn read_with(
     )
 }
 
+/// The answer that takes `bytes` to the caller's buffer at the real mode
+/// address r4, and leaves `rest` in the receive buffer.
 fn taken(r: &HypercallRequest, bytes: &[u8], rest: &[u8]) -> HypercallDisposition {
+    taken_at(r, r.r(4), bytes, rest)
+}
+
+/// The answer that takes `bytes` to the real address `real`, and leaves
+/// `rest` in the receive buffer.
+fn taken_at(r: &HypercallRequest, real: u64, bytes: &[u8], rest: &[u8]) -> HypercallDisposition {
     let mut answer = HypercallAnswer::lv1_status(0, [bytes.len() as u64, 0, 0, 0, 0, 0, 0]);
     answer.effects.push(Effect::SharedWriteIntent {
-        range: ByteRange::new(GuestAddr::new(r.r(4)), bytes.len() as u64).expect("a range"),
+        range: ByteRange::new(GuestAddr::new(real), bytes.len() as u64).expect("a range"),
         bytes: WritePayload::new(bytes.to_vec()),
         source: r.unit,
         source_time: r.tick,
@@ -210,5 +227,72 @@ fn a_read_of_an_empty_buffer_reads_0_bytes() {
     assert_eq!(
         read_with(&r, &holding(&[], 2), &storage(0x80_0000)),
         HypercallDisposition::Answered(HypercallAnswer::lv1_status(0, [0; 7]))
+    );
+}
+
+/// The kernel's first boot region in the console capture
+/// `lv2_repository_boot_nodes`, which gets no storage.
+const FIRST: MemoryRegion = MemoryRegion {
+    lpar_address: 0x0000_6C00_1000_0000,
+    size: 0x790_0000,
+    page_size_exp: 20,
+    unit_id: 1,
+    counter: 2,
+};
+
+/// The kernel's second boot region in the same capture, whose storage
+/// starts at the storage base.
+const SECOND: MemoryRegion = MemoryRegion {
+    lpar_address: 0x0000_5000_0030_0000,
+    size: 0xA_0000,
+    page_size_exp: 16,
+    unit_id: 1,
+    counter: 3,
+};
+
+/// The second region has creation index 1, and its storage starts at the
+/// storage base. So the bytes go to the storage base plus the buffer's
+/// offset in the region.
+#[test]
+fn a_read_into_an_allocated_region_writes_the_bytes_at_the_region_s_storage() {
+    let mut memory = MemoryState::default();
+    memory.create(FIRST);
+    memory.create(SECOND);
+    let storage = GuestMemory::from_regions(vec![
+        Region::new(0, 0x80_0000, "real mode", PageSize::Page64K),
+        crate::allocated_storage(),
+    ])
+    .expect("two regions");
+    let r = request(SECOND.lpar_address + 0x100, 4);
+    assert_eq!(
+        read_in(&r, &holding(&HELD, 0), &memory, &storage),
+        taken_at(
+            &r,
+            crate::ALLOCATED_STORAGE_BASE + 0x100,
+            &HELD[..4],
+            &HELD[4..]
+        )
+    );
+}
+
+const TX_RAISE: &str = "the transmit bit 1 of a virtual UART interrupt mask on a port whose peer \
+                        holds no more bytes than the transmit trigger, with which lv1 raises the \
+                        port's interrupt";
+
+/// Mask 3 stays on the port while the buffer holds a byte, because the
+/// receive bit decides the step. Once the read takes each byte, the
+/// status and the mask share only the transmit bit, whose step depends on
+/// the peer's bytes.
+#[test]
+fn under_mask_3_a_read_of_each_byte_gets_the_transmit_refusal_of_the_status_step() {
+    let mut uart = holding(&HELD, 3);
+    uart.apply(UartChange::ShadowSet(crate::VirtualUartShadowWrite {
+        index: 0,
+        value: 1 << 53,
+    }));
+    let r = request(BUFFER, 6);
+    assert_eq!(
+        read_with(&r, &uart, &storage(0x80_0000)),
+        refused(&r, TX_RAISE)
     );
 }

@@ -17,9 +17,9 @@
 //! The `hrfid` return raises the caller's external interrupt when the
 //! caller's status shadow and mask share a bit
 //! [OFW-4.93 lv1 a:0x1010-0x101C]; see
-//! [`cellgov_ps3_abi::lv1::interrupt_mask`]. [`external_delivery`] gives
-//! what the raise does, and [`delivering_table`] the registers that the
-//! return then leaves.
+//! [`cellgov_ps3_abi::lv1::interrupt_mask`]. [`external_raise`] gives
+//! what the raise does, and [`delivering_table`] gives the registers that
+//! the return leaves after a delivery.
 
 use cellgov_ps3_abi::hw::ppu_interrupt::SRR1_INTERRUPT_INFO;
 use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_EE, MSR_INTERRUPT_CLEARED};
@@ -57,25 +57,42 @@ pub struct ExternalDelivery {
     pub msr: u64,
 }
 
+/// What lv1's raise does for a thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExternalRaise {
+    /// The return enters the vector.
+    Deliver(ExternalDelivery),
+    /// The return sets LPCR\[MER\] [OFW-4.93 lv1 a:0x191C-0x1928]. The
+    /// thread takes a mediated external interrupt when it sets `MSR[EE]`;
+    /// see [`cellgov_ps3_abi::lv1::interrupt_mask`].
+    Mediated,
+}
+
+impl ExternalRaise {
+    /// The delivery, or `None` for [`Self::Mediated`].
+    pub fn delivery(self) -> Option<ExternalDelivery> {
+        match self {
+            Self::Deliver(delivery) => Some(delivery),
+            Self::Mediated => None,
+        }
+    }
+}
+
 /// What lv1's raise does for a thread whose `sc` saved the MSR `msr`.
+///
+/// With `MSR[EE]` = 0 the raise is [`ExternalRaise::Mediated`]
+/// [OFW-4.93 lv1 a:0x18E0-0x18EC].
 ///
 /// # Errors
 ///
-/// Returns the refusal text in these cases:
-/// - `MSR[EE]` is 0. lv1 then sets LPCR\[MER\]
-///   [OFW-4.93 lv1 a:0x191C-0x1928], and a later return from an
-///   interrupt raises the external interrupt under conditions whose
-///   meaning no image read gives [OFW-4.93 lv1 a:0x1880-0x18A8].
+/// For a saved `MSR[EE]` of 1, returns the refusal text in these cases:
 /// - The MSR holds one of bits 48 to 63 that the PPU's interrupt entry
 ///   keeps, such as ME. lv1 clears each of these bits.
 /// - The MSR holds one of bits 33 to 36 or 42 to 47. lv1 gives SRR1 the
 ///   whole MSR, and the PPU's interrupt entry clears these bits.
-pub(crate) fn external_delivery(msr: u64) -> Result<ExternalDelivery, UnmodelledError> {
+pub(crate) fn external_raise(msr: u64) -> Result<ExternalRaise, UnmodelledError> {
     if msr & MSR_EE == 0 {
-        return Err(UnmodelledError::new(
-            "an external interrupt on the return to a thread whose saved MSR[EE] is 0, for which \
-             lv1 sets LPCR[MER]",
-        ));
+        return Ok(ExternalRaise::Mediated);
     }
     if msr & EXTERNAL_INTERRUPT_MSR_CLEARED & !MSR_INTERRUPT_CLEARED != 0 {
         return Err(UnmodelledError::new(
@@ -89,10 +106,10 @@ pub(crate) fn external_delivery(msr: u64) -> Result<ExternalDelivery, Unmodelled
              gives SRR1 and the PPU's interrupt entry clears",
         ));
     }
-    Ok(ExternalDelivery {
+    Ok(ExternalRaise::Deliver(ExternalDelivery {
         vector: EXTERNAL_INTERRUPT_VECTOR,
         msr: external_interrupt_msr(msr),
-    })
+    }))
 }
 
 /// The result that a compare in lv1's vector puts in a CR field. The
@@ -195,7 +212,7 @@ pub(crate) fn table(problem_state: bool, firmware: Option<&str>) -> ReturnRegist
 /// The registers are those of [`table`], except r11 and r12. lv1 loads
 /// them from the saved pc and MSR [OFW-4.93 lv1 a:0x1038-0x103C] after the
 /// raise replaced those two values [OFW-4.93 lv1 a:0x190C-0x1914]. So r11
-/// is the vector and r12 the new MSR.
+/// is the vector, and r12 is the new MSR.
 pub(crate) fn delivering_table(
     problem_state: bool,
     firmware: Option<&str>,

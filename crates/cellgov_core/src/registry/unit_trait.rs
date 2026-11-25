@@ -110,6 +110,14 @@ pub trait RegisteredUnit: 'static {
     /// [`ExecutionUnit::clear_external_exception`].
     fn clear_external_exception(&mut self) -> bool;
 
+    /// Raises the thread's mediated external exception. See
+    /// [`ExecutionUnit::raise_mediated_external_exception`].
+    fn raise_mediated_external_exception(&mut self) -> bool;
+
+    /// Clears the thread's mediated external exception. See
+    /// [`ExecutionUnit::clear_mediated_external_exception`].
+    fn clear_mediated_external_exception(&mut self) -> bool;
+
     /// The PPE thread's issue pressure. See
     /// [`ExecutionUnit::ppe_issue_pressure`].
     fn ppe_issue_pressure(&self) -> cellgov_exec::PpeIssuePressure;
@@ -365,6 +373,16 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn clear_external_exception(&mut self) -> bool {
         ExecutionUnit::clear_external_exception(self)
+    }
+
+    #[inline]
+    fn raise_mediated_external_exception(&mut self) -> bool {
+        ExecutionUnit::raise_mediated_external_exception(self)
+    }
+
+    #[inline]
+    fn clear_mediated_external_exception(&mut self) -> bool {
+        ExecutionUnit::clear_mediated_external_exception(self)
     }
 
     #[inline]

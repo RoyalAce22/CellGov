@@ -11,6 +11,7 @@ use cellgov_time::GuestTicks;
 use super::answer::{HypercallDisposition, HypercallRefusal};
 use super::external::returns;
 use super::handlers::{answer, answers};
+use super::mediated::{take_refusal, MediatedTake};
 use super::request::HypercallRequest;
 use super::return_path::SavedMsrs;
 use super::vector;
@@ -194,6 +195,33 @@ impl Hypervisor {
     /// The first refusal, which stops the run.
     pub fn refusal(&self) -> Option<HypercallRefusal> {
         self.refusal
+    }
+
+    /// Tests `take`, a thread's take of a mediated external interrupt, as
+    /// lv1's handler tests it. `storage` is the thread's real address
+    /// space, which holds the masks.
+    ///
+    /// The take changes no group state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HypercallRefusal::MediatedExternal`] when lv1's handler
+    /// enters no vector, or enters it with other registers. The
+    /// hypervisor keeps the refusal as the first one when it keeps no
+    /// earlier refusal.
+    pub fn take_mediated_external(
+        &mut self,
+        take: &MediatedTake,
+        storage: &GuestMemory,
+    ) -> Result<(), HypercallRefusal> {
+        let firmware = self.firmware.as_deref();
+        match take_refusal(take, firmware, self.groups.interrupt(), storage) {
+            Some(refusal) => {
+                self.refusal.get_or_insert(refusal);
+                Err(refusal)
+            }
+            None => Ok(()),
+        }
     }
 }
 

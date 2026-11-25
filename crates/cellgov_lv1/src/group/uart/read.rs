@@ -255,16 +255,14 @@ fn empty_read(request: &HypercallRequest, checked: &Checked<'_>) -> HypercallDis
 /// r3 = 0 and r4 = 0, and the buffer keeps its bytes.
 ///
 /// The answer to a read of one or more bytes writes them to the caller's
-/// buffer, and carries the bytes that the receive buffer still holds. The
-/// call is a refusal in these cases:
-/// - CellGov's storage does not hold the caller's buffer;
-/// - the status step after the read refuses; see [`shadow::status_step`].
-///
+/// buffer, and carries the bytes that the receive buffer still holds.
 /// lv1 computes the status after the copy of each page
 /// [OFW-4.93 lv1 a:0x2F0830-0x2F0940]. Each copy only adds free bytes,
 /// so the receive bit can only go from set to clear. The answer carries
 /// the step for the bytes left after the read, which can clear the port's
-/// shadow bit.
+/// shadow bit. The call is a refusal in these cases:
+/// - CellGov's storage does not hold the caller's buffer;
+/// - the status step after the read refuses; see [`shadow::status_step`].
 fn received_read(
     request: &HypercallRequest,
     input: &ReadInput<'_>,

@@ -19,9 +19,12 @@ use cellgov_exec::{
     YieldReason,
 };
 use cellgov_ps3_abi::hw::ppu_interrupt::{
-    SRR1_INTERRUPT_INFO, SRR1_TRACE, VECTOR_DECREMENTER, VECTOR_EXTERNAL, VECTOR_TRACE,
+    SRR1_INTERRUPT_INFO, SRR1_MEDIATED_EXTERNAL, SRR1_TRACE, VECTOR_DECREMENTER, VECTOR_EXTERNAL,
+    VECTOR_TRACE,
 };
-use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_BE, MSR_EE, MSR_INTERRUPT_CLEARED, MSR_SE, MSR_SF};
+use cellgov_ps3_abi::hw::ppu_supervisor::{
+    MSR_BE, MSR_EE, MSR_HV, MSR_INTERRUPT_CLEARED, MSR_PR, MSR_SE, MSR_SF,
+};
 
 use super::batch::BatchEntry;
 use super::ppu_unit::PpuExecutionUnit;
@@ -30,9 +33,12 @@ use crate::instruction::PpuInstruction;
 
 /// The MSR at the vector of an interrupt taken with MSR `msr`.
 ///
-/// CellGov declares LPCR\[LPES\] = 0b11 for the kernel's partition. So an
-/// interrupt that the kernel takes does not change MSR\[HV\]. ME does not
-/// change either.
+/// CellGov declares LPCR\[LPES\] = 0b11 for the interrupts the kernel
+/// takes at its own vectors. So such an interrupt does not change
+/// MSR\[HV\]. ME does not change either. A mediated external interrupt
+/// differs: on the console it enters lv1 (LPES bit 0 = 0), and lv1
+/// passes it to the kernel's external vector. CellGov models only that
+/// second step, with the SRR1 bits that lv1 passes to the kernel.
 ///
 /// [CBE-Handbook p:292 s:9.12] Table 9-40: an interrupt clears BE, EE, FE0, FE1, FP, PR, SE, DR, IR and RI, sets SF, keeps ME, and keeps HV when LPCR\[LPES\] bits 0 and 1 are 1.
 fn entry_msr(msr: u64) -> u64 {
@@ -45,6 +51,14 @@ fn entry_msr(msr: u64) -> u64 {
 /// [PPC-Book3 p:62 s:5.4] SRR1 bits 33:36 and 42:47 hold the interrupt's information, and every other bit holds the MSR.
 pub(super) fn entry_srr1(msr: u64, cause: u64) -> u64 {
     (msr & !SRR1_INTERRUPT_INFO) | (cause & SRR1_INTERRUPT_INFO)
+}
+
+/// Whether a thread with MSR `msr` may take a mediated external
+/// interrupt.
+///
+/// [CBE-Handbook p:276 s:9.7] Mediated external interrupts are enabled when MSR\[EE\] & (^(MSR\[HV\]) | MSR\[PR\]) is 1.
+pub(super) fn mediated_enabled(msr: u64) -> bool {
+    msr & MSR_EE != 0 && (msr & MSR_HV == 0 || msr & MSR_PR != 0)
 }
 
 /// The SRR0 of the trace interrupt that `insn` at `pc` causes, or `None`.
@@ -86,6 +100,9 @@ pub(super) fn trace_srr0(
 pub(super) enum BoundaryInterrupt {
     /// An external exception exists.
     External,
+    /// A mediated external exception exists: CellGov's hypervisor set
+    /// LPCR\[MER\] for the thread.
+    Mediated,
     /// The decrementer is negative.
     Decrementer,
 }
@@ -96,14 +113,23 @@ impl BoundaryInterrupt {
     ///
     /// [PPC-Book3 p:69 s:5.5.7] An external interrupt sets SRR0 to the instruction the processor would execute next, and SRR1 bits 33:36 and 42:47 to 0.
     /// [CBE-Handbook p:255 s:9.5.11] A decrementer interrupt sets SRR0 to the instruction the processor would execute next.
+    ///
+    /// A mediated external interrupt enters lv1, which passes it to the
+    /// kernel's own external vector with SRR0 = the interrupted address
+    /// and SRR1 = lv1's saved HSRR1. That SRR1 holds bits 33 and 42.
+    ///
+    /// [OFW-4.93 lv1 a:0x18AC-0x18C0] lv1 sets the guest's SRR0 and SRR1 from the saved HSRR0 and HSRR1 and enters the vector at +496 of the thread's context.
     fn record(self, pc: u64) -> InterruptRecord {
         InterruptRecord {
             vector: match self {
-                Self::External => VECTOR_EXTERNAL,
+                Self::External | Self::Mediated => VECTOR_EXTERNAL,
                 Self::Decrementer => VECTOR_DECREMENTER,
             },
             srr0: pc,
-            srr1: 0,
+            srr1: match self {
+                Self::Mediated => SRR1_MEDIATED_EXTERNAL,
+                Self::External | Self::Decrementer => 0,
+            },
             dsisr: None,
             dar: None,
         }
@@ -191,12 +217,16 @@ impl PpuExecutionUnit {
     /// the next batch.
     ///
     /// When both exceptions exist, the thread takes the external one
-    /// first, as the PPE does. A thread that waits for the decrementer
+    /// first, as the PPE does. A mediated external exception also waits
+    /// while the thread is in hypervisor state with MSR\[PR\] = 0. CellGov
+    /// takes a direct external exception before a mediated one; the PPE
+    /// may take either. A thread that waits for the decrementer
     /// does not wake at its deadline: CellGov's hypervisor owns that wait.
     ///
     /// [PPC-Book3 p:76 s:5.8] External, decrementer and hypervisor decrementer exceptions have equal priority, and the processor may take any one of them.
     /// [CBE-Handbook p:291 s:9.10] Table 9-39: the PPE ranks the external interrupt above the decrementer interrupt.
     /// [PPC-Book3 p:81 s:6.3] A decrementer exception exists while DEC bit 0 is 1.
+    /// [CBE-Handbook p:276 s:9.7] Mediated external interrupts are enabled when MSR\[EE\] & (^(MSR\[HV\]) | MSR\[PR\]) is 1, and there is no relative priority between direct and mediated external exceptions.
     pub(super) fn boundary_interrupt(
         &mut self,
         ctx: &ExecutionContext<'_>,
@@ -209,6 +239,9 @@ impl PpuExecutionUnit {
         }
         if sup.external {
             return Some(BoundaryInterrupt::External);
+        }
+        if sup.mediated && mediated_enabled(sup.msr) {
+            return Some(BoundaryInterrupt::Mediated);
         }
         let tb = self.boundary_time_base(ctx, entry, pc);
         // The test reads the time base, so the step publishes a clock read.
@@ -357,6 +390,29 @@ impl PpuExecutionUnit {
             .update_supervisor(|s| s.external = false)
             .is_some()
     }
+
+    /// Raises a mediated external exception for the thread, as the
+    /// hypervisor's LPCR\[MER\] = 1 does. Returns `false`, and changes
+    /// nothing, when the thread has no supervisor registers.
+    ///
+    /// The exception exists until
+    /// [`Self::clear_mediated_external_exception`].
+    #[must_use]
+    pub fn raise_mediated_external_exception(&mut self) -> bool {
+        self.state
+            .update_supervisor(|s| s.mediated = true)
+            .is_some()
+    }
+
+    /// Clears the thread's mediated external exception, as the
+    /// hypervisor's LPCR\[MER\] = 0 does. Returns `false`, and changes
+    /// nothing, when the thread has no supervisor registers.
+    #[must_use]
+    pub fn clear_mediated_external_exception(&mut self) -> bool {
+        self.state
+            .update_supervisor(|s| s.mediated = false)
+            .is_some()
+    }
 }
 
 #[cfg(test)]
@@ -386,6 +442,10 @@ mod interrupt_batch_tests;
 #[cfg(test)]
 #[path = "tests/interrupt_boundary_tests.rs"]
 mod interrupt_boundary_tests;
+
+#[cfg(test)]
+#[path = "tests/interrupt_mediated_tests.rs"]
+mod interrupt_mediated_tests;
 
 #[cfg(test)]
 #[path = "tests/interrupt_system_call_tests.rs"]

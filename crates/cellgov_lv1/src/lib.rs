@@ -26,6 +26,10 @@
 //! [`answer()`] gives the order of the answers: lv1's own `sc` vector,
 //! then the handler, then the null backend. [`Hypervisor`] keeps a
 //! witness of each number with no handler.
+//!
+//! [`Hypervisor`] also adds to each answer the external interrupt of each
+//! return that the call causes. It tests a thread's take of a mediated
+//! external interrupt as lv1's handler tests it.
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 #![cfg_attr(
@@ -44,6 +48,7 @@ mod cost;
 mod external;
 mod group;
 mod handlers;
+mod mediated;
 mod request;
 mod return_path;
 mod state;
@@ -87,6 +92,9 @@ pub use group::uart::{
     VirtualUartShadowWrite, UART_SHADOW_DOUBLEWORDS,
 };
 pub use handlers::{answer, answered_numbers, answers};
+pub use mediated::MediatedTake;
 pub use request::HypercallRequest;
-pub use return_path::{Compare, ExternalDelivery, ReturnPair, ReturnRegisters, SavedMsrs};
+pub use return_path::{
+    Compare, ExternalDelivery, ExternalRaise, ReturnPair, ReturnRegisters, SavedMsrs,
+};
 pub use state::{HypercallWitness, Hypervisor};

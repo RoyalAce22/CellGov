@@ -98,6 +98,26 @@ fn a_raised_bit_of_a_thread_with_no_bitmap_is_a_refusal() {
     );
 }
 
+/// A bitmap registration checks only the status doublewords, so the
+/// mask doublewords of a registered bitmap can lie past the storage.
+#[test]
+fn a_raised_bit_whose_mask_doublewords_lie_past_storage_is_a_refusal() {
+    let mut bitmaps = registered(0);
+    bitmaps.write_shadow(StatusShadowWrite {
+        key: key(0),
+        index: 0,
+        value: PLUG_BIT,
+    });
+    let storage = GuestMemory::new((BITMAP + IRQ_MASK_OFFSET) as usize);
+    assert_eq!(
+        unmasked(&bitmaps, key(0), &storage),
+        Err(UnmodelledError::new(
+            "a raised status shadow bit of a thread whose mask doublewords CellGov holds no \
+             storage for"
+        ))
+    );
+}
+
 /// The raise on the caller sets the bit and stores the doubleword
 /// [OFW-4.93 lv1 a:0x2C6620-0x2C6634], and wakes nothing: the caller is
 /// not paused.

@@ -44,7 +44,7 @@ pub const fn rmls_limit(rmls: u8) -> u64 {
 }
 
 /// The LPCR\[RMLS\] value that selects the real mode limit `limit`, or
-/// `None` when no value selects it. A reserved value is never returned.
+/// `None` when no value selects it. It returns no reserved value.
 pub fn rmls_of_limit(limit: u64) -> Option<u8> {
     (0..=0b1011)
         .filter(|&rmls| rmls != 0b1000)

@@ -27,7 +27,8 @@ const OUTLET: u64 = 18;
 const UART_BITMAP: u64 = 0x0036_1000;
 const THREAD_0_BITMAP: u64 = 0x0036_9000;
 
-/// Plug 0 is the most significant bit of status doubleword 0.
+/// Plug 0 is the most significant bit of status doubleword 0
+/// [OFW-4.93 lv1 a:0x2C3794-0x2C37BC].
 const PLUG_BIT: u64 = 1 << 63;
 
 /// The size of the receive buffer of [`PORT`] at the kernel's open.
@@ -105,10 +106,21 @@ fn request() -> HypercallRequest {
     }
 }
 
-/// The answer that `status_step` builds from an empty answer.
+/// The answer that `status_step` builds from an empty answer, with
+/// storage that holds both bitmaps.
 fn step(uart: &UartState, received: u64) -> Result<HypercallAnswer, UnmodelledError> {
+    step_with_storage(uart, received, 0x0037_0000)
+}
+
+/// The answer that `status_step` builds from an empty answer, with
+/// `storage_bytes` bytes of storage from address 0.
+fn step_with_storage(
+    uart: &UartState,
+    received: u64,
+    storage_bytes: usize,
+) -> Result<HypercallAnswer, UnmodelledError> {
     let interrupt = interrupt();
-    let storage = GuestMemory::new(0x0037_0000);
+    let storage = GuestMemory::new(storage_bytes);
     let input = StatusInput {
         uart,
         raise: RaiseState {
@@ -155,23 +167,38 @@ fn the_first_raised_port_bit_raises_the_outlet_s_plug() {
 }
 
 /// lv1 calls the event function only when the count becomes 1
-/// [OFW-4.93 lv1 a:0x2F2270].
+/// [OFW-4.93 lv1 a:0x2F2270]. The count covers each doubleword of the
+/// shadow, so a set bit in the last doubleword also stops the event.
 #[test]
 fn a_raise_beside_another_set_bit_gives_no_event() {
     let mut expected = HypercallAnswer::lv1_status(0, []);
     expected.push_change(shadow_set(PORT_BIT | 1));
     expected.effects.push(write(UART_BITMAP, PORT_BIT | 1));
     assert_eq!(step(&uart(true, 1), 0x48), Ok(expected));
+
+    let mut last_doubleword_set = uart(true, 0);
+    last_doubleword_set.apply(UartChange::ShadowSet(VirtualUartShadowWrite {
+        index: 3,
+        value: 1,
+    }));
+    let mut expected = HypercallAnswer::lv1_status(0, []);
+    expected.push_change(shadow_set(PORT_BIT));
+    expected.effects.push(write(UART_BITMAP, PORT_BIT));
+    assert_eq!(step(&last_doubleword_set, 0x48), Ok(expected));
 }
 
+/// lv1 clears the bit and stores the doubleword
+/// [OFW-4.93 lv1 a:0x2F2308-0x2F2334].
 #[test]
-fn a_read_that_empties_the_buffer_clears_the_port_bit() {
+fn an_empty_receive_buffer_clears_a_set_port_bit() {
     let mut expected = HypercallAnswer::lv1_status(0, []);
     expected.push_change(shadow_set(0));
     expected.effects.push(write(UART_BITMAP, 0));
     assert_eq!(step(&uart(true, PORT_BIT), 0), Ok(expected));
 }
 
+/// lv1 changes nothing for a bit that the status gives
+/// [OFW-4.93 lv1 a:0x2F2250-0x2F2258].
 #[test]
 fn a_set_bit_that_the_status_still_shares_stays() {
     assert_eq!(
@@ -189,6 +216,17 @@ fn a_raise_before_the_irq_configuration_keeps_the_bit_only() {
     let mut expected = HypercallAnswer::lv1_status(0, []);
     expected.push_change(shadow_set(PORT_BIT));
     assert_eq!(step(&uart(false, 0), 0x48), Ok(expected));
+}
+
+/// The storage ends at the first byte of the UART bitmap.
+#[test]
+fn a_raise_into_a_bitmap_that_the_storage_does_not_hold_is_a_refusal() {
+    assert_eq!(
+        step_with_storage(&uart(true, 0), 0x48, UART_BITMAP as usize),
+        Err(UnmodelledError::new(
+            "a virtual UART interrupt bitmap that CellGov holds no storage for",
+        ))
+    );
 }
 
 /// A first raised bit from thread 1 gives the outlet an event on plug 0

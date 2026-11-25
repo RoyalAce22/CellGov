@@ -88,7 +88,9 @@ impl NoReply {
 /// The bytes that the dispatcher manager writes to its port when the
 /// partition's write of `last` completes `pending`.
 ///
-/// The value is an error in these cases:
+/// # Errors
+///
+/// Returns the [`NoReply`] in these cases:
 /// - `pending` holds more bytes than the hypervisor keeps, so CellGov
 ///   does not hold each request byte that the reply echoes;
 /// - `pending` and `last` do not complete the request;
