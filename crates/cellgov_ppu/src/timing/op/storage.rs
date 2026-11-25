@@ -27,6 +27,7 @@ pub(super) fn load(units: u8, ea: u64, len: u8, class: LoadClass) -> Op {
         len,
         class,
         tail: None,
+        inhibited: false,
     })
 }
 
@@ -39,6 +40,7 @@ pub(super) fn store(units: u8, ea: u64, len: u8) -> Op {
         len,
         conditional: false,
         tail: None,
+        inhibited: false,
     })
 }
 

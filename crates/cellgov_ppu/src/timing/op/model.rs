@@ -107,24 +107,28 @@ pub(crate) enum Kind {
     Unpipelined(u16),
     /// Reads `len` bytes at effective address `ea` and real address `ra`.
     /// When `tail` is `Some`, the bytes from its offset on are at its real
-    /// address.
+    /// address. `inhibited` is true when a byte is in caching-inhibited
+    /// storage.
     Load {
         ea: u64,
         ra: u64,
         len: u8,
         class: LoadClass,
         tail: Option<Tail>,
+        inhibited: bool,
     },
     /// Writes `len` bytes at effective address `ea` and real address `ra`.
     /// When `tail` is `Some`, the bytes from its offset on are at its real
     /// address. A conditional store's CR field waits for the line's
-    /// ownership.
+    /// ownership. `inhibited` is true when a byte is in caching-inhibited
+    /// storage.
     Store {
         ea: u64,
         ra: u64,
         len: u8,
         conditional: bool,
         tail: Option<Tail>,
+        inhibited: bool,
     },
     /// Zeroes the line at `ra` in the L2 and drops it from the L1.
     ZeroLine { ea: u64, ra: u64 },
@@ -232,6 +236,28 @@ impl Op {
             }
             Kind::ZeroLine { ea, ra } => *ra = to(*ea, 1, true).0,
             _ => {}
+        }
+    }
+
+    /// Sets the caching-inhibited flag of the op's load or store to what
+    /// `inhibited` gives for its effective address and length.
+    ///
+    /// An op that makes no load or store stays as it is.
+    pub(crate) fn mark_inhibited(&mut self, inhibited: impl Fn(u64, u8) -> bool) {
+        if let Kind::Load {
+            ea,
+            len,
+            inhibited: i,
+            ..
+        }
+        | Kind::Store {
+            ea,
+            len,
+            inhibited: i,
+            ..
+        } = &mut self.kind
+        {
+            *i = inhibited(*ea, *len);
         }
     }
 

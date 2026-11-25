@@ -2,8 +2,14 @@
 //! reach.
 
 use super::exit::Attempt;
+use crate::exec::caching_inhibited;
+use crate::timing::Op;
 use crate::unit::ppu_unit::PpuExecutionUnit;
 use cellgov_effects::Effect;
+
+#[cfg(test)]
+#[path = "tests/inhibited_operand_tests.rs"]
+mod inhibited_operand_tests;
 
 /// The batch's region views, on the stack while they fit.
 ///
@@ -48,6 +54,19 @@ impl<'a> RegionTable<'a> {
             &self.storage[..self.len]
         } else {
             &self.spill
+        }
+    }
+
+    /// Mark each load and store of `ops` that has a byte in a
+    /// caching-inhibited view.
+    ///
+    /// A translating thread's view is caching-inhibited when its page or
+    /// its region is. A byte that no view holds is not caching-inhibited.
+    #[inline]
+    pub(super) fn mark_inhibited(&self, ops: &mut [Op]) {
+        let views = self.as_slice();
+        for op in ops {
+            op.mark_inhibited(|ea, len| caching_inhibited(views, ea, u64::from(len)));
         }
     }
 }

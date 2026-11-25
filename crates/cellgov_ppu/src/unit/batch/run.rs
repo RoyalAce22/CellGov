@@ -154,6 +154,7 @@ impl PpuExecutionUnit {
                 }
                 self.real_op_addresses(&mut ops[..n_ops]);
             }
+            regions.mark_inhibited(&mut ops[..n_ops]);
             let ops = &ops[..n_ops];
             self.align_clock_read_to_issue(ctx, &entry, step_pc, &insn, ops);
             let attempt = self.begin_attempt(mem, effects.len(), insn, step_pc, translating, rerun);

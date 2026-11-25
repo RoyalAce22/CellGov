@@ -187,6 +187,7 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
                     len,
                     conditional: true,
                     tail: None,
+                    inhibited: false,
                 })
                 .src(gpr(rs))
                 .base(ra)

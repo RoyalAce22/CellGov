@@ -60,6 +60,9 @@ mod kernel_share_tests;
 mod divide_window_tests;
 
 #[cfg(test)]
+#[path = "tests/inhibited_access_tests.rs"]
+mod inhibited_access_tests;
+#[cfg(test)]
 #[path = "tests/preempted_call_tests.rs"]
 mod preempted_call_tests;
 #[cfg(test)]
@@ -1095,11 +1098,18 @@ impl PpeTiming {
                 len,
                 class,
                 tail,
-            } => self.load(exec, op, Operand { ea, ra, len, tail }, class),
+                inhibited,
+            } => self.load(exec, op, Operand { ea, ra, len, tail }, class, inhibited),
             Kind::Store {
-                ea, ra, len, tail, ..
+                ea,
+                ra,
+                len,
+                tail,
+                inhibited,
+                ..
             } => {
-                queue_store(&mut self.tables, exec, op, Operand { ea, ra, len, tail });
+                let at = Operand { ea, ra, len, tail };
+                queue_store(&mut self.tables, exec, op, at, inhibited);
             }
             Kind::ZeroLine { ra, .. } => self.tables.caches.zero(t, ra),
             Kind::Touch { ea, ra } => {
@@ -1286,11 +1296,22 @@ impl PpeTiming {
     /// A load that waits for such a store also holds the issue of the
     /// instructions after it. The store queue and the sector check use
     /// the real address.
-    fn load(&mut self, t: u64, op: &Op, at: Operand, class: LoadClass) {
+    ///
+    /// When `inhibited` is true, the load reads no cache and changes no
+    /// tag. CellGov charges it the trip of a load from memory. The
+    /// documents do not give the trip of a caching-inhibited load.
+    ///
+    /// [CBE-Handbook p:134 s:6.1.2.2] The CIU sends an access to the NCU or to the L2 by the page's I bit.
+    /// [CBE-Handbook p:208 s:8.4.1.1] A caching-inhibited load is an EIB operation of the instruction's own length.
+    fn load(&mut self, t: u64, op: &Op, at: Operand, class: LoadClass, inhibited: bool) {
         let tables = &mut *self.tables;
-        let (level, queued) = tables
-            .caches
-            .load_queued(t, at, class == LoadClass::Reserve);
+        let (level, queued) = if inhibited {
+            (Level::Memory, 0)
+        } else {
+            tables
+                .caches
+                .load_queued(t, at, class == LoadClass::Reserve)
+        };
         let arrival = match level {
             Level::Memory => 0,
             Level::L1 | Level::L2 => tables.caches.arrival(t, at),

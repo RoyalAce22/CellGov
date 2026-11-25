@@ -143,9 +143,17 @@ pub(super) fn queue_room(tables: &Tables, t: u64, ea: u64, len: u8) -> u64 {
 /// last issue cycle. The entries keep their drain times.
 ///
 /// [`PPU_STORE_MISS_FETCH_CYCLES`]: k::PPU_STORE_MISS_FETCH_CYCLES
+///
+/// When `inhibited` is true, the store changes no cache tag and fetches
+/// no line. A `sync` waits for the store's own EIB operation, but the
+/// documents do not give its time. So CellGov adds no wait for it.
+///
+/// [CBE-Handbook p:134 s:6.1.2.2] The CIU sends an access to the NCU or to the L2 by the page's I bit.
+/// [CBE-Handbook p:208 s:8.4.1.1] A caching-inhibited store is an EIB operation of the instruction's own length, and only a cacheable L2 miss reads a 128-byte line.
+/// [CBE-Handbook p:795 s:C.3.5] A `sync` at the bottom of the store queue waits for the BIU's `st_done` signal.
 #[inline]
-pub(super) fn queue_store(tables: &mut Tables, t: u64, op: &Op, operand: Operand) {
-    if tables.caches.store(t, operand) == Level::Memory {
+pub(super) fn queue_store(tables: &mut Tables, t: u64, op: &Op, operand: Operand, inhibited: bool) {
+    if !inhibited && tables.caches.store(t, operand) == Level::Memory {
         let last = t + u64::from(op.span.saturating_sub(1));
         tables.line_fetched = tables
             .line_fetched
