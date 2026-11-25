@@ -327,7 +327,7 @@ call table in `cellgov_ps3_abi::lv1::call` (the name and the input and
 output register counts), CellGov's family for the call and the work item
 that answers that family, the firmware versions whose kernel calls the
 number with its site count in the newest of them, and the state:
-`answered` (5 numbers) or `null_backend`, where the
+`answered` (6 numbers) or `null_backend`, where the
 call stops the run.
 
 ## Hypervisor repository
