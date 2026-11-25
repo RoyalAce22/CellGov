@@ -180,7 +180,7 @@ fn game_os_node(n1: u64, n2: u64, n3: u64, n4: u64, firmware: &str) -> Option<u6
 /// The size of the GameOS partition's real mode region at `firmware`.
 ///
 /// It is `bi.pu.rm_size`, or `None` when no repository source gives it.
-pub(crate) fn real_mode_size(firmware: &str) -> Option<u64> {
+pub fn real_mode_size(firmware: &str) -> Option<u64> {
     let bi = first_field(b"bi", 0);
     let pu = game_os_node(bi, field(b"pu", 0), 0, 0, firmware)?;
     game_os_node(bi, field(b"pu", 0), pu, field(b"rm_size", 0), firmware)

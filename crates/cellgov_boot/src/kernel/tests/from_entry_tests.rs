@@ -28,6 +28,9 @@ mod threads;
 #[path = "from_entry_start_msr_tests.rs"]
 mod start_msr;
 
+#[path = "from_entry_partition_tests.rs"]
+mod partition;
+
 /// A firmware for which CellGov serves the repository values of the
 /// psdevwiki dump.
 const FW: &str = "1.50";
@@ -191,12 +194,15 @@ fn a_kernel_that_never_calls_out_stops_at_the_step_cap() {
 
 #[test]
 fn a_segment_whose_zero_fill_passes_the_region_end_is_refused_and_one_ending_there_maps() {
+    // The real mode size at 4.93 is past the region end. The floors' size
+    // is not, so a fetch there takes the instruction storage interrupt.
+    let fw = "4.93";
     let real = KERNEL_SPAN_LIMIT - 0x1000;
     // The file holds 0x100 bytes of padding, thread 1's `b .` and one
     // `b .` of code.
     let file_len = 0x108;
     let past = kernel_elf_at(BASE + real, 0x1000 - file_len + 4, &[B_SELF]);
-    let error = run_kernel_from_entry(&past, FW, 4).unwrap_err();
+    let error = run_kernel_from_entry(&past, fw, 4).unwrap_err();
     assert!(
         matches!(error, KernelRunError::OutsideRegion { at, len } if (at, len) == (real, 0x1004)),
         "{error}"
@@ -206,7 +212,7 @@ fn a_segment_whose_zero_fill_passes_the_region_end_is_refused_and_one_ending_the
     // its entry only when the segment's bytes are in the region; an
     // unmapped word faults and adds no recent pc.
     let ending = kernel_elf_at(BASE + real, 0x1000 - file_len, &[B_SELF]);
-    let run = run_kernel_from_entry(&ending, FW, 4).unwrap();
+    let run = run_kernel_from_entry(&ending, fw, 4).unwrap();
     let entry = BASE + real + 0x104;
     let thread0 = run.thread0.expect("the run gives thread 0's position");
     assert_eq!(thread0.pc, entry);

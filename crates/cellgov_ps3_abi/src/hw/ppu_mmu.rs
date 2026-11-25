@@ -23,6 +23,34 @@ pub const RMLR_LIMIT_LOG2: (u32, u32) = (12, 62);
 /// [CBE-Handbook p:336 s:11.2] Table 11-1: the RMLS values select limits from 1 MB to 256 GB, and RMLS 0000 selects 256 GB.
 pub const PPE_RM_LIMIT_MAX: u64 = 1 << 38;
 
+/// The real mode limit that the low four bits of `rmls` select as LPCR\[RMLS\].
+///
+/// [CBE-Handbook p:336 s:11.2] Table 11-1: RMLS 0000 to 0111 select 256 GB, 16 GB, 1 GB, 64 MB, 256 MB, 16 MB, 8 MB and 128 MB.
+/// [CBE-Handbook p:336 s:11.2] Table 11-1: RMLS 1001 to 1011 select 4 MB, 2 MB and 1 MB, and the PPE treats each reserved value as 1 MB.
+pub const fn rmls_limit(rmls: u8) -> u64 {
+    match rmls & 0xF {
+        0b0000 => 1 << 38,
+        0b0001 => 1 << 34,
+        0b0010 => 1 << 30,
+        0b0011 => 1 << 26,
+        0b0100 => 1 << 28,
+        0b0101 => 1 << 24,
+        0b0110 => 1 << 23,
+        0b0111 => 1 << 27,
+        0b1001 => 1 << 22,
+        0b1010 => 1 << 21,
+        _ => 1 << 20,
+    }
+}
+
+/// The LPCR\[RMLS\] value that selects the real mode limit `limit`, or
+/// `None` when no value selects it. A reserved value is never returned.
+pub fn rmls_of_limit(limit: u64) -> Option<u8> {
+    (0..=0b1011)
+        .filter(|&rmls| rmls != 0b1000)
+        .find(|&rmls| rmls_limit(rmls) == limit)
+}
+
 /// Log2 of the segment size: 256 MB.
 ///
 /// [PPC-Book3 p:26 s:4.2] Segment size is 2^28 bytes.
@@ -182,3 +210,7 @@ pub const fn large_page_log2(lb_field: u8) -> Option<u32> {
 #[cfg(test)]
 #[path = "tests/ppu_mmu_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/ppu_mmu_rmls_tests.rs"]
+mod rmls_tests;

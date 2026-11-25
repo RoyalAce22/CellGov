@@ -11,15 +11,16 @@ use cellgov_effects::FaultKind;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionStepResult, UnitStatus};
 use cellgov_lv1::{
-    allocated_storage, page_table_storage, shadow_storage, HypercallRefusal, PausedThread,
-    RepositoryRead,
+    allocated_storage, page_table_storage, real_mode_size, shadow_storage, HypercallRefusal,
+    PausedThread, RepositoryRead,
 };
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, MemError, PageSize, Region};
 use cellgov_ppu::loader::checked_pt_loads;
+use cellgov_ppu::mmu::{Partition, PartitionRefusal};
 use cellgov_ppu::supervisor::SupervisorState;
 use cellgov_ppu::PpuExecutionUnit;
 use cellgov_ps3_abi::hw::ppu_interrupt::VECTOR_SYSTEM_RESET_THREAD1;
-use cellgov_ps3_abi::hw::ppu_mmu::REAL_MODE_IGNORED_EA;
+use cellgov_ps3_abi::hw::ppu_mmu::{rmls_of_limit, REAL_MODE_IGNORED_EA};
 use cellgov_ps3_abi::hw::ppu_spr::{
     CTRL_CT_THREAD0, CTRL_CT_THREAD1, CTRL_TE_THREAD0, CTRL_TE_THREAD1,
 };
@@ -210,6 +211,28 @@ pub enum KernelRunError {
         /// Its memory size.
         len: u64,
     },
+    /// No repository row gives the partition's real mode size at the
+    /// firmware.
+    #[error("no repository row gives the real mode size at firmware {firmware}")]
+    NoRealModeSize {
+        /// The firmware version.
+        firmware: String,
+    },
+    /// The partition's real mode size is a limit that no LPCR\[RMLS\]
+    /// value selects.
+    #[error("real mode size 0x{size:x} at firmware {firmware} is a limit no RMLS value selects")]
+    RealModeSize {
+        /// The firmware version.
+        firmware: String,
+        /// The size that the repository row gives.
+        size: u64,
+    },
+    /// The PPU refused the partition's resources.
+    #[error("kernel partition: {source}")]
+    Partition {
+        /// The PPU's account of the refusal.
+        source: PartitionRefusal,
+    },
 }
 
 /// Runs the kernel ELF `elf` of the firmware version `firmware` from its
@@ -229,27 +252,33 @@ pub enum KernelRunError {
 /// The MSR of thread 0 is the start MSR that lv1 gives the logical PPE
 /// of a partition [OFW-4.93 lv1 a:0x2E0EA0].
 ///
+/// Both threads hold the partition that [`kernel_partition`] gives for
+/// `firmware`. So a real-mode access at or past the partition's real
+/// mode size takes the storage interrupt.
+///
 /// Each thread reads its own thread in CTRL CT, and both enabled threads
 /// in TE. While lv1 holds the other thread paused, TE holds only the
 /// reader's own thread.
 ///
 /// # Errors
 ///
-/// Returns a [`KernelRunError`] when the ELF does not map into the
-/// real-mode address space.
+/// Returns a [`KernelRunError`] in these cases:
+/// - the ELF does not map into the real-mode address space;
+/// - no partition comes from the repository rows of `firmware`.
 pub fn run_kernel_from_entry(
     elf: &[u8],
     firmware: &str,
     step_cap: usize,
 ) -> Result<KernelRun, KernelRunError> {
     let entry = map_kernel(elf)?.entry;
+    let partition = kernel_partition(firmware)?;
     let mem = real_mode_image(elf)?;
     let mut rt = Runtime::new(mem, Budget::new(STEP_BUDGET), step_cap);
     rt.set_mode(RuntimeMode::FaultDriven);
     rt.set_hypervisor_firmware(firmware);
     let threads = Threads([
-        register_thread(&mut rt, 0, entry),
-        register_thread(&mut rt, 1, VECTOR_SYSTEM_RESET_THREAD1),
+        register_thread(&mut rt, 0, entry, partition),
+        register_thread(&mut rt, 1, VECTOR_SYSTEM_RESET_THREAD1, partition),
     ]);
     let mut trails = [KernelTrail::default(), KernelTrail::default()];
     let stop = drive(&mut rt, threads, &mut trails);
@@ -264,12 +293,61 @@ pub fn run_kernel_from_entry(
     })
 }
 
-/// Registers the unit of hardware thread `thread` in `rt`, at `pc`.
-fn register_thread(rt: &mut Runtime, thread: u8, pc: u64) -> UnitId {
+/// The partition that the kernel's threads hold at entry at `firmware`.
+///
+/// - The real mode limit is `bi.pu.1.rm_size` from the repository rows.
+/// - The real mode offset is 0, the partition address of the region,
+///   `bi.pu.1.rm_addr`. A CellGov real address is a partition address.
+/// - SDR1 and HID6\[LB\] are those of [`Partition::INITIAL`].
+///
+/// lv1 loads these resources when it switches a thread to the PPE:
+/// - LPCR from the thread's lv1 context and RMOR from the PPE object
+///   [OFW-4.93 lv1 a:0x2C47A0-0x2C47AC];
+/// - SDR1 from the page table of the PPE's address space
+///   [OFW-4.93 lv1 a:0x2C47BC-0x2C47D0].
+///
+/// [CBE-Handbook p:336 s:11.2] LPCR\[RMLS\] selects the real mode limit, from the sizes of Table 11-1.
+///
+/// Before the kernel selects an address space, that page table is one
+/// in lv1's own memory. No committed source gives its address, and
+/// CellGov does not model that address space. The threads start with
+/// translation off, so no access reads SDR1 until a selection loads it.
+///
+/// # Errors
+///
+/// Returns a [`KernelRunError`] in these cases:
+/// - no repository row gives the real mode size at `firmware`;
+/// - no RMLS value selects that size;
+/// - the PPU refuses the resources.
+pub fn kernel_partition(firmware: &str) -> Result<Partition, KernelRunError> {
+    let size = real_mode_size(firmware).ok_or_else(|| KernelRunError::NoRealModeSize {
+        firmware: firmware.to_owned(),
+    })?;
+    real_mode_partition(firmware, size)
+}
+
+/// The partition of [`kernel_partition`] with the real mode size `size`
+/// at `firmware`.
+pub(super) fn real_mode_partition(firmware: &str, size: u64) -> Result<Partition, KernelRunError> {
+    if rmls_of_limit(size).is_none() {
+        return Err(KernelRunError::RealModeSize {
+            firmware: firmware.to_owned(),
+            size,
+        });
+    }
+    let initial = Partition::INITIAL;
+    Partition::new(initial.sdr1(), size, 0, initial.lb())
+        .map_err(|source| KernelRunError::Partition { source })
+}
+
+/// Registers the unit of hardware thread `thread` in `rt`, at `pc`, with
+/// the resources of `partition`.
+fn register_thread(rt: &mut Runtime, thread: u8, pc: u64, partition: Partition) -> UnitId {
     rt.register_unit_with(|id| {
         let mut unit = PpuExecutionUnit::new(id);
-        unit.state_mut()
-            .set_supervisor(Some(SupervisorState::new(MSR_SF)));
+        let mut supervisor = SupervisorState::new(MSR_SF);
+        supervisor.partition = partition;
+        unit.state_mut().set_supervisor(Some(supervisor));
         unit.state_mut().pc = pc;
         unit.fix_ctrl(ctrl_of(thread));
         unit
