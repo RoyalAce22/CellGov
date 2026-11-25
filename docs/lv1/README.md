@@ -168,7 +168,7 @@ re-extraction differs. `repository_rows_are_well_formed` checks the logged set, 
 text of each key, the order of each boot's reads and the source of each
 served node without reading external data.
 
-`tables/repository.tsv` has 90 rows. Each row holds a
+`tables/repository.tsv` has 136 rows. Each row holds a
 node's key, its two values, the firmware CellGov serves its values to
 and its source. Each row is one of these nodes:
 
