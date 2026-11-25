@@ -109,7 +109,7 @@ pub(super) struct TableRow {
     pub(super) kind: Option<Kind>,
     /// `0x..` as written (`sd-0x..` for a row badged `SD`, which files
     /// as a candidate beside the plain row at the same revision), or the
-    /// version range of an LV2 row.
+    /// version range of an LV2 or LV1 row.
     pub(super) label: Option<String>,
     pub(super) first: String,
     pub(super) erk: [u8; 0x20],
@@ -145,6 +145,7 @@ pub(super) fn table_row(line: &str) -> Option<TableRow> {
             "npdrm" => kind = kind.or(Some(Kind::Class(SelfClass::Npdrm))),
             // `lv2ldr` rows stay unplaced; see `names::classify_name`.
             "lv2" => kind = kind.or(Some(Kind::Class(SelfClass::Lv2))),
+            "lv1" => kind = kind.or(Some(Kind::Class(SelfClass::Lv1))),
             "pkg" | "spkg" | "scepkg" => kind = kind.or(Some(Kind::Scepkg)),
             "np" => np_marker = true,
             "sd" => sd_marker = true,
@@ -155,7 +156,8 @@ pub(super) fn table_row(line: &str) -> Option<TableRow> {
         if i < erk_index && revision.is_none() && t.starts_with("0x") {
             revision = parse_revision(t);
         }
-        // The version-range column (`3.60-3.61`) labels an LV2 row.
+        // The version-range column (`3.60-3.61`) labels an LV2 or LV1
+        // row.
         if i < erk_index && versions.is_none() && t.contains('.') {
             versions = Lv2Versions::parse(t);
         }
@@ -164,7 +166,7 @@ pub(super) fn table_row(line: &str) -> Option<TableRow> {
         kind = Some(Kind::Class(SelfClass::Npdrm));
     }
     let label = match kind {
-        Some(Kind::Class(SelfClass::Lv2)) => versions.map(|v| v.to_string()),
+        Some(Kind::Class(class)) if class.is_version_labeled() => versions.map(|v| v.to_string()),
         _ => revision.map(|r| {
             if sd_marker {
                 format!("sd-0x{r:04x}")

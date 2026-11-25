@@ -6,6 +6,8 @@ fn record(kernel: Option<KernelRecord>, omission: Option<&str>) -> CoreOsRecord 
     CoreOsRecord {
         kernel,
         omission: omission.map(str::to_string),
+        lv1: None,
+        lv1_omission: None,
         files: Vec::new(),
     }
 }

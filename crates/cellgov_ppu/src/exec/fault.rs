@@ -141,18 +141,21 @@ pub enum PpuInterrupt {
     /// [CBE-Handbook p:258 s:9.5.15] VXU unavailable needs MSR\[VXU\] = 0, and SRR0 holds the instruction the processor would have attempted to execute next.
     #[error("PPU VXU unavailable interrupt")]
     VxuUnavailable,
-    /// `sc` with LEV = 1 from problem state, which invokes the hypervisor.
-    /// Another `sc` is one of these:
+    /// `sc` with LEV = 1 on a thread with no supervisor registers, which
+    /// invokes the hypervisor. Another `sc` is one of these:
     /// - any other LEV on a thread with no supervisor registers: a
     ///   syscall the unit yields;
     /// - any other LEV on a thread with supervisor registers: the system
     ///   call interrupt at the kernel's vector, whose record this variant
     ///   also gives;
-    /// - LEV = 1 in supervisor state: a hypercall the unit yields.
+    /// - LEV = 1 on a thread with supervisor registers, in either
+    ///   processor state: a hypercall the unit yields.
     ///
     /// For this variant the thread stops, and neither LV2 nor CellGov's
-    /// hypervisor receives a request. No document or console capture
-    /// shows what LV1 does with this call from a game process.
+    /// hypervisor receives a request. Such a thread runs a title with no
+    /// kernel. On the console, lv1's vector answers the call in r3
+    /// (`cellgov_ps3_abi::lv1::dispatch`) and the thread continues;
+    /// CellGov does not model that answer for such a thread.
     ///
     /// [PPC-Book3 p:12 s:2.3.1] `sc` with LEV = 1 invokes the hypervisor, even from problem state, and the architecture calls that a programming error.
     /// [CBE-Handbook p:256 s:9.5.13] On the PPE, LEV = 1 sets MSR\[HV\].

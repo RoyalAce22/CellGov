@@ -78,8 +78,8 @@ pub(crate) struct FirmwareInstallArgs {
     /// Replace the version that is already installed.
     #[arg(long, conflicts_with = "kernel_only")]
     pub force: bool,
-    /// Add only the LV2 kernel to the entry this PUP already
-    /// installed; its dev_flash tree stays as it is.
+    /// Add only the LV2 kernel and lv1.self to the entry this PUP
+    /// already installed; its dev_flash tree stays as it is.
     #[arg(long)]
     pub kernel_only: bool,
     #[command(flatten)]

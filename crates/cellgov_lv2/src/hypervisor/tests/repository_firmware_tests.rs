@@ -22,6 +22,7 @@ fn rgntotal_read() -> HypercallRequest {
         pc: 0x8000_0000_0000_ce3c,
         lr: 0x8000_0000_0000_c94c,
         thread: Some(0),
+        problem_state: false,
         tick: GuestTicks::ZERO,
     }
 }

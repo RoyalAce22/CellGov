@@ -154,6 +154,8 @@ revision = 1
                 stored_sha256: manifest::Sha256(manifest::sha256_of(kernel_bytes)),
             }),
             omission: None,
+            lv1: None,
+            lv1_omission: None,
             files: Vec::new(),
         };
         let keys = KeyVault::empty();
@@ -165,6 +167,8 @@ revision = 1
         let omitted = CoreOsRecord {
             kernel: None,
             omission: Some("no kernel in the package".to_string()),
+            lv1: None,
+            lv1_omission: None,
             files: Vec::new(),
         };
         let checked = verify_firmware_entry(&entry, Some(&omitted), &keys).expect("verify");
@@ -190,6 +194,8 @@ revision = 1
                 stored_sha256: manifest::Sha256(manifest::sha256_of(b"original")),
             }),
             omission: None,
+            lv1: None,
+            lv1_omission: None,
             files: Vec::new(),
         };
         let checked =

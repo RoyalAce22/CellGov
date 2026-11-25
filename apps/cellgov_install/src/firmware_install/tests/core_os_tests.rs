@@ -42,12 +42,13 @@ fn the_kernel_lands_under_core_os_and_the_record_lists_the_whole_table() {
             ("lv0", 7),
         ]
     );
-    // The unpack writes the kernel alone.
-    let written: Vec<String> = std::fs::read_dir(entry.join(CORE_OS_DIR))
+    // The unpack writes the kernel and the hypervisor alone.
+    let mut written: Vec<String> = std::fs::read_dir(entry.join(CORE_OS_DIR))
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
-    assert_eq!(written, [LV2_KERNEL_SELF]);
+    written.sort();
+    assert_eq!(written, [LV1_SELF, LV2_KERNEL_SELF]);
 
     let record = unpack.into_record();
     assert!(record.kernel.is_some() && record.omission.is_none());
@@ -57,7 +58,7 @@ fn the_kernel_lands_under_core_os_and_the_record_lists_the_whole_table() {
 #[test]
 fn a_table_naming_no_kernel_is_listed_and_nothing_is_written() {
     let entry = scratch();
-    let image = build_core_os_image(&[("lv0", b"SCE\0lv0"), ("lv1.self", b"SCE\0lv1")]);
+    let image = build_core_os_image(&[("lv0", b"SCE\0lv0"), ("creserved_0", b"x")]);
     let unpack = unpack_image(&image, &entry);
     assert!(
         matches!(unpack.kernel, Err(CoreOsOmission::NoKernel { files: 2 })),

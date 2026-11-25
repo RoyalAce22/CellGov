@@ -174,7 +174,12 @@ impl Loader {
                 })
                 .collect::<Result<Vec<_>, KeyVaultError>>()?;
             let version_range = constructor_version_range(&row);
-            if kind == "lv2" && components.len() >= 2 {
+            let version_class = match kind.as_str() {
+                "lv2" => Some(SelfClass::Lv2),
+                "lv1" => Some(SelfClass::Lv1),
+                _ => None,
+            };
+            if let (Some(class), true) = (version_class, components.len() >= 2) {
                 let (erk, riv) = (&components[0].1, &components[1].1);
                 if let (Ok(erk), Ok(riv), Some((start, end))) = (
                     erk.as_slice().try_into(),
@@ -182,7 +187,7 @@ impl Loader {
                     version_range,
                 ) {
                     self.add_keyset(
-                        Kind::Class(SelfClass::Lv2),
+                        Kind::Class(class),
                         Some(&format!("{}-{}", version_label(start), version_label(end))),
                         SelfKey { erk, riv },
                         Provenance::at(path, index + 1),
@@ -334,6 +339,7 @@ fn block_kind(self_type: Option<&str>, ty: Option<&str>, name: &str) -> Option<K
         Some("APP") => return Some(Kind::Class(SelfClass::App)),
         Some("NPDRM") => return Some(Kind::Class(SelfClass::Npdrm)),
         Some("LV2") => return Some(Kind::Class(SelfClass::Lv2)),
+        Some("LV1") => return Some(Kind::Class(SelfClass::Lv1)),
         Some(_) => return None,
         None => {}
     }
@@ -350,6 +356,8 @@ fn block_kind(self_type: Option<&str>, ty: Option<&str>, name: &str) -> Option<K
         Some(Kind::Class(SelfClass::App))
     } else if has_word("lv2") {
         Some(Kind::Class(SelfClass::Lv2))
+    } else if has_word("lv1") {
+        Some(Kind::Class(SelfClass::Lv1))
     } else if has_word("pkg") || has_word("scepkg") || has_word("spkg") {
         Some(Kind::Scepkg)
     } else {
@@ -395,17 +403,19 @@ fn block_label(
     at: &Provenance,
 ) -> Result<Option<String>, KeyVaultError> {
     match (kind, revision, version) {
-        // The firmware versions an LV2 keyset opens label it: the
+        // The firmware versions an LV2 or LV1 keyset opens label it: the
         // `version=` word, or the block's own name (`[lv2-3.55]`); its
         // `revision=` names no key.
-        (Kind::Class(SelfClass::Lv2), _, Some(v)) => match Lv2Versions::parse(&v) {
-            Some(_) => Ok(Some(v)),
-            None => Err(KeyVaultError::BadVersion {
-                at: at.clone(),
-                value: v,
-            }),
-        },
-        (Kind::Class(SelfClass::Lv2), _, None) => Ok(Some(name.to_string())),
+        (Kind::Class(class), _, Some(v)) if class.is_version_labeled() => {
+            match Lv2Versions::parse(&v) {
+                Some(_) => Ok(Some(v)),
+                None => Err(KeyVaultError::BadVersion {
+                    at: at.clone(),
+                    value: v,
+                }),
+            }
+        }
+        (Kind::Class(class), _, None) if class.is_version_labeled() => Ok(Some(name.to_string())),
         (_, Some(r), _) => match parse_revision(&r) {
             Some(_) => Ok(Some(r)),
             // scetool keeps a `revision=8000` keyset for debug SELFs. Bit
@@ -463,12 +473,16 @@ fn component_name(index: usize) -> String {
         .map_or_else(|| format!("component_{index}"), |name| name.to_string())
 }
 
-/// The firmware versions an LV2 label names: the label itself
+/// The firmware versions an LV2 or LV1 label names: the label itself
 /// (`3.60-3.61`, a `version=` word), or a block or file name with the
-/// class word in front (`lv2-3.55`, `lv2-3.60-3.61`).
-pub(super) fn lv2_label_versions(label: &str) -> Option<Lv2Versions> {
+/// class word in front (`lv2-3.55`, `lv1-3.60-3.61`).
+pub(super) fn label_versions(class: SelfClass, label: &str) -> Option<Lv2Versions> {
     Lv2Versions::parse(label).or_else(|| {
-        let rest: Vec<String> = words(label).into_iter().filter(|w| w != "lv2").collect();
+        let class_word = class.to_string();
+        let rest: Vec<String> = words(label)
+            .into_iter()
+            .filter(|w| *w != class_word)
+            .collect();
         Lv2Versions::parse(&rest.join("-"))
     })
 }

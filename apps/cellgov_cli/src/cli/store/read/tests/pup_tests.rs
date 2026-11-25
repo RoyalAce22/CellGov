@@ -47,6 +47,7 @@ fn the_set_is_clean_only_with_nothing_missing_mismatched_or_diverged() {
             reason: None,
         }],
         kernel_omission: None,
+        hypervisor_omission: None,
     }];
     assert!(!pup_set_is_clean(&missing, &[], &[]));
     assert!(!pup_set_is_clean(&[], &mismatched, &[]));

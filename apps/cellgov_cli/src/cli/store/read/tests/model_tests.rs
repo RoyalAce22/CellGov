@@ -48,12 +48,14 @@ fn a_verify_document_totals_every_entry_it_covered() {
                     reason: None,
                 }],
                 kernel_omission: None,
+                hypervisor_omission: None,
             },
             VerifiedEntryDoc {
                 entry: "02.51".to_string(),
                 matched: 2,
                 divergences: Vec::new(),
                 kernel_omission: None,
+                hypervisor_omission: None,
             },
         ],
     };

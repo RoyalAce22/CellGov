@@ -26,6 +26,7 @@ fn rgntotal_read_from(pc: u64, lr: u64) -> HypercallRequest {
         pc,
         lr,
         thread: Some(0),
+        problem_state: false,
         tick: GuestTicks::ZERO,
     }
 }

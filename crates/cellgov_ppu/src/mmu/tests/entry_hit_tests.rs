@@ -81,7 +81,8 @@ fn the_change_write_sets_bit_0x80_of_byte_15_and_keeps_its_other_bits() {
 fn a_search_gives_the_address_and_doubleword_1_of_the_entry_it_matched() {
     let d1 = 0x0234_5000 | 0b10;
     let (t, hit) = search(Access::Load, RELOCATE, d1);
-    assert!(t.is_ok(), "{t:?}");
+    // [PPC-Book3 p:38 s:4.5.3] RA is the entry's RPN followed by the EA's page offset.
+    assert_eq!(t.map(|t| t.real(EA)), Ok(Some(0x0234_5678)));
     assert_eq!(
         hit,
         Some(EntryHit {
@@ -101,7 +102,7 @@ fn a_match_in_the_secondary_group_gives_an_address_in_that_group() {
     let (t, hit) = translate_entry(EA, Access::Load, &thread(RELOCATE), |addr| {
         (addr == SECONDARY).then_some(g)
     });
-    assert!(t.is_ok(), "{t:?}");
+    assert_eq!(t.map(|t| t.real(EA)), Ok(Some(0x0234_5678)));
     assert_eq!(
         hit,
         Some(EntryHit {
@@ -144,7 +145,8 @@ fn a_refused_access_still_gives_the_entry_it_matched() {
 #[test]
 fn real_mode_and_a_search_with_no_match_give_no_entry() {
     let (t, hit) = search(Access::Load, MSR_SF, 0x0234_5000);
-    assert!(t.is_ok(), "{t:?}");
+    // [PPC-Book3 p:30 s:4.2.6.2] Below the limit, real mode ORs the EA with the offset, which is 0 here.
+    assert_eq!(t.map(|t| t.real(EA)), Ok(Some(EA)));
     assert_eq!(hit, None);
     let (t, hit) = translate_entry(EA, Access::Load, &thread(RELOCATE), |_| None);
     assert_eq!(

@@ -126,10 +126,10 @@ SELECT "pup_sha256", NULLIF("sites", 'none')
 FROM staging_hypercall_unresolved;
 DROP TABLE staging_hypercall_unresolved;
 
-CREATE TEMP TABLE staging_hypercall ("number" TEXT, "name" TEXT, "inputs" TEXT, "outputs" TEXT, "family" TEXT, "leaf" TEXT, "fw" TEXT, "sites" TEXT, "state" TEXT);
+CREATE TEMP TABLE staging_hypercall ("number" TEXT, "name" TEXT, "inputs" TEXT, "outputs" TEXT, "family" TEXT, "leaf" TEXT, "fw" TEXT, "sites" TEXT, "lv1_493" TEXT, "state" TEXT);
 .import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/hypercall.tsv staging_hypercall
-INSERT INTO hypercall ("number", "name", "inputs", "outputs", "family", "leaf", "fw", "sites", "state")
-SELECT CAST("number" AS INTEGER), NULLIF("name", 'none'), CAST(NULLIF("inputs", 'none') AS INTEGER), CAST(NULLIF("outputs", 'none') AS INTEGER), "family", "leaf", NULLIF("fw", 'none'), CAST("sites" AS INTEGER), "state"
+INSERT INTO hypercall ("number", "name", "inputs", "outputs", "family", "leaf", "fw", "sites", "lv1_493", "state")
+SELECT CAST("number" AS INTEGER), NULLIF("name", 'none'), CAST(NULLIF("inputs", 'none') AS INTEGER), CAST(NULLIF("outputs", 'none') AS INTEGER), "family", "leaf", NULLIF("fw", 'none'), CAST("sites" AS INTEGER), "lv1_493", "state"
 FROM staging_hypercall;
 DROP TABLE staging_hypercall;
 

@@ -93,12 +93,22 @@ pub(crate) struct CoreOsFileDoc {
     pub size: u64,
 }
 
+/// The command that writes a `[core_os]` block into an installed
+/// firmware entry, as one literal the not-recorded texts share.
+macro_rules! kernel_only_hint {
+    () => {
+        "add it with `cellgov firmware install <PS3UPDAT.PUP> --kernel-only`"
+    };
+}
+
 /// Why a firmware entry whose record predates the `[core_os]` block
 /// holds no kernel, as one literal both constants below spell.
 macro_rules! kernel_not_recorded_reason {
     () => {
-        "installed before the kernel was kept; add it with \
-         `cellgov firmware install <PS3UPDAT.PUP> --kernel-only`"
+        concat!(
+            "installed before the kernel was kept; ",
+            kernel_only_hint!()
+        )
     };
 }
 
@@ -114,6 +124,14 @@ pub(crate) const KERNEL_NOT_RECORDED_REASON: &str = kernel_not_recorded_reason!(
 /// predates the `[core_os]` block.
 pub(crate) const KERNEL_NOT_RECORDED: &str =
     concat!("not unpacked (", kernel_not_recorded_reason!(), ")");
+
+/// What a verify report prints for the hypervisor of a firmware entry
+/// whose record predates the `[core_os]` block.
+pub(crate) const HYPERVISOR_NOT_RECORDED: &str = concat!(
+    "not unpacked (installed before the hypervisor was kept; ",
+    kernel_only_hint!(),
+    ")"
+);
 
 /// What a human report prints for a base whose PARAM.SFO named no
 /// version. A boot summary's game identity prints the same words for
@@ -348,6 +366,11 @@ pub(crate) struct VerifiedEntryDoc {
     /// whose kernel the pass checked.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kernel_omission: Option<String>,
+    /// Why the pass checked no hypervisor for a firmware entry: the
+    /// entry stores none. Absent for a title entry, and for a firmware
+    /// entry whose hypervisor the pass checked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hypervisor_omission: Option<String>,
 }
 
 /// `firmware verify` and `title verify`.

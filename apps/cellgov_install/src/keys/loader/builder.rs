@@ -3,10 +3,10 @@
 use std::collections::BTreeMap;
 
 use crate::keys::names::{parse_revision, Kind, Part};
-use crate::keys::vault::SelfEntry;
-use crate::keys::{IgnoreReason, KeyVault, KeyVaultError, Provenance, SelfClass, SelfKey};
+use crate::keys::vault::{ClassTableMut, SelfEntry};
+use crate::keys::{IgnoreReason, KeyVault, KeyVaultError, Provenance, SelfKey};
 
-use super::text::lv2_label_versions;
+use super::text::label_versions;
 
 /// A keyset half waiting for its other half.
 pub(in crate::keys) struct PendingHalf {
@@ -83,8 +83,8 @@ impl Loader {
     }
 
     /// File a complete keyset: labeled by its parsed revision (APP,
-    /// NPDRM) or version range (LV2) when the label is one, otherwise
-    /// as an unlabeled candidate.
+    /// NPDRM) or version range (LV2, LV1) when the label is one,
+    /// otherwise as an unlabeled candidate.
     pub(in crate::keys) fn add_keyset(
         &mut self,
         kind: Kind,
@@ -98,26 +98,25 @@ impl Loader {
                 self.vault.push_scepkg(SelfEntry { key, label, at });
                 Ok(())
             }
-            Kind::Class(SelfClass::Lv2) => match lv2_label_versions(&label) {
-                Some(versions) => self
-                    .vault
-                    .insert_lv2_labeled(versions, SelfEntry { key, label, at }),
-                None => {
-                    self.vault
-                        .push_unlabeled(SelfClass::Lv2, SelfEntry { key, label, at });
-                    Ok(())
-                }
-            },
-            Kind::Class(class) => match parse_revision(&label) {
-                Some(revision) => {
-                    self.vault
-                        .insert_labeled(class, revision, SelfEntry { key, label, at })
-                }
-                None => {
-                    self.vault
-                        .push_unlabeled(class, SelfEntry { key, label, at });
-                    Ok(())
-                }
+            Kind::Class(class) => match self.vault.class_table_mut(class) {
+                ClassTableMut::Version(table) => match label_versions(class, &label) {
+                    Some(versions) => {
+                        table.insert_labeled(class, versions, SelfEntry { key, label, at })
+                    }
+                    None => {
+                        table.push_unlabeled(SelfEntry { key, label, at });
+                        Ok(())
+                    }
+                },
+                ClassTableMut::Revision(table) => match parse_revision(&label) {
+                    Some(revision) => {
+                        table.insert_labeled(class, revision, SelfEntry { key, label, at })
+                    }
+                    None => {
+                        table.push_unlabeled(SelfEntry { key, label, at });
+                        Ok(())
+                    }
+                },
             },
         }
     }

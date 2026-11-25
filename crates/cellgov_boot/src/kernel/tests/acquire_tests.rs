@@ -31,7 +31,7 @@ fn empty_vault() -> Vault {
 }
 
 fn managed(entry_dir: &Path, core_os: Option<CoreOsRecord>) -> FirmwareChoice {
-    FirmwareChoice::Managed(ManagedFirmware {
+    FirmwareChoice::Managed(Box::new(ManagedFirmware {
         entry: FirmwareEntry {
             version: FW.to_string(),
             entry_dir: entry_dir.to_path_buf(),
@@ -39,7 +39,7 @@ fn managed(entry_dir: &Path, core_os: Option<CoreOsRecord>) -> FirmwareChoice {
             core_os,
         },
         selected_by: FirmwareSelectedBy::Named,
-    })
+    }))
 }
 
 fn stored() -> Option<CoreOsRecord> {
@@ -49,6 +49,8 @@ fn stored() -> Option<CoreOsRecord> {
             stored_sha256: Sha256([0; 32]),
         }),
         omission: None,
+        lv1: None,
+        lv1_omission: None,
         files: Vec::new(),
     })
 }
@@ -98,6 +100,8 @@ fn an_entry_that_stores_no_kernel_says_whether_its_record_predates_kernels() {
     let omitted = CoreOsRecord {
         kernel: None,
         omission: Some("the package held no kernel".to_string()),
+        lv1: None,
+        lv1_omission: None,
         files: Vec::new(),
     };
     let err = kernel_of_record(&managed(&dir, Some(omitted)), &empty_vault()).unwrap_err();

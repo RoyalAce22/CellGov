@@ -38,6 +38,8 @@ fn unpacked() -> CoreOsRecord {
             stored_sha256: sha256_of(b"kernel"),
         }),
         omission: None,
+        lv1: None,
+        lv1_omission: None,
     }
 }
 
@@ -46,6 +48,8 @@ fn omitted(why: &str) -> CoreOsRecord {
         files: Vec::new(),
         kernel: None,
         omission: Some(why.to_string()),
+        lv1: None,
+        lv1_omission: None,
     }
 }
 
@@ -128,6 +132,8 @@ fn a_block_naming_neither_a_kernel_nor_an_omission_is_refused() {
         files: unpacked().files,
         kernel: None,
         omission: None,
+        lv1: None,
+        lv1_omission: None,
     };
     let err = InstallRecord::parse(&toml_of(&firmware_record(Some(neither)))).unwrap_err();
     assert!(
@@ -188,12 +194,16 @@ fn the_block_names_its_kernel_or_why_it_has_none() {
     let with_kernel = CoreOsRecord {
         kernel: Some(kernel.clone()),
         omission: None,
+        lv1: None,
+        lv1_omission: None,
         files: Vec::new(),
     };
     assert_eq!(stored_kernel(Some(&with_kernel)), Ok(&kernel));
     let omitted = CoreOsRecord {
         kernel: None,
         omission: Some("no kernel".to_string()),
+        lv1: None,
+        lv1_omission: None,
         files: Vec::new(),
     };
     assert_eq!(

@@ -83,6 +83,7 @@ pub fn is_key_gap(e: &SceError) -> bool {
             | SceError::NoAppKey { .. }
             | SceError::NoNpdrmKey { .. }
             | SceError::NoLv2Key { .. }
+            | SceError::NoLv1Key { .. }
             | SceError::NoCandidateOpensEnvelope { .. }
             | SceError::KeyEnvelopePadding
             | SceError::AesCbcDecryptFailed

@@ -17,6 +17,7 @@ fn request(inputs: [u64; 4]) -> HypercallRequest {
         pc: PC,
         lr: 0,
         thread: Some(0),
+        problem_state: false,
         tick: GuestTicks::new(7),
     }
 }
@@ -137,24 +138,24 @@ fn an_allocation_past_the_partition_memory_is_refused_and_keeps_no_region() {
 }
 
 #[test]
-fn an_allocation_with_a_nonzero_r5_or_flags_is_refused() {
+fn an_allocation_with_r5_1_or_low_flags_is_refused() {
     let (first, _) = kernel_sizes_4_93();
     let mut hv = hypervisor_4_93();
     assert_eq!(
         hv.dispatch(&request([first, 20, 1, 0])),
-        refused("an allocation with a nonzero r5")
+        refused("an allocation with r5 = 1")
     );
     assert_eq!(
         hv.dispatch(&request([first, 20, 0, 4])),
-        refused("an allocation with flags in r6")
+        refused("an allocation with flags in the low 4 bits of r6")
     );
     assert!(hv.memory().regions().is_empty());
 }
 
 #[test]
-fn an_allocation_page_size_the_kernel_does_not_pass_is_refused() {
+fn an_allocation_page_size_in_lv1s_range_the_kernel_does_not_pass_is_refused() {
     let mut hv = hypervisor_4_93();
-    for exp in [0, 12, 15, 17, 19, 21, 24, 64, 0x1_0000_0014] {
+    for exp in [12, 15, 17, 19, 21, 24] {
         assert_eq!(
             hv.dispatch(&request([0x100_0000, exp, 0, 0])),
             refused("an allocation page size that no kernel allocation is shown to pass"),
@@ -165,13 +166,13 @@ fn an_allocation_page_size_the_kernel_does_not_pass_is_refused() {
 }
 
 #[test]
-fn an_allocation_size_that_is_no_nonzero_page_multiple_is_refused() {
+fn an_allocation_of_size_0_is_refused() {
     let mut hv = hypervisor_4_93();
-    for (size, exp) in [(0, 20), (0x8_0000, 20), (0x10_8000, 16), (0x10_0001, 20)] {
+    for exp in [16, 20] {
         assert_eq!(
-            hv.dispatch(&request([size, exp, 0, 0])),
-            refused("an allocation size that is not a nonzero multiple of its page size"),
-            "{size:#x} in 2^{exp} pages"
+            hv.dispatch(&request([0, exp, 0, 0])),
+            refused("an allocation of size 0"),
+            "2^{exp} pages"
         );
     }
     assert!(hv.memory().regions().is_empty());
@@ -185,7 +186,13 @@ fn an_allocation_with_no_firmware_or_a_floor_firmware_is_refused() {
         none.dispatch(&request([first, 20, 0, 0])),
         refused("an allocation with no firmware version")
     );
-    for fw in ["1.50", "1.94", "3.70"] {
+    let mut at_1_50 = Hypervisor::new();
+    at_1_50.set_firmware("1.50");
+    assert_eq!(
+        at_1_50.dispatch(&request([first, 20, 0, 0])),
+        refused("an allocation at a firmware whose lv1 argument checks are not read")
+    );
+    for fw in ["1.94", "3.70"] {
         let mut hv = Hypervisor::new();
         hv.set_firmware(fw);
         assert_eq!(

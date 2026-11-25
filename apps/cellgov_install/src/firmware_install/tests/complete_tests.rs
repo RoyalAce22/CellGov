@@ -218,6 +218,8 @@ fn a_kernel_the_pass_could_not_write_over_is_not_reported_as_replaced() {
             stored_sha256: digest_of(b"SCE\0old"),
         }),
         omission: None,
+        lv1: None,
+        lv1_omission: None,
         files: Vec::new(),
     };
     install_entry_at(&vfs, &entry_dir, digest_of(&pup), Some(held));

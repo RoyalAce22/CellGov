@@ -13,11 +13,12 @@ use super::{
     CryptoMaterial, KeyVault, KeyVaultError, Lv2Versions, Provenance, SelfClass, SelfKey, Slot,
 };
 
-/// One `[[app]]` / `[[npdrm]]` / `[[lv2]]` / `[[scepkg]]` table.
+/// One `[[app]]` / `[[npdrm]]` / `[[lv2]]` / `[[lv1]]` / `[[scepkg]]`
+/// table.
 ///
 /// `revision` labels an APP or NPDRM keyset and `version` (a
-/// [`Lv2Versions`] label) an LV2 one; the loader refuses the other
-/// field on each.
+/// [`Lv2Versions`] label) an LV2 or LV1 one; the loader refuses the
+/// other field on each.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TomlSelfKey {
@@ -40,6 +41,7 @@ struct TomlVault {
     app: Vec<TomlSelfKey>,
     npdrm: Vec<TomlSelfKey>,
     lv2: Vec<TomlSelfKey>,
+    lv1: Vec<TomlSelfKey>,
     material: Vec<TomlMaterial>,
     scalars: BTreeMap<String, toml::Value>,
 }
@@ -54,6 +56,7 @@ impl TomlVault {
             app: take_table_array(&mut values, "app")?,
             npdrm: take_table_array(&mut values, "npdrm")?,
             lv2: take_table_array(&mut values, "lv2")?,
+            lv1: take_table_array(&mut values, "lv1")?,
             material: take_table_array(&mut values, "material")?,
             scalars: values,
         })
@@ -118,6 +121,7 @@ impl Loader {
             (Kind::Class(SelfClass::App), parsed.app),
             (Kind::Class(SelfClass::Npdrm), parsed.npdrm),
             (Kind::Class(SelfClass::Lv2), parsed.lv2),
+            (Kind::Class(SelfClass::Lv1), parsed.lv1),
         ] {
             for entry in entries {
                 let key = SelfKey {
@@ -168,6 +172,14 @@ impl Loader {
                 "[[material]] needs at least one component".to_string(),
             ));
         }
+        if let Some(key) = lv1_material_key(&entry.kind, &entry.label, &components) {
+            self.add_keyset(
+                Kind::Class(SelfClass::Lv1),
+                Some(&entry.label),
+                key,
+                at.clone(),
+            )?;
+        }
         self.vault.material.push((
             CryptoMaterial {
                 kind: entry.kind,
@@ -178,6 +190,33 @@ impl Loader {
         ));
         Ok(())
     }
+}
+
+/// The LV1 keyset a preserved `[[material]]` row of kind `lv1` holds.
+///
+/// A catalog import before the LV1 class existed kept these rows as
+/// material only. The row's `erk` and `riv` components are the keyset,
+/// and its label is the version range that the builder parses. A row of
+/// another kind, one whose label is no version range, or one whose
+/// `erk` or `riv` is absent or of another length, gives `None` and stays
+/// material only. The catalog import files no LV1 keyset from a row
+/// with no version range, so its `keys.toml` reads back to the same
+/// vault.
+fn lv1_material_key(kind: &str, label: &str, components: &[(String, Vec<u8>)]) -> Option<SelfKey> {
+    if kind != "lv1" {
+        return None;
+    }
+    Lv2Versions::parse(label)?;
+    let component = |name: &str| {
+        components
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, bytes)| bytes.as_slice())
+    };
+    Some(SelfKey {
+        erk: component("erk")?.try_into().ok()?,
+        riv: component("riv")?.try_into().ok()?,
+    })
 }
 
 /// The bytes of a top-level scalar: a hex string or a byte array.
@@ -247,12 +286,14 @@ fn keyset_label(at: &Provenance, kind: Kind, entry: TomlSelfKey) -> Result<Strin
         },
         Kind::Scepkg => toml_refusal(
             at,
-            format!("[[scepkg]] takes no {found}; the field applies to [[lv2]] only"),
+            format!("[[scepkg]] takes no {found}; the field applies to [[lv2]] and [[lv1]] only"),
         ),
     };
     match (kind, entry.revision, entry.version) {
-        (Kind::Class(SelfClass::Lv2), Some(_), _) => Err(wrong_label("version", "revision")),
-        (Kind::Class(SelfClass::Lv2), None, Some(v)) => {
+        (Kind::Class(class), Some(_), _) if class.is_version_labeled() => {
+            Err(wrong_label("version", "revision"))
+        }
+        (Kind::Class(class), None, Some(v)) if class.is_version_labeled() => {
             if Lv2Versions::parse(&v).is_none() {
                 return Err(KeyVaultError::BadVersion {
                     at: at.clone(),
@@ -344,16 +385,18 @@ impl KeyVault {
                 push_self_key_body(&mut out, &entry.key);
             }
         }
-        for (versions, entry) in &self.lv2.labeled {
-            out.push_str(&format!("\n[[lv2]]\nversion = \"{versions}\"\n"));
-            push_self_key_body(&mut out, &entry.key);
-        }
-        for entry in &self.lv2.unlabeled {
-            out.push_str(&format!(
-                "\n[[lv2]]\nlabel = {}\n",
-                toml_string(&entry.label)
-            ));
-            push_self_key_body(&mut out, &entry.key);
+        for (class, table) in [(SelfClass::Lv2, &self.lv2), (SelfClass::Lv1, &self.lv1)] {
+            for (versions, entry) in &table.labeled {
+                out.push_str(&format!("\n[[{class}]]\nversion = \"{versions}\"\n"));
+                push_self_key_body(&mut out, &entry.key);
+            }
+            for entry in &table.unlabeled {
+                out.push_str(&format!(
+                    "\n[[{class}]]\nlabel = {}\n",
+                    toml_string(&entry.label)
+                ));
+                push_self_key_body(&mut out, &entry.key);
+            }
         }
         for (material, _) in &self.material {
             out.push_str(&format!(

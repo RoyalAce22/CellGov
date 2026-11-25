@@ -12,9 +12,14 @@
 //! - a typed refusal, which stops the run.
 //!
 //! No handler writes guest state. An answer can carry a new memory
-//! region, and [`Hypervisor`] keeps it. A number with no handler takes
-//! the null backend: [`Hypervisor`] keeps a witness of it and refuses it
-//! by number.
+//! region, and [`Hypervisor`] keeps it.
+//!
+//! Before a handler runs, the hypervisor gives the answers of lv1's own
+//! `sc` vector: a number past the hypercall table, and a problem-state
+//! call. A number with no handler takes the null backend. It answers
+//! lv1's invalid-entry status where lv1's table marks the number
+//! invalid, and refuses the number otherwise. [`Hypervisor`] keeps a
+//! witness of each number with no handler.
 
 mod answer;
 mod console;
@@ -24,6 +29,7 @@ mod memory;
 mod repository;
 mod request;
 mod state;
+mod vector;
 
 pub use answer::{ConsoleWrite, HypercallAnswer, HypercallDisposition, HypercallRefusal};
 pub use cost::cost;

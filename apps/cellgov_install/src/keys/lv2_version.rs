@@ -1,15 +1,16 @@
-//! The firmware versions that label an LV2 keyset.
+//! The firmware versions that label an LV2 or LV1 keyset.
 //!
 //! An LV2 keyset opens the kernels of a run of firmware versions, so a
-//! version range labels it. The kernel SELF's program identification
-//! header carries the version, and the vault matches it against each
-//! keyset's range.
+//! version range labels it. An LV1 keyset opens the hypervisor SELFs of
+//! such a run in the same way. The SELF's program identification header
+//! carries the version, and the vault matches it against each keyset's
+//! range.
 
 use std::fmt;
 
 use cellgov_ps3_abi::format::sce::{self_version, self_version_major, self_version_minor};
 
-/// The firmware versions that label one LV2 keyset, both ends
+/// The firmware versions that label one LV2 or LV1 keyset, both ends
 /// included; a single version has `lo == hi`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Lv2Versions {
@@ -40,7 +41,9 @@ impl Lv2Versions {
     /// - `3.55`, one version;
     /// - `3.60-3.61`, a range, or `3.60~3.61` as a key table spells one;
     /// - `3-60-3-61`, a range as a name split into words spells it;
-    /// - the 16 hex digits of one version word.
+    /// - the 16 hex digits of one version word;
+    /// - two such words joined by `-`, a range as a constructor catalog's
+    ///   preserved label spells it, or one word and one dotted version.
     ///
     /// A range whose ends are out of order gives `None`.
     #[must_use]
@@ -48,6 +51,13 @@ impl Lv2Versions {
         let text = text.trim();
         if let Some(version) = parse_version_word(text) {
             return Some(Self::single(version));
+        }
+        let word_range = text
+            .split_once(['-', '~'])
+            .filter(|(lo, hi)| parse_version_word(lo).is_some() || parse_version_word(hi).is_some())
+            .and_then(|(lo, hi)| Some((range_end(lo)?, range_end(hi)?)));
+        if let Some((lo, hi)) = word_range {
+            return (lo <= hi).then_some(Self { lo, hi });
         }
         let parts: Vec<&str> = text.split(['.', '-', '~']).collect();
         let (lo, hi) = match parts[..] {
@@ -63,6 +73,14 @@ impl Lv2Versions {
         };
         (lo <= hi).then_some(Self { lo, hi })
     }
+}
+
+/// One end of a range: a 16-digit version word or a dotted `3.55`.
+fn range_end(text: &str) -> Option<u64> {
+    parse_version_word(text).or_else(|| {
+        let (major, minor) = text.split_once('.')?;
+        dotted_version(major, minor)
+    })
 }
 
 /// `major.minor` as a version word: the major is one or two decimal

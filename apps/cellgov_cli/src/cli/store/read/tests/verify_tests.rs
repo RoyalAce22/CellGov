@@ -100,6 +100,7 @@ fn a_clean_pass_reports_what_it_checked() {
             matched: 42,
             divergences: Vec::new(),
             kernel_omission: None,
+            hypervisor_omission: None,
         }]),
         "title TEST00000",
     );
@@ -116,6 +117,7 @@ fn a_kernel_the_entry_does_not_store_is_named_as_unchecked_not_as_a_divergence()
         matched: 370,
         divergences: Vec::new(),
         kernel_omission: Some("update_files carries no CORE_OS_PACKAGE.pkg".to_string()),
+        hypervisor_omission: None,
     }]);
     assert!(d.clean);
     let rendered = render(&d, "firmware 4.93");
@@ -136,6 +138,7 @@ fn a_pass_that_examined_no_artefact_is_not_a_clean_verdict() {
         matched: 0,
         divergences: Vec::new(),
         kernel_omission: None,
+        hypervisor_omission: None,
     }]);
     assert!(empty.clean);
     assert!(checked_nothing(&empty));
@@ -145,6 +148,7 @@ fn a_pass_that_examined_no_artefact_is_not_a_clean_verdict() {
         matched: 1,
         divergences: Vec::new(),
         kernel_omission: None,
+        hypervisor_omission: None,
     }])));
 }
 
@@ -155,6 +159,7 @@ fn every_divergence_gets_its_own_line() {
             entry: "base".to_string(),
             matched: 1,
             kernel_omission: None,
+            hypervisor_omission: None,
             divergences: vec![
                 DivergenceDoc {
                     path: "a/PARAM.SFO".to_string(),

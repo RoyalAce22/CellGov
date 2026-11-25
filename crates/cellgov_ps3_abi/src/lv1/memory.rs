@@ -73,6 +73,93 @@ pub fn game_os_region_counter_at_boot(firmware: &str) -> Option<u64> {
 /// [PS3DEVWIKI-HV-SYSCALL-REF s:lv1_allocate_memory] Every successful allocation the page reports returned muid 1 in r5.
 pub const ALLOCATE_MEMORY_UNIT_ID: u64 = 1;
 
+/// The `allocate_memory` worker in each firmware whose lv1 image shows
+/// its argument checks, ascending by firmware.
+///
+/// The 3.15, 3.41, 3.70 and 4.93 workers hold the same instructions.
+/// The 1.94 worker makes the same checks in the same order, with other
+/// registers and branch offsets. No 1.50 worker was found. Each
+/// `ALLOCATE_MEMORY_*_R3` constant gives the 4.93 address of its check;
+/// the 3.15 address is 0x8180 lower.
+///
+/// [PS3DEVWIKI-HV-RE s:Memory_HV_calls] lv1_allocate_memory is at 0x2D72F0 at 3.15: the wrapper that calls the 3.15 worker.
+pub const ALLOCATE_MEMORY_WORKERS: &[(&str, u32)] = &[
+    ("1.94", 0x2EEB98),
+    ("3.15", 0x2D6CD8),
+    ("3.41", 0x2D4D64),
+    ("3.70", 0x2DDA90),
+    ("4.93", 0x2DEE58),
+];
+
+/// Whether the lv1 image of the firmware version `firmware` shows the
+/// `allocate_memory` argument checks.
+pub fn allocate_memory_checks_read(firmware: &str) -> bool {
+    ALLOCATE_MEMORY_WORKERS
+        .iter()
+        .any(|(fw, _)| *fw == firmware)
+}
+
+/// The largest size, in r3, that `allocate_memory` checks past. The
+/// worker builds it with `li r0, -1` and `clrldi r0, r0, 2`.
+pub const ALLOCATE_MEMORY_MAX_SIZE: u64 = 0x3FFF_FFFF_FFFF_FFFF;
+
+/// The smallest page size exponent, in r4, that `allocate_memory`
+/// checks past.
+pub const ALLOCATE_MEMORY_PAGE_SIZE_EXP_MIN: u64 = 12;
+
+/// The largest page size exponent, in r4, that `allocate_memory` checks
+/// past. The worker compares r4 - 12 with 49, unsigned.
+pub const ALLOCATE_MEMORY_PAGE_SIZE_EXP_MAX: u64 = 61;
+
+/// The largest value of r5 that `allocate_memory` checks past.
+pub const ALLOCATE_MEMORY_R5_MAX: u64 = 1;
+
+/// The flag bits, in r6, that `allocate_memory` checks past: the low 4.
+pub const ALLOCATE_MEMORY_FLAGS_MASK: u64 = 0xF;
+
+/// The r3 of `allocate_memory` for a size above
+/// [`ALLOCATE_MEMORY_MAX_SIZE`]: `LV1_ILLEGAL_PARAMETER_VALUE` (-17) in
+/// the low word.
+///
+/// The worker marks the failing argument in the high word of r3:
+/// - bit 32 is r3, the size;
+/// - bit 33 is r4, the page size exponent;
+/// - bit 34 is r5;
+/// - bit 35 is r6, the flags.
+///
+/// The worker checks the arguments in this order, and the first failure
+/// is the answer:
+/// 1. the size, at 4.93 0x2DEF60;
+/// 2. the page size exponent, at 0x2DEF9C;
+/// 3. the size's alignment to the page size, at 0x2DEFB4;
+/// 4. r5, at 0x2DEF30;
+/// 5. the flags, at 0x2DF014.
+///
+/// The partition check before them, at 0x2DEEC4, reads lv1's own state
+/// and no argument.
+pub const ALLOCATE_MEMORY_SIZE_TOO_LARGE_R3: u64 = 0x0000_0001_FFFF_FFEF;
+
+/// The r3 of `allocate_memory` for a page size exponent outside
+/// [`ALLOCATE_MEMORY_PAGE_SIZE_EXP_MIN`] to
+/// [`ALLOCATE_MEMORY_PAGE_SIZE_EXP_MAX`]: -17, with r4 marked. The check
+/// is at 4.93 0x2DEF9C.
+pub const ALLOCATE_MEMORY_PAGE_SIZE_EXP_R3: u64 = 0x0000_0002_FFFF_FFEF;
+
+/// The r3 of `allocate_memory` for a size that is not a multiple of the
+/// page size: -17, with r3 and r4 marked. The check is at 4.93
+/// 0x2DEFB4. A size of 0 passes it.
+pub const ALLOCATE_MEMORY_SIZE_ALIGNMENT_R3: u64 = 0x0000_0003_FFFF_FFEF;
+
+/// The r3 of `allocate_memory` for an r5 above
+/// [`ALLOCATE_MEMORY_R5_MAX`]: `LV1_NO_ENTRY` (-6), with r5 marked. The
+/// check is at 4.93 0x2DEF30.
+pub const ALLOCATE_MEMORY_R5_R3: u64 = 0x0000_0004_FFFF_FFFA;
+
+/// The r3 of `allocate_memory` for flags outside
+/// [`ALLOCATE_MEMORY_FLAGS_MASK`]: -17, with r6 marked. The check is at
+/// 4.93 0x2DF014.
+pub const ALLOCATE_MEMORY_FLAGS_R3: u64 = 0x0000_0008_FFFF_FFEF;
+
 #[cfg(test)]
 #[path = "tests/memory_tests.rs"]
 mod tests;
@@ -80,3 +167,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/memory_console_tests.rs"]
 mod console_tests;
+
+#[cfg(test)]
+#[path = "tests/memory_check_tests.rs"]
+mod check_tests;

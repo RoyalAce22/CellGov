@@ -90,6 +90,10 @@ pub trait RegisteredUnit: 'static {
     /// [`ExecutionUnit::ppe_thread`].
     fn ppe_thread(&self) -> Option<u8>;
 
+    /// Whether the unit's thread is in problem state. See
+    /// [`ExecutionUnit::in_problem_state`].
+    fn in_problem_state(&self) -> bool;
+
     /// The PPE thread's issue pressure. See
     /// [`ExecutionUnit::ppe_issue_pressure`].
     fn ppe_issue_pressure(&self) -> cellgov_exec::PpeIssuePressure;
@@ -320,6 +324,11 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn ppe_thread(&self) -> Option<u8> {
         ExecutionUnit::ppe_thread(self)
+    }
+
+    #[inline]
+    fn in_problem_state(&self) -> bool {
+        ExecutionUnit::in_problem_state(self)
     }
 
     #[inline]

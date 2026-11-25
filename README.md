@@ -154,17 +154,18 @@ import reads these forms:
 
 - `keys.toml`: CellGov's own schema, what `keys import` writes.
 - scetool-style `[keyset]` files: `type` / `self_type` / `revision`
-  (`version` for an LV2 keyset) plus `erk` or `key` and `riv` or `iv`
-  per block.
+  (`version` for an LV2 or LV1 keyset) plus `erk` or `key` and `riv`
+  or `iv` per block.
 - `name: HEX` and `name = HEX` lines, and pasted key tables, one key
   per row.
 - Per-key files named `app-key-0A` / `app-iv-0A` / `npdrm-...` /
   `lv2-key-3.60-3.61` / `pkg-key` / `pup-hmac`, holding hex text or
   the raw bytes.
 
-A SELF keyset is one of three classes: `app` and `npdrm` keysets are
-labeled by key revision, and `lv2` keysets, which open the stored
-LV2 kernels, by the firmware versions they cover. `firmware kernels`
+A SELF keyset is one of four classes: `app` and `npdrm` keysets are
+labeled by key revision, and `lv2` and `lv1` keysets, which open the
+stored LV2 kernels and hypervisors, by the firmware versions they
+cover. `firmware kernels`
 refreshes `vfs/.cellgov/firmware-kernel-coverage.json` with one row per
 archive firmware version. Each row distinguishes not installed, kernel
 not unpacked with its reason, missing key with its name, and decrypted;

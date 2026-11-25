@@ -11,7 +11,8 @@ use aes::cipher::{BlockDecryptMut, KeyIvInit, StreamCipher, StreamCipherSeek};
 
 use cellgov_ps3_abi::format::sce::{
     SCE_COMP_KIND_NONE, SCE_COMP_KIND_ZLIB, SCE_DATA_KEY_SIZE, SCE_ENC_KIND_AES128_CTR,
-    SCE_ENC_KIND_PLAIN, SCE_SECTION_DESCRIPTOR_SIZE, SCE_SECTION_KIND_PHDR, SELF_PROGRAM_TYPE_LV2,
+    SCE_ENC_KIND_PLAIN, SCE_SECTION_DESCRIPTOR_SIZE, SCE_SECTION_KIND_PHDR, SELF_PROGRAM_TYPE_LV1,
+    SELF_PROGRAM_TYPE_LV2,
 };
 
 use crate::field::{read_be_u32, read_be_u64, usize_from_header, usize_from_u32};
@@ -62,6 +63,8 @@ pub fn decrypt_package(data: &[u8], keys: &KeyVault) -> Result<Vec<u8>, SceError
 ///
 /// - an LV2 kernel opens under the LV2 keysets, in
 ///   [`KeyVault::lv2_key_candidates`] order;
+/// - a hypervisor SELF opens under the LV1 keysets, in
+///   [`KeyVault::lv1_key_candidates`] order;
 /// - every other type opens under the APP keysets for its key
 ///   revision.
 ///
@@ -76,6 +79,8 @@ pub fn decrypt_package(data: &[u8], keys: &KeyVault) -> Result<Vec<u8>, SceError
 ///   revision and no unlabeled candidate.
 /// - [`SceError::NoLv2Key`]: a kernel meets a vault with no LV2
 ///   keyset.
+/// - [`SceError::NoLv1Key`]: a hypervisor SELF meets a vault with no
+///   LV1 keyset.
 /// - [`SceError::NoCandidateOpensEnvelope`]: the walk tried every
 ///   candidate and none fits.
 /// - [`SceError::KeyEnvelopePadding`]: the one candidate does not fit,
@@ -101,6 +106,18 @@ pub fn decrypt_self_to_elf(data: &[u8], keys: &KeyVault) -> Result<Vec<u8>, SceE
             "LV2",
             revision,
             || SceError::NoLv2Key {
+                version: program.version,
+            },
+        )?
+    } else if program.program_type == SELF_PROGRAM_TYPE_LV1 {
+        open_envelope_with(
+            data,
+            &hdr,
+            keys.lv1_key_candidates(program.version),
+            None,
+            "LV1",
+            revision,
+            || SceError::NoLv1Key {
                 version: program.version,
             },
         )?

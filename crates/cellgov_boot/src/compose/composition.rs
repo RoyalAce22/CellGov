@@ -144,7 +144,7 @@ pub enum ComposeError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FirmwareChoice {
     /// A store entry.
-    Managed(ManagedFirmware),
+    Managed(Box<ManagedFirmware>),
     /// A raw tree outside the store. The run carries no firmware
     /// version, so nothing downstream can key on one.
     Unmanaged {
@@ -279,11 +279,11 @@ pub fn compose_boot(inputs: &ComposeInputs<'_>) -> Result<BootComposition, Compo
             dir: dir.to_path_buf(),
         },
         (None, true) => FirmwareChoice::None,
-        (None, false) => FirmwareChoice::Managed(select_firmware(
+        (None, false) => FirmwareChoice::Managed(Box::new(select_firmware(
             &inventory,
             inputs.fw,
             shipped_firmware(&inventory, inputs.title),
-        )?),
+        )?)),
     };
 
     let mut mounts = Vec::new();

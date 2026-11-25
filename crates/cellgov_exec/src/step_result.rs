@@ -24,10 +24,11 @@ pub struct LocalDiagnostics {
     /// Set on `YieldReason::Syscall`:
     /// - 0 for an LV2 call, which a thread with no supervisor registers
     ///   yields;
-    /// - 1 for a hypercall, which a thread in supervisor state yields.
+    /// - 1 for a hypercall, which a thread with supervisor registers
+    ///   yields from either processor state.
     ///
-    /// A problem-state `sc` with LEV = 1 stops the thread and yields no
-    /// syscall.
+    /// On a thread with no supervisor registers, `sc` with LEV = 1 stops
+    /// the thread and yields no syscall.
     ///
     /// [PPC-Book1 p:26 s:2.4.2 System Call Instruction] LEV=0 user-mode kernel syscall path.
     /// [PPC-Book3 p:12 s:2.3.1] LEV=1 invokes the hypervisor; LEV>1 reserved.

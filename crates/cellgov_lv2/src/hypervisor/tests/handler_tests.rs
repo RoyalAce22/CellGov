@@ -1,4 +1,5 @@
 use super::*;
+use crate::hypervisor::HypercallRefusal;
 use cellgov_event::UnitId;
 use cellgov_time::GuestTicks;
 
@@ -10,6 +11,7 @@ fn request(number: u64) -> HypercallRequest {
         pc: 0x8000_0000_0000_fc54,
         lr: 0,
         thread: Some(1),
+        problem_state: false,
         tick: GuestTicks::new(10),
     }
 }

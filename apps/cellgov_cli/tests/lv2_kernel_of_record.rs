@@ -42,8 +42,11 @@ fn the_4_93_kernel_maps_at_its_link_base_and_enters_by_saving_r3_to_r5() {
     let vault =
         KeyVault::load_for_vfs(&store).unwrap_or_else(|e| panic!("installed-firmware-tests: {e}"));
 
-    let kernel = kernel_of_record(&FirmwareChoice::Managed(managed), &OperatorVault(vault))
-        .unwrap_or_else(|e| panic!("installed-firmware-tests: {e}"));
+    let kernel = kernel_of_record(
+        &FirmwareChoice::Managed(Box::new(managed)),
+        &OperatorVault(vault),
+    )
+    .unwrap_or_else(|e| panic!("installed-firmware-tests: {e}"));
 
     assert_eq!(kernel.firmware, installed_firmware::TEST_FIRMWARE_VERSION);
     assert_eq!(kernel.image.entry, LV2_KERNEL_LINK_BASE + 0x100);

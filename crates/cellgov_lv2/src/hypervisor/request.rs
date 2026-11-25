@@ -19,6 +19,8 @@ pub struct HypercallRequest {
     pub lr: u64,
     /// The PPE hardware thread the unit ran on, when the unit names one.
     pub thread: Option<u8>,
+    /// Whether the caller was in problem state, `MSR[PR]` = 1.
+    pub problem_state: bool,
     /// The guest time of the call.
     pub tick: GuestTicks,
 }

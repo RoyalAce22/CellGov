@@ -43,3 +43,7 @@ mod inflate_bound_tests;
 #[cfg(test)]
 #[path = "tests/program_identification_tests.rs"]
 mod program_identification_tests;
+
+#[cfg(all(test, feature = "decrypt"))]
+#[path = "tests/lv1_program_type_tests.rs"]
+mod lv1_program_type_tests;

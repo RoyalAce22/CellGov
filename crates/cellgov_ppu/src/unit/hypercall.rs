@@ -1,8 +1,8 @@
 //! The hypercall yield of a thread with supervisor registers.
 //!
-//! On such a thread, `sc` with LEV = 1 in supervisor state is a
-//! hypercall. The thread yields it to the runtime, which answers as the
-//! hypervisor. The answer arrives as the runtime's committed inputs of
+//! On such a thread, `sc` with LEV = 1 is a hypercall in either
+//! processor state. The thread yields it to the runtime, which answers
+//! as the hypervisor. The answer arrives as the runtime's committed inputs of
 //! the next batch: r3, the outputs from r4, and the step past `sc`. The
 //! runtime names the request's PPE hardware thread from the thread's
 //! CTRL.
@@ -23,8 +23,8 @@ impl PpuExecutionUnit {
     /// - any other LEV takes the system call interrupt at the kernel's
     ///   vector.
     ///
-    /// `sc` with LEV = 1 retires only in supervisor state: in problem
-    /// state it stops the thread.
+    /// The hypervisor reads the processor state of a LEV = 1 call from
+    /// `ExecutionUnit::in_problem_state`.
     pub(super) fn supervisor_sc_yield(
         &mut self,
         entry: &BatchEntry,

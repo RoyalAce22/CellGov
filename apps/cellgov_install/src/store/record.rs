@@ -13,7 +13,7 @@
 //!   none, never both and never neither.
 //! - Every string a consumer joins onto a path -- `store_path`, the
 //!   `[files]` keys, the `[rap]` filename, the `[title]` ids, the
-//!   `[core_os] kernel.path` -- is gated here, so no record read off
+//!   `[core_os] kernel.path` and `lv1.path` -- is gated here, so no record read off
 //!   disk can name a file outside the tree it describes.
 //! - The version of a kind whose store path encodes one (firmware,
 //!   update) is a usable directory name. A base's version is the one
@@ -134,13 +134,18 @@ pub enum InstallRecordParseError {
         /// The kind that carries none.
         kind: ArtifactKind,
     },
-    /// A `[core_os]` block that neither names a stored kernel nor says
-    /// why there is none, or does both.
-    #[error("[core_os] must carry exactly one of `kernel` and `omission`")]
+    /// A `[core_os]` block in one of these shapes:
+    /// - it neither names a stored kernel nor says why there is none;
+    /// - it does both;
+    /// - it names a stored hypervisor and a reason it has none.
+    #[error(
+        "[core_os] must carry exactly one of `kernel` and `omission`, and at most one of `lv1` \
+         and `lv1_omission`"
+    )]
     CoreOsBlockShape,
-    /// A `[core_os] kernel.path` that would leave the entry a consumer
-    /// joins it onto.
-    #[error("[core_os] kernel path {path:?} is not a path inside the recorded entry")]
+    /// A `[core_os] kernel.path` or `lv1.path` that would leave the entry
+    /// a consumer joins it onto.
+    #[error("[core_os] stored path {path:?} is not a path inside the recorded entry")]
     UnsafeKernelPath {
         /// The offending path.
         path: String,
@@ -233,15 +238,16 @@ pub struct CoreOsFileRecord {
     pub size: u64,
 }
 
-/// The LV2 kernel written beside `dev_flash/`, SCE-wrapped as shipped.
+/// A CoreOS SELF written beside `dev_flash/`, SCE-wrapped as shipped:
+/// the LV2 kernel, or the hypervisor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct KernelRecord {
     /// Entry-relative, `/`-separated path of the stored file.
     pub path: String,
-    /// SHA-256 over the SCE container as stored. The install holds no
-    /// key that opens the kernel, so the digest has a different basis
-    /// from the post-decrypt ones `firmware.toml` records for modules.
+    /// SHA-256 over the SCE container as stored. The install does not
+    /// open the SELF, so the digest has a different basis from the
+    /// post-decrypt ones `firmware.toml` records for modules.
     pub stored_sha256: HexSha256,
 }
 
@@ -256,13 +262,14 @@ impl KernelRecord {
     }
 }
 
-/// Why a firmware entry holds no stored kernel.
+/// Why a firmware entry holds no stored kernel, or no stored
+/// hypervisor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KernelAbsence<'a> {
     /// The entry's record predates the `[core_os]` block, so it names
-    /// neither a kernel nor a reason.
+    /// neither the SELF nor a reason.
     NotRecorded,
-    /// The install stored no kernel. The reason it recorded, when it
+    /// The install stored no SELF. The reason it recorded, when it
     /// named one.
     Omitted(Option<&'a str>),
 }
@@ -281,11 +288,30 @@ pub fn stored_kernel(core_os: Option<&CoreOsRecord>) -> Result<&KernelRecord, Ke
         .ok_or(KernelAbsence::Omitted(block.omission.as_deref()))
 }
 
+/// The hypervisor a record's `[core_os]` block names, or why it names
+/// none. `core_os` is `None` for a record that predates the block.
+///
+/// # Errors
+///
+/// [`KernelAbsence`] when the entry holds no stored hypervisor.
+pub fn stored_hypervisor(
+    core_os: Option<&CoreOsRecord>,
+) -> Result<&KernelRecord, KernelAbsence<'_>> {
+    let block = core_os.ok_or(KernelAbsence::NotRecorded)?;
+    block
+        .lv1
+        .as_ref()
+        .ok_or(KernelAbsence::Omitted(block.lv1_omission.as_deref()))
+}
+
 /// What the install read out of `CORE_OS_PACKAGE.pkg`: the table the
-/// package held, and the one file the install copied from it.
+/// package held, and the files the install copied from it.
 ///
 /// Every install writes the block. A record without one predates the
-/// block, reads as "not unpacked", and names no reason.
+/// block, reads as "not unpacked", and names no reason. A block without
+/// `lv1` and `lv1_omission` predates the hypervisor's storage, comes
+/// from a package whose table names no hypervisor, or comes from a
+/// package that yielded no table; `omission` then names why.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CoreOsRecord {
@@ -295,6 +321,13 @@ pub struct CoreOsRecord {
     /// The reason the install stored no kernel, as text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub omission: Option<String>,
+    /// The stored hypervisor SELF.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lv1: Option<KernelRecord>,
+    /// The reason the install stored no hypervisor that the table names,
+    /// as text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lv1_omission: Option<String>,
     /// Every entry the package's file table held, in table order.
     /// Empty when the install could not read the table.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -487,10 +520,13 @@ impl TryFrom<RawInstallRecord> for InstallRecord {
                 (Some(_), None) | (None, Some(_)) => {}
                 _ => return Err(InstallRecordParseError::CoreOsBlockShape),
             }
-            if let Some(kernel) = &core_os.kernel {
-                if !tree_rel_path_is_safe(&kernel.path) {
+            if core_os.lv1.is_some() && core_os.lv1_omission.is_some() {
+                return Err(InstallRecordParseError::CoreOsBlockShape);
+            }
+            for stored in core_os.kernel.iter().chain(&core_os.lv1) {
+                if !tree_rel_path_is_safe(&stored.path) {
                     return Err(InstallRecordParseError::UnsafeKernelPath {
-                        path: kernel.path.clone(),
+                        path: stored.path.clone(),
                     });
                 }
             }
@@ -601,3 +637,11 @@ mod shipped_firmware_tests;
 #[cfg(test)]
 #[path = "tests/core_os_record_tests.rs"]
 mod core_os_record_tests;
+
+#[cfg(test)]
+#[path = "tests/core_os_lv1_record_tests.rs"]
+mod core_os_lv1_record_tests;
+
+#[cfg(test)]
+#[path = "tests/stored_hypervisor_tests.rs"]
+mod stored_hypervisor_tests;

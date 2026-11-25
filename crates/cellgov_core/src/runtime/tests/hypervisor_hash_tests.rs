@@ -21,6 +21,7 @@ fn allocate(rt: &mut Runtime, size: u64) {
         pc: 0,
         lr: 0,
         thread: Some(0),
+        problem_state: false,
         tick: GuestTicks::ZERO,
     };
     let disposition = rt.hypervisor.dispatch(&request);

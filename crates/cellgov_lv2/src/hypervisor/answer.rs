@@ -5,7 +5,7 @@ use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::call::LOGICAL_CONSOLE_SEND_MAX;
 use cellgov_ps3_abi::lv1::repository::RepositoryKey;
-use cellgov_ps3_abi::lv1::status::LV1_SUCCESS;
+use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
 use super::memory::MemoryRegion;
 
@@ -30,8 +30,11 @@ impl ConsoleWrite {
 /// The answer to one hypercall, which the runtime applies as effects.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HypercallAnswer {
-    /// The status for r3: an LV1 status code.
-    pub status: i64,
+    /// The exact value for r3. Its low word holds the LV1 status code.
+    /// Its high word is what lv1 puts there on that path: 0 for a
+    /// zero-extended status, or the argument mark of an
+    /// `allocate_memory` refusal.
+    pub r3: u64,
     /// The values for r4 onward, in register order.
     pub outputs: Vec<u64>,
     /// Memory writes, at real addresses.
@@ -45,8 +48,14 @@ pub struct HypercallAnswer {
 impl HypercallAnswer {
     /// `LV1_SUCCESS` with `outputs` from r4.
     pub fn success(outputs: Vec<u64>) -> Self {
+        Self::lv1_status(zero_extended(LV1_SUCCESS), outputs)
+    }
+
+    /// The exact `r3` and the `outputs` from r4 that lv1 returns, with no
+    /// memory write.
+    pub fn lv1_status(r3: u64, outputs: Vec<u64>) -> Self {
         Self {
-            status: LV1_SUCCESS,
+            r3,
             outputs,
             effects: Vec::new(),
             console: None,
@@ -64,6 +73,21 @@ pub enum HypercallRefusal {
     /// No handler answers the number: the null backend.
     #[error("hypercall {number} from {unit:?} at pc 0x{pc:016x} has no handler")]
     Unmodelled {
+        /// The hypercall number.
+        number: u64,
+        /// The unit that made the call.
+        unit: UnitId,
+        /// The address of its `sc`.
+        pc: u64,
+    },
+    /// A problem-state call at a firmware whose live hypercall table no
+    /// console capture gives, so whether its entry is problem-state
+    /// callable is not known.
+    #[error(
+        "problem-state hypercall {number} from {unit:?} at pc 0x{pc:016x}: no capture gives \
+         lv1's hypercall table at this firmware"
+    )]
+    ProblemState {
         /// The hypercall number.
         number: u64,
         /// The unit that made the call.
@@ -121,7 +145,9 @@ impl HypercallRefusal {
     /// The hypercall number the refusal names.
     pub fn number(&self) -> u64 {
         match self {
-            Self::Unmodelled { number, .. } | Self::UnmodelledInput { number, .. } => *number,
+            Self::Unmodelled { number, .. }
+            | Self::ProblemState { number, .. }
+            | Self::UnmodelledInput { number, .. } => *number,
             Self::RepositoryNode { .. } | Self::RepositorySecondValueUnobserved { .. } => {
                 cellgov_ps3_abi::lv1::call::READ_REPOSITORY_NODE
             }

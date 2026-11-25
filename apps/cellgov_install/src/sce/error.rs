@@ -38,6 +38,14 @@ pub enum SceError {
         /// The version word of the kernel's program identification header.
         version: u64,
     },
+    /// The key vault holds no LV1 keyset at all, so nothing can open a
+    /// hypervisor SELF.
+    #[error("SCE: no LV1 key configured; the hypervisor names firmware version {}; check `cellgov keys show`", crate::keys::version_label(*version))]
+    NoLv1Key {
+        /// The version word of the hypervisor's program identification
+        /// header.
+        version: u64,
+    },
     /// Several vault keysets were tried for the revision and none
     /// passed the envelope's padding self-check.
     #[error("SCE: none of the {tried} {class} keysets in the vault opens the envelope of the container at key revision 0x{revision:04x} (wrong key material, or a wrong RAP for an NPDRM title)")]
@@ -276,6 +284,7 @@ impl SceError {
                 | SceError::NoAppKey { .. }
                 | SceError::NoNpdrmKey { .. }
                 | SceError::NoLv2Key { .. }
+                | SceError::NoLv1Key { .. }
                 | SceError::RapPboxNotAPermutation { .. }
         )
     }

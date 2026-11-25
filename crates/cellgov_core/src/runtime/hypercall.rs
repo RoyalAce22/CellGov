@@ -1,5 +1,6 @@
-//! The hypercall entry: CellGov's hypervisor answers a supervisor
-//! thread's `sc` with LEV = 1, and the runtime applies the answer.
+//! The hypercall entry: CellGov's hypervisor answers the `sc` with LEV =
+//! 1 of a thread with supervisor registers, in either processor state,
+//! and the runtime applies the answer.
 //!
 //! The answer reaches the guest in two parts:
 //! - its memory writes land at dispatch time through
@@ -51,6 +52,10 @@ impl Runtime {
             pc: result.local_diagnostics.pc.unwrap_or_default(),
             lr: result.local_diagnostics.lr.unwrap_or_default(),
             thread: self.registry.get(source).and_then(|u| u.ppe_thread()),
+            problem_state: self
+                .registry
+                .get(source)
+                .is_some_and(|u| u.in_problem_state()),
             tick: self.time,
         };
         let disposition = self.hypervisor.dispatch(&request);
@@ -96,7 +101,7 @@ impl Runtime {
             *slot = *value;
             self.registry.push_register_write(unit, reg, *value);
         }
-        let status = answer.status as u64;
+        let status = answer.r3;
         if tracing {
             self.trace.record(&TraceRecord::HypercallReturned {
                 unit,
@@ -174,7 +179,8 @@ fn traced_disposition(disposition: &HypercallDisposition) -> TracedHypercallDisp
             TracedHypercallDisposition::Unmodelled
         }
         HypercallDisposition::Refused(
-            HypercallRefusal::UnmodelledInput { .. }
+            HypercallRefusal::ProblemState { .. }
+            | HypercallRefusal::UnmodelledInput { .. }
             | HypercallRefusal::RepositoryNode { .. }
             | HypercallRefusal::RepositorySecondValueUnobserved { .. },
         ) => TracedHypercallDisposition::Refused,
@@ -184,3 +190,7 @@ fn traced_disposition(disposition: &HypercallDisposition) -> TracedHypercallDisp
 #[cfg(test)]
 #[path = "tests/hypercall_dispatch_tests.rs"]
 mod hypercall_dispatch_tests;
+
+#[cfg(test)]
+#[path = "tests/hypercall_vector_tests.rs"]
+mod hypercall_vector_tests;

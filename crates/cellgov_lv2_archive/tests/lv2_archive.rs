@@ -647,6 +647,14 @@ fn readme(data: ReadmeData<'_>) -> String {
                     .count()
                     .to_string(),
             ),
+            (
+                "hypercall_invalid",
+                data.hypercalls
+                    .iter()
+                    .filter(|row| row.lv1_493 == archive::Lv1Entry::Invalid)
+                    .count()
+                    .to_string(),
+            ),
             ("hypercall_gate", HYPERCALL_GATE.to_string()),
             ("hypercall_regenerate", HYPERCALL_REGENERATE.to_string()),
             ("repository_nodes", data.repository.len().to_string()),

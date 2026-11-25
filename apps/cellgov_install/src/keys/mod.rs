@@ -22,9 +22,12 @@
 //!   `np-klic-free`), holding hex text or the raw bytes.
 //!
 //! A key revision labels an APP or NPDRM keyset. The firmware versions
-//! an LV2 keyset opens ([`Lv2Versions`]) label it; the kernel SELF's
-//! program identification header names them. The loader keeps a SELF
-//! keyset with no stated label as an unlabeled candidate. For a SELF
+//! an LV2 or LV1 keyset opens ([`Lv2Versions`]) label it; the kernel or
+//! hypervisor SELF's program identification header names them. A
+//! preserved `[[material]]` row of kind `lv1` also gives an LV1 keyset
+//! when it holds an `erk` and a `riv` under a version-range label. The
+//! loader keeps a SELF keyset with no stated label as an unlabeled
+//! candidate. For a SELF
 //! the vault has no labeled key for, the decrypt paths try every
 //! candidate, and the envelope's zero padding selects the one that
 //! fits.
@@ -56,3 +59,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/lv2_keys_tests.rs"]
 mod lv2_keys_tests;
+
+#[cfg(test)]
+#[path = "tests/lv1_keys_tests.rs"]
+mod lv1_keys_tests;

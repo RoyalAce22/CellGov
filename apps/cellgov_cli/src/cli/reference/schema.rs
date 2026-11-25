@@ -270,6 +270,7 @@ fn verify_doc() -> VerifyDoc {
                 reason: None,
             }],
             kernel_omission: None,
+            hypervisor_omission: None,
         }],
         clean: false,
     }
@@ -316,6 +317,7 @@ fn pup_verify_doc() -> PupVerifyDoc {
             matched: 370,
             divergences: Vec::new(),
             kernel_omission: None,
+            hypervisor_omission: None,
         }],
         clean: false,
     }

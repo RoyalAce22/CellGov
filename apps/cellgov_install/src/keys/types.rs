@@ -153,19 +153,33 @@ pub enum SelfClass {
     /// The LV2 kernel SELF; the firmware versions a keyset opens
     /// ([`super::Lv2Versions`]) label it.
     Lv2,
+    /// The hypervisor SELF (`lv1.self`); the firmware versions a keyset
+    /// opens label it, as for [`SelfClass::Lv2`].
+    Lv1,
 }
 
 impl SelfClass {
     /// Every class, in report order.
-    pub const ALL: [SelfClass; 3] = [SelfClass::App, SelfClass::Npdrm, SelfClass::Lv2];
+    pub const ALL: [SelfClass; 4] = [
+        SelfClass::App,
+        SelfClass::Npdrm,
+        SelfClass::Lv2,
+        SelfClass::Lv1,
+    ];
 
     /// The inventory's name for what labels a keyset of this class.
     #[must_use]
     pub const fn label_kind(self) -> &'static str {
         match self {
             SelfClass::App | SelfClass::Npdrm => "revisions",
-            SelfClass::Lv2 => "versions",
+            SelfClass::Lv2 | SelfClass::Lv1 => "versions",
         }
+    }
+
+    /// Whether firmware version ranges label this class's keysets.
+    #[must_use]
+    pub const fn is_version_labeled(self) -> bool {
+        matches!(self, SelfClass::Lv2 | SelfClass::Lv1)
     }
 }
 
@@ -175,6 +189,7 @@ impl fmt::Display for SelfClass {
             SelfClass::App => "app",
             SelfClass::Npdrm => "npdrm",
             SelfClass::Lv2 => "lv2",
+            SelfClass::Lv1 => "lv1",
         })
     }
 }

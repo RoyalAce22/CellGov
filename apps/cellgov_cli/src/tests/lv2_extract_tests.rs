@@ -65,6 +65,8 @@ fn an_entry_without_a_stored_kernel_carries_its_reason() {
     let error = kernel_record(&entry(Some(CoreOsRecord {
         kernel: None,
         omission: Some("update_files carries no CoreOS package".to_string()),
+        lv1: None,
+        lv1_omission: None,
         files: Vec::new(),
     })))
     .expect_err("the entry stores no kernel");

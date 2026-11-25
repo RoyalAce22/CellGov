@@ -2,7 +2,7 @@
 --   CELLGOV_REGENERATE=1 cargo test -p cellgov_lv2_archive --test lv2_archive committed_archive_matches_generator
 -- Do not edit by hand: committed_archive_matches_generator fails on drift.
 
-PRAGMA user_version = 9;
+PRAGMA user_version = 10;
 
 CREATE TABLE firmware (
     "fw" TEXT NOT NULL,
@@ -162,6 +162,7 @@ CREATE TABLE hypercall (
     "leaf" TEXT NOT NULL CHECK ("leaf" IN ('boot', 'dispatch', 'interrupt_delivery', 'logical_spe', 'repository', 'translation')),
     "fw" TEXT,
     "sites" INTEGER NOT NULL,
+    "lv1_493" TEXT NOT NULL CHECK ("lv1_493" IN ('handler', 'invalid', 'past_table')),
     "state" TEXT NOT NULL CHECK ("state" IN ('answered', 'null_backend')),
     PRIMARY KEY ("number")
 ) STRICT;

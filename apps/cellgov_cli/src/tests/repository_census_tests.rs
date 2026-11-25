@@ -130,6 +130,7 @@ fn a_boot_stopped_by_a_refused_read_keeps_that_read_as_refused() {
     let rows =
         census_rows(PUP_355, 100, &boot_stopped_by(stop)).expect("a refusal is a census end");
     assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].pup_sha256, PUP_355);
     assert_eq!(rows[0].key, bi_rgntotal());
     assert!(!rows[0].answered, "the refused read is logged as refused");
 }

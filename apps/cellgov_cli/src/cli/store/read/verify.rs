@@ -20,7 +20,9 @@ use cellgov_boot::manifest::BASE_GAME_VER;
 use cellgov_install::store::inventory::FirmwareEntry;
 
 use super::collect::StoreView;
-use super::model::{DivergenceDoc, VerifiedEntryDoc, VerifyDoc, KERNEL_NOT_RECORDED};
+use super::model::{
+    DivergenceDoc, VerifiedEntryDoc, VerifyDoc, HYPERVISOR_NOT_RECORDED, KERNEL_NOT_RECORDED,
+};
 use super::{emit, view};
 
 /// `cellgov firmware verify <VERSION>`
@@ -70,11 +72,23 @@ pub(super) fn firmware_entry_doc(
             .iter()
             .map(|f| module_fault_doc(view, f))
             .collect(),
-        kernel_omission: checked.kernel_absence.map(|absence| match absence {
-            KernelAbsence::NotRecorded => KERNEL_NOT_RECORDED.to_string(),
-            KernelAbsence::Omitted(reason) => reason.unwrap_or("not unpacked").to_string(),
-        }),
+        kernel_omission: checked
+            .kernel_absence
+            .map(|absence| omission_text(absence, KERNEL_NOT_RECORDED)),
+        hypervisor_omission: checked
+            .hypervisor_absence
+            .map(|absence| omission_text(absence, HYPERVISOR_NOT_RECORDED)),
     })
+}
+
+/// Why the pass checked no stored CoreOS SELF, as the report prints it.
+/// `not_recorded` is the text for a record that predates the
+/// `[core_os]` block.
+fn omission_text(absence: KernelAbsence<'_>, not_recorded: &str) -> String {
+    match absence {
+        KernelAbsence::NotRecorded => not_recorded.to_string(),
+        KernelAbsence::Omitted(reason) => reason.unwrap_or("not unpacked").to_string(),
+    }
 }
 
 /// `cellgov title verify <TITLE_ID> [--ver V]`
@@ -166,6 +180,7 @@ pub(crate) fn title_verify(
                 .map(|d| divergence_doc(&view, d))
                 .collect(),
             kernel_omission: None,
+            hypervisor_omission: None,
         });
     }
 
@@ -292,10 +307,13 @@ fn render(doc: &VerifyDoc, subject: &str) -> String {
 pub(super) fn render_entry(entry: &VerifiedEntryDoc) -> String {
     let mut out = String::new();
     // An omission is no divergence: the pass found nothing wrong.
-    // The line keeps a clean summary from claiming a kernel the pass
-    // did not check.
+    // The line keeps a clean summary from claiming a kernel or a
+    // hypervisor the pass did not check.
     if let Some(why) = &entry.kernel_omission {
         out.push_str(&format!("{}: kernel not checked: {why}\n", entry.entry));
+    }
+    if let Some(why) = &entry.hypervisor_omission {
+        out.push_str(&format!("{}: hypervisor not checked: {why}\n", entry.entry));
     }
     for divergence in &entry.divergences {
         out.push_str(
@@ -317,3 +335,7 @@ pub(super) fn render_entry(entry: &VerifiedEntryDoc) -> String {
 #[cfg(test)]
 #[path = "tests/verify_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/verify_hypervisor_omission_tests.rs"]
+mod hypervisor_omission_tests;

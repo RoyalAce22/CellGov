@@ -16,7 +16,7 @@ const SHIPPED_FW: &str = "3.55";
 
 fn disc_composition(selected_by: FirmwareSelectedBy) -> BootComposition {
     BootComposition {
-        firmware: FirmwareChoice::Managed(ManagedFirmware {
+        firmware: FirmwareChoice::Managed(Box::new(ManagedFirmware {
             entry: FirmwareEntry {
                 version: SHIPPED_FW.to_string(),
                 entry_dir: PathBuf::from("store/firmware/3.55"),
@@ -24,7 +24,7 @@ fn disc_composition(selected_by: FirmwareSelectedBy) -> BootComposition {
                 core_os: None,
             },
             selected_by,
-        }),
+        })),
         game: GameChoice::Stored(Box::new(StoredGame {
             title_id: DISC.to_string(),
             version: GameVersion::Base,

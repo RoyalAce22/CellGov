@@ -2,8 +2,9 @@
 //! - the instructions ahead of a fault commit;
 //! - the instruction that faults leaves nothing;
 //! - the reservation stays;
-//! - a machine check, a checkstop, a problem-state `sc` with LEV = 1 and
-//!   a CellGov stop end the thread.
+//! - a machine check, a checkstop and a CellGov stop end the thread;
+//! - `sc` with LEV = 1 yields a hypercall from either processor state,
+//!   and ends a thread with no supervisor registers.
 
 use super::interrupt_support::*;
 use crate::exec::{PpuFault, PpuInterrupt};
@@ -183,15 +184,41 @@ fn a_machine_check_and_a_checkstop_stay_terminal_on_a_thread_with_supervisor_reg
 }
 
 /// [PPC-Book3 p:12 s:2.3.1] `sc` with LEV = 1 from problem state invokes the hypervisor, and the architecture calls that a programming error.
+///
+/// lv1's own vector checks `SRR1[PR]` and answers the call, so the
+/// thread yields it to CellGov's hypervisor.
 #[test]
-fn sc_with_lev_1_in_problem_state_stays_terminal_on_a_thread_with_supervisor_registers() {
+fn sc_with_lev_1_in_problem_state_yields_a_hypercall_on_a_thread_with_supervisor_registers() {
     let mem = memory(&[SC_1]);
     let mut unit = kernel_unit(KERNEL_MSR | MSR_PR);
+    let (r, _) = run(&mut unit, &mem, 4);
+    assert_eq!(r.yield_reason, YieldReason::Syscall);
+    assert_eq!(r.fault, None);
+    assert_eq!(r.local_diagnostics.syscall_lev, Some(1));
+    assert!(unit.in_problem_state());
+    assert_eq!(unit.state().pc, CODE);
+}
+
+#[test]
+fn sc_with_lev_1_in_supervisor_state_yields_a_hypercall_and_reports_no_problem_state() {
+    let mem = memory(&[SC_1]);
+    let mut unit = kernel_unit(KERNEL_MSR);
+    let (r, _) = run(&mut unit, &mem, 4);
+    assert_eq!(r.yield_reason, YieldReason::Syscall);
+    assert_eq!(r.local_diagnostics.syscall_lev, Some(1));
+    assert!(!unit.in_problem_state());
+}
+
+#[test]
+fn sc_with_lev_1_stays_terminal_on_a_thread_without_supervisor_registers() {
+    let mut mem = memory(&[SC_1]);
+    put_words(&mut mem, 0, &[SC_1]);
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
     let (r, _) = run(&mut unit, &mem, 4);
     assert_eq!(r.yield_reason, YieldReason::Fault);
     assert_eq!(fault_code(r.fault), Some(FAULT_SYSTEM_CALL | 1));
     assert_eq!(unit.status(), UnitStatus::Faulted);
-    assert_eq!(unit.state().pc, CODE);
+    assert!(!unit.in_problem_state());
 }
 
 #[test]

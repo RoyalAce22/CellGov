@@ -7,13 +7,18 @@
 use cellgov_mem::lanes::{self, source, LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::call::ALLOCATE_MEMORY;
 use cellgov_ps3_abi::lv1::memory::{
-    game_os_region_counter_at_boot, region_address, ALLOCATE_MEMORY_UNIT_ID,
+    allocate_memory_checks_read, game_os_region_counter_at_boot, region_address,
+    ALLOCATE_MEMORY_FLAGS_MASK, ALLOCATE_MEMORY_FLAGS_R3, ALLOCATE_MEMORY_MAX_SIZE,
+    ALLOCATE_MEMORY_PAGE_SIZE_EXP_MAX, ALLOCATE_MEMORY_PAGE_SIZE_EXP_MIN,
+    ALLOCATE_MEMORY_PAGE_SIZE_EXP_R3, ALLOCATE_MEMORY_R5_MAX, ALLOCATE_MEMORY_R5_R3,
+    ALLOCATE_MEMORY_SIZE_ALIGNMENT_R3, ALLOCATE_MEMORY_SIZE_TOO_LARGE_R3, ALLOCATE_MEMORY_UNIT_ID,
 };
 use cellgov_ps3_abi::lv1::partition::LPAR_ID_GAME_OS;
 use cellgov_ps3_abi::lv1::repository::{field, first_field, lookup, RepositoryKey};
 
 use super::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use super::request::HypercallRequest;
+use super::vector;
 
 /// The page size exponents that the 4.93 kernel's boot allocations pass,
 /// ascending. Its `sc` at 0x80000000002653c0 passes 20, and its `sc` at
@@ -128,16 +133,45 @@ fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDispositio
     })
 }
 
+/// The r3 that lv1's `allocate_memory` worker returns for the first of
+/// its argument checks that the call fails, or `None` when every check
+/// passes.
+///
+/// The arguments are the size in r3, the page size exponent in r4, r5
+/// and the flags in r6. The checks run in lv1's order; see
+/// [`ALLOCATE_MEMORY_SIZE_TOO_LARGE_R3`].
+fn lv1_argument_check(size: u64, exp: u64, r5: u64, flags: u64) -> Option<u64> {
+    let exp_span = ALLOCATE_MEMORY_PAGE_SIZE_EXP_MAX - ALLOCATE_MEMORY_PAGE_SIZE_EXP_MIN;
+    if size > ALLOCATE_MEMORY_MAX_SIZE {
+        Some(ALLOCATE_MEMORY_SIZE_TOO_LARGE_R3)
+    } else if exp.wrapping_sub(ALLOCATE_MEMORY_PAGE_SIZE_EXP_MIN) > exp_span {
+        Some(ALLOCATE_MEMORY_PAGE_SIZE_EXP_R3)
+    } else if size & ((1u64 << exp) - 1) != 0 {
+        Some(ALLOCATE_MEMORY_SIZE_ALIGNMENT_R3)
+    } else if r5 > ALLOCATE_MEMORY_R5_MAX {
+        Some(ALLOCATE_MEMORY_R5_R3)
+    } else if flags & !ALLOCATE_MEMORY_FLAGS_MASK != 0 {
+        Some(ALLOCATE_MEMORY_FLAGS_R3)
+    } else {
+        None
+    }
+}
+
 /// Hypercall 0: a new region of r3 bytes in 2^r4-byte pages, with its
 /// logical partition address in r4 and its memory unit id in r5.
+///
+/// A call that fails one of lv1's argument checks gets lv1's own r3,
+/// with r4 to r10 cleared, at each firmware whose lv1 shows the checks.
+/// This assumes that lv1 writes no return slot on that path.
 ///
 /// The address takes the partition's region counter, which starts at the
 /// firmware's boot value. The answer carries the region, and the
 /// hypervisor keeps it. The call is a refusal in these cases:
-/// - r5 or r6 is not 0;
+/// - no lv1 image read shows the argument checks for `firmware`;
+/// - r5 is 1, or r6 sets one of its low 4 bits, which lv1's checks pass;
 /// - r4 is a page size exponent that the kernel's boot allocations do
 ///   not pass;
-/// - r3 is not a nonzero multiple of the page size;
+/// - r3 is 0;
 /// - no source gives the boot counter or the partition's memory for
 ///   `firmware`;
 /// - the regions would hold more than the partition's memory;
@@ -148,11 +182,26 @@ pub(super) fn allocate(
     memory: &MemoryState,
 ) -> HypercallDisposition {
     let (size, exp) = (request.r(3), request.r(4));
+    let Some(firmware) = firmware else {
+        return refuse(request, "an allocation with no firmware version");
+    };
+    if !allocate_memory_checks_read(firmware) {
+        return refuse(
+            request,
+            "an allocation at a firmware whose lv1 argument checks are not read",
+        );
+    }
+    if let Some(r3) = lv1_argument_check(size, exp, request.r(5), request.r(6)) {
+        return HypercallDisposition::Answered(HypercallAnswer::lv1_status(
+            r3,
+            vector::cleared_outputs(),
+        ));
+    }
     if request.r(5) != 0 {
-        return refuse(request, "an allocation with a nonzero r5");
+        return refuse(request, "an allocation with r5 = 1");
     }
     if request.r(6) != 0 {
-        return refuse(request, "an allocation with flags in r6");
+        return refuse(request, "an allocation with flags in the low 4 bits of r6");
     }
     let page_size_exp = match u8::try_from(exp) {
         Ok(page_size_exp) if KERNEL_PAGE_SIZE_EXPS.contains(&exp) => page_size_exp,
@@ -163,15 +212,9 @@ pub(super) fn allocate(
             )
         }
     };
-    if size == 0 || size % (1u64 << exp) != 0 {
-        return refuse(
-            request,
-            "an allocation size that is not a nonzero multiple of its page size",
-        );
+    if size == 0 {
+        return refuse(request, "an allocation of size 0");
     }
-    let Some(firmware) = firmware else {
-        return refuse(request, "an allocation with no firmware version");
-    };
     let (Some(boot_counter), Some(pool)) = (
         game_os_region_counter_at_boot(firmware),
         partition_pool(firmware),
@@ -209,3 +252,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/memory_hash_tests.rs"]
 mod hash_tests;
+
+#[cfg(test)]
+#[path = "tests/memory_check_tests.rs"]
+mod check_tests;

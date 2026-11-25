@@ -134,6 +134,10 @@ impl ExecutionUnit for PpuExecutionUnit {
         Some(self.ctrl_thread())
     }
 
+    fn in_problem_state(&self) -> bool {
+        self.state.supervisor().is_some_and(|s| s.problem_state())
+    }
+
     fn time_base_read(&self) -> Option<u64> {
         self.state.clock_read.then_some(self.state.tb)
     }

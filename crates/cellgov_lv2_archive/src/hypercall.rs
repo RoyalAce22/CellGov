@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use cellgov_ps3_abi::lv1::call::{
     self, LOGICAL_CONSOLE_CONSTRUCT, LOGICAL_CONSOLE_FLUSH, LOGICAL_CONSOLE_SEND,
 };
+use cellgov_ps3_abi::lv1::table::{self as lv1_table, TableEntry};
 
 use super::extraction::ExtractionError;
 use super::pup::PupRow;
@@ -78,8 +79,41 @@ impl HypercallState {
     }
 }
 
+/// What lv1's live 4.93 hypercall table holds for a number
+/// ([`lv1_table::table_entry`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lv1Entry {
+    /// A handler.
+    Handler,
+    /// The Invalid HV Call function.
+    Invalid,
+    /// No entry: the number is past the end of the table.
+    PastTable,
+}
+
+impl Lv1Entry {
+    /// The entry of hypercall `number` in the live 4.93 table.
+    pub fn of(number: u64) -> Self {
+        match lv1_table::table_entry(lv1_table::LIVE_TABLE_FIRMWARE, number) {
+            Some(TableEntry::Handler(_)) => Self::Handler,
+            Some(TableEntry::Invalid) => Self::Invalid,
+            None => Self::PastTable,
+        }
+    }
+
+    /// The label `hypercall.tsv` uses.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Handler => "handler",
+            Self::Invalid => "invalid",
+            Self::PastTable => "past_table",
+        }
+    }
+}
+
 /// One hypercall number: its call-table row, its family and the work
-/// item that owns it, the kernels that call it, and CellGov's answer.
+/// item that owns it, the kernels that call it, lv1's 4.93 table entry
+/// and CellGov's answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HypercallRow {
     /// The constant a site loads into r11.
@@ -100,6 +134,8 @@ pub struct HypercallRow {
     /// The most sites one kernel of the newest version in `fw` holds; 0
     /// when `fw` is empty.
     pub sites: usize,
+    /// Its entry in lv1's live 4.93 hypercall table.
+    pub lv1_493: Lv1Entry,
     /// Whether CellGov's hypervisor answers it.
     pub state: HypercallState,
 }
@@ -212,6 +248,7 @@ pub fn hypercall_rows(
                 sites: by_fw
                     .and_then(|m| m.values().next_back().copied())
                     .unwrap_or(0),
+                lv1_493: Lv1Entry::of(number),
                 state: if cellgov_lv2::hypervisor::answers(number) {
                     HypercallState::Answered
                 } else {
@@ -245,6 +282,7 @@ pub fn hypercall_tsv(rows: &[HypercallRow]) -> Result<String, ArchiveError> {
                     row.fw.join(",")
                 },
                 row.sites.to_string(),
+                row.lv1_493.label().to_string(),
                 row.state.label().to_string(),
             ]
         })
@@ -359,3 +397,7 @@ fn parse_list(cell: &str) -> Vec<u64> {
 #[cfg(test)]
 #[path = "tests/hypercall_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/hypercall_lv1_entry_tests.rs"]
+mod lv1_entry_tests;

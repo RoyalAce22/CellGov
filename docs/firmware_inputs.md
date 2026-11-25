@@ -169,3 +169,46 @@ The [generated CLI reference](cli.md#cellgov-firmware-verify-pups) owns the
 exact options and exit statuses. The [LV2 archive page](lv2/README.md#pup-provenance)
 owns the current table measurements and column definitions; do not copy
 those changing values into this runbook.
+
+## Decrypt and disassemble lv1 for a firmware
+
+The install stores both CoreOS SELFs beside `dev_flash/`: the LV2 kernel
+as `core_os/lv2_kernel.self` and the hypervisor as `core_os/lv1.self`,
+each SCE-wrapped as shipped. Reading lv1 settles hypervisor answers that
+have no public source. Reading lv1 is not running it, so the rule against
+running the console's lv1 does not apply.
+
+The vault needs an LV1 keyset that opens the firmware's hypervisor. The
+preserved `[[material]]` rows of kind `lv1` give these keysets on load;
+`cellgov keys show` reports them under `lv1: versions ...`. The decrypted
+image is written to a scratch path only, never into the repository, a
+fixture, or a committed artifact. Facts derived from it -- addresses,
+statuses, tables -- are committed.
+
+1. Confirm the firmware entry holds `lv1.self`. A PUP installed before
+   this capability keeps only the kernel; add the hypervisor with the
+   PUP the entry came from:
+
+   ```console
+   cellgov --vfs-root <state>/dev_hdd0 firmware install <that-PUP>.PUP --kernel-only
+   ```
+
+   The pass reports `hypervisor core_os/lv1.self (as stored, sha256 ...)`
+   and writes nothing else.
+
+2. Decrypt the stored hypervisor to a scratch ELF:
+
+   ```console
+   cellgov --vfs-root <state>/dev_hdd0 self decrypt \
+     <state>/dev_hdd0/firmware/<version>/core_os/lv1.self \
+     --output <scratch>/lv1_<version>.elf
+   ```
+
+3. Disassemble at a virtual address. lv1 links at 0; the `sc` (LEV=1)
+   interrupt vector is at the architectural address `0x0c00`:
+
+   ```console
+   cellgov dev disasm <scratch>/lv1_<version>.elf --vaddr 0xc00 --count 320
+   ```
+
+Delete the scratch ELF when done.

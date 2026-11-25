@@ -187,8 +187,8 @@ pub(super) fn report_omissions(omissions: &[ManifestOmission]) {
     }
 }
 
-/// Report what the CoreOS package yielded: the stored kernel, or why
-/// there is none.
+/// Report what the CoreOS package yielded: the stored kernel or why
+/// there is none, and the stored hypervisor or why there is none.
 #[cfg(feature = "decrypt")]
 pub(super) fn report_core_os(core_os: &CoreOsRecord) {
     match (&core_os.kernel, &core_os.omission) {
@@ -202,6 +202,29 @@ pub(super) fn report_core_os(core_os: &CoreOsRecord) {
             eprintln!("  kernel not unpacked (the dev_flash tree is unaffected): {why}");
         }
         (None, None) => eprintln!("  kernel not unpacked (the dev_flash tree is unaffected)"),
+    }
+    match hypervisor_line(core_os) {
+        Ok(line) => println!("{line}"),
+        Err(line) => eprintln!("{line}"),
+    }
+}
+
+/// The report line for the hypervisor: `Ok` when the install stored it,
+/// `Err` when it did not.
+///
+/// A block with neither `lv1` nor `lv1_omission` comes from a table that
+/// names no hypervisor or from no table; that is still no stored
+/// hypervisor, so it gets a line too.
+#[cfg(feature = "decrypt")]
+fn hypervisor_line(core_os: &CoreOsRecord) -> Result<String, String> {
+    match (&core_os.lv1, &core_os.lv1_omission) {
+        (Some(lv1), _) => Ok(format!(
+            "  hypervisor {} (as stored, sha256 {})",
+            lv1.path,
+            lv1.stored_sha256.to_hex(),
+        )),
+        (None, Some(why)) => Err(format!("  hypervisor not unpacked: {why}")),
+        (None, None) => Err("  hypervisor not unpacked".to_string()),
     }
 }
 
@@ -249,3 +272,7 @@ mod tests;
 #[cfg(all(test, feature = "decrypt"))]
 #[path = "tests/kernel_only_exit_tests.rs"]
 mod kernel_only_exit_tests;
+
+#[cfg(all(test, feature = "decrypt"))]
+#[path = "tests/hypervisor_line_tests.rs"]
+mod hypervisor_line_tests;

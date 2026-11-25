@@ -57,6 +57,11 @@ fn full_toml() -> String {
         h(0xD1, 32),
         h(0xD2, 16)
     ));
+    t.push_str(&format!(
+        "[[lv1]]\nversion = \"3.60-3.61\"\nerk = \"{}\"\nriv = \"{}\"\n",
+        h(0xE1, 32),
+        h(0xE2, 16)
+    ));
     t
 }
 
@@ -91,6 +96,11 @@ fn assert_full(v: &KeyVault) {
     assert_eq!(lv2.len(), 1);
     assert_eq!(lv2[0].erk, [0xD1u8; 32]);
     assert_eq!(v.labels(SelfClass::Lv2), ["3.60-3.61"]);
+    let lv1: Vec<&SelfKey> = v.lv1_key_candidates(0x0003_0060_0000_0000).collect();
+    assert_eq!(lv1.len(), 1);
+    assert_eq!(lv1[0].erk, [0xE1u8; 32]);
+    assert_eq!(lv1[0].riv, [0xE2u8; 16]);
+    assert_eq!(v.labels(SelfClass::Lv1), ["3.60-3.61"]);
     assert!(
         v.missing_for_decrypt().is_empty(),
         "{:?}",
@@ -122,7 +132,7 @@ fn an_empty_vault_refuses_every_slot_by_name() {
         v.scepkg_keys().map(|_| ()).unwrap_err(),
         KeyVaultError::MissingScepkg
     ));
-    assert_eq!(v.missing_for_decrypt().len(), SCALARS.len() + 4);
+    assert_eq!(v.missing_for_decrypt().len(), SCALARS.len() + 5);
     assert!(v.self_key_candidates(SelfClass::App, 0).next().is_none());
 }
 
@@ -977,5 +987,6 @@ fn what_is_missing_is_named_slot_by_slot_and_table_by_table() {
     assert!(missing.contains(&"app (no keyset)".to_string()));
     assert!(missing.contains(&"npdrm (no keyset)".to_string()));
     assert!(missing.contains(&"lv2 (no keyset)".to_string()));
-    assert_eq!(missing.len(), Slot::ALL.len() + 4);
+    assert!(missing.contains(&"lv1 (no keyset)".to_string()));
+    assert_eq!(missing.len(), Slot::ALL.len() + 5);
 }

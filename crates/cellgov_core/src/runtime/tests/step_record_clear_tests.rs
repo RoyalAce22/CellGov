@@ -142,6 +142,7 @@ fn refusing(refusal: StepError) -> Runtime {
                     pc: 0,
                     lr: 0,
                     thread: None,
+                    problem_state: false,
                     tick: GuestTicks::ZERO,
                 });
             rt

@@ -41,8 +41,10 @@ pub const LV1_BAD_OPTION: i64 = -18;
 pub const LV1_IMPLEMENTATION_LIMITATION: i64 = -19;
 /// `LV1_NOT_IMPLEMENTED`.
 ///
-/// The enum gives the name only. No public source says that lv1 returns
-/// it for a number it has no handler for.
+/// lv1 returns this for a hypercall number past the end of its table,
+/// and for a number whose table entry is the invalid-call function; see
+/// [`super::dispatch::UNKNOWN_HYPERCALL_R3`] and
+/// [`super::table::INVALID_HYPERCALL_R3`] for the derivations.
 pub const LV1_NOT_IMPLEMENTED: i64 = -20;
 /// `LV1_INVALID_CLASS_ID`.
 pub const LV1_INVALID_CLASS_ID: i64 = -21;
@@ -58,3 +60,13 @@ pub const LV1_INVALID_DATA_FORMAT: i64 = -25;
 pub const LV1_INVALID_OPERATION: i64 = -26;
 /// `LV1_INTERNAL_ERROR`.
 pub const LV1_INTERNAL_ERROR: i64 = -32768;
+
+/// The r3 value that holds `status` in its low word and 0 in its high
+/// word.
+///
+/// lv1's `sc` vector returns its own statuses in this form, and so do
+/// the handlers that build their statuses with `oris` and `ori`. See
+/// [`super::dispatch`].
+pub const fn zero_extended(status: i64) -> u64 {
+    status as u32 as u64
+}

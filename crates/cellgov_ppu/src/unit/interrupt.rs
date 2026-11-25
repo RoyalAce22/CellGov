@@ -7,8 +7,8 @@
 //! - the system call interrupt of `sc` with any other LEV;
 //! - the external and decrementer interrupts, between two instructions.
 //!
-//! `sc` with LEV = 1 yields a hypercall in supervisor state, and stops
-//! the thread in problem state. Interrupt entry ends the batch. The next
+//! `sc` with LEV = 1 yields a hypercall in either processor state.
+//! Interrupt entry ends the batch. The next
 //! batch follows the new MSR, whose IR and DR are 0. A thread with no
 //! supervisor registers keeps the terminal fault of every interrupt.
 
@@ -84,9 +84,11 @@ impl PpuExecutionUnit {
     /// - every fault of a thread with no supervisor registers;
     /// - a CellGov stop;
     /// - a machine check: the 4.93 kernel's machine check vector loops on
-    ///   itself, so CellGov keeps the stop;
-    /// - `sc` with LEV = 1 from problem state: CellGov's hypervisor
-    ///   answers a hypercall from supervisor state only.
+    ///   itself, so CellGov keeps the stop.
+    ///
+    /// `sc` with LEV = 1 reaches here only from a thread with no
+    /// supervisor registers. A thread with them yields a hypercall in
+    /// either processor state.
     pub(super) fn delivered_interrupt(&self, fault: &PpuFault) -> Option<PpuInterrupt> {
         if !self.translates() {
             return None;

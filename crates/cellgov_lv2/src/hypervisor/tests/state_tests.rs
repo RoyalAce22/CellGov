@@ -9,6 +9,7 @@ fn request(number: u64, tick: u64, inputs: [u64; 8]) -> HypercallRequest {
         pc: 0x100,
         lr: 0,
         thread: Some(0),
+        problem_state: false,
         tick: GuestTicks::new(tick),
     }
 }

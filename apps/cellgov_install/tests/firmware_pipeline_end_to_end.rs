@@ -232,14 +232,14 @@ fn install_stores_the_kernel_the_core_os_package_carries_beside_the_tree() {
         cellgov_install::manifest::Sha256(cellgov_install::manifest::sha256_of(&bytes)),
         "the recorded digest is over the bytes as stored"
     );
-    // The unpack keeps the kernel alone; the table names every entry,
-    // kernel included.
-    assert_eq!(
-        std::fs::read_dir(outcome.entry_dir.join("core_os"))
-            .unwrap()
-            .count(),
-        1
-    );
+    // The unpack keeps the kernel and the hypervisor alone; the table
+    // names every entry, both included.
+    let mut kept: Vec<String> = std::fs::read_dir(outcome.entry_dir.join("core_os"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    kept.sort();
+    assert_eq!(kept, ["lv1.self", "lv2_kernel.self"]);
     let names: Vec<&str> = outcome
         .core_os
         .files

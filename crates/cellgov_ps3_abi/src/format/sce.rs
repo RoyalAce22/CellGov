@@ -94,6 +94,11 @@ pub const SELF_PROGRAM_ID_TYPE_OFFSET: usize = 0x0C;
 /// header; see [`self_version`] for its layout.
 pub const SELF_PROGRAM_ID_VERSION_OFFSET: usize = 0x10;
 
+/// `program_type` of the hypervisor SELF; the LV1 keys open it.
+///
+/// The `lv1.self` of 1.50, 1.94, 3.70 and 4.93 reads 2.
+pub const SELF_PROGRAM_TYPE_LV1: u32 = 2;
+
 /// `program_type` of the LV2 kernel SELF; the LV2 loader's keys open it.
 ///
 /// The 4.93 `lv2_kernel.self` reads 3.

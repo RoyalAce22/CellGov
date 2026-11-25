@@ -1,6 +1,6 @@
 //! The hypervisor's state: the partition's memory regions, and its own
-//! records of the null-backend witnesses, the guest TTY sink, the
-//! repository reads and the refusal that stopped the run.
+//! records of the witnesses of numbers with no handler, the guest TTY
+//! sink, the repository reads and the refusal that stopped the run.
 
 use std::collections::BTreeMap;
 
@@ -8,12 +8,14 @@ use cellgov_ps3_abi::lv1::call::READ_REPOSITORY_NODE;
 use cellgov_time::GuestTicks;
 
 use super::answer::{HypercallDisposition, HypercallRefusal};
-use super::handlers::answer;
+use super::handlers::{answer, answers};
 use super::memory::MemoryState;
 use super::repository::{read_record, RepositoryRead};
 use super::request::HypercallRequest;
+use super::vector;
 
-/// How often the null backend saw one hypercall number.
+/// How often the hypervisor saw one hypercall number that no handler
+/// answers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HypercallWitness {
     /// Calls of the number.
@@ -61,14 +63,29 @@ impl Hypervisor {
     /// it:
     /// - a created memory region joins the partition's regions;
     /// - a console write appends its bytes to the TTY sink;
-    /// - a repository read appends its record, answered or refused;
-    /// - a number with no handler counts toward its witness;
+    /// - a repository read that reaches its handler appends its record,
+    ///   answered or refused;
+    /// - a number with no handler counts toward its witness, whether
+    ///   lv1's answer or a refusal disposes of it;
     /// - the first refusal is kept.
     pub fn dispatch(&mut self, request: &HypercallRequest) -> HypercallDisposition {
         let disposition = answer(request, self.firmware.as_deref(), &self.memory);
-        if request.number == READ_REPOSITORY_NODE {
+        // A read that lv1's vector answers or refuses never reaches the
+        // node table, so it is no repository read.
+        if request.number == READ_REPOSITORY_NODE
+            && vector::vector_disposition(request, self.firmware.as_deref()).is_none()
+        {
             self.repository_reads
                 .push(read_record(request, &disposition));
+        }
+        if !answers(request.number) {
+            self.witnesses
+                .entry(request.number)
+                .and_modify(|w| w.hits = w.hits.saturating_add(1))
+                .or_insert(HypercallWitness {
+                    hits: 1,
+                    first_tick: request.tick,
+                });
         }
         match &disposition {
             HypercallDisposition::Answered(answer) => {
@@ -80,15 +97,6 @@ impl Hypervisor {
                 }
             }
             HypercallDisposition::Refused(refusal) => {
-                if let HypercallRefusal::Unmodelled { number, .. } = refusal {
-                    self.witnesses
-                        .entry(*number)
-                        .and_modify(|w| w.hits = w.hits.saturating_add(1))
-                        .or_insert(HypercallWitness {
-                            hits: 1,
-                            first_tick: request.tick,
-                        });
-                }
                 self.refusal.get_or_insert(*refusal);
             }
         }
@@ -106,7 +114,7 @@ impl Hypervisor {
         self.memory.sync_term()
     }
 
-    /// Each number the null backend saw, ascending.
+    /// Each number with no handler that the hypervisor saw, ascending.
     pub fn witnesses(&self) -> &BTreeMap<u64, HypercallWitness> {
         &self.witnesses
     }

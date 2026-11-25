@@ -144,6 +144,8 @@ pub(super) fn classify_name(name: &str, value_len: Option<usize>) -> NameClass {
             // loader keys, which open the loader binary and no kernel,
             // so `lv2ldr` is no alias.
             "lv2" if kind.is_none() => kind = Some(Kind::Class(SelfClass::Lv2)),
+            // `lv1ldr` is one of lv0's loader keys for the same reason.
+            "lv1" if kind.is_none() => kind = Some(Kind::Class(SelfClass::Lv1)),
             "pkg" | "scepkg" | "spkg" if kind.is_none() => kind = Some(Kind::Scepkg),
             "key" | "erk" if part.is_none() => part = Some(Part::Erk),
             "iv" | "riv" if part.is_none() => part = Some(Part::Riv),

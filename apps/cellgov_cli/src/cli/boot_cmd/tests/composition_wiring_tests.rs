@@ -18,7 +18,7 @@ fn selection(fw: Option<&str>, game_ver: Option<&str>, dir: Option<&str>) -> Boo
 
 fn managed(entry_dir: &str) -> BootComposition {
     BootComposition {
-        firmware: FirmwareChoice::Managed(ManagedFirmware {
+        firmware: FirmwareChoice::Managed(Box::new(ManagedFirmware {
             entry: FirmwareEntry {
                 version: "4.93".to_string(),
                 entry_dir: PathBuf::from(entry_dir),
@@ -26,7 +26,7 @@ fn managed(entry_dir: &str) -> BootComposition {
                 core_os: None,
             },
             selected_by: FirmwareSelectedBy::Named,
-        }),
+        })),
         game: GameChoice::Unstored,
         mounts: Vec::new(),
         eboot_dirs: Vec::new(),

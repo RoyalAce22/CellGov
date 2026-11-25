@@ -368,6 +368,13 @@ pub trait ExecutionUnit {
         None
     }
 
+    /// Whether this unit's thread is in problem state, `MSR[PR]` = 1, at
+    /// the end of its last step. A unit with no machine state register
+    /// answers false.
+    fn in_problem_state(&self) -> bool {
+        false
+    }
+
     /// What this PPE thread's recent stalls at the issue point the PPE's
     /// threads share add to each instruction of another one.
     ///

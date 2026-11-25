@@ -24,6 +24,7 @@ fn read(lpar: u64, second: &[u8], index: u64) -> HypercallRequest {
         pc: 0x8000_0000_0000_ce3c,
         lr: 0,
         thread: Some(1),
+        problem_state: false,
         tick: GuestTicks::ZERO,
     }
 }

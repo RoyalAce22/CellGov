@@ -37,6 +37,9 @@ pub const HYPERCALL_LEAVES: &[&str] = &[
 /// Labels of `hypercall.state`; `HypercallState::label` gives each one.
 pub const HYPERCALL_STATES: &[&str] = &["answered", "null_backend"];
 
+/// Labels of `hypercall.lv1_493`; `Lv1Entry::label` gives each one.
+pub const HYPERCALL_LV1_ENTRIES: &[&str] = &["handler", "invalid", "past_table"];
+
 /// Defines `hypercall_site.tsv`: each kernel's hypercall sites, by
 /// number.
 pub const HYPERCALL_SITE: TableSpec = TableSpec {
@@ -142,6 +145,12 @@ pub const HYPERCALL: TableSpec = TableSpec {
         Column {
             name: "sites",
             kind: ColumnKind::Integer,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "lv1_493",
+            kind: ColumnKind::Enum(HYPERCALL_LV1_ENTRIES),
             nullable: false,
             references: None,
         },

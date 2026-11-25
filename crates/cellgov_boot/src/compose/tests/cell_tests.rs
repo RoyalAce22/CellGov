@@ -66,7 +66,7 @@ fn composition(firmware: FirmwareChoice, game: GameChoice) -> BootComposition {
 }
 
 fn managed(version: &str) -> FirmwareChoice {
-    FirmwareChoice::Managed(ManagedFirmware {
+    FirmwareChoice::Managed(Box::new(ManagedFirmware {
         entry: FirmwareEntry {
             version: version.to_string(),
             entry_dir: PathBuf::from("store/firmware"),
@@ -74,7 +74,7 @@ fn managed(version: &str) -> FirmwareChoice {
             core_os: None,
         },
         selected_by: FirmwareSelectedBy::Named,
-    })
+    }))
 }
 
 fn stored(version: GameVersion) -> GameChoice {

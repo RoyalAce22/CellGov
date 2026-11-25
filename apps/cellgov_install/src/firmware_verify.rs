@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 
 use crate::keys::KeyVault;
 use crate::manifest::{self, FirmwareManifest, ManifestError, Sha256 as HexSha256, MANIFEST_FILE};
-use crate::store::record::{stored_kernel, CoreOsRecord, KernelAbsence, KernelRecord};
+use crate::store::record::{
+    stored_hypervisor, stored_kernel, CoreOsRecord, KernelAbsence, KernelRecord,
+};
 use cellgov_ps3_abi::format::dev_flash::FLASH_MOUNT;
 
 /// Why one module did not match the manifest entry that names it.
@@ -269,6 +271,7 @@ fn is_vault_gap(e: &crate::sce::SceError) -> bool {
             | SceError::NoAppKey { .. }
             | SceError::NoNpdrmKey { .. }
             | SceError::NoLv2Key { .. }
+            | SceError::NoLv1Key { .. }
             | SceError::NoCandidateOpensEnvelope { .. }
             | SceError::NoRapForNpdrmTitle { .. }
             | SceError::RapPboxNotAPermutation { .. }
@@ -449,7 +452,7 @@ fn open_module(
     }))
 }
 
-/// Re-hash the stored kernel `kernel` names under `entry_dir`.
+/// Re-hash the stored CoreOS SELF `kernel` names under `entry_dir`.
 ///
 /// The record holds the as-stored digest, so this hashes the bytes as
 /// they lie and needs no key. `None` is a match.
@@ -489,16 +492,19 @@ pub fn verify_stored_kernel(
 /// One firmware entry held against its manifest and its record.
 #[derive(Debug)]
 pub struct EntryVerifyReport<'a> {
-    /// The modules, and the stored kernel when the entry holds one.
+    /// The modules, and the stored kernel and hypervisor when the entry
+    /// holds them.
     pub report: FirmwareVerifyReport,
     /// Why the pass checked no kernel, when the entry stores none.
     pub kernel_absence: Option<KernelAbsence<'a>>,
+    /// Why the pass checked no hypervisor, when the entry stores none.
+    pub hypervisor_absence: Option<KernelAbsence<'a>>,
 }
 
 /// Holds the firmware entry at `entry_dir` against its record: every
-/// module the entry's `firmware.toml` lists, and the kernel its
-/// `[core_os]` block names. `core_os` is `None` for a record that
-/// predates the block.
+/// module the entry's `firmware.toml` lists, and the kernel and the
+/// hypervisor its `[core_os]` block names. `core_os` is `None` for a
+/// record that predates the block.
 ///
 /// # Errors
 ///
@@ -510,25 +516,46 @@ pub fn verify_firmware_entry<'a>(
     keys: &KeyVault,
 ) -> Result<EntryVerifyReport<'a>, FirmwareVerifyError> {
     let mut report = verify_firmware_tree(&entry_dir.join(FLASH_MOUNT), keys)?;
-    let kernel_absence = match stored_kernel(core_os) {
-        Ok(kernel) => {
-            match verify_stored_kernel(entry_dir, kernel)? {
-                None => report.matched += 1,
-                Some(fault) => report.divergences.push(fault),
-            }
-            None
-        }
-        Err(absence) => Some(absence),
-    };
+    let kernel_absence = verify_core_os_self(entry_dir, stored_kernel(core_os), &mut report)?;
+    let hypervisor_absence =
+        verify_core_os_self(entry_dir, stored_hypervisor(core_os), &mut report)?;
     Ok(EntryVerifyReport {
         report,
         kernel_absence,
+        hypervisor_absence,
     })
+}
+
+/// Holds the stored CoreOS SELF that `stored` names to its recorded
+/// digest, and counts the result into `report`. Returns the absence
+/// when the entry holds no such SELF.
+fn verify_core_os_self<'a>(
+    entry_dir: &Path,
+    stored: Result<&KernelRecord, KernelAbsence<'a>>,
+    report: &mut FirmwareVerifyReport,
+) -> Result<Option<KernelAbsence<'a>>, FirmwareVerifyError> {
+    let record = match stored {
+        Ok(record) => record,
+        Err(absence) => return Ok(Some(absence)),
+    };
+    match verify_stored_kernel(entry_dir, record)? {
+        None => report.matched += 1,
+        Some(fault) => report.divergences.push(fault),
+    }
+    Ok(None)
 }
 
 #[cfg(test)]
 #[path = "tests/firmware_verify_tests.rs"]
 mod tests;
+
+#[cfg(all(test, feature = "decrypt"))]
+#[path = "tests/firmware_verify_lv1_tests.rs"]
+mod lv1_tests;
+
+#[cfg(all(test, feature = "decrypt"))]
+#[path = "tests/firmware_verify_hypervisor_absence_tests.rs"]
+mod hypervisor_absence_tests;
 
 #[cfg(test)]
 #[path = "tests/verify_stored_kernel_tests.rs"]
