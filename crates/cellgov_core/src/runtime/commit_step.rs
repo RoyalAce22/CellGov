@@ -12,6 +12,7 @@ use crate::commit::{BlockReason, CommitContext, CommitError, CommitOutcome};
 use crate::runtime::spaces::AddressSpaceId;
 use crate::runtime::state::Runtime;
 use crate::runtime::types::RuntimeStep;
+use crate::runtime::unit_clocks::FiredEvents;
 
 impl Runtime {
     /// Drive the commit pipeline for the step [`Runtime::step`] last
@@ -191,7 +192,9 @@ impl Runtime {
             self.route_raw_spu_window_accesses(source_space, effects);
         }
 
+        let mut fired = FiredEvents::default();
         if result.yield_reason == YieldReason::Syscall {
+            fired = self.fire_events_before_dispatch();
             self.dispatch_syscall(result, source);
         }
         // Park before firing completions: fire_dma_completions sets the
@@ -227,7 +230,10 @@ impl Runtime {
         // unit that a due event wakes resumes at the event's tick.
         self.wake_reservation_lost_waiters();
         self.registry.sync_clocks(self.time);
-        let (mut due, mut timer_due) = self.fire_due_events(self.time);
+        let (mut due, mut timer_due) = fired;
+        let (dispatch_due, dispatch_timer_due) = self.fire_due_events(self.time);
+        due.extend(dispatch_due);
+        timer_due.extend(dispatch_timer_due);
         self.serve_spu_thread_interrupt_mailbox(source);
 
         // A unit that stopped itself reports the stop it can resume from.
@@ -302,6 +308,20 @@ impl Runtime {
             .notify_yielded(source, result.yield_reason, self.step_woke_others, holds_cs);
 
         outcome
+    }
+
+    /// Fires each event due by this commit's tick before the commit
+    /// dispatches its system call, and returns the fired events.
+    ///
+    /// An event due before the commit's tick takes effect at its own tick,
+    /// so the dispatch sees its result. For example, a paused thread whose
+    /// decrementer deadline came first is running when the dispatch raises
+    /// its plug. The commit's writes already landed, so a waiter whose
+    /// reservation they cleared resumes at this commit's tick.
+    fn fire_events_before_dispatch(&mut self) -> FiredEvents {
+        self.wake_reservation_lost_waiters();
+        self.registry.sync_clocks(self.time);
+        self.fire_due_events(self.time)
     }
 
     /// Trivial-step fast path under FaultDriven: the step left nothing

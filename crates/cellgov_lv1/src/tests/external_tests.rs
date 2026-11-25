@@ -177,6 +177,7 @@ fn a_raise_that_wakes_a_paused_thread_with_ee_clear_gives_it_the_mediated_reques
         vec![ThreadResume {
             thread: 1,
             external: Some(ExternalRaise::Mediated),
+            clears_decrementer: false,
         }]
     );
 }
@@ -268,6 +269,7 @@ fn a_raise_that_wakes_a_paused_thread_ends_its_pause_and_delivers_its_interrupt(
         vec![ThreadResume {
             thread: 1,
             external: Some(DELIVERY),
+            clears_decrementer: false,
         }]
     );
     assert_eq!(hv.groups().interrupt().paused().thread(1), None);

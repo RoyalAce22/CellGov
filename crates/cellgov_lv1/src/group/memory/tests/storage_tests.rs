@@ -143,7 +143,7 @@ fn a_page_of_a_region_with_no_storage_is_no_storage_and_one_past_every_region_is
     let memory = boot_regions_and_one_past_the_storage();
     assert_eq!(memory.storage_of(&PAST_STORAGE), None);
     assert_eq!(
-        region_page(&memory, PAST_STORAGE.lpar_address + 0x8_0000, 20),
+        region_page(&memory, PAST_STORAGE.lpar_address, 20),
         Some(AllocatedPage::NoStorage)
     );
     assert_eq!(

@@ -22,7 +22,7 @@ pub(crate) const GROUP: Group = Group {
         HashedSurface {
             name: "the memory regions",
             source: Some(REGION_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(37),
         },
         HashedSurface {
             name: "the region counter",
@@ -42,17 +42,17 @@ pub(crate) const GROUP: Group = Group {
         HashedSurface {
             name: "the real address of each memory region's storage",
             source: Some(REGION_STORAGE_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(37),
         },
         HashedSurface {
             name: "the real address of each address space's page table",
             source: Some(PAGE_TABLE_STORAGE_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(37),
         },
         HashedSurface {
             name: "the end of the storage that the memory regions got",
             source: Some(STORAGE_END_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(37),
         },
     ],
 };

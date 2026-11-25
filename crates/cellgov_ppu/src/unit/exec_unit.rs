@@ -153,6 +153,14 @@ impl ExecutionUnit for PpuExecutionUnit {
         self.registers_at_boundary(tick, time_base)
     }
 
+    fn decrementer_zero(&self, tick: GuestTicks, time_base: u64) -> Option<GuestTicks> {
+        self.decrementer_zero_tick(tick, time_base)
+    }
+
+    fn write_decrementer(&mut self, value: u32, tick: GuestTicks, time_base: u64) -> bool {
+        self.write_decrementer_at_boundary(value, tick, time_base)
+    }
+
     fn load_page_table(&mut self, sdr1: u64, lb: u8) -> bool {
         self.state
             .update_supervisor(|s| {

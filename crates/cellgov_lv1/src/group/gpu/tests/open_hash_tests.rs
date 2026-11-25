@@ -27,7 +27,7 @@ fn the_gpu_open_surface_is_on_its_own_source() {
     assert_eq!(GROUP.hashed_surfaces.len(), 1);
     let surface = &GROUP.hashed_surfaces[0];
     assert_eq!(surface.source, Some(GPU_OPEN_SOURCE));
-    assert_eq!(surface.stamp, Stamp::Pending);
+    assert_eq!(surface.stamp, Stamp::Version(37));
     assert_eq!(GPU_OPEN_SOURCE, 216);
     assert!(GROUP
         .lanes

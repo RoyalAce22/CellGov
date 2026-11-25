@@ -562,6 +562,14 @@ mod hypercall_return_tests;
 mod boundary_registers_tests;
 
 #[cfg(test)]
+#[path = "tests/decrementer_zero_tests.rs"]
+mod decrementer_zero_tests;
+
+#[cfg(test)]
+#[path = "tests/decrementer_write_tests.rs"]
+mod decrementer_write_tests;
+
+#[cfg(test)]
 #[path = "tests/boundary_time_base_tests.rs"]
 mod boundary_time_base_tests;
 

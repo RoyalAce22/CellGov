@@ -397,6 +397,35 @@ pub trait ExecutionUnit {
         None
     }
 
+    /// The guest tick at which this unit's decrementer reaches 0, read as
+    /// [`Self::boundary_registers`] reads it, or `None` for a unit with no
+    /// supervisor registers.
+    ///
+    /// The tick is never before `tick`. A decrementer that is 0 or
+    /// negative at the read gives `tick`.
+    fn decrementer_zero(
+        &self,
+        _tick: cellgov_time::GuestTicks,
+        _time_base: u64,
+    ) -> Option<cellgov_time::GuestTicks> {
+        None
+    }
+
+    /// Writes `value` to this unit's decrementer, as the hypervisor writes
+    /// it before it returns to the thread, and returns whether the unit
+    /// took it. A unit with no supervisor registers takes no write.
+    ///
+    /// The write holds at the time base that the thread reads at its next
+    /// instruction boundary at `tick`; see [`Self::boundary_registers`].
+    fn write_decrementer(
+        &mut self,
+        _value: u32,
+        _tick: cellgov_time::GuestTicks,
+        _time_base: u64,
+    ) -> bool {
+        false
+    }
+
     /// Gives the thread the page table that `sdr1` names and the large
     /// page sizes that `lb` selects, as the hypervisor loads them, and
     /// returns whether the thread took them.

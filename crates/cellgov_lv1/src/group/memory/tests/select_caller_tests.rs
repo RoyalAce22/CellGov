@@ -74,8 +74,13 @@ fn a_caller_that_refuses_the_load_gets_a_refusal_and_the_selection_stays_unset()
 fn a_caller_that_takes_the_load_selects_the_address_space() {
     let mut hv = constructed();
     let d = select_from(&mut hv, CallerTranslation::Loads);
+    let space = hv
+        .address_spaces()
+        .space(CAPTURED_VAS_ID)
+        .expect("the constructed space");
+    let load = page_table::load(space, page_table::PAGE_TABLE_STORAGE_BASE);
     assert!(
-        matches!(&d, HypercallDisposition::Answered(a) if a.page_table.is_some()),
+        matches!(&d, HypercallDisposition::Answered(a) if a.page_table.as_ref() == Some(&load)),
         "{d:?}"
     );
     assert_eq!(hv.refusal(), None);

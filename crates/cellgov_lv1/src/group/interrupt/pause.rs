@@ -10,8 +10,8 @@
 //! [`super::raise::raise`]. The wake ends the pause, and the thread
 //! returns from the call through lv1's vector, which checks the thread's
 //! status shadow against its mask; see
-//! [`cellgov_ps3_abi::lv1::interrupt_mask`]. CellGov does not model the
-//! decrementer wake of mode 0.
+//! [`cellgov_ps3_abi::lv1::interrupt_mask`]. In mode 0, the thread's
+//! decrementer also wakes it; see [`crate::DecrementerWake`].
 
 use std::collections::BTreeMap;
 

@@ -43,6 +43,11 @@ impl Runtime {
                     self.registry
                         .set_status_override(wake.unit, cellgov_exec::UnitStatus::Runnable);
                 }
+                TimerWakeKind::Decrementer => {
+                    if !self.wake_on_decrementer(wake.unit) {
+                        continue;
+                    }
+                }
                 TimerWakeKind::SyncWait(reason) => {
                     let expired = self.lv2_host.expire_wait(reason, wake.unit, self.time);
                     // Expiry effects repair structs the expiring

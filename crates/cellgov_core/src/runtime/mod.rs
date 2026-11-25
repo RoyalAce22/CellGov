@@ -28,6 +28,7 @@ mod code_writes;
 mod commit_step;
 mod commit_trace;
 mod construction;
+mod decrementer_wake;
 mod dma;
 mod host_write;
 mod hypercall;

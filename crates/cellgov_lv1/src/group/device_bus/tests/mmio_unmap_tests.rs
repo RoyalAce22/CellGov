@@ -272,8 +272,14 @@ fn an_unmap_inside_the_mapping_past_its_start_is_a_refusal() {
 fn unread_buses_devices_and_firmware_are_refusals() {
     let groups = opened_and_mapped();
     let address = kernel_mapping().lpar_address;
-    let other_bus = unmap_call(2, 0, address);
-    assert_eq!(unmap(&groups, &other_bus), OTHER_BUS.refusal(&other_bus));
+    for bus in [2, 3, 4] {
+        let other_bus = unmap_call(bus, 0, address);
+        assert_eq!(
+            unmap(&groups, &other_bus),
+            OTHER_BUS.refusal(&other_bus),
+            "bus {bus}"
+        );
+    }
     let other_device = unmap_call(1, 3, address);
     assert_eq!(
         unmap(&groups, &other_device),

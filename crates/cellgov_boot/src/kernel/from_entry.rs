@@ -77,15 +77,17 @@ pub enum KernelRunStop {
     /// A hardware thread accessed the MMIO of a device. The console
     /// performs the access, and no word that CellGov models answers it.
     DeviceMmio(DeviceMmioAccess),
-    /// lv1 paused every hardware thread, and no wake came.
+    /// lv1 paused every hardware thread, and no wake can come.
     ///
     /// On the console, one of these wakes a paused thread:
     /// - an interrupt on an unmasked plug, which the runtime delivers: the
     ///   thread runs again and returns from `pause`;
-    /// - in mode 0, the thread's decrementer, which CellGov does not model.
+    /// - in mode 0, the thread's decrementer. The runtime moves guest time
+    ///   to the earliest decrementer deadline, and the thread returns from
+    ///   `pause` there.
     ///
-    /// With both threads paused, no thread runs to raise a plug, so the run
-    /// cannot continue.
+    /// With both threads paused, no thread runs to raise a plug. So the run
+    /// stops here only when no thread holds a mode 0 pause.
     NoWake {
         /// The paused threads, in thread order.
         paused: Vec<PausedThread>,

@@ -10,7 +10,7 @@ fn thread_1_reads_only_its_own_te_bit_while_lv1_holds_thread_0_paused() {
         MFCTRL_R3,
         ANDIS_R3_CT1,
         bne(4),
-        LI_R3_0,
+        LI_R3_1,
         LI_R11_PAUSE,
         SC_1, // 5: thread 0 pauses
         MFCTRL_R3,
@@ -35,7 +35,7 @@ fn thread_0_reads_only_its_own_te_bit_while_lv1_holds_thread_1_paused() {
         MFCTRL_R3,
         ANDIS_R3_CT1,
         beq(4),
-        LI_R3_0,
+        LI_R3_1,
         LI_R11_PAUSE,
         SC_1, // 5: thread 1 pauses
         MFCTRL_R3,

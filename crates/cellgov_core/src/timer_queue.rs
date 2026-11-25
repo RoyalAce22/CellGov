@@ -26,6 +26,10 @@ pub enum TimerWakeKind {
     /// the SPU decrementer's zero crossing ends a wait on Tm: make the
     /// unit runnable when it still waits on an event.
     UnitEvent,
+    /// A PPE hardware thread that lv1 paused in mode 0, whose decrementer
+    /// reaches 0: CellGov's hypervisor ends the pause when it still holds
+    /// the thread paused.
+    Decrementer,
 }
 
 /// A registered wake: the parked unit and its expiry action.
@@ -52,7 +56,8 @@ struct Queued {
 ///
 /// 1. the deadline
 /// 2. the unit
-/// 3. the kind: 1 for a sleep, 2 for a sync wait, 3 for a unit event
+/// 3. the kind: 1 for a sleep, 2 for a sync wait, 3 for a unit event, 4
+///    for a decrementer
 /// 4. and up: the block reason of a sync wait
 impl LaneValue for Queued {
     fn lanes(&self, lanes: &mut ObjectLanes) {
@@ -65,6 +70,7 @@ impl LaneValue for Queued {
                 reason.push_lanes(lanes, 4);
             }
             TimerWakeKind::UnitEvent => lanes.lane(3, 0, 3),
+            TimerWakeKind::Decrementer => lanes.lane(3, 0, 4),
         }
     }
 }

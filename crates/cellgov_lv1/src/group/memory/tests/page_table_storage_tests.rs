@@ -154,6 +154,15 @@ fn a_selection_loads_sdr1_with_the_selected_address_space_s_table() {
 #[test]
 fn a_selection_of_an_address_space_whose_table_has_no_storage_refuses() {
     let spaces = spaces(TABLES_IN_STORAGE + 1);
+    // Guest storage holds the range just past the page table storage, so
+    // only the missing table address can make the selection refuse.
+    let past = Region::new(
+        PAGE_TABLE_STORAGE_BASE + PAGE_TABLE_STORAGE_BYTES,
+        TABLE_BYTES as usize,
+        "past the page table storage",
+        PageSize::Page64K,
+    );
+    let storage = GuestMemory::from_regions(vec![page_table_storage(), past]).expect("storage");
     let d = select(
         &request(
             SELECT_VIRTUAL_ADDRESS_SPACE,
@@ -162,7 +171,7 @@ fn a_selection_of_an_address_space_whose_table_has_no_storage_refuses() {
         CallerTranslation::Loads,
         Some("4.93"),
         &spaces,
-        &storage(),
+        &storage,
     );
     assert_eq!(
         refusal_what(&d),

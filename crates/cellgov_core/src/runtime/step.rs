@@ -123,6 +123,11 @@ impl Runtime {
                 self.emit_time_warp_trace(&due, &timer_due);
             }
         }
+        // A decrementer wake that the step-entry fire asked of the
+        // hypervisor can end in a refusal, which stops the run here.
+        if self.hypervisor.refusal().is_some() {
+            return Err(StepError::HypercallRefused);
+        }
 
         let unit_id = self.select_or_warp()?;
         let start = self.registry.clock(unit_id);
@@ -323,7 +328,8 @@ impl Runtime {
     /// while a wake source remains instead of reporting a terminal
     /// AllBlocked with live future deadlines still queued. Each pass
     /// pops at least the queue head it warped to, so the loop
-    /// terminates.
+    /// terminates. A pass whose decrementer wake the hypervisor refuses
+    /// stops the warp with [`StepError::HypercallRefused`].
     #[inline]
     fn select_or_warp(&mut self) -> Result<UnitId, StepError> {
         if let Some(id) = self.scheduler.select_next(&self.registry) {
@@ -345,6 +351,9 @@ impl Runtime {
             self.place_ppe_threads();
             self.registry.sync_clocks(self.time);
             self.emit_time_warp_trace(&due, &timer_due);
+            if self.hypervisor.refusal().is_some() {
+                return Err(StepError::HypercallRefused);
+            }
             if let Some(id) = self.scheduler.select_next(&self.registry) {
                 return Ok(id);
             }

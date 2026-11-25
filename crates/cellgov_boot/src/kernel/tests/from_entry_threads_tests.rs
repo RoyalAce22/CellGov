@@ -22,6 +22,12 @@ use super::*;
 #[path = "from_entry_pause_ctrl_tests.rs"]
 mod pause_ctrl;
 
+#[path = "from_entry_decrementer_wake_tests.rs"]
+mod decrementer_wake;
+
+#[path = "from_entry_decrementer_clear_tests.rs"]
+mod decrementer_clear;
+
 /// A firmware whose lv1 `pause` handler an lv1 image read shows.
 const FW_PAUSE: &str = "4.93";
 
@@ -110,7 +116,7 @@ fn a_thread_1_fault_stops_the_run_and_names_thread_1() {
 
 #[test]
 fn a_pause_parks_its_thread_on_the_sc_while_the_other_thread_runs_on() {
-    let code = [LI_R3_0, LI_R11_PAUSE, SC_1, B_SELF];
+    let code = [LI_R3_1, LI_R11_PAUSE, SC_1, B_SELF];
     let run = run_kernel_from_entry(&kernel_elf(&code), FW_PAUSE, 50).unwrap();
     assert_eq!(run.stop, KernelRunStop::StepCap);
     assert_eq!(run.steps, 50);
@@ -123,18 +129,8 @@ fn a_pause_parks_its_thread_on_the_sc_while_the_other_thread_runs_on() {
 }
 
 #[test]
-fn a_pause_of_both_threads_stops_the_run_with_each_threads_wake_flag() {
-    // Thread 0 pauses in mode 1 and thread 1 in mode 0.
-    let code = [
-        MFCTRL_R3,
-        ANDIS_R3_CT1,
-        LI_R3_1,
-        beq(2),
-        LI_R3_0,
-        LI_R11_PAUSE,
-        SC_1,
-        B_SELF,
-    ];
+fn a_mode_1_pause_of_both_threads_stops_the_run_with_no_wake() {
+    let code = [LI_R3_1, LI_R11_PAUSE, SC_1, B_SELF];
     let run = run_kernel_from_entry(&shared_entry_elf(&code), FW_PAUSE, 10_000).unwrap();
     assert_eq!(
         run.stop,
@@ -146,14 +142,14 @@ fn a_pause_of_both_threads_stops_the_run_with_each_threads_wake_flag() {
                 },
                 PausedThread {
                     thread: 1,
-                    decrementer_wakes: true,
+                    decrementer_wakes: false,
                 },
             ],
         }
     );
     let thread0 = run.thread0.expect("thread 0's position");
     let thread1 = run.thread1.expect("thread 1's position");
-    assert_eq!((thread0.pc, thread1.pc), (thread0_pc(6), thread1_pc(6)));
+    assert_eq!((thread0.pc, thread1.pc), (thread0_pc(2), thread1_pc(2)));
     assert_eq!(
         (thread0.status, thread1.status),
         (Some(UnitStatus::Blocked), Some(UnitStatus::Blocked))

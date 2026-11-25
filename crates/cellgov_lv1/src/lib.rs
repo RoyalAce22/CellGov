@@ -45,6 +45,7 @@
 
 mod answer;
 mod cost;
+mod decrementer_wake;
 mod external;
 mod group;
 mod handlers;
@@ -61,6 +62,7 @@ pub use answer::{
     PageTableLoad, ReturnPath, ThreadInterrupt, ThreadResume,
 };
 pub use cost::cost;
+pub use decrementer_wake::DecrementerWake;
 pub use group::device_bus::{
     DeviceBusChange, DeviceBusState, DmaMapping, DmaRegion, MmioMapping, OpenDevice,
     StorageBusOpen, StorageDeviceOpen, StorageDevicePort,

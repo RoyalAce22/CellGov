@@ -143,8 +143,20 @@ fn after_the_free_the_region_is_gone_and_the_next_allocate_is_refused() {
     );
     let disposition = allocate_region(&again, Some("4.93"), &state);
     assert!(
-        matches!(disposition, HypercallDisposition::Refused(_)),
+        matches!(
+            disposition,
+            HypercallDisposition::Refused(HypercallRefusal::UnmodelledInput {
+                number: ALLOCATE_DEVICE_DMA_REGION,
+                ..
+            })
+        ),
         "{disposition:?}"
+    );
+    let mut never_freed = DeviceBusState::default();
+    never_freed.apply(DeviceBusChange::Opened(NETWORK));
+    assert_eq!(
+        r3_of(&allocate_region(&again, Some("4.93"), &never_freed)),
+        Some(0)
     );
 }
 
@@ -188,6 +200,29 @@ fn each_captured_region_with_no_mapping_frees_and_leaves_the_others() {
         state.freed_pools().collect::<Vec<_>>(),
         [NETWORK, DEVICE_1, DEVICE_2]
     );
+}
+
+/// The free method reads the mapping list at +72 of the region
+/// [OFW-4.93 lv1 a:0x2276B8-0x2276C4], so a mapping of the device that
+/// lies just below the region or at its end leaves the region free.
+#[test]
+fn a_mapping_just_outside_the_region_leaves_it_free() {
+    let r = network_region();
+    for bus_address in [r.address - 0x1000, r.address + r.size] {
+        let mut state = held(&[]);
+        state.apply(DeviceBusChange::DmaRegionMapped(DmaMapping {
+            bus: 1,
+            device: 0,
+            bus_address,
+            lpar_address: 0x80_0000,
+            length: 0x1000,
+        }));
+        assert_eq!(
+            free(&state, &free_of(r)),
+            freed_answer(r),
+            "{bus_address:#x}"
+        );
+    }
 }
 
 #[test]

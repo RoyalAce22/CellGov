@@ -98,6 +98,50 @@ pub(crate) fn returns(
     }
 }
 
+/// The [`ThreadResume`] of the paused thread `thread` that a wake with no
+/// call ends.
+///
+/// The thread returns from `pause` through the vector of the call, so its
+/// return makes the shadow test of [`returns`]. The test reads the state
+/// that `groups` holds after the wake. A firmware whose logical PPE id no
+/// table gives makes no test. The resume writes no DEC; the caller sets
+/// [`ThreadResume::clears_decrementer`] for a wake that sets lv1's byte.
+///
+/// # Errors
+///
+/// Returns the case that the model does not cover, as [`returns`] refuses
+/// it for a woken thread.
+pub(crate) fn wake_return(
+    thread: u8,
+    firmware: Option<&str>,
+    groups: &GroupStates,
+    storage: &GuestMemory,
+    msrs: &SavedMsrs,
+) -> Result<ThreadResume, UnmodelledError> {
+    let Some(ppe_id) = firmware.and_then(game_os_logical_ppe_id) else {
+        return Ok(ThreadResume {
+            thread,
+            external: None,
+            clears_decrementer: false,
+        });
+    };
+    let woken: StateChange = InterruptChange::ThreadWoken(thread).into();
+    let running = RunningThreads::default();
+    let test = ReturnTest {
+        after: groups.interrupt().after(std::slice::from_ref(&woken)),
+        ppe_id,
+        storage,
+        msrs,
+        running: &running,
+    };
+    let external = test.delivery(thread)?;
+    Ok(ThreadResume {
+        thread,
+        external,
+        clears_decrementer: false,
+    })
+}
+
 /// What the test of each return reads.
 struct ReturnTest<'a> {
     /// The interrupt state after the answer's changes.
@@ -130,6 +174,10 @@ impl ReturnTest<'_> {
 
     /// The interrupt of the return of `caller`, and the [`ThreadResume`]
     /// of each thread in `woken`.
+    ///
+    /// A raise that wakes a thread sets no byte at +1830, so its resume
+    /// writes no DEC. CellGov does not model the byte's setter in lv1's
+    /// common interrupt work [OFW-4.93 lv1 a:0x2C6374].
     fn deliveries(
         &self,
         caller: Option<u8>,
@@ -143,7 +191,11 @@ impl ReturnTest<'_> {
             .iter()
             .map(|&thread| {
                 let external = self.delivery(thread)?;
-                Ok(ThreadResume { thread, external })
+                Ok(ThreadResume {
+                    thread,
+                    external,
+                    clears_decrementer: false,
+                })
             })
             .collect::<Result<Vec<_>, UnmodelledError>>()?;
         Ok((external, resumed))

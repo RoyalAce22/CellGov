@@ -181,6 +181,7 @@ fn raise_answer(id: u64, index: u8, value: u64, woken: bool) -> HypercallDisposi
         answer.resumed = vec![ThreadResume {
             thread: 1,
             external: Some(DELIVERY),
+            clears_decrementer: false,
         }];
     }
     HypercallDisposition::Answered(answer)

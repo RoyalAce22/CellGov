@@ -144,6 +144,25 @@ fn a_boot_mode_of_3_is_refused_by_name() {
     }
 }
 
+#[test]
+fn a_boot_mode_of_3_is_refused_before_the_rsx_enable_and_busy_checks() {
+    let boot_mode_3 = refused(
+        "a gpu_open with a sys.boot.gos of 3, which sets an lv1 GPU state word that the \
+         model does not keep",
+    );
+    let settings = GpuSettings {
+        boot_mode: 3,
+        rsx_enable: 0,
+    };
+    assert_eq!(open(settings, &GpuState::default(), 0), boot_mode_3);
+    assert_eq!(open(settings, &held(0), 0), boot_mode_3);
+    let settings = GpuSettings {
+        boot_mode: 3,
+        ..DEFAULT_SETTINGS
+    };
+    assert_eq!(open(settings, &held(0), 0), boot_mode_3);
+}
+
 /// The owner word keeps 255 [OFW-4.93 lv1 a:0x20C594]
 /// [OFW-4.93 lv1 a:0x20C5C4], so the handler takes the print path
 /// [OFW-4.93 lv1 a:0x20EB70-0x20EB74].
@@ -175,6 +194,15 @@ fn an_unread_firmware_is_refused_by_name() {
         );
         assert_eq!(
             disposition,
+            refused("a gpu_open at a firmware whose lv1 handler is not read"),
+            "{firmware:?}"
+        );
+        let unread_settings = GpuSettings {
+            boot_mode: 4,
+            rsx_enable: 0,
+        };
+        assert_eq!(
+            open_gpu(&open_call(0), firmware, unread_settings, &held(0)),
             refused("a gpu_open at a firmware whose lv1 handler is not read"),
             "{firmware:?}"
         );

@@ -24,9 +24,9 @@ eight-step deterministic loop:
    the remaining per-effect updates (mailboxes, signals, DMA
    enqueue, reservations, wakes, block transitions, RSX flip
    requests) in emission order.
-6. Dispatch the unit's syscall through `Lv2Host`, or its hypercall
-   through CellGov's hypervisor in `cellgov_lv1`, if the yield reason
-   was `Syscall`.
+6. If the yield reason was `Syscall`, fire the events due by the
+   commit's tick, then dispatch the unit's syscall through `Lv2Host`,
+   or its hypercall through CellGov's hypervisor in `cellgov_lv1`.
 7. Advance the commit epoch, then fire due DMA completions and timer
    wakes, settle a finished unit, and run the RSX FIFO advance pass.
    See [DMA and timer wakes](#dma-and-timer-wakes) through
@@ -51,7 +51,7 @@ flowchart TD
   val -->|rejected| discard
   val -->|ok| drain["5. drain staging atomically, apply effects in emission order"]
   drain --> sc{"yield reason Syscall?"}
-  sc -->|yes| lv2["6. Lv2Host or hypervisor dispatch"] --> epoch
+  sc -->|yes| lv2["6. fire due events; Lv2Host or hypervisor dispatch"] --> epoch
   sc -->|no| epoch["7. advance epoch; fire due DMA completions and timer wakes; settle finished unit; RSX advance"]
   epoch --> rec["8. emit commit records, notify scheduler"] --> sel
 ```
@@ -129,7 +129,8 @@ result struct.
 ### DMA and timer wakes
 
 Step 7 advances the commit epoch, then fires due DMA completions
-and due timer wakes.
+and due timer wakes. A commit with a syscall already fired the
+events due by its tick in step 6, so the dispatch sees their results.
 
 A DMA completion or a timer deadline is stamped with the issuing
 unit's clock at the end of its step. An event fires once no runnable
@@ -150,6 +151,9 @@ tick and after every step that starts before it.
     as an SPU's decrementer raises Tm, becomes runnable. The runtime
     sets that deadline when the unit parks and drops it when the unit
     next runs.
+  - A PPE hardware thread that lv1 paused in mode 0 returns from
+    `pause` when its decrementer reaches 0, if no plug interrupt woke
+    it first.
 
 ### Finished-unit settlement
 

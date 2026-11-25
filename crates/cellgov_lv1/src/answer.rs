@@ -83,14 +83,18 @@ pub struct ThreadInterrupt {
     pub external: Option<ExternalRaise>,
 }
 
-/// A paused thread that a call woke, and the external interrupt that its
-/// return from `pause` raises.
+/// A paused thread that a wake ended, and what its return from `pause`
+/// does to the thread.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ThreadResume {
     /// The PPE hardware thread.
     pub thread: u8,
     /// The external interrupt of its return, or `None`.
     pub external: Option<ExternalRaise>,
+    /// Whether the return writes DEC = 0. lv1's return writes it when the
+    /// byte at +1830 of the thread's context is set, and then clears the
+    /// byte [OFW-4.93 lv1 a:0x2C425C-0x2C4274].
+    pub clears_decrementer: bool,
 }
 
 /// How lv1's vector returns to the caller.

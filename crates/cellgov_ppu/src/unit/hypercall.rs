@@ -122,15 +122,74 @@ impl PpuExecutionUnit {
         time_base: u64,
     ) -> Option<BoundaryRegisters> {
         let sup = self.state.supervisor()?;
-        let tb = PPU_TIME_BASE_ORIGIN
-            .wrapping_add(cellgov_time::ticks_to_tb(tick.raw()))
-            .max(self.state.tb)
-            .max(time_base);
+        let tb = self.boundary_read_time_base(tick, time_base);
         Some(BoundaryRegisters {
             pc: self.state.pc,
             msr: sup.msr,
             dec: sup.dec_at(tb),
         })
+    }
+
+    /// The guest tick at which the thread's decrementer reaches 0, or
+    /// `None` for a thread with no supervisor registers.
+    ///
+    /// The decrementer reads at the time base of
+    /// [`Self::registers_at_boundary`]. The deadline is that time base plus
+    /// the decrementer, sign-extended, as lv1 arms the wake of a paused
+    /// thread [OFW-4.93 lv1 a:0x2C6110-0x2C613C]. The answer is the first
+    /// tick whose time base reaches the deadline, and never before `tick`.
+    ///
+    /// A decrementer that reads 0 or negative gives `tick`: the thread
+    /// already reads its time base at or past the deadline, also when that
+    /// time base leads the time base of `tick`.
+    ///
+    /// [PPC-Book3 p:80 s:6.3] The DEC counts down at the time-base frequency.
+    pub(super) fn decrementer_zero_tick(
+        &self,
+        tick: GuestTicks,
+        time_base: u64,
+    ) -> Option<GuestTicks> {
+        let sup = self.state.supervisor()?;
+        let tb = self.boundary_read_time_base(tick, time_base);
+        let dec = i64::from(sup.dec_at(tb) as i32);
+        let Some(ahead) = u64::try_from(dec).ok().filter(|&ahead| ahead > 0) else {
+            return Some(tick);
+        };
+        let deadline = tb.saturating_add(ahead);
+        let ticks = cellgov_time::tb_to_ticks(deadline.saturating_sub(PPU_TIME_BASE_ORIGIN), 1);
+        Some(GuestTicks::new(ticks.max(tick.raw())))
+    }
+
+    /// Writes `value` to the thread's decrementer at the time base of
+    /// [`Self::registers_at_boundary`], and returns whether the thread took
+    /// it. A thread with no supervisor registers takes no write.
+    ///
+    /// [PPC-Book3 p:80 s:6.3] The DEC counts down at the time-base frequency.
+    pub(super) fn write_decrementer_at_boundary(
+        &mut self,
+        value: u32,
+        tick: GuestTicks,
+        time_base: u64,
+    ) -> bool {
+        let tb = self.boundary_read_time_base(tick, time_base);
+        self.state
+            .update_supervisor(|s| {
+                s.dec = value;
+                s.dec_tb = tb;
+            })
+            .is_some()
+    }
+
+    /// The time base that the thread reads at its next instruction
+    /// boundary at `tick`: the latest of these time bases:
+    /// - the time base of `tick`;
+    /// - the time base that the thread last read;
+    /// - `time_base`, the highest time base that any unit read.
+    fn boundary_read_time_base(&self, tick: GuestTicks, time_base: u64) -> u64 {
+        PPU_TIME_BASE_ORIGIN
+            .wrapping_add(cellgov_time::ticks_to_tb(tick.raw()))
+            .max(self.state.tb)
+            .max(time_base)
     }
 
     /// The PPE hardware thread the thread's CTRL names: 1 when CT names

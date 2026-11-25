@@ -8,7 +8,8 @@ use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::lv1::call::READ_REPOSITORY_NODE;
 use cellgov_time::GuestTicks;
 
-use super::answer::{HypercallDisposition, HypercallRefusal};
+use super::answer::{HypercallDisposition, HypercallRefusal, ThreadResume};
+use super::decrementer_wake::{wake_entry, DecrementerWake};
 use super::external::returns;
 use super::handlers::{answer, answers};
 use super::interprocessor::RunningThreads;
@@ -18,6 +19,7 @@ use super::return_path::SavedMsrs;
 use super::vector;
 use crate::group::interrupt::bitmap::IrqStateBitmapState;
 use crate::group::interrupt::event_port::EventReceivePortState;
+use crate::group::interrupt::InterruptChange;
 use crate::group::memory::address_space::AddressSpaceState;
 use crate::group::memory::region::MemoryState;
 use crate::group::partition::repository::{read_record, RepositoryRead};
@@ -262,6 +264,38 @@ impl Hypervisor {
         take_entry(take, firmware, self.groups.interrupt(), storage).inspect_err(|refusal| {
             self.refusal.get_or_insert(*refusal);
         })
+    }
+
+    /// Ends the pause of the thread of `wake` at its decrementer deadline,
+    /// as lv1's timer does, and returns the [`ThreadResume`] of the
+    /// thread. `storage` is the thread's real address space, which holds
+    /// the masks, and `msrs` gives the thread's saved MSR.
+    ///
+    /// The answer is `None`, and the state does not change, when lv1 holds
+    /// the thread in no pause that its decrementer ends.
+    ///
+    /// # Errors
+    ///
+    /// Returns the refusal of the thread's `pause` when the model does not
+    /// cover the return of the thread. The state does not change. The
+    /// hypervisor keeps the refusal as the first one when it keeps no
+    /// earlier refusal.
+    pub fn wake_on_decrementer(
+        &mut self,
+        wake: &DecrementerWake,
+        storage: &GuestMemory,
+        msrs: &SavedMsrs,
+    ) -> Result<Option<ThreadResume>, HypercallRefusal> {
+        let firmware = self.firmware.as_deref();
+        let resume =
+            wake_entry(wake, firmware, &self.groups, storage, msrs).inspect_err(|refusal| {
+                self.refusal.get_or_insert(*refusal);
+            })?;
+        if resume.is_some() {
+            self.groups
+                .apply(InterruptChange::ThreadWoken(wake.thread).into());
+        }
+        Ok(resume)
     }
 }
 

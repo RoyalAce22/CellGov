@@ -11,7 +11,7 @@
 //! version. So two changes that each add a surface never edit the tag.
 
 /// The tag that the checkpoint scheme id hashes.
-pub const CHECKPOINT_TAG: &[u8] = b"cellgov-checkpoint-fnv1a/v36";
+pub const CHECKPOINT_TAG: &[u8] = b"cellgov-checkpoint-fnv1a/v37";
 
 /// The version that [`CHECKPOINT_TAG`] ends with.
 pub const CHECKPOINT_VERSION: u32 = tag_version(CHECKPOINT_TAG);
@@ -57,6 +57,11 @@ pub const RUNTIME_SURFACES: &[HashedSurface] = &[
         name: "the words of the device registers that the memory models",
         source: None,
         stamp: Stamp::Version(36),
+    },
+    HashedSurface {
+        name: "the decrementer wake of each paused PPE hardware thread in the timer wakes",
+        source: Some(crate::lanes::source::TIMER_WAKE),
+        stamp: Stamp::Version(37),
     },
 ];
 

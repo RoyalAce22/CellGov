@@ -14,8 +14,9 @@
 //!   - the r0, r11, r12 and CR fields that lv1's return leaves.
 //!
 //! An answer that pauses the caller also parks it. The caller takes its
-//! committed inputs at its first step after a wake makes it runnable. An
-//! answer that wakes a paused thread makes that thread's unit runnable.
+//! committed inputs at its first step after a wake makes it runnable. A
+//! pause in mode 0 also queues the caller's decrementer wake. An answer
+//! that wakes a paused thread makes that thread's unit runnable.
 //! An answer that sends a running thread an interprocessor interrupt
 //! gives that thread the exception of lv1's handler before its next step.
 //!
@@ -158,6 +159,7 @@ impl Runtime {
         if answer.pauses_caller {
             self.registry
                 .set_status_override(unit, cellgov_exec::UnitStatus::Blocked);
+            self.queue_decrementer_wake(unit, &answer);
         } else if answer.outputs().is_some() {
             self.set_external_exception(unit, answer.external);
         }
@@ -209,7 +211,13 @@ impl Runtime {
     /// A raise replaces r11 and r12 with the vector and the new MSR, as lv1
     /// loads them after the raise. The runtime gives a unit's register
     /// writes in order, so these writes win.
-    fn resume_paused_thread(&mut self, resume: &ThreadResume) {
+    ///
+    /// The wake ends the pause, so a decrementer wake queued for the pause
+    /// has nothing left to wake.
+    ///
+    /// A resume that clears the decrementer writes DEC = 0 at the time base
+    /// that the thread reads first after the wake.
+    pub(in crate::runtime) fn resume_paused_thread(&mut self, resume: &ThreadResume) {
         let Some(unit) = self.unit_of_thread(resume.thread) else {
             self.lv2_host.log_invariant_break(
                 "dispatch.hypervisor_woken_thread_missing",
@@ -217,6 +225,10 @@ impl Runtime {
             );
             return;
         };
+        self.timer_wakes.cancel(unit);
+        if resume.clears_decrementer {
+            self.clear_resumed_decrementer(unit);
+        }
         self.registry.clear_status_override(unit);
         // The wake makes another unit runnable, which the scheduler's
         // notice of this step reports.
@@ -226,6 +238,24 @@ impl Runtime {
             self.registry.push_register_write(unit, 12, delivery.msr);
         }
         self.set_external_exception(unit, resume.external);
+    }
+
+    /// Writes DEC = 0 to `unit` at the runtime's time and time base.
+    ///
+    /// If the unit takes no write, the runtime logs an invariant break and
+    /// the thread keeps its decrementer.
+    fn clear_resumed_decrementer(&mut self, unit: UnitId) {
+        let (time, time_base) = (self.time, self.time_base);
+        let written = self
+            .registry
+            .get_mut(unit)
+            .is_some_and(|registered| registered.write_decrementer(0, time, time_base));
+        if !written {
+            self.lv2_host.log_invariant_break(
+                "dispatch.hypervisor_decrementer_write_refused",
+                format_args!("{unit:?} took no DEC = 0 write, so it keeps its decrementer"),
+            );
+        }
     }
 
     /// Gives `unit` the exception of `raise`, as lv1's return to the
@@ -492,7 +522,7 @@ impl Runtime {
 /// The SRR1 that each PPE hardware thread's `sc` sets, as lv1 saves it.
 ///
 /// A thread whose unit holds no supervisor registers keeps a `None` slot.
-fn saved_msrs(registry: &UnitRegistry) -> SavedMsrs {
+pub(in crate::runtime) fn saved_msrs(registry: &UnitRegistry) -> SavedMsrs {
     let mut msrs = SavedMsrs::default();
     for (_, unit) in registry.iter() {
         let (Some(thread), Some(save)) = (unit.ppe_thread(), unit.system_call_save_restore())

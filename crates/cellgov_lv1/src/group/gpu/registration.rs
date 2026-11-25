@@ -16,7 +16,7 @@ pub(crate) const GROUP: Group = Group {
     hashed_surfaces: &[HashedSurface {
         name: "the GPU open that the partition holds",
         source: Some(GPU_OPEN_SOURCE),
-        stamp: Stamp::Pending,
+        stamp: Stamp::Version(37),
     }],
 };
 

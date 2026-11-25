@@ -102,6 +102,14 @@ pub trait RegisteredUnit: 'static {
     /// [`ExecutionUnit::boundary_registers`].
     fn boundary_registers(&self, tick: GuestTicks, time_base: u64) -> Option<BoundaryRegisters>;
 
+    /// The guest tick at which the unit's decrementer reaches 0. See
+    /// [`ExecutionUnit::decrementer_zero`].
+    fn decrementer_zero(&self, tick: GuestTicks, time_base: u64) -> Option<GuestTicks>;
+
+    /// Writes the unit's decrementer. See
+    /// [`ExecutionUnit::write_decrementer`].
+    fn write_decrementer(&mut self, value: u32, tick: GuestTicks, time_base: u64) -> bool;
+
     /// Gives the thread a page table and large page sizes. See
     /// [`ExecutionUnit::load_page_table`].
     fn load_page_table(&mut self, sdr1: u64, lb: u8) -> bool;
@@ -379,6 +387,16 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn boundary_registers(&self, tick: GuestTicks, time_base: u64) -> Option<BoundaryRegisters> {
         ExecutionUnit::boundary_registers(self, tick, time_base)
+    }
+
+    #[inline]
+    fn decrementer_zero(&self, tick: GuestTicks, time_base: u64) -> Option<GuestTicks> {
+        ExecutionUnit::decrementer_zero(self, tick, time_base)
+    }
+
+    #[inline]
+    fn write_decrementer(&mut self, value: u32, tick: GuestTicks, time_base: u64) -> bool {
+        ExecutionUnit::write_decrementer(self, value, tick, time_base)
     }
 
     #[inline]

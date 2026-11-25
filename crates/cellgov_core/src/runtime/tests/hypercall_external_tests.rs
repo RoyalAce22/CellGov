@@ -48,6 +48,9 @@ mod clock;
 #[path = "hypercall_external_resume_tests.rs"]
 mod resume;
 
+#[path = "hypercall_decrementer_wake_tests.rs"]
+mod decrementer_wake;
+
 /// The `sc` of the kernel's port call in the setup of a thread's record
 /// [OFW-4.93 lv2_kernel a:0x8000000000007d8c]. The console gave thread 1's
 /// call the port id 4 (`GAME_OS_PORT_CALLS`).
@@ -90,6 +93,8 @@ const _: () = assert!(SRR1_MEDIATED_EXTERNAL & SRR1_EXTERNAL == SRR1_EXTERNAL);
 enum Step {
     /// A hypercall from `sc` at the address, with r11 and r3 onward.
     Call(u64, [u64; 9]),
+    /// A [`Step::Call`] whose step costs the given number of ticks.
+    CallCosting(u64, u64, [u64; 9]),
     /// A step with no hypercall, until the other thread paused.
     AwaitPause,
     /// A step that takes the decrementer interrupt.
@@ -119,6 +124,23 @@ struct Seen {
     /// The decrementer that the thread's boundary registers give at time
     /// base 0. It counts down by one for each time base tick.
     decrementer: u32,
+    /// The `pause` calls that the thread yielded.
+    pauses: usize,
+    /// The tick at which the decrementer reaches 0 for each `pause`, in
+    /// call order. A `pause` with no entry gives no deadline.
+    decrementer_deadlines: Vec<u64>,
+    /// Each decrementer write, as the value and the raw tick.
+    decrementer_writes: Vec<(u32, u64)>,
+}
+
+impl Seen {
+    /// Records the thread's hypercall `number`.
+    fn called(&mut self, number: u64) {
+        if number == PAUSE {
+            self.paused = true;
+            self.pauses += 1;
+        }
+    }
 }
 
 type Shared = Rc<RefCell<Seen>>;
@@ -172,6 +194,29 @@ impl ExecutionUnit for Thread {
                 .decrementer
                 .wrapping_sub(time_base as u32),
         })
+    }
+    fn decrementer_zero(
+        &self,
+        tick: cellgov_time::GuestTicks,
+        _time_base: u64,
+    ) -> Option<cellgov_time::GuestTicks> {
+        let seen = self.seen.borrow();
+        let deadline = seen
+            .decrementer_deadlines
+            .get(seen.pauses.checked_sub(1)?)?;
+        Some(cellgov_time::GuestTicks::new(*deadline).max(tick))
+    }
+    fn write_decrementer(
+        &mut self,
+        value: u32,
+        tick: cellgov_time::GuestTicks,
+        _time_base: u64,
+    ) -> bool {
+        self.seen
+            .borrow_mut()
+            .decrementer_writes
+            .push((value, tick.raw()));
+        true
     }
     fn system_call_save_restore(&self) -> Option<SaveRestore> {
         Some(SaveRestore {
@@ -229,12 +274,24 @@ impl ExecutionUnit for Thread {
             ),
             Some(Step::Call(pc, args)) => {
                 self.next += 1;
-                seen.paused |= args[0] == PAUSE;
+                seen.called(args[0]);
                 result(
                     YieldReason::Syscall,
                     LocalDiagnostics::with_pc_lr_syscall_lev(pc, 0, 1),
                     Some(args),
                 )
+            }
+            Some(Step::CallCosting(ticks, pc, args)) => {
+                self.next += 1;
+                seen.called(args[0]);
+                ExecutionStepResult {
+                    consumed_cost: InstructionCost::new(ticks),
+                    ..result(
+                        YieldReason::Syscall,
+                        LocalDiagnostics::with_pc_lr_syscall_lev(pc, 0, 1),
+                        Some(args),
+                    )
+                }
             }
             Some(Step::AwaitPause) => {
                 self.next += 1;
