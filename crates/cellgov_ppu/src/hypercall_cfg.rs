@@ -14,8 +14,8 @@
 //! - a word that control can enter in another way, which
 //!   [`crate::indirect_entry`] bounds.
 //!
-//! Each of these leaves the site unresolved. A `bcctr` or `bclr` whose
-//! target the bound lost leaves every site unresolved. A path also ends
+//! Each of these leaves the site unresolved. A `bcctr`, `bclr` or `rfid`
+//! whose target the bound lost leaves every site unresolved. A path also ends
 //! at a word that nothing enters, such as a `nop` after `blr`. That path
 //! loads no constant.
 
@@ -131,8 +131,8 @@ enum Flow {
 /// [`real_indirect_words`] gives. A `bcctr` or `bclr` that may run in
 /// 32-bit mode, and an unbounded 32-bit switch of `bound`, can reach each
 /// word that [`low_indirect_words`] gives. A
-/// `bcctr` or `bclr` whose target `bound` lost can enter any word in
-/// either mode, so it leaves every site unresolved.
+/// `bcctr`, `bclr` or `rfid` whose target `bound` lost can enter any word
+/// in either mode, so it leaves every site unresolved.
 pub(crate) fn scan(
     code: &Code,
     bound: &IndirectBound,

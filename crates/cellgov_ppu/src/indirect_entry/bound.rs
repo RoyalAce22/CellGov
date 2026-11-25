@@ -122,6 +122,10 @@ pub(crate) struct IndirectBound {
     ///
     /// A path reaches the `bclr` with an LR that can hold a constant that
     /// `JoinFlow` dropped.
+    ///
+    /// The set also holds each `rfid` that can keep MSR\[IR\] at 1 when a
+    /// path reaches it with an SRR0 that can hold a constant that
+    /// `JoinFlow` dropped.
     pub(crate) lost_targets: BTreeSet<u64>,
     /// Each address where an `rfid`, `mtmsr` or `mtmsrd` can put control
     /// into real mode.
@@ -176,6 +180,7 @@ pub(crate) fn indirect_entries(
         ctr_writes: BTreeMap::new(),
         lost_ctr_writes: BTreeSet::new(),
         lost_returns: BTreeSet::new(),
+        lost_rfids: BTreeSet::new(),
     };
     for file in files {
         for value in file.doublewords() {
@@ -206,6 +211,7 @@ pub(crate) fn indirect_entries(
         bound.ctr_writes.clear();
         bound.lost_ctr_writes.clear();
         bound.lost_returns.clear();
+        bound.lost_rfids.clear();
         for (index, segment) in code.segments().iter().enumerate() {
             bound.code_constants(index, segment, words.tocs.segment(index), &every, None);
         }
@@ -223,6 +229,7 @@ pub(crate) fn indirect_entries(
     flow.run();
     let mut lost_targets = flow.bcctr_targets(&mut bound.targets);
     lost_targets.extend(&bound.lost_returns);
+    lost_targets.extend(&bound.lost_rfids);
     let mut entries = real_mode_entries(elf, code);
     entries.extend(bound.named);
     let mut indirect = IndirectBound {
@@ -287,6 +294,9 @@ pub(super) struct Bound<'a> {
     /// The address of each `bclr` whose LR can hold a constant that
     /// [`JoinFlow`] dropped, from the TOCs of the latest round.
     lost_returns: BTreeSet<u64>,
+    /// The address of each `rfid` that [`Constants::translated_rfid_lost`]
+    /// gives, from the TOCs of the latest round.
+    lost_rfids: BTreeSet<u64>,
 }
 
 impl Bound<'_> {
@@ -345,7 +355,9 @@ impl Bound<'_> {
     /// - names each constant that the code builds in a GPR;
     /// - keeps the target of each `bclr` whose LR the code builds;
     /// - keeps each constant that an `mtctr` copies;
-    /// - enters each word that an `rfid` can enter with MSR\[IR\] at 1.
+    /// - enters each word that an `rfid` can enter with MSR\[IR\] at 1;
+    /// - keeps each `rfid` that can enter a word with MSR\[IR\] at 1 from
+    ///   an SRR0 that can hold a constant that [`JoinFlow`] dropped.
     ///
     /// `index` is the index of `segment` in the code. `tocs` holds the
     /// TOC of each word of `segment`, as [`FunctionWords`] gives it.
@@ -396,6 +408,9 @@ impl Bound<'_> {
             }
             for target in constants.translated_rfid_targets(raw) {
                 self.enter(target);
+            }
+            if constants.translated_rfid_lost(raw) {
+                self.lost_rfids.insert(address);
             }
             for &constant in constants
                 .step(address, raw)

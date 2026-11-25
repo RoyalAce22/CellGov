@@ -944,3 +944,7 @@ mod hypercall_mode32_branch_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_mode32_review_tests.rs"]
 mod hypercall_mode32_review_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_rfid_lost_srr0_tests.rs"]
+mod hypercall_rfid_lost_srr0_tests;

@@ -187,13 +187,14 @@ fn an_rfid_past_a_branch_target_enters_the_low_word_that_the_branch_brings() {
 
 /// With SF at 0 the `rfid` fetches word 11, the low-order 32 bits of the
 /// SRR0 that the `mtspr` writes before the `b`. The join pass carries no
-/// SRR0 to the branch target, so the census enters no word for this
-/// `rfid`.
+/// SRR0 to the branch target, so no entry holds word 11. The switch scan
+/// knows no SRR0 at the `rfid` either. So the bound keeps the `rfid` as
+/// an unbounded 32-bit switch, and the census enters each low word.
 ///
 /// [PPC-Book1 p:24 s:2.4] A branch alters only CTR and LR.
 /// [PPC-Book3 p:13 s:2.3] `rfid` fetches from SRR0 0:61 || 0b00 when SF = 1 in the new MSR, and from 32 zeros || SRR0 32:61 || 0b00 when SF = 0.
 #[test]
-fn an_rfid_past_a_branch_misses_the_low_word_of_the_srr0_written_before_the_branch() {
+fn an_rfid_past_a_branch_from_the_srr0_written_before_it_is_an_unbounded_32_bit_switch() {
     let [one, sldi, high, low] = build_high(at(11));
     let b = word(PpuInstruction::B {
         offset: 8,
@@ -216,9 +217,14 @@ fn an_rfid_past_a_branch_misses_the_low_word_of_the_srr0_written_before_the_bran
         PPC_NOP,
         PPC_NOP,
     ];
-    assert_eq!(
-        bound(&words, false),
-        BTreeSet::new(),
-        "pins a known gap: the join pass carries no SRR0, so the bound misses word 11"
-    );
+    let code = Code::new(vec![CodeSegment {
+        vaddr: at(0),
+        words: words.to_vec(),
+    }]);
+    let bound = indirect_entries(&[], &[], &code).expect("no jump table");
+    assert_eq!(bound.entries, BTreeSet::new());
+    assert_eq!(bound.unbounded_mode32_switches, BTreeSet::from([at(9)]));
+    let low_words = crate::hypercall_cfg::low_indirect_words(&code, &bound);
+    let low: BTreeSet<u64> = low_words.collect();
+    assert!(low.contains(&at(11)), "{low:x?}");
 }

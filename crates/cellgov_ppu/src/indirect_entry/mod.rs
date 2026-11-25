@@ -27,7 +27,10 @@
 //! low-order 32 bits of SRR0. So for an `rfid` that can leave MSR\[IR\]
 //! at 1, the bound holds a word for each SRR0 constant that the scan
 //! knows. It holds the word that the `rfid` fetches under each MSR\[SF\]
-//! that SRR1 can give.
+//! that SRR1 can give. An SRR0 that the scan does not know can hold an
+//! address that the image names. When SRR1 can also give MSR\[SF\] at 0,
+//! the `rfid` is an unbounded 32-bit switch, as the next paragraph
+//! states.
 //!
 //! An indirect branch in 32-bit mode, with MSR\[SF\] and MSR bit 1 at 0,
 //! ignores the high-order 32 bits of its target. An `rfid` or `mtmsrd`
@@ -66,7 +69,9 @@
 //!   - a CTR after a decrement of a constant that the scan records;
 //!   - a CTR from a GPR that can hold a constant that the scan dropped;
 //! - each `bclr` that a path reaches with an LR that can hold a constant
-//!   the scan dropped.
+//!   the scan dropped;
+//! - each `rfid` that can leave MSR\[IR\] at 1, when a path reaches it
+//!   with an SRR0 that can hold a constant the scan dropped.
 //!
 //! [`CtrFlow`] gives the paths that bring CTR to a `bcctr`. [`JoinFlow`]
 //! gives the constants that the paths to a branch target bring in the
@@ -76,8 +81,10 @@
 //!   When the paths bring more, it drops them and marks the register as
 //!   one that can hold a constant the scan dropped. The image does not
 //!   name a dropped constant. The mark moves only with a copy of the
-//!   register. So the scan does not record a dropped constant that a
-//!   store and a load move, or that a call takes into its routine.
+//!   register, also a copy into or out of SRR0 or SRR1. A call keeps
+//!   the marks of SRR0 and SRR1, and an `sc` clears them. So the scan
+//!   does not record a dropped constant that a store and a load move,
+//!   or that a call takes into its routine.
 //!
 //! A second scan finds where an `rfid`, `mtmsr` or `mtmsrd` can put
 //! control into real mode. It forgets each constant at a word that
@@ -160,3 +167,7 @@ mod toc_candidate_tests;
 #[cfg(test)]
 #[path = "../tests/indirect_entry_rfid_low_word_tests.rs"]
 mod rfid_low_word_tests;
+
+#[cfg(test)]
+#[path = "../tests/indirect_entry_lost_srr_tests.rs"]
+mod lost_srr_tests;

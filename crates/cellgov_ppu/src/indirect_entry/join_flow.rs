@@ -17,9 +17,10 @@ use crate::instruction::PpuInstruction;
 /// dropped. So a loop that steps a constant adds a finite number of
 /// constants, and the flow ends.
 ///
-/// A dropped constant can be the address that a later `bcctr` or `bclr`
-/// reaches. So a CTR copied from a lost GPR, and a lost LR at a `bclr`,
-/// can reach an address that the scan does not know.
+/// A dropped constant can be the address that a later `bcctr`, `bclr` or
+/// `rfid` reaches. So a CTR copied from a lost GPR, a lost LR at a `bclr`
+/// and a lost SRR0 at an `rfid` can reach an address that the scan does
+/// not know.
 const JOIN_LIMIT: usize = 16;
 
 /// What the paths to one join word bring in the GPRs and in LR.
@@ -36,6 +37,9 @@ struct Brought {
     lr: BTreeMap<u64, Value>,
     /// Whether LR can also hold a constant that the flow dropped.
     lr_lost: bool,
+    /// Whether SRR0 and SRR1 can also hold a constant that the flow
+    /// dropped. The flow brings no SRR0 or SRR1 constant to a join word.
+    srrs_lost: [bool; 2],
 }
 
 impl Brought {
@@ -48,6 +52,7 @@ impl Brought {
         constants.lost_gprs = self.lost_gprs;
         constants.lr.clone_from(&self.lr);
         constants.lr_lost = self.lr_lost;
+        [constants.srr0_lost, constants.srr1_lost] = self.srrs_lost;
         constants
     }
 
@@ -95,9 +100,14 @@ impl Brought {
                 lr_lost = true;
             }
         }
-        if (lost_gprs, lr_lost) != (self.lost_gprs, self.lr_lost) {
+        let srrs_lost = [
+            self.srrs_lost[0] || path.srr0_lost,
+            self.srrs_lost[1] || path.srr1_lost,
+        ];
+        if (lost_gprs, lr_lost, srrs_lost) != (self.lost_gprs, self.lr_lost, self.srrs_lost) {
             self.lost_gprs = lost_gprs;
             self.lr_lost = lr_lost;
+            self.srrs_lost = srrs_lost;
             changed = true;
         }
         changed

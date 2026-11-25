@@ -5,12 +5,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
-use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_BIT1, MSR_IR, MSR_PR, MSR_SF};
+use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_BIT1, MSR_IR, MSR_PR, MSR_SF, SPR_SRR0, SPR_SRR1};
 
 use super::real_mode::{fetch_address, MsrWord, Switch};
 use super::toc::FunctionToc;
 use crate::caller_census::{surely_written_gprs, written_gprs};
-use crate::instruction::PpuInstruction;
+use crate::instruction::{spr_number, PpuInstruction};
 use crate::local_cfg::falls_through;
 
 /// The constants that a register can hold on the paths to a word.
@@ -98,6 +98,10 @@ pub(super) struct Constants {
     pub(super) lr_lost: bool,
     srr0: Option<Value>,
     srr1: Option<Value>,
+    /// Whether SRR0 can also hold a constant that the scan dropped.
+    pub(super) srr0_lost: bool,
+    /// Whether SRR1 can also hold a constant that the scan dropped.
+    pub(super) srr1_lost: bool,
 }
 
 impl Constants {
@@ -131,14 +135,31 @@ impl Constants {
                 self.forget_srrs();
                 self.forget_written(&decoded);
             }
-            PpuInstruction::PpePrivileged { raw } => match MsrWord::of(raw) {
-                Some(MsrWord::MtSrr0 { rs }) => self.srr0 = self.gpr(rs).cloned(),
-                Some(MsrWord::MtSrr1 { rs }) => self.srr1 = self.gpr(rs).cloned(),
-                _ => self.forget_written(&decoded),
-            },
+            PpuInstruction::PpePrivileged { raw } => self.step_privileged(raw, &decoded),
             _ => self.forget_written(&decoded),
         }
         None
+    }
+
+    /// Steps over the privileged word `raw`, which decodes to `decoded`.
+    fn step_privileged(&mut self, raw: u32, decoded: &PpuInstruction) {
+        match MsrWord::of(raw) {
+            Some(MsrWord::MtSrr0 { rs }) => {
+                self.srr0 = self.gpr(rs).cloned();
+                self.srr0_lost = self.is_lost(rs);
+            }
+            Some(MsrWord::MtSrr1 { rs }) => {
+                self.srr1 = self.gpr(rs).cloned();
+                self.srr1_lost = self.is_lost(rs);
+            }
+            _ => {
+                let lost = self.lost_srr_copy(raw);
+                self.forget_written(decoded);
+                if let Some(rt) = lost {
+                    self.set_lost(rt, true);
+                }
+            }
+        }
     }
 
     /// Adds to r2 the TOCs that `toc` gives a word.
@@ -154,6 +175,24 @@ impl Constants {
     fn forget_srrs(&mut self) {
         self.srr0 = None;
         self.srr1 = None;
+        self.srr0_lost = false;
+        self.srr1_lost = false;
+    }
+
+    /// The GPR that the word `raw` copies SRR0 or SRR1 into, when that
+    /// register can hold a constant that the scan dropped.
+    ///
+    /// [PPC-Book3 p:21 s:3.4] `mfspr` is primary opcode 31 with extended opcode 339, and it places the SPR that its SPR field names into RT.
+    fn lost_srr_copy(&self, raw: u32) -> Option<u8> {
+        if (raw >> 26, (raw >> 1) & 0x3FF) != (31, 339) {
+            return None;
+        }
+        let lost = match spr_number(raw) {
+            SPR_SRR0 => self.srr0_lost,
+            SPR_SRR1 => self.srr1_lost,
+            _ => false,
+        };
+        lost.then_some(((raw >> 21) & 0x1F) as u8)
     }
 
     /// Where the word `raw` at `address` can put control into real mode.
@@ -204,7 +243,8 @@ impl Constants {
     /// The fetch address depends on MSR\[SF\] of the new MSR, which `rfid`
     /// sets from SRR1 bits 0 and 1. So the set holds the address of each
     /// SRR0 constant under each MSR\[SF\] that SRR1 can give. An SRR1 that
-    /// the scan does not know can set IR with SF at 0 or at 1.
+    /// the scan does not know can set IR with SF at 0 or at 1. An SRR1
+    /// that can hold a constant that the scan dropped can do so too.
     ///
     /// [PPC-Book3 p:13 s:2.3] `rfid` places the OR of SRR1 bits 0 and 1 into MSR\[SF\].
     /// [PPC-Book3 p:13 s:2.3] `rfid` fetches from SRR0 0:61 || 0b00 when SF = 1 in the new MSR, and from 32 zeros || SRR0 32:61 || 0b00 when SF = 0.
@@ -212,7 +252,7 @@ impl Constants {
         let (Some(MsrWord::Rfid), Some(srr0)) = (MsrWord::of(raw), &self.srr0) else {
             return BTreeSet::new();
         };
-        fetch_kinds(self.srr1.as_ref(), true)
+        fetch_kinds(self.known_srr1(), true)
             .into_iter()
             .flat_map(|msr| {
                 srr0.constants()
@@ -220,6 +260,26 @@ impl Constants {
                     .map(move |&srr0| fetch_address(srr0 & !0b11, msr))
             })
             .collect()
+    }
+
+    /// Whether the word `raw` is an `rfid` that can enter a word with
+    /// MSR\[IR\] at 1 from an SRR0 that can hold a constant that the scan
+    /// dropped.
+    ///
+    /// The image need not name a dropped constant, so the `rfid` can enter
+    /// a word that the bound does not hold, with MSR\[SF\] at 0 or at 1.
+    ///
+    /// [PPC-Book3 p:13 s:2.3] `rfid` sets MSR\[IR\] to SRR1\[IR\] | SRR1\[PR\] and fetches the next instruction from SRR0 under the new MSR.
+    pub(super) fn translated_rfid_lost(&self, raw: u32) -> bool {
+        MsrWord::of(raw) == Some(MsrWord::Rfid)
+            && self.srr0_lost
+            && !fetch_kinds(self.known_srr1(), true).is_empty()
+    }
+
+    /// The SRR1 constants, or `None` when SRR1 can also hold a constant
+    /// that the scan dropped.
+    fn known_srr1(&self) -> Option<&Value> {
+        self.srr1.as_ref().filter(|_| !self.srr1_lost)
     }
 
     /// Where the word `raw` at `address` can put control into 32-bit
@@ -263,7 +323,7 @@ impl Constants {
         let next = || address.checked_add(4).map(Value::One);
         Some(match MsrWord::of(raw)? {
             MsrWord::Rfid => (
-                self.srr1.as_ref(),
+                self.known_srr1(),
                 self.srr0.as_ref().map(|srr0| srr0.map(|srr0| srr0 & !0b11)),
                 true,
             ),
@@ -349,16 +409,19 @@ impl Constants {
     /// writes LR when `link` is set.
     ///
     /// The routine that a branch with `link` calls can write SRR0 and
-    /// SRR1, so the step forgets them.
+    /// SRR1, so the step forgets their constants. The routine can also
+    /// leave them unchanged, so SRR0 and SRR1 keep their lost marks.
     ///
     /// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.
+    /// [PPC-Book1 p:24 s:2.4] A branch alters only CTR and LR.
     fn after_branch(&mut self, address: u64, bo: u8, link: bool) {
         if !falls_through(bo, link) {
             *self = Self::default();
             return;
         }
         if link {
-            self.forget_srrs();
+            self.srr0 = None;
+            self.srr1 = None;
             self.lr_lost = false;
             self.lr = address
                 .checked_add(4)
