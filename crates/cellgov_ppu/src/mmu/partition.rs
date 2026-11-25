@@ -1,8 +1,8 @@
 //! The translation resources the hypervisor sets for a partition.
 
 use cellgov_ps3_abi::hw::ppu_mmu::{
-    large_page_log2, HTABSIZE_MAX, PPE_HTABORG_MAX, PPE_HTABSIZE_MAX, RMLR_LIMIT_LOG2,
-    SDR1_HTABORG, SDR1_HTABSIZE,
+    large_page_log2, HTABSIZE_MAX, PPE_HTABORG_MAX, PPE_HTABSIZE_MAX, PPE_RM_LIMIT_MAX,
+    RMLR_LIMIT_LOG2, SDR1_HTABORG, SDR1_HTABSIZE,
 };
 
 /// SDR1, the real mode limit and offset, and the large page sizes of one partition.
@@ -58,13 +58,14 @@ impl Partition {
     /// The resources a partition starts with, until the hypervisor sets its own.
     ///
     /// - SDR1 = 0.
-    /// - Real mode covers every EA (bits 2:63), at offset 0.
+    /// - Real mode covers EA bits 2:63 below [`PPE_RM_LIMIT_MAX`], at
+    ///   offset 0. This is the limit of LPCR\[RMLS\] = 0000.
     /// - Large pages are 16 MB (LP = 0) and 64 KB (LP = 1).
     ///
     /// [PPC-Book3 p:37 s:4.5.2] SDR1 = 0 names the smallest page table, 256 KB at real address 0.
     pub const INITIAL: Self = Self {
         sdr1: 0,
-        rm_limit: 1 << RMLR_LIMIT_LOG2.1,
+        rm_limit: PPE_RM_LIMIT_MAX,
         rm_offset: 0,
         lb: 0b0010,
     };

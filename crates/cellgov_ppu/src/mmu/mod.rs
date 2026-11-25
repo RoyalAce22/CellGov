@@ -11,12 +11,24 @@ mod translate;
 
 pub(crate) use cache::TranslationCache;
 pub use partition::{Partition, PartitionRefusal};
-pub(crate) use translate::{translate, Access, Translation};
+pub(crate) use translate::{translate_entry, Access, EntryHit, Translation};
 
 #[cfg(test)]
 #[path = "tests/translate_tests.rs"]
 mod translate_tests;
 
 #[cfg(test)]
+#[path = "tests/entry_hit_tests.rs"]
+mod entry_hit_tests;
+
+#[cfg(test)]
 #[path = "tests/cache_tests.rs"]
 mod cache_tests;
+
+#[cfg(test)]
+#[path = "tests/hypervisor_real_mode_tests.rs"]
+mod hypervisor_real_mode_tests;
+
+#[cfg(test)]
+#[path = "tests/initial_real_mode_tests.rs"]
+mod initial_real_mode_tests;

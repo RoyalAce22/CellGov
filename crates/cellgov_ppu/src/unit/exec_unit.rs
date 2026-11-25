@@ -64,6 +64,7 @@ impl ExecutionUnit for PpuExecutionUnit {
             fetch_runs: _,
             store_buf: _,
             table_reads: _,
+            table_writes: _,
             // A cache of translations: a hit and a miss give one result.
             translations: _,
             timing,

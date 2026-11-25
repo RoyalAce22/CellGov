@@ -133,6 +133,15 @@ fn ranges(effects: &[Effect]) -> (Vec<Read>, Vec<Write>) {
     (reads, writes)
 }
 
+/// Every write intent outside the page table, in order: the stores, less
+/// the R and C writes of the table searches.
+fn stores(effects: &[Effect]) -> Vec<Write> {
+    let table = HTAB..HTAB + 0x4_0000;
+    let mut writes = ranges(effects).1;
+    writes.retain(|(at, _)| !table.contains(at));
+    writes
+}
+
 fn commit(mem: &mut GuestMemory, effects: &[Effect]) {
     for (at, bytes) in ranges(effects).1 {
         put(mem, at, &bytes);
@@ -155,7 +164,7 @@ fn a_mapped_load_and_store_reach_their_pages_and_publish_real_addresses() {
     assert_eq!(unit.state().pc, SEGMENT + 8);
     let (reads, writes) = ranges(&effects);
     assert_eq!(
-        writes,
+        stores(&effects),
         vec![(DATA_RA + 4, 0xDEAD_BEEFu32.to_be_bytes().to_vec())]
     );
     assert!(
@@ -883,7 +892,7 @@ fn a_store_across_two_pages_publishes_each_real_piece_with_its_own_bytes() {
         r.local_diagnostics
     );
     assert_eq!(
-        ranges(&effects).1,
+        stores(&effects),
         vec![
             (DATA_RA + 0xFFE, vec![0x12, 0x34]),
             (FAR_RA, vec![0x56, 0x78]),

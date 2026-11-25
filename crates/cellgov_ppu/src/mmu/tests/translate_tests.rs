@@ -10,11 +10,27 @@ use cellgov_ps3_abi::hw::ppu_mmu::{
 use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_DR, MSR_IR, MSR_PR, MSR_SF, PPE_SLB_LP, SLB_VALID};
 
 use super::*;
-use crate::exec::PpuInterrupt;
+use crate::exec::{PpuFault, PpuInterrupt};
 use crate::supervisor::{SlbEntry, SupervisorState};
 
 /// The page table's origin: 2^11 groups of 128 bytes (256 KB) at 16 MB.
 const HTAB: u64 = 0x0100_0000;
+
+/// The translation or the interrupt that [`translate_entry`] gives,
+/// without the entry. A CellGov stop fails the test.
+fn translate(
+    ea: u64,
+    access: Access,
+    sup: &SupervisorState,
+    pteg: impl Fn(u64) -> Option<[u8; PTEG_BYTES]>,
+) -> Result<Translation, PpuInterrupt> {
+    translate_entry(ea, access, sup, pteg)
+        .0
+        .map_err(|fault| match fault {
+            PpuFault::Interrupt(interrupt) => interrupt,
+            stop => panic!("translation stopped where an interrupt was due: {stop}"),
+        })
+}
 
 /// A hashed page table: PTEG real address to its 128 bytes.
 #[derive(Default)]
@@ -491,7 +507,7 @@ fn htabsize_takes_more_hash_bits_into_the_group_index() {
 fn partition_new_refuses_what_the_architecture_does_not_allow() {
     use PartitionRefusal as R;
     let lb = Partition::INITIAL.lb();
-    assert_eq!(Partition::new(0, 1 << 62, 0, lb), Ok(Partition::INITIAL));
+    assert_eq!(Partition::new(0, 1 << 38, 0, lb), Ok(Partition::INITIAL));
     assert_eq!(
         Partition::new(1 << 62, 1 << 62, 0, lb),
         Err(R::Sdr1(1 << 62))
@@ -553,25 +569,26 @@ fn partition_new_refuses_a_page_table_past_the_ppes_42_bit_real_space() {
 #[test]
 fn real_mode_drops_the_real_address_bits_past_the_ppes_42() {
     let read = Table::default();
-    // The initial limit passes EA bit 42; the real address drops it.
-    let s = SupervisorState::new(MSR_SF);
+    // A limit past the 42 bits passes EA bit 42; the real address drops it.
+    let mut s = SupervisorState::new(MSR_SF);
+    s.partition = Partition::new(0, 1 << 62, 0, Partition::INITIAL.lb()).expect("p");
     let ea = 0x0000_0400_0000_5678;
-    let t = translate(ea, Access::Load, &s, read.read()).expect("inside the initial limit");
+    let t = translate(ea, Access::Load, &s, read.read()).expect("inside the limit");
     assert_eq!((t.ea, t.ra, t.len), (0x0000_0400_0000_0000, 0, 1 << 42));
     assert_eq!(t.real(ea), Some(0x5678));
     // An offset bit past the 42 drops out too.
-    let mut s = SupervisorState::new(MSR_SF);
     s.partition =
         Partition::new(0, 1 << 28, (1 << 42) | 0x1000_0000, Partition::INITIAL.lb()).expect("p");
     let t = translate(0x1234, Access::Store, &s, read.read()).expect("in limit");
     assert_eq!(t.real(0x1234), Some(0x1000_1234));
 }
 
+/// [CBE-Handbook p:336 s:11.2] Table 11-1: RMLS 0000 selects the 256 GB limit.
 #[test]
-fn the_initial_partition_sizes_lp_0_at_16_mb_and_lp_1_at_64_kb() {
+fn the_initial_partition_has_sdr1_0_real_mode_256_gb_at_0_and_large_pages_16_mb_and_64_kb() {
     assert_eq!(Partition::INITIAL.large_page_log2(false), 24);
     assert_eq!(Partition::INITIAL.large_page_log2(true), 16);
-    assert_eq!(Partition::INITIAL.rm_limit(), 1 << 62);
+    assert_eq!(Partition::INITIAL.rm_limit(), 256 << 30);
     assert_eq!(Partition::INITIAL.rm_offset(), 0);
     assert_eq!(Partition::INITIAL.sdr1(), 0);
 }

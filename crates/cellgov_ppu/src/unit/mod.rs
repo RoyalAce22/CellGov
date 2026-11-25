@@ -48,6 +48,18 @@ mod translation_tests;
 mod translated_fetch_run_tests;
 
 #[cfg(test)]
+#[path = "tests/reference_change_tests.rs"]
+mod reference_change_tests;
+
+#[cfg(test)]
+#[path = "tests/probe_reference_tests.rs"]
+mod probe_reference_tests;
+
+#[cfg(test)]
+#[path = "tests/entry_write_range_tests.rs"]
+mod entry_write_range_tests;
+
+#[cfg(test)]
 #[path = "tests/time_base_tests.rs"]
 mod time_base_tests;
 
@@ -318,3 +330,7 @@ mod code_event_tests;
 #[cfg(test)]
 #[path = "tests/code_event_atomic_tests.rs"]
 mod code_event_atomic_tests;
+
+#[cfg(test)]
+#[path = "tests/initial_real_mode_unit_tests.rs"]
+mod initial_real_mode_unit_tests;

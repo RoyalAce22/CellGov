@@ -8,6 +8,7 @@ use crate::exec::PpuFault;
 use crate::instruction;
 use crate::mmu::Access;
 use crate::unit::ppu_unit::PpuExecutionUnit;
+use crate::unit::translation::{RefillStop, CHANGE_UNSET};
 use cellgov_effects::Effect;
 
 /// What a translating thread does after an access missed every view.
@@ -87,21 +88,31 @@ impl PpuExecutionUnit {
         // wraps the effective space. An address no view holds then has
         // no storage at its real address. A hit and a miss of the
         // cache then give one stop.
-        let (true, FaultExit::Mem(cellgov_mem::MemError::Unmapped(miss), store)) =
-            (translating, &exit)
-        else {
+        // A store to a writable page whose entry has C = 0 is no fault
+        // either: the unit writes C and the store runs again.
+        let (true, FaultExit::Mem(refused, store)) = (translating, &exit) else {
             return MissStep::Stop(exit);
         };
-        let access = if *store { Access::Store } else { Access::Load };
         let marks = (attempt.effects_before, attempt.stores_before);
-        let step = self.translation_miss(
-            mem,
-            &attempt.insn,
-            regions,
-            effects,
-            marks,
-            (miss.addr, access),
-        );
+        let step = match refused {
+            cellgov_mem::MemError::Unmapped(miss) => {
+                let access = if *store { Access::Store } else { Access::Load };
+                self.translation_miss(
+                    mem,
+                    &attempt.insn,
+                    regions,
+                    effects,
+                    marks,
+                    (miss.addr, access),
+                )
+            }
+            cellgov_mem::MemError::ReservedWrite { addr, region }
+                if *store && *region == CHANGE_UNSET =>
+            {
+                self.change_miss(mem, regions, effects, marks, *addr)
+            }
+            _ => return MissStep::Stop(exit),
+        };
         match step {
             MissStep::Stop(_) => {}
             // The instruction runs again: in the next batch after
@@ -157,7 +168,10 @@ impl PpuExecutionUnit {
                     access,
                 ));
             }
-            Some(Err(refused)) => return MissStep::Stop(FaultExit::Verdict(refused)),
+            Some(Err(RefillStop::Fault(refused))) => {
+                return MissStep::Stop(FaultExit::Verdict(refused));
+            }
+            Some(Err(RefillStop::AfterStores)) => return MissStep::EndBatch,
             Some(Ok(t)) => t,
         };
         if self.alias_with_buffered_stores(&t) {
@@ -169,6 +183,34 @@ impl PpuExecutionUnit {
         }
         // The access translates to a real address no storage holds.
         MissStep::Stop(self.unbacked_access(insn, mem, regions.as_slice(), ea, access))
+    }
+
+    /// What a store that met a [`CHANGE_UNSET`] view at `ea` does next:
+    /// write C and run again, end the batch, or stop.
+    ///
+    /// The step truncates `effects` and the buffered stores to their
+    /// lengths at the start of the attempt. A rerun finds `regions`
+    /// rebuilt with C set.
+    #[cold]
+    fn change_miss<'m>(
+        &mut self,
+        mem: &'m cellgov_mem::GuestMemory,
+        regions: &mut RegionTable<'m>,
+        effects: &mut Vec<Effect>,
+        (effects_before, stores_before): (usize, usize),
+        ea: u64,
+    ) -> MissStep {
+        effects.truncate(effects_before);
+        self.store_buf.truncate(stores_before);
+        match self.refill_change(mem, ea) {
+            Ok(_) => {}
+            Err(RefillStop::Fault(refused)) => {
+                return MissStep::Stop(FaultExit::Verdict(refused));
+            }
+            Err(RefillStop::AfterStores) => return MissStep::EndBatch,
+        }
+        *regions = RegionTable::new(self.translated_views(mem).into_iter());
+        MissStep::Rerun
     }
 
     /// Takes back what an attempt whose access missed in the translation

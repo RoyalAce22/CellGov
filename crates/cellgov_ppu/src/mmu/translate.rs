@@ -3,13 +3,13 @@
 
 use cellgov_ps3_abi::hw::ppu_mmu::{
     HASH_BITS, HASH_INDEX_MIN_BITS, PPE_PTE_AVPN, PPE_PTE_LP, PPE_PTE_RPN, PPE_REAL_ADDRESS_BITS,
-    PTEG_BYTES, PTE_BYTES, PTE_C, PTE_G, PTE_H, PTE_I, PTE_L, PTE_N, PTE_PP, PTE_V,
-    REAL_MODE_IGNORED_EA, SDR1_HTABORG, SDR1_HTABSIZE, SEGMENT_LOG2, SLB_KP, SLB_KS, SLB_L, SLB_N,
-    SMALL_PAGE_LOG2,
+    PTEG_BYTES, PTE_BYTES, PTE_C, PTE_C_BYTE, PTE_C_BYTE_MASK, PTE_G, PTE_H, PTE_I, PTE_L, PTE_N,
+    PTE_PP, PTE_R, PTE_R_BYTE, PTE_R_BYTE_MASK, PTE_V, REAL_MODE_IGNORED_EA, SDR1_HTABORG,
+    SDR1_HTABSIZE, SEGMENT_LOG2, SLB_KP, SLB_KS, SLB_L, SLB_N, SMALL_PAGE_LOG2,
 };
-use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_DR, MSR_IR, PPE_SLB_LP};
+use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_DR, MSR_HV, MSR_IR, PPE_SLB_LP};
 
-use crate::exec::PpuInterrupt;
+use crate::exec::{PpuFault, PpuInterrupt};
 use crate::supervisor::{SlbEntry, SupervisorState};
 
 /// What an access does with the storage it reaches.
@@ -51,6 +51,42 @@ impl Translation {
     }
 }
 
+/// The page table entry that a search matched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EntryHit {
+    /// The entry's real address.
+    pub addr: u64,
+    /// The entry's doubleword 1.
+    pub d1: u64,
+}
+
+impl EntryHit {
+    /// The byte write that sets the entry's R bit, as the byte's real
+    /// address and its new value, or `None` when R is 1.
+    ///
+    /// [PPC-Book3 p:43 s:4.9] The processor writes R or C only when the new value differs from the old.
+    /// [PPC-Book3 p:2 s:1.3.2] When the processor writes a field of an architected table, no other defined field changes.
+    pub fn reference_write(&self) -> Option<(u64, u8)> {
+        self.bit_write(PTE_R, PTE_R_BYTE, PTE_R_BYTE_MASK)
+    }
+
+    /// The byte write that sets the entry's C bit, or `None` when C is 1.
+    /// See [`Self::reference_write`].
+    pub fn change_write(&self) -> Option<(u64, u8)> {
+        self.bit_write(PTE_C, PTE_C_BYTE, PTE_C_BYTE_MASK)
+    }
+
+    /// The write of byte `byte` of the entry with `mask` set, or `None`
+    /// when `bit` of doubleword 1 is set.
+    fn bit_write(&self, bit: u64, byte: usize, mask: u8) -> Option<(u64, u8)> {
+        if self.d1 & bit != 0 {
+            return None;
+        }
+        let old = self.d1.to_be_bytes()[byte - PTE_BYTES / 2];
+        Some((self.addr + byte as u64, old | mask))
+    }
+}
+
 /// What the PP bits and the key allow.
 ///
 /// [PPC-Book3 p:45 s:4.10.1] Figure 30: with key 0, PP 11 is read only and the rest read/write; with key 1, PP 00 is no access, 10 read/write, and 01 and 11 read only.
@@ -70,17 +106,20 @@ fn authority(key: bool, pp: u64) -> Authority {
 }
 
 /// The translation of `ea` for `access` on a thread with supervisor
-/// registers `sup`.
+/// registers `sup`, and the page table entry its search matched.
 ///
 /// `pteg` reads the 128-byte page table entry group at a real address,
 /// or gives `None` where no storage is. The search finds no matching
 /// entry in a group that `pteg` gives as `None`.
 ///
-/// The translation does not set a PTE's R or C bit.
+/// The entry is `Some` when the search matches an entry, also for a
+/// refused access, and `None` otherwise. The function writes no entry:
+/// the caller makes the R and C writes that [`EntryHit`] gives.
 ///
-/// # Errors
-///
-/// The storage or segment interrupt the access takes:
+/// The result's error is the storage or segment interrupt the access
+/// takes, or the stop CellGov makes:
+/// - a real mode access with MSR\[HV\] = 1: the unmodelled stop
+///   [`HYPERVISOR_REAL_MODE`];
 /// - a real mode access at or past the real mode limit: the storage
 ///   interrupt with the protection cause;
 /// - no SLB entry for the segment: the segment interrupt;
@@ -88,22 +127,35 @@ fn authority(key: bool, pp: u64) -> Authority {
 ///   not-found cause;
 /// - a page the access may not reach: the storage interrupt with the
 ///   protection or no-execute cause.
-pub fn translate(
+pub fn translate_entry(
     ea: u64,
     access: Access,
     sup: &SupervisorState,
     pteg: impl Fn(u64) -> Option<[u8; PTEG_BYTES]>,
-) -> Result<Translation, PpuInterrupt> {
+) -> (Result<Translation, PpuFault>, Option<EntryHit>) {
     let relocate = match access {
         Access::Fetch => MSR_IR,
         Access::Load | Access::Store => MSR_DR,
     };
-    if sup.msr & relocate == 0 {
-        real_mode(ea, access, sup)
+    if sup.msr & relocate != 0 {
+        let (result, hit) = virtual_mode(ea, access, sup, pteg);
+        (result.map_err(PpuFault::from), hit)
+    } else if sup.msr & MSR_HV != 0 {
+        (Err(PpuFault::Unmodelled(HYPERVISOR_REAL_MODE)), None)
     } else {
-        virtual_mode(ea, access, sup, pteg)
+        (real_mode(ea, access, sup).map_err(PpuFault::from), None)
     }
 }
+
+/// The unmodelled stop of a real mode access with MSR\[HV\] = 1.
+///
+/// The PPU runs no hypervisor code, because CellGov is the hypervisor. So
+/// the model holds no HRMOR and does not model the two hypervisor real
+/// modes.
+///
+/// [PPC-Book3 p:29 s:4.2.6] With MSR\[HV\] = 1, the HRMOR offsets an access with EA bit 0 = 0, and an access with EA bit 0 = 1 uses EA bits 2:63 as the real address.
+/// [CBE-Handbook p:99 s:4.2.8.1] Table 4-8: the PPE's hypervisor offset mode ORs the HRMOR into the EA, and its hypervisor real mode uses EA bits 22:63 as the real address.
+pub(crate) const HYPERVISOR_REAL_MODE: &str = "real addressing mode in hypervisor state";
 
 /// The interrupt for a refused access at `ea`.
 fn refusal(ea: u64, access: Access, cause: Refusal) -> PpuInterrupt {
@@ -193,8 +245,10 @@ fn virtual_mode(
     access: Access,
     sup: &SupervisorState,
     pteg: impl Fn(u64) -> Option<[u8; PTEG_BYTES]>,
-) -> Result<Translation, PpuInterrupt> {
-    let slbe = segment(sup, ea).ok_or_else(|| refusal(ea, access, Refusal::Segment))?;
+) -> (Result<Translation, PpuInterrupt>, Option<EntryHit>) {
+    let Some(slbe) = segment(sup, ea) else {
+        return (Err(refusal(ea, access, Refusal::Segment)), None);
+    };
     let large = slbe.vsid_flags & SLB_L != 0;
     let lp = slbe.vsid_flags & PPE_SLB_LP != 0;
     let p = if large {
@@ -202,9 +256,25 @@ fn virtual_mode(
     } else {
         SMALL_PAGE_LOG2
     };
-    let d1 = search(sup.partition.sdr1(), slbe, ea, p, &pteg)
-        .ok_or_else(|| refusal(ea, access, Refusal::NotFound))?;
+    let Some(hit) = search(sup.partition.sdr1(), slbe, ea, p, &pteg) else {
+        return (Err(refusal(ea, access, Refusal::NotFound)), None);
+    };
+    (
+        entry_translation(ea, access, sup, slbe, p, hit.d1),
+        Some(hit),
+    )
+}
 
+/// The translation of `ea` for `access` through the entry with
+/// doubleword 1 `d1`, in the segment of `slbe` with pages of 2^`p` bytes.
+fn entry_translation(
+    ea: u64,
+    access: Access,
+    sup: &SupervisorState,
+    slbe: &SlbEntry,
+    p: u32,
+    d1: u64,
+) -> Result<Translation, PpuInterrupt> {
     // [PPC-Book3 p:38 s:4.5.3] The N value is the PTE's N ORed with the SLB entry's N.
     // [PPC-Book3 p:45 s:4.10.1] A fetch is not permitted when N is 1 or the PTE's G is 1, and every access takes its Key from Kp in problem state and from Ks otherwise.
     if access == Access::Fetch && (slbe.vsid_flags & SLB_N != 0 || d1 & (PTE_N | PTE_G) != 0) {
@@ -233,7 +303,7 @@ fn virtual_mode(
     })
 }
 
-/// Doubleword 1 of the first PTE that translates `ea` in `slbe`, with pages of 2^`p` bytes.
+/// The first PTE that translates `ea` in `slbe`, with pages of 2^`p` bytes.
 ///
 /// [PPC-Book3 p:38 s:4.5.3] The primary hash XORs VPN bits 13:51 with the low-order 28-p bits of the VPN; the secondary hash is its one's complement. A PTEG's real address is HTABORG, the hash's bits 0:27 masked by HTABSIZE ORed into HTABORG's low-order bits, the hash's bits 28:38, and seven 0 bits.
 /// [PPC-Book3 p:38 s:4.5.3] A PTE matches when H names its group, V = 1, AVPN bits 0:51+q equal VA bits 0:51+q with q = min(5, 28-p), and L equals the SLB entry's L.
@@ -251,7 +321,7 @@ fn search(
     ea: u64,
     p: u32,
     pteg: &impl Fn(u64) -> Option<[u8; PTEG_BYTES]>,
-) -> Option<u64> {
+) -> Option<EntryHit> {
     let vsid = slbe.vsid_flags >> 12;
     let offset = ea & ((1u64 << SEGMENT_LOG2) - 1);
     let hash_mask = (1u64 << HASH_BITS) - 1;
@@ -275,9 +345,10 @@ fn search(
         let Some(group) = pteg(addr) else {
             continue;
         };
-        let even = group.chunks_exact(PTE_BYTES).step_by(2);
-        let odd = group.chunks_exact(PTE_BYTES).skip(1).step_by(2);
-        for pte in even.chain(odd) {
+        let slots = group.chunks_exact(PTE_BYTES).enumerate();
+        let even = slots.clone().step_by(2);
+        let odd = slots.skip(1).step_by(2);
+        for (slot, pte) in even.chain(odd) {
             let d0 = u64::from_be_bytes(pte[..8].try_into().unwrap_or_default());
             let d1 = u64::from_be_bytes(pte[8..].try_into().unwrap_or_default());
             let hit = d0 & PTE_V != 0
@@ -286,7 +357,8 @@ fn search(
                 && (!large || (d1 & PPE_PTE_LP != 0) == lp)
                 && (d0 ^ want) & compare == 0;
             if hit {
-                return Some(d1);
+                let addr = addr + (slot * PTE_BYTES) as u64;
+                return Some(EntryHit { addr, d1 });
             }
         }
     }

@@ -100,9 +100,11 @@ impl PpuExecutionUnit {
     /// Takes `interrupt`, which the instruction at `pc` caused, at its
     /// vector, and yields at the interrupt boundary.
     ///
-    /// The instruction is the first of its batch. The unit puts back the
-    /// state at batch entry, so the instruction leaves no state and no
-    /// effect. The reservation stays.
+    /// The instruction is the first of its batch. The unit restores the
+    /// state at batch entry, so the instruction leaves no state. The
+    /// reservation stays. The instruction's only effects are:
+    /// - the page table reads and the R and C writes of its table searches;
+    /// - the time base read of the boundary test.
     ///
     /// [PPC-Book3 p:63 s:5.4] Interrupts do not clear reservations.
     pub(super) fn interrupt_yield(

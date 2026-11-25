@@ -18,11 +18,47 @@ use super::batch::{fetch_window, CodeBytes, FaultExit};
 use super::ppu_unit::PpuExecutionUnit;
 use crate::exec::{ExecuteVerdict, PpuFault, PpuInterrupt};
 use crate::instruction::PpuInstruction;
-use crate::mmu::{translate, Access, Translation};
+use crate::mmu::{translate_entry, Access, EntryHit, Translation};
 
 /// The region label a view gives when it refuses a store to a read-only
 /// page.
 pub(super) const PAGE_PROTECTION: &str = "page protection";
+
+/// The region label a view gives when it refuses a store to a writable
+/// page whose entry has C = 0.
+///
+/// The refusal is no fault: the unit writes C and runs the store again.
+/// A load that cached the page's translation therefore does not hide C
+/// from a later store in the batch.
+pub(in crate::unit) const CHANGE_UNSET: &str = "page change bit unset";
+
+/// Why a refill kept no translation.
+pub(in crate::unit) enum RefillStop {
+    /// The access takes this fault.
+    Fault(PpuFault),
+    /// A buffered store reaches a byte the search writes. The batch ends
+    /// ahead of the access, so the store commits first and the next
+    /// batch searches again.
+    AfterStores,
+}
+
+/// What one table search gives.
+struct TableSearch {
+    /// The translation, or the interrupt or stop the access takes.
+    result: Result<Translation, PpuFault>,
+    /// The page table entry groups the search read.
+    read: Vec<ByteRange>,
+    /// The entry the search matched.
+    entry: Option<EntryHit>,
+}
+
+/// Whether `e` publishes a store.
+fn is_store(e: &Effect) -> bool {
+    matches!(
+        e,
+        Effect::SharedWriteIntent { .. } | Effect::ConditionalStore { .. }
+    )
+}
 
 /// The last word a translating thread runs: the word after it is the
 /// last word of the effective space, whose next address wraps to 0.
@@ -39,18 +75,41 @@ static STAND_IN: [u8; 2 << SMALL_PAGE_LOG2] = [0; 2 << SMALL_PAGE_LOG2];
 
 /// The page table entry group at real address `addr` and its range, or
 /// `None` where no storage holds all of it.
-fn read_pteg(mem: &GuestMemory, addr: u64) -> Option<(ByteRange, [u8; PTEG_BYTES])> {
+///
+/// The group holds the bytes of `writes` that fall in it, so a search
+/// sees the R and C writes the block made.
+fn read_pteg(
+    mem: &GuestMemory,
+    addr: u64,
+    writes: &[(ByteRange, u8)],
+) -> Option<(ByteRange, [u8; PTEG_BYTES])> {
     let range = ByteRange::new(GuestAddr::new(addr), PTEG_BYTES as u64)?;
-    let group = mem.read(range)?.as_ref().try_into().ok()?;
+    let mut group: [u8; PTEG_BYTES] = mem.read(range)?.as_ref().try_into().ok()?;
+    for &(at, byte) in writes {
+        if let Some(slot) = at
+            .start()
+            .raw()
+            .checked_sub(addr)
+            .filter(|&off| off < PTEG_BYTES as u64)
+        {
+            group[slot as usize] = byte;
+        }
+    }
     Some((range, group))
 }
 
 /// Push `t`'s piece of each region of `mem` onto `out`, at its effective
 /// address.
 ///
-/// A piece of a read-only page refuses stores as [`PAGE_PROTECTION`]. A
-/// piece is caching-inhibited when its page or its region is. A piece of
-/// a provisional region logs its reads at their real addresses.
+/// A piece refuses stores in these cases:
+/// - a piece of a read-only page refuses them as [`PAGE_PROTECTION`];
+/// - a piece of a writable page in a region that refuses writes refuses
+///   them as that region;
+/// - any other piece of a writable page whose entry has C = 0 refuses
+///   them as [`CHANGE_UNSET`].
+///
+/// A piece is caching-inhibited when its page or its region is. A piece
+/// of a provisional region logs its reads at their real addresses.
 fn push_views<'m>(t: &Translation, mem: &'m GuestMemory, out: &mut Vec<RegionView<'m>>) {
     let t_end = t.ra.saturating_add(t.len);
     for view in mem.region_views() {
@@ -77,6 +136,7 @@ fn push_views<'m>(t: &Translation, mem: &'m GuestMemory, out: &mut Vec<RegionVie
             provisional: view.provisional,
             write_refused_by: if t.writable {
                 view.write_refused_by
+                    .or((!t.changed).then_some(CHANGE_UNSET))
             } else {
                 Some(PAGE_PROTECTION)
             },
@@ -140,6 +200,7 @@ impl PpuExecutionUnit {
     pub(super) fn follow_translation(&mut self) {
         self.translations.clear();
         self.table_reads.clear();
+        self.table_writes.clear();
         if let Some(sup) = self.state.supervisor() {
             self.translations.follow(sup);
         }
@@ -238,21 +299,18 @@ impl PpuExecutionUnit {
         probe_views.push(stand_in(t, ea));
         let mut verdict = self.probe(insn, mem, &probe_views);
         if let Some(next) = unheld_after(&verdict, t) {
-            let searched = self
-                .search_table(mem, next, access)
-                .map(|(n, _)| n)
-                .or_else(|refused| {
-                    // A store the next page refuses keeps that page's load
-                    // translation where [`Self::refill_for`] keeps it, and
-                    // meets the page's protection on a read-only view.
-                    if access != Access::Store {
-                        return Err(refused);
-                    }
-                    match self.search_table(mem, next, Access::Load) {
-                        Ok((n, _)) if n.inhibited && n.changed => Ok(n),
-                        _ => Err(refused),
-                    }
-                });
+            let searched = self.probe_table(mem, next, access).or_else(|refused| {
+                // A store the next page refuses keeps that page's load
+                // translation where [`Self::refill_for`] keeps it, and
+                // meets the page's protection on a read-only view.
+                if access != Access::Store {
+                    return Err(refused);
+                }
+                match self.probe_table(mem, next, Access::Load) {
+                    Ok(n) if n.inhibited && n.changed => Ok(n),
+                    _ => Err(refused),
+                }
+            });
             let next_t = match searched {
                 // The PPE refuses an operand in a caching-inhibited page
                 // before it performs it, so the operand meets the next
@@ -281,12 +339,23 @@ impl PpuExecutionUnit {
 
     /// The verdict of `insn` run on a copy of the thread against
     /// `views`. Nothing of the run is kept.
+    ///
+    /// A store to a page whose entry has C = 0 writes C and continues, so
+    /// the run does not take a [`CHANGE_UNSET`] refusal.
     fn probe(
         &self,
         insn: &PpuInstruction,
         mem: &GuestMemory,
         views: &[RegionView<'_>],
     ) -> ExecuteVerdict {
+        let views: Vec<_> = views
+            .iter()
+            .map(|v| RegionView {
+                write_refused_by: v.write_refused_by.filter(|&r| r != CHANGE_UNSET),
+                ..*v
+            })
+            .collect();
+        let views = &views[..];
         let mut state = self.state.clone();
         let mut store_buf = self.store_buf.clone();
         let mut effects = Vec::new();
@@ -314,19 +383,20 @@ impl PpuExecutionUnit {
         out
     }
 
-    /// The translation of `ea` for `access` and the page table entry
-    /// groups its search read. The unit keeps neither.
+    /// The table search of `ea` for `access`. The unit keeps nothing of
+    /// it.
+    ///
+    /// The search sees the R and C writes the block made.
     ///
     /// # Errors
     ///
-    /// Returns the storage or segment interrupt that translation gives,
-    /// or the checkstop of a group no storage holds.
+    /// Returns the checkstop of a group no storage holds.
     fn search_table(
         &self,
         mem: &GuestMemory,
         ea: u64,
         access: Access,
-    ) -> Result<(Translation, Vec<ByteRange>), PpuFault> {
+    ) -> Result<TableSearch, PpuFault> {
         let Some(sup) = self.state.supervisor() else {
             return Err(PpuFault::Internal(
                 "a translation refill on a thread that does not translate",
@@ -336,43 +406,198 @@ impl PpuExecutionUnit {
         // storage holds is an access to nonexistent storage.
         let unbacked = std::cell::Cell::new(false);
         let read = std::cell::RefCell::new(Vec::with_capacity(2));
-        let searched = translate(ea, access, sup, |addr| match read_pteg(mem, addr) {
-            Some((range, group)) => {
-                read.borrow_mut().push(range);
-                Some(group)
-            }
-            None => {
-                unbacked.set(true);
-                None
+        let (result, entry) = translate_entry(ea, access, sup, |addr| {
+            match read_pteg(mem, addr, &self.table_writes) {
+                Some((range, group)) => {
+                    read.borrow_mut().push(range);
+                    Some(group)
+                }
+                None => {
+                    unbacked.set(true);
+                    None
+                }
             }
         });
         if unbacked.get() {
             return Err(PpuFault::Checkstop);
         }
-        Ok((searched?, read.into_inner()))
+        Ok(TableSearch {
+            result,
+            read: read.into_inner(),
+            entry,
+        })
+    }
+
+    /// The translation of `ea` for `access` that a table search gives.
+    /// The unit keeps nothing of it.
+    ///
+    /// # Errors
+    ///
+    /// Returns one of these:
+    /// - the storage or segment interrupt that translation gives;
+    /// - the unmodelled stop that translation gives;
+    /// - the checkstop of a group no storage holds.
+    fn probe_table(
+        &self,
+        mem: &GuestMemory,
+        ea: u64,
+        access: Access,
+    ) -> Result<Translation, PpuFault> {
+        self.search_table(mem, ea, access)?.result
     }
 
     /// Translate `ea` for `access` and keep the translation, and the
     /// page table entry groups the search read.
     ///
+    /// The search writes R = 1 to the entry it matches, even when the
+    /// access takes an interrupt. A store writes C later, when it meets a
+    /// [`CHANGE_UNSET`] view ([`Self::refill_change`]).
+    ///
     /// # Errors
     ///
-    /// Returns the storage or segment interrupt that translation gives,
-    /// or the checkstop of a group no storage holds.
+    /// Returns one of these:
+    /// - the storage or segment interrupt that translation gives;
+    /// - the unmodelled stop that translation gives;
+    /// - the checkstop of a group no storage holds;
+    /// - [`RefillStop::AfterStores`].
     pub(super) fn refill(
         &mut self,
         mem: &GuestMemory,
         ea: u64,
         access: Access,
-    ) -> Result<Translation, PpuFault> {
-        let (t, read) = self.search_table(mem, ea, access)?;
-        self.translations.insert(access, t);
-        for range in read {
-            if !self.table_reads.contains(&range) {
-                self.table_reads.push(range);
+    ) -> Result<Translation, RefillStop> {
+        self.refill_writing(mem, ea, access, false)
+    }
+
+    /// [`Self::refill`] for a store that met a [`CHANGE_UNSET`] view at `ea`.
+    ///
+    /// The search also writes C = 1, and the kept translation has C set.
+    ///
+    /// # Errors
+    ///
+    /// Returns the refusals of [`Self::refill`].
+    pub(super) fn refill_change(
+        &mut self,
+        mem: &GuestMemory,
+        ea: u64,
+    ) -> Result<Translation, RefillStop> {
+        self.refill_writing(mem, ea, Access::Store, true)
+    }
+
+    /// [`Self::refill`], with the C write of a permitted store when
+    /// `change` is set.
+    ///
+    /// [CBE-Handbook p:90 s:4.2.6.8] A table lookup that matches an entry with R = 0 sets R regardless of any storage interrupt, and a store's lookup sets C = 0 to 1 unless the access takes a storage exception.
+    fn refill_writing(
+        &mut self,
+        mem: &GuestMemory,
+        ea: u64,
+        access: Access,
+        change: bool,
+    ) -> Result<Translation, RefillStop> {
+        let search = self
+            .search_table(mem, ea, access)
+            .map_err(RefillStop::Fault)?;
+        let wrote = match search.entry {
+            Some(hit) => self.note_entry_writes(hit, change && search.result.is_ok())?,
+            None => false,
+        };
+        // A refused search that wrote the entry read it, so its groups
+        // publish too.
+        if wrote || search.result.is_ok() {
+            for range in search.read {
+                if !self.table_reads.contains(&range) {
+                    self.table_reads.push(range);
+                }
             }
         }
+        let mut t = search.result.map_err(RefillStop::Fault)?;
+        t.changed |= change;
+        self.translations.insert(access, t);
         Ok(t)
+    }
+
+    /// Keep the R write that `hit` needs, and its C write when `change`
+    /// is set. Returns whether the unit kept a write.
+    ///
+    /// The writes publish ahead of the block's stores. So when a buffered
+    /// store reaches a byte one of them writes, the unit keeps neither.
+    ///
+    /// [CBE-Handbook p:90 s:4.2.6.8] The PPE performs every store in order, its page table entry updates included.
+    ///
+    /// # Errors
+    ///
+    /// Returns one of these, and keeps no write:
+    /// - [`RefillStop::AfterStores`] when a buffered store reaches a byte
+    ///   that a write needs;
+    /// - the internal fault of a write to the last byte of the address
+    ///   space, which has no one-byte range. A search finds no entry there.
+    pub(super) fn note_entry_writes(
+        &mut self,
+        hit: EntryHit,
+        change: bool,
+    ) -> Result<bool, RefillStop> {
+        let writes = [
+            hit.reference_write(),
+            change.then(|| hit.change_write()).flatten(),
+        ];
+        let mut kept = Vec::with_capacity(writes.len());
+        for (ra, byte) in writes.into_iter().flatten() {
+            let Some(range) = ByteRange::new(GuestAddr::new(ra), 1) else {
+                return Err(RefillStop::Fault(PpuFault::Internal(
+                    "a page table entry byte at the end of the address space",
+                )));
+            };
+            if self.buffered_store_reaches(ra) {
+                return Err(RefillStop::AfterStores);
+            }
+            kept.push((range, byte));
+        }
+        if kept.is_empty() {
+            return Ok(false);
+        }
+        self.table_writes.extend(kept);
+        Ok(true)
+    }
+
+    /// Whether a buffered store writes the byte at real address `ra`.
+    fn buffered_store_reaches(&self, ra: u64) -> bool {
+        self.store_buf.stores_from(0).any(|(ea, len)| {
+            self.real_store_pieces(ea, len)
+                .any(|(at, n)| at <= ra && ra - at < u64::from(n))
+        })
+    }
+
+    /// Publish the R and C writes the block's searches made, ahead of the
+    /// block's stores.
+    ///
+    /// The PPE performs these writes in program order with the stores.
+    /// The unit publishes them ahead of the stores instead. This CellGov
+    /// convention gives the same storage:
+    /// - The commit pipeline makes all writes of a batch visible at one
+    ///   epoch boundary. No other unit, DMA transfer or hypercall sees
+    ///   their order in the batch.
+    /// - A search reads committed memory, so it reads none of the block's
+    ///   buffered stores. A buffered store to a byte that a write needs
+    ///   stops the refill ([`RefillStop::AfterStores`]). A store after
+    ///   the search comes after the write in both orders.
+    ///
+    /// [CBE-Handbook p:90 s:4.2.6.8] The PPE performs all stores in order, its page table entry updates included.
+    pub(super) fn publish_table_writes(&mut self, effects: &mut Vec<Effect>) {
+        if self.table_writes.is_empty() {
+            return;
+        }
+        let at = effects.iter().position(is_store).unwrap_or(effects.len());
+        let source = self.id;
+        let writes = self.table_writes.drain(..).map(|(range, byte)| {
+            Effect::shared_write(
+                range,
+                WritePayload::from_slice(&[byte]),
+                source,
+                cellgov_time::GuestTicks::ZERO,
+            )
+        });
+        effects.splice(at..at, writes);
     }
 
     /// [`Self::refill`] for the access of a miss.
@@ -389,19 +614,21 @@ impl PpuExecutionUnit {
     ///
     /// # Errors
     ///
-    /// Returns the storage or segment interrupt that translation gives,
-    /// or the checkstop of a group no storage holds.
+    /// Returns the refusals of [`Self::refill`].
     pub(super) fn refill_for(
         &mut self,
         mem: &GuestMemory,
         ea: u64,
         access: Access,
-    ) -> Result<Translation, PpuFault> {
+    ) -> Result<Translation, RefillStop> {
         match self.refill(mem, ea, access) {
-            Err(refused) if access == Access::Store => match self.refill(mem, ea, Access::Load) {
-                Ok(t) if t.inhibited && t.changed => Ok(t),
-                _ => Err(refused),
-            },
+            Err(RefillStop::Fault(refused)) if access == Access::Store => {
+                match self.refill(mem, ea, Access::Load) {
+                    Ok(t) if t.inhibited && t.changed => Ok(t),
+                    Err(RefillStop::AfterStores) => Err(RefillStop::AfterStores),
+                    _ => Err(RefillStop::Fault(refused)),
+                }
+            }
             done => done,
         }
     }
@@ -463,7 +690,7 @@ impl PpuExecutionUnit {
     /// # Errors
     ///
     /// Returns one of these faults:
-    /// - the interrupt that translation gives;
+    /// - the interrupt or the unmodelled stop that translation gives;
     /// - the instruction storage interrupt of a word that runs past the
     ///   translation's end, or of a region that holds no code;
     /// - the checkstop of a real address no storage holds;
@@ -475,7 +702,17 @@ impl PpuExecutionUnit {
     ) -> Result<((u64, u64), CodeBytes<'m>), PpuFault> {
         let t = match self.translations.lookup(Access::Fetch, pc) {
             Some(t) => *t,
-            None => self.refill(mem, pc, Access::Fetch)?,
+            None => self
+                .refill(mem, pc, Access::Fetch)
+                .map_err(|stop| match stop {
+                    RefillStop::Fault(f) => f,
+                    // Only a retired instruction buffers a store, so the batch
+                    // ends ahead of this fetch and the next batch fetches
+                    // again; it does not take this fault.
+                    RefillStop::AfterStores => {
+                        PpuFault::Internal("a fetch's R write that waits for a buffered store")
+                    }
+                })?,
         };
         let not_found = PpuFault::Interrupt(PpuInterrupt::InstructionStorage {
             no_execute: false,
@@ -652,12 +889,6 @@ impl PpuExecutionUnit {
     /// slot of that conditional store. That slot is ahead of the read
     /// intents of the instructions after it, which are real already.
     pub(super) fn real_stores(&self, effects: &mut Vec<Effect>) {
-        let is_store = |e: &Effect| {
-            matches!(
-                e,
-                Effect::SharedWriteIntent { .. } | Effect::ConditionalStore { .. }
-            )
-        };
         let Some(from) = effects.iter().position(is_store) else {
             return;
         };

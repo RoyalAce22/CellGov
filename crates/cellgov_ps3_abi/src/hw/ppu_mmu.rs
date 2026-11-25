@@ -18,6 +18,11 @@ pub const REAL_MODE_IGNORED_EA: u64 = 0xC000_0000_0000_0000;
 /// [PPC-Book3 p:30 s:4.2.6.2] The supported limit values are of the form 2^j, where 12 <= j <= 62.
 pub const RMLR_LIMIT_LOG2: (u32, u32) = (12, 62);
 
+/// The largest real mode limit the PPE supports: 256 GB, which LPCR\[RMLS\] = 0000 selects.
+///
+/// [CBE-Handbook p:336 s:11.2] Table 11-1: the RMLS values select limits from 1 MB to 256 GB, and RMLS 0000 selects 256 GB.
+pub const PPE_RM_LIMIT_MAX: u64 = 1 << 38;
+
 /// Log2 of the segment size: 256 MB.
 ///
 /// [PPC-Book3 p:26 s:4.2] Segment size is 2^28 bytes.
@@ -119,8 +124,27 @@ pub const PTE_RPN: u64 = 0x3FFF_FFFF_FFFF_F000;
 /// [CBE-Handbook p:79 s:4.2.1] Table 4-1: the PPE does not implement real address bits 2:21 and treats them as 0.
 pub const PPE_PTE_RPN: u64 = 0x0000_03FF_FFFF_F000;
 
+/// The PTE's reference bit: R, bit 55 of doubleword 1. See [`PTE_V`].
+pub const PTE_R: u64 = doubleword_bit(55);
+
 /// The PTE's change bit: C, bit 56 of doubleword 1. See [`PTE_V`].
 pub const PTE_C: u64 = doubleword_bit(56);
+
+/// The byte of a PTE that holds R: byte 14, whose low-order bit is
+/// doubleword 1 bit 55.
+///
+/// [PPC-Book3 p:44 s:4.9] The processor can set R or C with a store to a byte, halfword, word or doubleword. See [`PTE_V`] for the bit numbers.
+pub const PTE_R_BYTE: usize = 14;
+
+/// R's mask in [`PTE_R_BYTE`].
+pub const PTE_R_BYTE_MASK: u8 = 0x01;
+
+/// The byte of a PTE that holds C: byte 15, whose high-order bit is
+/// doubleword 1 bit 56. See [`PTE_R_BYTE`].
+pub const PTE_C_BYTE: usize = 15;
+
+/// C's mask in [`PTE_C_BYTE`].
+pub const PTE_C_BYTE_MASK: u8 = 0x80;
 
 /// The PTE's caching-inhibited bit: I, bit 58 of doubleword 1.
 ///

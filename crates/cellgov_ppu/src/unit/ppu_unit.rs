@@ -95,6 +95,10 @@ pub struct PpuExecutionUnit {
     /// translation misses read, each once. They publish as read intents
     /// at the block boundary.
     pub(super) table_reads: Vec<cellgov_mem::ByteRange>,
+    /// The R and C writes the block's table searches made, each as a
+    /// byte's real range and its new value. They publish ahead of the
+    /// block's stores at the block boundary.
+    pub(super) table_writes: Vec<(cellgov_mem::ByteRange, u8)>,
     /// The issue model that prices each retired instruction in core
     /// cycles.
     pub(super) timing: Box<crate::timing::PpeTiming>,
@@ -136,6 +140,7 @@ impl PpuExecutionUnit {
             store_buf: StoreBuffer::new(),
             translations: crate::mmu::TranslationCache::default(),
             table_reads: Vec::new(),
+            table_writes: Vec::new(),
             timing: Box::default(),
             profile_mode: false,
             profile_insns: std::collections::BTreeMap::new(),
@@ -265,6 +270,7 @@ impl PpuExecutionUnit {
             fetch_runs: _,
             store_buf: _,
             table_reads: _,
+            table_writes: _,
             // Translations of the page table in the memory before the
             // restore.
             translations,

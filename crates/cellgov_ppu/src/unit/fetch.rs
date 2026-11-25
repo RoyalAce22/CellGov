@@ -16,19 +16,24 @@ pub(super) const FETCH_RUNS_MAX: usize = 8;
 pub(super) const NO_FETCH_RUN: u64 = u64::MAX;
 
 impl PpuExecutionUnit {
-    /// Publish what the block did to committed memory: the stores it
-    /// buffered, and the text it fetched.
+    /// Publish what the block did to committed memory.
     ///
-    /// Both reach the effect list at the block boundary rather than per
-    /// instruction, so the two orders a write to the text region and a
-    /// fetch of it can take are held apart without a packet per fetch.
+    /// The block publishes:
+    /// - the stores it buffered;
+    /// - the text it fetched;
+    /// - the R and C writes of its table searches.
     ///
-    /// A thread that translates publishes both at real addresses.
+    /// The stores and the text reach the effect list at the block boundary
+    /// rather than per instruction, so the two orders a write to the text
+    /// region and a fetch of it can take are held apart without a packet
+    /// per fetch. A thread that translates publishes them at real
+    /// addresses.
     pub(super) fn close_block(&mut self, effects: &mut Vec<Effect>) {
         let translates = self.translates();
         self.store_buf.flush(effects, self.id);
         if translates {
             self.real_stores(effects);
+            self.publish_table_writes(effects);
         }
         if self.fetch_end != NO_FETCH_RUN {
             self.fetch_runs.push((self.fetch_start, self.fetch_end));

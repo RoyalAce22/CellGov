@@ -16,7 +16,7 @@ type Context = (u64, [SlbEntry; PPE_SLB_ENTRIES], Partition);
 /// The data and fetch translations a thread made, by first effective
 /// address.
 ///
-/// A translation enters only from [`super::translate()`], so a hit gives
+/// A translation enters only from [`super::translate_entry()`], so a hit gives
 /// what a fresh translation gives while nothing it read changes. The
 /// cache records the MSR, SLB and partition its translations read, and
 /// [`Self::follow`] empties it when they differ. The unit empties it at

@@ -22,3 +22,7 @@ mod translation_hit_miss_tests;
 #[cfg(test)]
 #[path = "tests/faulted_reserve_count_tests.rs"]
 mod faulted_reserve_count_tests;
+
+#[cfg(test)]
+#[path = "tests/unbacked_hit_trim_tests.rs"]
+mod unbacked_hit_trim_tests;

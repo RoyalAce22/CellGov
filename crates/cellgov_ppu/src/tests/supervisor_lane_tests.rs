@@ -91,7 +91,7 @@ fn supervisor_lane_wire_format_golden() {
     );
     assert_eq!(
         SupervisorState::new(0).digest(),
-        0x71C5_E3B6_0FC3_EFA7,
+        0xCF68_A661_5791_8C6F,
         "written by hand in the same commit as the change that moves it"
     );
     assert_eq!(

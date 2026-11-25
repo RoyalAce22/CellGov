@@ -37,6 +37,17 @@ fn the_pte_doubleword_1_fields_tile_without_overlap() {
 }
 
 #[test]
+fn r_and_c_sit_in_adjacent_bytes_of_doubleword_1() {
+    assert_eq!([PTE_R, PTE_C], [0x100, 0x80]);
+    let in_entry = |byte: usize, mask: u8| u64::from(mask) << (8 * (PTE_BYTES - 1 - byte));
+    assert_eq!(in_entry(PTE_R_BYTE, PTE_R_BYTE_MASK), PTE_R);
+    assert_eq!(in_entry(PTE_C_BYTE, PTE_C_BYTE_MASK), PTE_C);
+    for field in [PTE_RPN, PTE_I, PTE_G, PTE_N, PTE_PP] {
+        assert_eq!(field & (PTE_R | PTE_C), 0);
+    }
+}
+
+#[test]
 fn sdr1_holds_a_page_table_origin_of_44_bits_and_a_size_of_5() {
     assert_eq!(SDR1_HTABORG.count_ones(), 44);
     assert_eq!(SDR1_HTABORG.trailing_zeros(), 18);

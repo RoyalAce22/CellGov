@@ -47,6 +47,10 @@ impl PpuExecutionUnit {
     /// Restore the batch-entry state, drop staged stores, fetch runs and
     /// effects, and rewind the per-step trace to the batch entry.
     ///
+    /// The rollback keeps the page table reads and the R and C writes of
+    /// the batch's table searches. A search reads and writes the table
+    /// even when its access takes an interrupt.
+    ///
     /// Retirements discarded by the rollback never reach the trace
     /// stream: the rollback truncates their `PpuStateHash` /
     /// `PpuStateFull` entries, barrier records and code events, and restores
