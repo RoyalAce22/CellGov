@@ -23,11 +23,14 @@ const SECOND: MemoryRegion = MemoryRegion {
     counter: 3,
 };
 
+/// A region whose counter value is its logical partition address, so
+/// each region of a test takes its own value.
 fn region(lpar_address: u64, size: u64, page_size_exp: u8) -> MemoryRegion {
     MemoryRegion {
         lpar_address,
         size,
         page_size_exp,
+        counter: lpar_address,
         ..SECOND
     }
 }
@@ -57,35 +60,41 @@ fn boot_regions_and_one_past_the_storage() -> MemoryState {
 
 #[test]
 fn each_region_starts_at_its_page_size_past_the_last_stored_region() {
+    let regions = [
+        region(0x0000_4000_0010_0000, 0x1_0000, 16),
+        region(0x0000_5000_0020_0000, 0x10_0000, 20),
+        region(0x0000_4000_0030_0000, 0x1_0000, 16),
+    ];
     let mut memory = MemoryState::default();
-    memory.create(region(0x0000_4000_0010_0000, 0x1_0000, 16));
-    memory.create(region(0x0000_5000_0020_0000, 0x10_0000, 20));
-    memory.create(region(0x0000_4000_0030_0000, 0x1_0000, 16));
-    assert_eq!(memory.storage_real(0), Some(ALLOCATED_STORAGE_BASE));
+    for r in regions {
+        memory.create(r);
+    }
+    assert_eq!(memory.storage_of(&regions[0]), Some(ALLOCATED_STORAGE_BASE));
     assert_eq!(
-        memory.storage_real(1),
+        memory.storage_of(&regions[1]),
         Some(ALLOCATED_STORAGE_BASE + 0x10_0000)
     );
     assert_eq!(
-        memory.storage_real(2),
+        memory.storage_of(&regions[2]),
         Some(ALLOCATED_STORAGE_BASE + 0x20_0000)
     );
 }
 
 #[test]
 fn a_region_after_one_with_no_storage_starts_past_the_last_stored_region() {
+    let regions = [
+        region(0x0000_4000_0010_0000, 0x1_0000, 16),
+        region(0x0000_6400_0200_0000, 2 * ALLOCATED_STORAGE_BYTES, 20),
+        region(0x0000_4000_0030_0000, 0x1_0000, 16),
+    ];
     let mut memory = MemoryState::default();
-    memory.create(region(0x0000_4000_0010_0000, 0x1_0000, 16));
-    memory.create(region(
-        0x0000_6400_0200_0000,
-        2 * ALLOCATED_STORAGE_BYTES,
-        20,
-    ));
-    memory.create(region(0x0000_4000_0030_0000, 0x1_0000, 16));
-    assert_eq!(memory.storage_real(0), Some(ALLOCATED_STORAGE_BASE));
-    assert_eq!(memory.storage_real(1), None);
+    for r in regions {
+        memory.create(r);
+    }
+    assert_eq!(memory.storage_of(&regions[0]), Some(ALLOCATED_STORAGE_BASE));
+    assert_eq!(memory.storage_of(&regions[1]), None);
     assert_eq!(
-        memory.storage_real(2),
+        memory.storage_of(&regions[2]),
         Some(ALLOCATED_STORAGE_BASE + 0x1_0000)
     );
 }
@@ -132,7 +141,7 @@ fn a_page_larger_than_its_regions_pages_gets_lv1s_r3() {
 #[test]
 fn a_page_of_a_region_with_no_storage_is_no_storage_and_one_past_every_region_is_none() {
     let memory = boot_regions_and_one_past_the_storage();
-    assert_eq!(memory.storage_real(2), None);
+    assert_eq!(memory.storage_of(&PAST_STORAGE), None);
     assert_eq!(
         region_page(&memory, PAST_STORAGE.lpar_address + 0x8_0000, 20),
         Some(AllocatedPage::NoStorage)

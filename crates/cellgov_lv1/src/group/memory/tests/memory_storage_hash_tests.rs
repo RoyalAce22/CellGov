@@ -12,11 +12,16 @@ fn a_stored_region_adds_its_real_address_under_the_storage_source() {
     let mut memory = MemoryState::default();
     memory.create(region);
     let expected = lanes::value_term(REGION_COUNTER_SOURCE, 0, &4u64)
-        .wrapping_add(lanes::value_term(REGION_SOURCE, 0, &region))
+        .wrapping_add(lanes::value_term(REGION_SOURCE, 3, &region))
         .wrapping_add(lanes::value_term(
             REGION_STORAGE_SOURCE,
-            0,
+            3,
             &ALLOCATED_STORAGE_BASE,
+        ))
+        .wrapping_add(lanes::value_term(
+            STORAGE_END_SOURCE,
+            0,
+            &(ALLOCATED_STORAGE_BASE + 0xA_0000),
         ));
     assert_eq!(memory.sync_term(), expected);
 }
@@ -32,8 +37,8 @@ fn a_region_with_no_storage_adds_no_storage_term() {
     };
     let mut memory = MemoryState::default();
     memory.create(region);
-    assert_eq!(memory.storage_real(0), None);
+    assert_eq!(memory.storage_of(&region), None);
     let expected = lanes::value_term(REGION_COUNTER_SOURCE, 0, &3u64)
-        .wrapping_add(lanes::value_term(REGION_SOURCE, 0, &region));
+        .wrapping_add(lanes::value_term(REGION_SOURCE, 2, &region));
     assert_eq!(memory.sync_term(), expected);
 }

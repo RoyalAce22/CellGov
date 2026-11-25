@@ -27,7 +27,7 @@ use cellgov_ps3_abi::lv1::repository::{field, first_field, lookup, RepositoryKey
 
 use super::allocator::{CounterDraw, HeldRegions};
 use super::storage::{self, ALLOCATED_STORAGE_BASE};
-use super::{REGION_COUNTER_SOURCE, REGION_SOURCE, REGION_STORAGE_SOURCE};
+use super::{REGION_COUNTER_SOURCE, REGION_SOURCE, REGION_STORAGE_SOURCE, STORAGE_END_SOURCE};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::request::HypercallRequest;
@@ -80,13 +80,24 @@ impl LaneValue for MemoryRegion {
 }
 
 /// The partition's memory regions, their storage and its region counter.
+///
+/// The state keys each region and its storage by the region's counter
+/// value. No two regions take the same value, because each region moves
+/// the counter past the value that it took. A key stays the same when
+/// another region leaves the state.
+///
+/// Each kept region is live and belongs to the GameOS partition, the one
+/// partition that CellGov runs.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MemoryState {
     next_counter: Option<u64>,
     regions: Vec<MemoryRegion>,
     /// The real address of the storage of each region that has storage,
-    /// by the region's creation index.
+    /// by the region's counter value.
     storage: BTreeMap<u64, u64>,
+    /// The real address past the last range of storage that a region
+    /// got, or `None` until a region gets storage.
+    storage_end: Option<u64>,
 }
 
 impl MemoryState {
@@ -102,28 +113,24 @@ impl MemoryState {
         self.next_counter
     }
 
-    /// The real address of the storage of the region with the creation
-    /// index `index`, or `None` when the region has no storage.
-    pub fn storage_real(&self, index: u64) -> Option<u64> {
-        self.storage.get(&index).copied()
+    /// The real address of the storage of `region`, or `None` when the
+    /// region has no storage.
+    pub fn storage_of(&self, region: &MemoryRegion) -> Option<u64> {
+        self.storage.get(&region.counter).copied()
     }
 
     /// Keeps `region`, gives it storage when the storage has room, and
     /// moves the counter past the value it took.
     ///
-    /// The region's storage starts after the storage of the last region
-    /// that has storage; see [`storage::placement`].
+    /// The region's storage starts past every range that a region got
+    /// before; see [`storage::placement`]. The end of the storage that the
+    /// regions got never moves down, so no two regions get the same byte.
     pub(crate) fn create(&mut self, region: MemoryRegion) {
         self.take_counter(region.counter);
-        let end = match self.storage.last_key_value() {
-            Some((&index, &real)) => {
-                let size = self.regions.get(index as usize).map_or(0, |r| r.size);
-                real.saturating_add(size)
-            }
-            None => ALLOCATED_STORAGE_BASE,
-        };
+        let end = self.storage_end.unwrap_or(ALLOCATED_STORAGE_BASE);
         if let Some(real) = storage::placement(end, &region) {
-            self.storage.insert(self.regions.len() as u64, real);
+            self.storage.insert(region.counter, real);
+            self.storage_end = Some(real + region.size);
         }
         self.regions.push(region);
     }
@@ -139,10 +146,12 @@ impl MemoryState {
     ///
     /// The terms have these objects:
     /// - each region is one object of the lane source `REGION_SOURCE`,
-    ///   keyed by its creation index;
+    ///   keyed by its counter value;
     /// - the real address of each region's storage is one object of the
     ///   lane source `REGION_STORAGE_SOURCE`, with the same key;
-    /// - the counter is object 0 of the lane source `REGION_COUNTER_SOURCE`.
+    /// - the counter is object 0 of the lane source `REGION_COUNTER_SOURCE`;
+    /// - the end of the storage that the regions got is object 0 of the
+    ///   lane source `STORAGE_END_SOURCE`.
     ///
     /// A state with no region adds no term.
     pub fn sync_term(&self) -> u128 {
@@ -150,11 +159,14 @@ impl MemoryState {
             Some(counter) => lanes::value_term(REGION_COUNTER_SOURCE, 0, &counter),
             None => 0,
         };
-        for (index, region) in (0u64..).zip(&self.regions) {
-            sum = sum.wrapping_add(lanes::value_term(REGION_SOURCE, index, region));
+        for region in &self.regions {
+            sum = sum.wrapping_add(lanes::value_term(REGION_SOURCE, region.counter, region));
         }
-        for (&index, real) in &self.storage {
-            sum = sum.wrapping_add(lanes::value_term(REGION_STORAGE_SOURCE, index, real));
+        for (&counter, real) in &self.storage {
+            sum = sum.wrapping_add(lanes::value_term(REGION_STORAGE_SOURCE, counter, real));
+        }
+        if let Some(end) = self.storage_end {
+            sum = sum.wrapping_add(lanes::value_term(STORAGE_END_SOURCE, 0, &end));
         }
         sum
     }
@@ -331,3 +343,7 @@ mod storage_hash_tests;
 #[cfg(test)]
 #[path = "tests/memory_boot_storage_tests.rs"]
 mod boot_storage_tests;
+
+#[cfg(test)]
+#[path = "tests/region_release_tests.rs"]
+mod release_tests;

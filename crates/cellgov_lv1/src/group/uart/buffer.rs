@@ -14,8 +14,8 @@ use crate::group::memory::region::{MemoryRegion, MemoryState};
 pub(super) enum BufferRegion {
     /// The real mode region, whose base is 0.
     RealMode,
-    /// The region that `allocate_memory` created with this creation index.
-    Allocated(usize),
+    /// This region, which `allocate_memory` created.
+    Allocated(MemoryRegion),
 }
 
 /// The outcome of the region checks on a buffer.
@@ -58,10 +58,10 @@ pub(super) fn check(
         };
         (BufferRegion::RealMode, rm_size)
     } else {
-        let Some((index, region)) = allocated_region(regions, base) else {
+        let Some(region) = allocated_region(regions, base) else {
             return BufferCheck::RegionNotHeld;
         };
-        (BufferRegion::Allocated(index), region.size)
+        (BufferRegion::Allocated(*region), region.size)
     };
     // lv1's lookup finds no region when the base plus the size is not
     // above r4 [OFW-4.93 lv1 a:0x2CE798-0x2CE7A8].
@@ -89,15 +89,14 @@ pub(super) fn real_address(
 ) -> Option<u64> {
     match region {
         BufferRegion::RealMode => Some(address),
-        BufferRegion::Allocated(index) => {
-            let region = memory.regions().get(index)?;
-            let storage = memory.storage_real(index as u64)?;
+        BufferRegion::Allocated(region) => {
+            let storage = memory.storage_of(&region)?;
             storage.checked_add(address.checked_sub(region.lpar_address)?)
         }
     }
 }
 
-/// The creation index and the region that `allocate_memory` created at `base`.
+/// The region that `allocate_memory` created at `base`.
 ///
 /// Such a region passes the class check and the page array check of both
 /// handlers:
@@ -109,9 +108,6 @@ pub(super) fn real_address(
 ///   the handlers check [OFW-4.93 lv1 a:0x358948].
 /// - The constructor stores the region's page object at +176
 ///   [OFW-4.93 lv1 a:0x2DEAE0-0x2DEAE8].
-fn allocated_region(regions: &[MemoryRegion], base: u64) -> Option<(usize, &MemoryRegion)> {
-    regions
-        .iter()
-        .enumerate()
-        .find(|(_, region)| region.lpar_address == base)
+fn allocated_region(regions: &[MemoryRegion], base: u64) -> Option<&MemoryRegion> {
+    regions.iter().find(|region| region.lpar_address == base)
 }

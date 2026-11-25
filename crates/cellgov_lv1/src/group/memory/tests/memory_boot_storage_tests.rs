@@ -12,10 +12,14 @@ fn the_4_93_boot_allocations_each_get_storage_from_the_storage_base() {
     let mut hv = hypervisor_4_93();
     hv.dispatch(&request([first, 20, 0, 0]));
     hv.dispatch(&request([second, 16, 0, 0]));
-    assert_eq!(hv.memory().regions().len(), 2);
-    assert_eq!(hv.memory().storage_real(0), Some(ALLOCATED_STORAGE_BASE));
+    let regions = hv.memory().regions();
+    assert_eq!(regions.len(), 2);
     assert_eq!(
-        hv.memory().storage_real(1),
+        hv.memory().storage_of(&regions[0]),
+        Some(ALLOCATED_STORAGE_BASE)
+    );
+    assert_eq!(
+        hv.memory().storage_of(&regions[1]),
         Some(ALLOCATED_STORAGE_BASE + first)
     );
 }

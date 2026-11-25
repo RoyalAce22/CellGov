@@ -22,7 +22,7 @@ pub(crate) const GROUP: Group = Group {
         HashedSurface {
             name: "the memory regions",
             source: Some(REGION_SOURCE),
-            stamp: Stamp::Version(22),
+            stamp: Stamp::Pending,
         },
         HashedSurface {
             name: "the region counter",
@@ -42,18 +42,23 @@ pub(crate) const GROUP: Group = Group {
         HashedSurface {
             name: "the real address of each memory region's storage",
             source: Some(REGION_STORAGE_SOURCE),
-            stamp: Stamp::Version(28),
+            stamp: Stamp::Pending,
         },
         HashedSurface {
             name: "the real address of each address space's page table",
             source: Some(PAGE_TABLE_STORAGE_SOURCE),
             stamp: Stamp::Pending,
         },
+        HashedSurface {
+            name: "the end of the storage that the memory regions got",
+            source: Some(STORAGE_END_SOURCE),
+            stamp: Stamp::Pending,
+        },
     ],
 };
 
 /// The lane source of the memory regions the hypervisor created, one
-/// object per region in the order of creation.
+/// object per region, keyed by its counter value.
 pub(crate) const REGION_SOURCE: u8 = 77;
 
 /// The lane source of the partition's region counter.
@@ -68,8 +73,12 @@ pub(crate) const ADDRESS_SPACE_SOURCE: u8 = 79;
 pub(crate) const SELECTED_ADDRESS_SPACE_SOURCE: u8 = 80;
 
 /// The lane source of the real addresses of the regions' storage, one
-/// object per region that has storage, keyed by its creation index.
+/// object per region that has storage, keyed by its counter value.
 pub(crate) const REGION_STORAGE_SOURCE: u8 = 128;
+
+/// The lane source of the real address past the last range of storage
+/// that a memory region got.
+pub(crate) const STORAGE_END_SOURCE: u8 = 130;
 
 /// The lane source of the real addresses of the page tables, one object
 /// per address space whose table has storage, keyed by its construction

@@ -1,5 +1,8 @@
 use super::*;
-use crate::group::memory::storage::{allocated_storage, ALLOCATED_STORAGE_BASE};
+use crate::group::memory::region::MemoryRegion;
+use crate::group::memory::storage::{
+    allocated_storage, ALLOCATED_STORAGE_BASE, ALLOCATED_STORAGE_BYTES,
+};
 use crate::group::state::StateChange;
 use crate::Hypervisor;
 use cellgov_event::UnitId;
@@ -252,11 +255,9 @@ fn allocated(offset: u64) -> (Hypervisor, u64, GuestMemory) {
     let lpar = answered(hv.dispatch_with(&allocate, &memory))
         .outputs()
         .expect("outputs")[0];
-    let real = hv
-        .groups()
-        .memory()
-        .regions()
-        .storage_real(0)
+    let memory_state = hv.groups().memory().regions();
+    let real = memory_state
+        .storage_of(&memory_state.regions()[0])
         .expect("storage");
     let head = ByteRange::new(GuestAddr::new(real + offset), 16).expect("the buffer head");
     let mut bytes = NOTIFY_WRITE_COMMAND.to_be_bytes().to_vec();
@@ -284,6 +285,51 @@ fn a_buffer_in_an_allocated_region_is_read_from_the_region_storage() {
             "offset {offset:#x}"
         );
     }
+}
+
+/// The first region fills the storage, so the second gets none. A buffer
+/// in the second region is unheld; it never takes the storage of the
+/// first.
+#[test]
+fn a_buffer_in_an_allocated_region_with_no_storage_is_unheld() {
+    let stored = MemoryRegion {
+        lpar_address: 0x0000_5000_0030_0000,
+        size: ALLOCATED_STORAGE_BYTES,
+        page_size_exp: 16,
+        unit_id: 1,
+        counter: 2,
+    };
+    let unstored = MemoryRegion {
+        lpar_address: 0x0000_6400_0200_0000,
+        size: REGION_SIZE,
+        page_size_exp: 20,
+        unit_id: 1,
+        counter: 3,
+    };
+    let mut regions = MemoryState::default();
+    regions.create(stored);
+    regions.create(unstored);
+    assert_eq!(regions.storage_of(&stored), Some(ALLOCATED_STORAGE_BASE));
+    assert_eq!(regions.storage_of(&unstored), None);
+    let rm_size = real_mode_size("4.93");
+    assert_eq!(
+        buffer_real(
+            &regions,
+            rm_size,
+            unstored.lpar_address + 0x100,
+            NOTIFY_BUFFER_BYTES
+        ),
+        BufferPlace::Unheld
+    );
+    assert_eq!(
+        buffer_real(
+            &regions,
+            rm_size,
+            stored.lpar_address + 0x100,
+            NOTIFY_BUFFER_BYTES
+        ),
+        BufferPlace::Real(ALLOCATED_STORAGE_BASE + 0x100)
+    );
 }
 
 /// The first address past the allocated region lies in no region of the

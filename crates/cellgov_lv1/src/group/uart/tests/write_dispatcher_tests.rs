@@ -155,7 +155,7 @@ fn boot_regions() -> MemoryState {
 /// The real address of [`HEADER_ADDRESS`] in the boot regions' storage.
 fn header_real() -> u64 {
     let base = boot_regions()
-        .storage_real(1)
+        .storage_of(&SECOND)
         .expect("the second is stored");
     base + (HEADER_ADDRESS - SECOND.lpar_address)
 }
@@ -369,7 +369,7 @@ fn a_write_is_answered_only_while_its_bytes_fit_with_the_request_s_bytes_in_the_
 fn a_buffer_in_a_region_with_no_storage_is_a_refusal() {
     let mut memory = boot_regions();
     memory.create(PAST_STORAGE);
-    assert_eq!(memory.storage_real(2), None);
+    assert_eq!(memory.storage_of(&PAST_STORAGE), None);
     let r = request(PAST_STORAGE.lpar_address + 0x100, 16);
     assert_eq!(
         write_with(&r, &UartState::default(), &memory, &storage(&[])),

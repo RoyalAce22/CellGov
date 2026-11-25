@@ -91,7 +91,7 @@ fn boot_regions() -> MemoryState {
 fn boot_regions_and_one_past_the_storage() -> MemoryState {
     let mut memory = boot_regions();
     memory.create(PAST_STORAGE);
-    assert_eq!(memory.storage_real(2), None);
+    assert_eq!(memory.storage_of(&PAST_STORAGE), None);
     memory
 }
 

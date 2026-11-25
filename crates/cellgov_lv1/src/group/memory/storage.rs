@@ -7,8 +7,15 @@
 //! [`WRITE_HTAB_ALLOCATED_PAGE_SIZE_R3`]. CellGov keeps the pages in
 //! guest storage at [`ALLOCATED_STORAGE_BASE`], so that the PPU reads
 //! them through the page table. Each region that fits gets its own range
-//! of the storage; see [`placement`]. No two regions get the same byte,
-//! so each range holds 0, as lv1's pages do after the allocation.
+//! of the storage; see [`placement`].
+//!
+//! lv1's page allocator fills each page of a new allocation with 0
+//! [OFW-4.93 lv1 a:0x2C14F8-0x2C1508].
+//! CellGov gives a new region only storage that no region got before, so
+//! the range of a new region holds 0 with no write. The storage of a
+//! region that leaves the memory state is never given to another region.
+//! When the storage has no room past the ranges that regions got, a new
+//! region gets no storage, and `write_htab_entry` refuses its pages.
 
 use cellgov_mem::{PageSize, Region};
 use cellgov_ps3_abi::lv1::memory::WRITE_HTAB_ALLOCATED_PAGE_SIZE_R3;
@@ -86,13 +93,14 @@ pub(crate) enum AllocatedPage {
 /// the page's size and does not read the entry's page protection; see
 /// [`WRITE_HTAB_ALLOCATED_PAGE_SIZE_R3`].
 pub(crate) fn region_page(memory: &MemoryState, address: u64, shift: u32) -> Option<AllocatedPage> {
-    let (index, region) = (0u64..)
-        .zip(memory.regions())
-        .find(|(_, r)| address >= r.lpar_address && address - r.lpar_address < r.size)?;
+    let region = memory
+        .regions()
+        .iter()
+        .find(|r| address >= r.lpar_address && address - r.lpar_address < r.size)?;
     if shift > u32::from(region.page_size_exp) {
         return Some(AllocatedPage::Lv1(WRITE_HTAB_ALLOCATED_PAGE_SIZE_R3));
     }
-    Some(match memory.storage_real(index) {
+    Some(match memory.storage_of(region) {
         Some(real) => AllocatedPage::Stored(real + (address - region.lpar_address)),
         None => AllocatedPage::NoStorage,
     })

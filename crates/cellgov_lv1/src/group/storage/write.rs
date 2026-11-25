@@ -141,10 +141,11 @@ pub(super) fn buffer_real(
     let Some(end) = address.checked_add(bytes) else {
         return BufferPlace::Unheld;
     };
-    let found = (0u64..)
-        .zip(regions.regions())
-        .find(|(_, r)| address >= r.lpar_address && address - r.lpar_address < r.size);
-    let Some((index, region)) = found else {
+    let found = regions
+        .regions()
+        .iter()
+        .find(|r| address >= r.lpar_address && address - r.lpar_address < r.size);
+    let Some(region) = found else {
         // The storage above the real mode region holds pages that lv1
         // gives the partition at no logical partition address of their
         // own (see `crate::group::memory::storage`). lv1's translation
@@ -159,7 +160,7 @@ pub(super) fn buffer_real(
         return BufferPlace::Lv1(NOTIFY_WRITE_BUFFER_PAST_REGION_STATUS);
     }
     regions
-        .storage_real(index)
+        .storage_of(region)
         .and_then(|real| real.checked_add(address - region.lpar_address))
         .map_or(BufferPlace::Unheld, BufferPlace::Real)
 }
