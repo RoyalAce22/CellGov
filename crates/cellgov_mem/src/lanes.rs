@@ -234,6 +234,9 @@ pub mod source {
     /// The interrupt state bitmaps registered with the hypervisor, one
     /// object per logical PPE thread in key order.
     pub const HYPERVISOR_IRQ_STATE_BITMAP: u8 = 81;
+    /// The event receive ports the hypervisor constructed, one object
+    /// per port in id order.
+    pub const HYPERVISOR_EVENT_RECEIVE_PORT: u8 = 82;
 }
 
 const OBJECT_BITS: u32 = 32;

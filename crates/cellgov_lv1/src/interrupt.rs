@@ -28,6 +28,7 @@ use cellgov_ps3_abi::lv1::ppe::game_os_logical_ppe_id;
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
 use super::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
+use super::event_port::EventReceivePort;
 use super::request::HypercallRequest;
 use super::{memory, vector};
 
@@ -47,6 +48,15 @@ pub struct IrqStateBitmapRegistration {
     pub key: IrqStateBitmapKey,
     /// The bitmap's logical partition address, from r5.
     pub lpar_address: u64,
+}
+
+/// A change to the partition's interrupt state that an answer carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterruptChange {
+    /// The call registered this interrupt state bitmap.
+    BitmapRegistered(IrqStateBitmapRegistration),
+    /// The call constructed this event receive port.
+    PortConstructed(EventReceivePort),
 }
 
 /// Fields 1 to 3: the logical PPE id, the thread and the address.
@@ -232,10 +242,12 @@ pub(super) fn configure_bitmap(
         source: request.unit,
         source_time: request.tick,
     });
-    answer.irq_state_bitmap = Some(IrqStateBitmapRegistration {
-        key: IrqStateBitmapKey { ppe_id, thread },
-        lpar_address: address,
-    });
+    answer.interrupt = Some(InterruptChange::BitmapRegistered(
+        IrqStateBitmapRegistration {
+            key: IrqStateBitmapKey { ppe_id, thread },
+            lpar_address: address,
+        },
+    ));
     HypercallDisposition::Answered(answer)
 }
 

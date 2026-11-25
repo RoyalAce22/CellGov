@@ -1,0 +1,21 @@
+[test]
+name = "lv2_event_port_ids"
+
+# A hardware probe: the port ids that lv1 construct_event_receive_port gave the
+# running kernel, read back from the kernel's per-thread records and its three
+# per-thread port tables through the CFW's lv2 peek. The console capture is the
+# answer; no emulator runs it.
+
+[observe]
+# per read, the address and the doubleword there: 45 reads, 720 bytes. The reads are
+# the TOC word, the record slot and the three table slots, then +0x00 and +0x40 of
+# each of the two records, then words 0 to 5 of each thread's table A entry, words
+# 0 to 6 of each thread's table B entry and words 0 to 4 of each thread's table C
+# entry. The port id is record +0x40, word 1 of a table A entry and word 0 of a
+# table B or table C entry.
+memory_regions = [
+  { name = "result", addr = 0, size = 720 },
+]
+
+[expect]
+outcome = "completed"

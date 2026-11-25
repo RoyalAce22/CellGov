@@ -127,6 +127,13 @@ pub const SELECT_VIRTUAL_ADDRESS_SPACE: u64 = 7;
 /// [`super::interrupt`].
 pub const CONFIGURE_IRQ_STATE_BITMAP: u64 = 11;
 
+/// `construct_event_receive_port`: no input, and the new port's id in
+/// r4. Linux `arch/powerpc/platforms/ps3/interrupt.c`,
+/// `ps3_event_receive_port_setup`, makes the call in this form and names
+/// the output the outlet. The lv1 handler [OFW-4.93 lv1 a:0x2EF424]
+/// writes the output in this form; see [`super::event_port`].
+pub const CONSTRUCT_EVENT_RECEIVE_PORT: u64 = 18;
+
 /// `get_logical_ppe_id`: no input, and the id of the caller's logical
 /// PPE in r4. Linux `arch/powerpc/platforms/ps3/repository.c`,
 /// `ps3_repository_read_mm_info`, makes the call in this form. The lv1

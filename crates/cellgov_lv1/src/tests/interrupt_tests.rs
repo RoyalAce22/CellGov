@@ -75,10 +75,12 @@ fn registered(r: &HypercallRequest, thread: u8, bitmap: u64) -> HypercallDisposi
         source: r.unit,
         source_time: r.tick,
     });
-    answer.irq_state_bitmap = Some(IrqStateBitmapRegistration {
-        key: IrqStateBitmapKey { ppe_id: 1, thread },
-        lpar_address: bitmap,
-    });
+    answer.interrupt = Some(InterruptChange::BitmapRegistered(
+        IrqStateBitmapRegistration {
+            key: IrqStateBitmapKey { ppe_id: 1, thread },
+            lpar_address: bitmap,
+        },
+    ));
     HypercallDisposition::Answered(answer)
 }
 
