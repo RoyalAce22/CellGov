@@ -25,7 +25,7 @@ The firmware, PUP and kernel tables are the LV2 archive's:
 from there. Run the SQLite build command from this directory so its
 relative paths resolve.
 
-Archive schema version: **1**. `sql/schema.sql` records the
+Archive schema version: **2**. `sql/schema.sql` records the
 same value in SQLite's `user_version`, so a column change cannot pass as
 an unchanged archive.
 
@@ -81,13 +81,48 @@ that answers that family, the firmware versions whose kernel calls the
 number with its site count in the newest of them, its entry in lv1's
 live 4.93 hypercall table, and the state.
 
+`name_source` tells which source gave the name:
+
+- `header`: `lv1call.h`, in its Linux copy or its OtherOS++ copy. The
+  OtherOS++ copy names some numbers only `undocumented_function_N`.
+- `psdevwiki`: psdevwiki's list of hypercalls.
+- `cellgov`: CellGov's reading of the call's lv1 handler in the 4.93
+  firmware. The call table cites the handler of each such name.
+
+A psdevwiki or CellGov name replaces the header's placeholder. The
+family comes from the header's name.
+
+A number that neither header lists has no header row and no
+placeholder. `UNLISTED_ALIASES` in `cellgov_ps3_abi::lv1::call` gives a
+psdevwiki or CellGov name to some of these numbers:
+89, 137, 195, 196, 230 and 231. Each of them takes its name from that alias.
+Every other number that neither header lists has `none` as its name and
+its `name_source`. A number that neither header lists has `none` as its
+`inputs` and `outputs`, and its family is `unnamed`.
+
 `lv1_493` is `handler`, `invalid` or `past_table`. It comes from
 `cellgov_ps3_abi::lv1::table`, which holds the console capture
-`tests/micro/lv1_hypercall_table`. The state is `answered`
+`tests/micro/lv1_hypercall_table`. A `past_table` number
+(0 numbers) is not below the table's entry
+count, 256. The state is `answered`
 (17 numbers) or `null_backend`: no handler answers
-the number. At 4.93 the null backend answers lv1's invalid-entry status
-for an `invalid` number (17 numbers) and stops the run
-for a `handler` number. At every other firmware it stops the run.
+the number.
+
+lv1's vector answers a `past_table` number before any handler runs. It
+returns lv1's unknown-hypercall status, `LV1_NOT_IMPLEMENTED`, to a
+call from either processor state. CellGov gives that answer, whatever
+the row's state, at each firmware whose lv1 image shows the entry count:
+1.94, 3.15, 3.41, 3.70 and 4.93. At every other firmware:
+
+- CellGov refuses a problem-state call to the number, and the refusal
+  stops the run.
+- A supervisor-state call gets its handler's answer, or the null backend
+  stops the run.
+
+For a number below the entry count, the null backend at 4.93 answers
+lv1's invalid-entry status for an `invalid` number
+(17 numbers). It stops the run for a `handler`
+number. At every other firmware it stops the run.
 
 The state comes from the handler each hypercall group of `cellgov_lv1`
 registers. A change that registers a handler need not regenerate this
