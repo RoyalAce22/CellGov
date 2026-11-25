@@ -16,8 +16,8 @@
 //!
 //! The answer to a write of one or more bytes carries the bytes of the
 //! request that is not complete, and the hypervisor keeps them. The answer
-//! to a write that completes a request puts the reply in the port's
-//! receive buffer.
+//! to a write that completes a request puts the service's reply, if any,
+//! in the port's receive buffer.
 
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_ps3_abi::lv1::call::WRITE_VIRTUAL_UART;

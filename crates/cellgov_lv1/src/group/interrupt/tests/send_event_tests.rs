@@ -387,8 +387,8 @@ fn a_raise_on_a_plug_past_doubleword_0_writes_and_masks_its_own_doubleword() {
 
 /// The first wake clears the pause flag, and the thread runs again. lv1
 /// signals a raise on it with an interprocessor interrupt
-/// [OFW-4.93 lv1 a:0x2C663C-0x2C6650], which reads the running
-/// registers that `dispatch_returning` does not give.
+/// [OFW-4.93 lv1 a:0x2C663C-0x2C6650]. lv1's handler reads the running
+/// registers, and `dispatch_returning` gives none.
 #[test]
 fn a_second_raise_after_a_wake_is_the_no_running_registers_refusal() {
     const PLUG_10_BIT: u64 = 1 << 53;

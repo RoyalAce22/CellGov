@@ -65,7 +65,7 @@ enum Progress {
     Complete {
         /// The request header.
         header: [u8; HEADER],
-        /// The bytes past the end of the request.
+        /// The count of bytes past the end of the request.
         extra: u64,
     },
 }

@@ -43,6 +43,9 @@ const TAKE_PC: u64 = 0x8000_0000_0000_8e58;
 
 const UNIT: UnitId = UnitId::new(1);
 
+/// A decrementer that is not negative.
+const DEC: u32 = 0x0010_0000;
+
 fn call(number: u64, args: &[u64], thread: u8) -> HypercallRequest {
     let mut inputs = [0; 8];
     inputs[..args.len()].copy_from_slice(args);
@@ -104,6 +107,7 @@ fn take(srr0: u64, msr: u64) -> MediatedTake {
         thread: Some(1),
         srr0,
         srr1: msr | SRR1_MEDIATED_EXTERNAL,
+        decrementer: Some(DEC),
     }
 }
 
@@ -233,3 +237,6 @@ fn a_take_in_hypervisor_state_is_a_refusal() {
         ))
     );
 }
+
+#[path = "mediated_decrementer_tests.rs"]
+mod decrementer;

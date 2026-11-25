@@ -486,6 +486,7 @@ pub const NODES: &[RepositoryNode] = &[
         0,
         0x0068_a678,
     ),
+    // `bus.1.dev.1.type`; see `bus.1.dev.<n>.type` above.
     bus_node(
         1,
         [field(b"dev", 1), field(b"type", 0), 0],
@@ -541,6 +542,7 @@ pub const NODES: &[RepositoryNode] = &[
         0,
         0x0068_aa78,
     ),
+    // `bus.1.dev.2.type`; see `bus.1.dev.<n>.type` above.
     bus_node(
         1,
         [field(b"dev", 2), field(b"type", 0), 0],
@@ -560,6 +562,7 @@ pub const NODES: &[RepositoryNode] = &[
         0x2f,
         0x0068_ac78,
     ),
+    // `bus.1.dev.3.type`; see `bus.1.dev.<n>.type` above.
     bus_node(
         1,
         [field(b"dev", 3), field(b"type", 0), 0],
@@ -577,6 +580,7 @@ pub const NODES: &[RepositoryNode] = &[
     // loop runs that many times
     // [OFW-4.93 lv2_kernel a:0x80000000000937bc-0x80000000000937f8].
     bus_node(1, [field(b"num_dev", 0), 0, 0], 4, 0, 0x0068_adf8),
+    // `bus.1.type`; see `bus.<n>.type` above.
     bus_node(1, [field(b"type", 0), 0, 0], 4, 0, 0x0068_ad78),
     // `plat.id`: the platform id, 8 bytes of text. The kernel keeps it at
     // offset 0xa8 of its boot record [OFW-4.93 lv2_kernel a:0x800000000000CD08].
@@ -813,7 +817,7 @@ pub const NO_NODE_R3: u64 = 0x0000_001E_FFFF_FFFA;
 /// for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AbsentNode {
-    /// The read that names no node.
+    /// The key that names no node.
     pub key: RepositoryKey,
     /// The firmware versions whose read CellGov answers with
     /// [`NO_NODE_R3`], ascending.
@@ -858,7 +862,7 @@ pub const ABSENT_NODES: &[AbsentNode] = &[
     absent_bus_node(1, [field(b"dev", 2), field(b"intr", 2), 0]),
     absent_bus_node(1, [field(b"dev", 2), field(b"reg", 2), field(b"type", 0)]),
     // `bus.1.dev.3.reg.0.type`: the handler of type 6 reads it after the
-    // id. A failed read skips the region and goes on to interrupt 0
+    // id. After a failed read, the handler skips the region and reads interrupt 0
     // [OFW-4.93 lv2_kernel a:0x8000000000093364-0x8000000000093380].
     absent_bus_node(1, [field(b"dev", 3), field(b"reg", 0), field(b"type", 0)]),
 ];

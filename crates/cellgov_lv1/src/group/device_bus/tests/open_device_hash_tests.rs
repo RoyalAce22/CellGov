@@ -26,8 +26,6 @@ fn open_device_sync_term_lane_vector_golden() {
     assert_eq!(state(&[BUS_1_DEVICE_0]).sync_term(), sum);
 }
 
-/// Opens of bus 2 device 5 and then bus 1 device 3 give bus 1 device 3
-/// the object 0.
 #[test]
 fn open_device_sync_term_keys_each_device_by_its_bus_and_device_order() {
     let lane = |object, field, value| contribution(LaneIndex::new(176, object, field, 0), value);
@@ -74,8 +72,6 @@ fn a_second_open_of_one_device_leaves_the_state_and_term() {
     assert!(!once.is_open(OpenDevice { bus: 1, device: 1 }));
 }
 
-/// The stamp is left to the scheme guard: the checkpoint scheme move
-/// stamps each pending surface with its new version.
 #[test]
 fn the_group_surface_is_on_its_own_lane_source() {
     assert_eq!(GROUP.hashed_surfaces.len(), 1);

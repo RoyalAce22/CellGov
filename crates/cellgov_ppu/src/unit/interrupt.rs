@@ -468,6 +468,10 @@ mod hypercall_return_tests;
 mod boundary_registers_tests;
 
 #[cfg(test)]
+#[path = "tests/boundary_time_base_tests.rs"]
+mod boundary_time_base_tests;
+
+#[cfg(test)]
 #[path = "tests/interrupt_facility_tests.rs"]
 mod interrupt_facility_tests;
 

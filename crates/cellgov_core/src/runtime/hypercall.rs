@@ -86,7 +86,7 @@ impl Runtime {
         let storage =
             crate::runtime::spaces::resolve_space_memory(&self.memory, &self.spaces, space);
         let msrs = saved_msrs(&self.registry);
-        let running = running_threads(&self.registry, request.tick);
+        let running = running_threads(&self.registry, request.tick, self.time_base);
         let disposition = self
             .hypervisor
             .dispatch_signalling(&request, storage, &msrs, &running);
@@ -174,10 +174,10 @@ impl Runtime {
     /// The thread takes the interrupt at its next instruction boundary:
     /// the first instruction of its next step. The handler reloads the
     /// LPCR, which clears LPCR\[MER\] [OFW-4.93 lv1 a:0x1A40]
-    /// [OFW-4.93 lv1 a:0x1A5C]. So this first clears the mediated external
-    /// exception only. An external exception that an earlier interrupt
-    /// raised, and that the thread has not yet taken, stays: lv1 entered
-    /// the vector for it, and the reload clears no such entry.
+    /// [OFW-4.93 lv1 a:0x1A5C]. So this first clears only the mediated
+    /// external exception. An external exception that an earlier interrupt
+    /// raised stays until the thread takes it. lv1 entered the vector for
+    /// it, and the LPCR reload does not change it.
     fn interrupt_running_thread(&mut self, interrupt: &ThreadInterrupt) {
         let Some(unit) = self.unit_of_thread(interrupt.thread) else {
             self.lv2_host.log_invariant_break(
@@ -284,7 +284,10 @@ impl Runtime {
     ///
     /// The take of a mediated interrupt sets [`SRR1_MEDIATED_EXTERNAL`] in
     /// SRR1. A take that the hypervisor refuses stops the run at the next
-    /// step, after the thread entered the vector.
+    /// step, after the thread entered the vector. The hypervisor reads the
+    /// decrementer at the unit's clock, the end of the step that took the
+    /// interrupt. Where the run's time base is later, it reads the
+    /// decrementer at that time base, as the thread's next read does.
     pub(in crate::runtime) fn end_external_interrupt(
         &mut self,
         result: &ExecutionStepResult,
@@ -297,6 +300,7 @@ impl Runtime {
         else {
             return;
         };
+        let at = self.registry.clock(source);
         let Some(registered) = self.registry.get_mut(source) else {
             return;
         };
@@ -311,6 +315,9 @@ impl Runtime {
             thread: registered.ppe_thread(),
             srr0: interrupt.srr0,
             srr1: interrupt.srr1,
+            decrementer: registered
+                .boundary_registers(at, self.time_base)
+                .map(|regs| regs.dec),
         };
         let space = self.spaces.space_of(source);
         let storage =
@@ -467,18 +474,19 @@ fn saved_msrs(registry: &UnitRegistry) -> SavedMsrs {
 }
 
 /// The registers of each PPE hardware thread whose unit runs at an
-/// instruction boundary, with the decrementer at the guest tick `tick`
-/// of the call, or at the unit's own clock where that one is later.
+/// instruction boundary.
 ///
 /// The unit's pc and MSR are those at the start of its next step, at its
-/// own clock. A unit whose clock is past `tick` reads its decrementer at
-/// that clock, as its own boundary test does at the step's start tick.
+/// own clock. Its decrementer reads the latest of these times:
+/// - `tick`, the guest tick of the call;
+/// - the unit's own clock, as its boundary test does at the step's start;
+/// - `time_base`, the run's time base, as the unit's next read does.
 ///
 /// A thread gets no slot in these cases:
 /// - its unit is not runnable;
 /// - its unit holds a syscall return, so its next step steps past `sc`;
 /// - its unit holds no supervisor registers.
-fn running_threads(registry: &UnitRegistry, tick: GuestTicks) -> RunningThreads {
+fn running_threads(registry: &UnitRegistry, tick: GuestTicks, time_base: u64) -> RunningThreads {
     let mut running = RunningThreads::default();
     for (id, unit) in registry.iter() {
         let runnable = registry.effective_status(id) == Some(UnitStatus::Runnable);
@@ -486,7 +494,9 @@ fn running_threads(registry: &UnitRegistry, tick: GuestTicks) -> RunningThreads 
             continue;
         }
         let at = tick.max(registry.clock(id));
-        let (Some(thread), Some(regs)) = (unit.ppe_thread(), unit.boundary_registers(at)) else {
+        let (Some(thread), Some(regs)) =
+            (unit.ppe_thread(), unit.boundary_registers(at, time_base))
+        else {
             continue;
         };
         if let Some(slot) = running.0.get_mut(usize::from(thread)) {

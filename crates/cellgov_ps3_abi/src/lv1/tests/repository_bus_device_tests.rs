@@ -55,8 +55,6 @@ fn interrupt_0_of_device_0_answers_v1_2_and_v2_0_from_the_lv1_capture() {
     );
 }
 
-/// The capture's `node.tsv` holds the type 4 in its row of address
-/// 0x68A3F8, and the id 1 in its row of address 0x68A378.
 #[test]
 fn device_1_of_bus_1_answers_type_4_and_id_1_from_the_lv1_capture() {
     assert_eq!(

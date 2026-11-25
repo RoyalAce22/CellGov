@@ -69,7 +69,7 @@ pub fn construct_logical_spe_handler(
         .find(|handler| handler.firmware == firmware)
 }
 
-/// The SPE type of the worker that this module describes: the type 1 worker
+/// The SPE type whose worker CellGov read: the type 1 worker
 /// [OFW-4.93 lv1 a:0x31588C].
 pub const LOGICAL_SPE_TYPE_1: u64 = 1;
 

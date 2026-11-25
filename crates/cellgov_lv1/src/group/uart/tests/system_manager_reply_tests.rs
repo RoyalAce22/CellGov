@@ -73,7 +73,7 @@ fn captured_words() -> Vec<(String, u64)> {
 ///
 /// The header is the header of service id 0x0B with 16 payload bytes
 /// [OFW-4.93 lv1 a:0x44BA78-0x44BAA8] [OFW-4.93 lv1 a:0x44DF18-0x44DF24].
-/// The payload is read from the console capture: the kernel keeps payload
+/// The function reads the payload from the console capture: the kernel keeps payload
 /// bytes 1 and 2 at +2032 of its object, the doubleword at payload byte 8
 /// at +2040, and the word at payload byte 4 at +2048
 /// [OFW-4.93 lv2_kernel a:0x8000000000261a94-0x8000000000261ab8]. lv1

@@ -134,8 +134,8 @@ fn a_reply_that_brings_the_free_bytes_to_the_receive_trigger_adds_the_receive_bi
     );
 }
 
-/// The peer holds the request bytes that the service did not read yet, so
-/// the transmit bit is known only when that count is not above the
+/// The peer holds the request bytes that the service did not read. So
+/// CellGov knows the transmit bit only when that count is not above the
 /// transmit trigger [OFW-4.93 lv1 a:0x2F0D48-0x2F0D54].
 #[test]
 fn unread_request_bytes_above_the_transmit_trigger_are_a_refusal() {
@@ -172,8 +172,8 @@ fn the_status_of_a_kernel_port_that_is_not_a_service_port_is_a_refusal() {
 
 /// The kernel's interrupt function sends 165 with r4 = 7 and the port of
 /// its record [OFW-4.93 lv2_kernel a:0x80000000000174CC-0x80000000000174E4].
-/// A receive trigger of the buffer size, set by 164 before the call, adds
-/// the receive bit to an empty buffer's status.
+/// A receive trigger of the buffer size, which 164 sets before the call,
+/// adds the receive bit to an empty buffer's status.
 #[test]
 fn the_hypervisor_answers_the_kernel_s_status_call_from_the_group_s_state_and_keeps_it() {
     let mut hv = Hypervisor::new();

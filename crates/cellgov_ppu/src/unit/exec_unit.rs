@@ -148,8 +148,8 @@ impl ExecutionUnit for PpuExecutionUnit {
         self.save_restore_at_sc()
     }
 
-    fn boundary_registers(&self, tick: GuestTicks) -> Option<BoundaryRegisters> {
-        self.registers_at_boundary(tick)
+    fn boundary_registers(&self, tick: GuestTicks, time_base: u64) -> Option<BoundaryRegisters> {
+        self.registers_at_boundary(tick, time_base)
     }
 
     fn load_page_table(&mut self, sdr1: u64, lb: u8) -> bool {

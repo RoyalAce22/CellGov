@@ -100,7 +100,7 @@ pub trait RegisteredUnit: 'static {
 
     /// The registers at the unit's next instruction boundary. See
     /// [`ExecutionUnit::boundary_registers`].
-    fn boundary_registers(&self, tick: GuestTicks) -> Option<BoundaryRegisters>;
+    fn boundary_registers(&self, tick: GuestTicks, time_base: u64) -> Option<BoundaryRegisters>;
 
     /// Gives the thread a page table and large page sizes. See
     /// [`ExecutionUnit::load_page_table`].
@@ -365,8 +365,8 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     }
 
     #[inline]
-    fn boundary_registers(&self, tick: GuestTicks) -> Option<BoundaryRegisters> {
-        ExecutionUnit::boundary_registers(self, tick)
+    fn boundary_registers(&self, tick: GuestTicks, time_base: u64) -> Option<BoundaryRegisters> {
+        ExecutionUnit::boundary_registers(self, tick, time_base)
     }
 
     #[inline]

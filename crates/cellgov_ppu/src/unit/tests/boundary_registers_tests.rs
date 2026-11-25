@@ -23,7 +23,7 @@ fn boundary_registers_give_the_pc_the_msr_and_the_decrementer_at_the_tick() {
     let ticks = 100 * cellgov_time::TICKS_PER_TB_TICK;
     let unit = thread(0);
     assert_eq!(
-        unit.boundary_registers(GuestTicks::new(ticks)),
+        unit.boundary_registers(GuestTicks::new(ticks), 0),
         Some(BoundaryRegisters {
             pc: CODE,
             msr: KERNEL_MSR,
@@ -36,7 +36,7 @@ fn boundary_registers_give_the_pc_the_msr_and_the_decrementer_at_the_tick() {
 fn the_decrementer_reads_the_thread_s_own_time_base_where_that_one_is_later() {
     let unit = thread(0x10);
     let registers = unit
-        .boundary_registers(GuestTicks::ZERO)
+        .boundary_registers(GuestTicks::ZERO, 0)
         .expect("supervisor registers");
     assert_eq!(registers.dec, DEC - 0x10);
 }
@@ -44,5 +44,5 @@ fn the_decrementer_reads_the_thread_s_own_time_base_where_that_one_is_later() {
 #[test]
 fn a_thread_with_no_supervisor_registers_gives_no_boundary_registers() {
     let unit = crate::PpuExecutionUnit::new(cellgov_event::UnitId::new(0));
-    assert_eq!(unit.boundary_registers(GuestTicks::ZERO), None);
+    assert_eq!(unit.boundary_registers(GuestTicks::ZERO, 0), None);
 }

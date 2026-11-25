@@ -55,8 +55,8 @@
 //! No step reads r5 [OFW-4.93 lv1 a:0x228078-0x2280D4].
 //!
 //! The open function calls that entry with the bus 1 lock held
-//! [OFW-4.93 lv1 a:0x237660-0x2376BC]. A nonzero r3 it returns
-//! zero-extended [OFW-4.93 lv1 a:0x2376C0-0x2376C8]. After a 0, it runs the
+//! [OFW-4.93 lv1 a:0x237660-0x2376BC]. It returns a nonzero r3 of the
+//! entry zero-extended [OFW-4.93 lv1 a:0x2376C0-0x2376C8]. After a 0, it runs the
 //! hook [OFW-4.93 lv1 a:0x23E2F8] [OFW-4.93 lv1 a:0x237794-0x2377B0]. The
 //! hook gives the global object at +16 a 288-byte object of its own and
 //! stores to a register block [OFW-4.93 lv1 a:0x23E174-0x23E1F8]
@@ -185,7 +185,7 @@ pub const OPEN_DEVICE_NO_DEVICE_R3: u64 = 0x0000_0002_FFFF_FFFA;
 /// The device's open entry returns -9 [OFW-4.93 lv1 a:0x2280A4]. The open
 /// function clears the high word on each path:
 /// - for device 0 of bus 1 [OFW-4.93 lv1 a:0x2376C4];
-/// - for device 1 of bus 1, after the controller's open passes the -9 on
+/// - for device 1 of bus 1, after the controller's open returns the -9
 ///   [OFW-4.93 lv1 a:0x23DC9C] [OFW-4.93 lv1 a:0x2377EC];
 /// - for device 2 of bus 1, on the same terms [OFW-4.93 lv1 a:0x237778].
 pub const OPEN_DEVICE_BUSY_R3: u64 = zero_extended(LV1_BUSY);

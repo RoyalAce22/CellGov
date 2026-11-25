@@ -71,7 +71,6 @@ fn an_open_of_device_1_or_device_2_does_not_depend_on_the_other_one() {
     );
 }
 
-/// The 4.93 kernel opens devices 0, 1 and 2 of bus 1 in that order.
 #[test]
 fn the_hypervisor_opens_devices_0_1_and_2_as_the_kernel_does() {
     let mut hv = Hypervisor::new();

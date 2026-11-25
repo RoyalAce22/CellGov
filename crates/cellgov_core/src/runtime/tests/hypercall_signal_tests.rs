@@ -25,6 +25,9 @@ use crate::registry::UnitRegistry;
 use crate::runtime::types::{RuntimeMode, StepError};
 use crate::runtime::Runtime;
 
+#[path = "hypercall_signal_time_base_tests.rs"]
+mod time_base;
+
 /// The `sc` of the kernel's port call in the setup of a thread's record
 /// [OFW-4.93 lv2_kernel a:0x8000000000007d8c]. The console gave thread 1's
 /// call the port id 4 (`GAME_OS_PORT_CALLS`).
@@ -50,7 +53,9 @@ const EE_SET_MSR: u64 = 0x8000_0000_0000_8032;
 const TARGET_PC: u64 = 0x8000_0000_0007_e8c4;
 const EE_CLEAR_MSR: u64 = EE_SET_MSR & !MSR_EE;
 
-/// A scripted thread's decrementer at tick 0. It counts down one a tick.
+/// A scripted thread's decrementer at tick 0. It counts down by one for
+/// each tick. It reads at the later of its tick and the run's time base,
+/// and counts one tick as one time base step.
 const DEC_AT_ZERO: u32 = 0x7FFF_0000;
 
 /// The runtime's step cap, which bounds every run here.
@@ -134,8 +139,9 @@ impl ExecutionUnit for Thread {
             srr1: self.msr,
         })
     }
-    fn boundary_registers(&self, tick: GuestTicks) -> Option<BoundaryRegisters> {
-        let elapsed = u32::try_from(tick.raw()).expect("a tick that fits the decrementer");
+    fn boundary_registers(&self, tick: GuestTicks, time_base: u64) -> Option<BoundaryRegisters> {
+        let at = tick.raw().max(time_base);
+        let elapsed = u32::try_from(at).expect("a tick that fits the decrementer");
         Some(BoundaryRegisters {
             pc: TARGET_PC,
             msr: self.msr,
@@ -285,7 +291,7 @@ fn run(rt: &mut Runtime) {
     panic!("the run outlasted {STEP_CAP} steps");
 }
 
-/// Thread 1 sets up its port on its plug 9 and then spins; thread 0
+/// Thread 1 connects its port to its plug 9 and then spins; thread 0
 /// sends on the port once thread 1 spins. Thread 1 runs with `msr`.
 /// Returns thread 1's state and the step order.
 fn send_to_spinning_thread(msr: u64) -> (Shared, Vec<Entry>) {
@@ -343,8 +349,7 @@ const QUIET: Entry = Entry::Step {
 };
 
 /// Thread 1 runs with EE clear, so lv1's handler sets LPCR\[MER\]
-/// [OFW-4.93 lv1 a:0x187C]. Its first step after the send holds the
-/// mediated exception.
+/// [OFW-4.93 lv1 a:0x187C].
 #[test]
 fn a_send_to_a_thread_with_ee_clear_gives_it_the_mediated_exception_at_its_next_step() {
     let (thread_1, entries) = send_to_spinning_thread(EE_CLEAR_MSR);
@@ -362,8 +367,7 @@ fn a_send_to_a_thread_with_ee_clear_gives_it_the_mediated_exception_at_its_next_
 }
 
 /// Thread 1 runs with EE set, so lv1's handler enters its vector
-/// [OFW-4.93 lv1 a:0x188C-0x18C0]. Its first step after the send takes
-/// the interrupt, and the take ends the exception.
+/// [OFW-4.93 lv1 a:0x188C-0x18C0].
 #[test]
 fn a_send_to_a_thread_with_ee_set_makes_its_next_step_take_the_interrupt() {
     let (thread_1, entries) = send_to_spinning_thread(EE_SET_MSR);
@@ -381,10 +385,10 @@ fn a_send_to_a_thread_with_ee_set_makes_its_next_step_take_the_interrupt() {
     assert!(!thread_1.external);
 }
 
-/// Thread 1 holds the external and the mediated exception of earlier
-/// sends, and has not stepped since. A second send whose handler raises
-/// nothing keeps the external exception: the handler's LPCR reload clears
-/// only LPCR\[MER\] [OFW-4.93 lv1 a:0x1A40] [OFW-4.93 lv1 a:0x1A5C].
+/// The handler's LPCR reload clears only LPCR\[MER\]
+/// [OFW-4.93 lv1 a:0x1A40] [OFW-4.93 lv1 a:0x1A5C]. So a send whose
+/// handler raises nothing keeps an external exception that thread 1 did
+/// not take yet.
 #[test]
 fn a_send_that_raises_nothing_clears_the_mediated_exception_and_keeps_an_untaken_external_one() {
     let mut rt = runtime();
@@ -451,7 +455,7 @@ fn registers_at(tick: u32) -> Option<RunningThread> {
 fn each_runnable_thread_gives_its_registers() {
     let (registry, _) = registry();
     assert_eq!(
-        running_threads(&registry, GuestTicks::ZERO),
+        running_threads(&registry, GuestTicks::ZERO, 0),
         RunningThreads([registers(), registers()])
     );
 }
@@ -462,7 +466,7 @@ fn a_thread_that_holds_a_syscall_return_gives_no_registers() {
     let (mut registry, ids) = registry();
     registry.set_syscall_return(ids[1], 0);
     assert_eq!(
-        running_threads(&registry, GuestTicks::ZERO),
+        running_threads(&registry, GuestTicks::ZERO, 0),
         RunningThreads([registers(), None])
     );
 }
@@ -476,7 +480,7 @@ fn a_thread_whose_clock_is_past_the_call_reads_its_decrementer_at_its_own_clock(
     registry.set_clock(ids[0], GuestTicks::new(0x8));
     registry.set_clock(ids[1], GuestTicks::new(0x100));
     assert_eq!(
-        running_threads(&registry, GuestTicks::new(0x10)),
+        running_threads(&registry, GuestTicks::new(0x10), 0),
         RunningThreads([registers_at(0x10), registers_at(0x100)])
     );
 }
@@ -486,7 +490,7 @@ fn a_blocked_thread_gives_no_registers() {
     let (mut registry, ids) = registry();
     registry.set_status_override(ids[0], UnitStatus::Blocked);
     assert_eq!(
-        running_threads(&registry, GuestTicks::ZERO),
+        running_threads(&registry, GuestTicks::ZERO, 0),
         RunningThreads([None, registers()])
     );
 }

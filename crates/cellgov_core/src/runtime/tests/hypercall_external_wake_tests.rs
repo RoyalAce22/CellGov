@@ -9,8 +9,8 @@ use super::{
     call, register, run, runtime, setup, spawn, Step, EE_OFF_MSR, PLUG_BIT, PORT, SEND_SC,
 };
 
-/// lv1 wakes thread 1 as in the delivering wake. The saved EE = 0, so the
-/// return sets LPCR\[MER\] and changes no saved register
+/// lv1 wakes thread 1 as for a pause that saved EE = 1. Here the saved
+/// EE = 0, so the return sets LPCR\[MER\] and changes no saved register
 /// [OFW-4.93 lv1 a:0x191C-0x1928]. r11 and r12 keep the saved SRR0 and
 /// SRR1 [OFW-4.93 lv1 a:0x1038-0x103C]. The steps are four calls, the
 /// mediated take, and the finish.

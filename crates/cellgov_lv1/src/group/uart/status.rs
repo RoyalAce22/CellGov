@@ -129,17 +129,17 @@ fn service_port_traffic(firmware: &str, port: u64, received: u64) -> Option<Virt
 /// `port` in `uart`.
 ///
 /// The status reads the traffic of [`service_port_traffic`], with one
-/// change: the peer holds the bytes of the request that is not complete
-/// on the port, or a lower count. The service reads those bytes at a time
-/// that no image read gives. The transmit bit is set when the peer's count
-/// is not above the transmit trigger, so the status is known when the two
-/// ends of that range give the same status.
+/// change: the peer holds at most the bytes of the request that is not
+/// complete on the port. The service reads those bytes at a time that no
+/// image read gives. lv1 sets the transmit bit when the peer's count is
+/// not above the transmit trigger. So CellGov knows the status only when
+/// the two ends of that range give the same status.
 ///
 /// # Errors
 ///
-/// Returns the case that the model does not cover in these cases:
+/// Returns the [`UnmodelledError`] in these cases:
 /// - `port` is not a service port, so CellGov does not hold its traffic;
-/// - the two ends of the peer's range give two statuses.
+/// - the two ends of the peer's range give different statuses.
 pub(super) fn port_status(
     firmware: &str,
     uart: &UartState,

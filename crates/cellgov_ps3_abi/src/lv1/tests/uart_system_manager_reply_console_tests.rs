@@ -1,5 +1,5 @@
-//! The system manager's reply to the 4.93 kernel's service id 9 request,
-//! held to the console capture of the kernel's system manager object.
+//! The system manager's reply to the 4.93 kernel's request of service id
+//! 9, held to the console capture of the kernel's system manager object.
 
 use super::*;
 
@@ -13,7 +13,6 @@ pub(super) const MANAGER_SLOT: u64 = KERNEL_TOC + 3864;
 /// The object's address in the image's TOC slot.
 pub(super) const MANAGER: u64 = 0x8000_0000_0047_4c38;
 
-/// The rows of `reply.tsv`.
 fn capture() -> Vec<(String, u64, u64)> {
     capture_rows("reply.tsv")
 }

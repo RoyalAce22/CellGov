@@ -282,7 +282,7 @@ pub enum HypercallRefusal {
         lr: u64,
     },
     /// A `write_virtual_uart` call completes a request on the system
-    /// manager's port, and CellGov does not hold each input of the reply.
+    /// manager's port, and CellGov does not hold every input of the reply.
     #[error(
         "hypercall {} from {unit:?} at pc 0x{pc:016x}: CellGov does not hold the inputs of the \
          system manager's reply to a request of service id 0x{service:04x}",

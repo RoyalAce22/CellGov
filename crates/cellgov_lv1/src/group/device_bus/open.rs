@@ -54,7 +54,7 @@ const OTHER_DEVICE: UnmodelledError = UnmodelledError::new(
      that CellGov does not model",
 );
 
-/// The open at a firmware whose handler is not read.
+/// The open at a firmware whose handler no lv1 image read shows.
 const UNREAD_FIRMWARE: UnmodelledError =
     UnmodelledError::new("an open_device at a firmware whose lv1 handler is not read");
 
@@ -66,7 +66,9 @@ const UNREAD_FIRMWARE: UnmodelledError =
 /// - for device 0, 1 or 2 of bus 1 that is not open, 0, and the answer
 ///   opens the device.
 ///
-/// lv1 reads no r5 on these paths. The call is a refusal in these cases:
+/// lv1 reads no r5 on these paths.
+///
+/// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
 /// - the call names another device of a bus that passes the checks.
 pub(crate) fn open_device(

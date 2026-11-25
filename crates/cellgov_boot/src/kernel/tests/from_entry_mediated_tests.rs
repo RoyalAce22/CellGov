@@ -110,6 +110,8 @@ enum After {
     ClearMaskAndTell,
     /// A branch to lv1's slot 0x28B8 less 12, whose words set EE.
     AtSlot,
+    /// A store of -1 in the decrementer, then the move that sets EE.
+    NegativeDecrementer,
 }
 
 /// A kernel whose thread 0 raises its own external interrupt through lv1
@@ -181,6 +183,11 @@ fn requesting_kernel(after: After) -> (Vec<u8>, u64) {
             words[slot - 3..slot].copy_from_slice(&set_msr(0));
             words[slot] = MFSPR_R0_PVR;
             MEDIATED_UNDELIVERED_PC
+        }
+        After::NegativeDecrementer => {
+            raise.extend([li(3, 0xFFFF), MTDEC_R3]);
+            raise.extend(set_msr(0));
+            address(start + raise.len())
         }
     };
     raise.push(MFSPR_R0_PVR);
@@ -316,3 +323,6 @@ fn a_take_at_lv1_s_slot_stops_the_run() {
         )
     );
 }
+
+#[path = "from_entry_mediated_decrementer_tests.rs"]
+mod decrementer;

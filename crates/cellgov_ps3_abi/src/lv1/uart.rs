@@ -934,7 +934,8 @@ pub struct GameOsIdentityDispatcherRequest {
 /// An isolated SPU module of lv1 derives the data bytes from data of the
 /// console, so no image read gives them. CellGov may serve
 /// identity-derived bytes only from one committed synthetic console
-/// identity. It commits no such identity yet.
+/// identity. CellGov commits no such identity, so it refuses each request
+/// in this table.
 pub const GAME_OS_IDENTITY_DISPATCHER_REQUESTS: &[GameOsIdentityDispatcherRequest] =
     &[GameOsIdentityDispatcherRequest {
         firmware: "4.93",

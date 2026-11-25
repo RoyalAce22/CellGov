@@ -52,7 +52,6 @@ fn capture_keys(name: &str) -> Vec<RepositoryKey> {
         .collect()
 }
 
-/// The capture's `node.tsv` rows of device 1's regions and interrupts.
 #[test]
 fn the_regions_and_interrupts_of_device_1_answer_the_captured_values() {
     let cases = [
@@ -100,7 +99,6 @@ fn device_2(n: [u64; 2]) -> RepositoryKey {
     }
 }
 
-/// The capture's `node.tsv` rows of device 2's regions and interrupts.
 #[test]
 fn the_regions_and_interrupts_of_device_2_answer_the_captured_values() {
     let cases = [
@@ -142,9 +140,7 @@ fn device_3(n: [u64; 2]) -> RepositoryKey {
 }
 
 /// The handler of type 6 reads the id and interrupt 0 of device 3
-/// [OFW-4.93 lv2_kernel a:0x8000000000093318-0x80000000000933ac]. The
-/// capture's `node.tsv` holds type 6, id 3, and v1 = 5 with v2 = 0x2F for
-/// interrupt 0.
+/// [OFW-4.93 lv2_kernel a:0x8000000000093318-0x80000000000933ac].
 #[test]
 fn device_3_of_bus_1_answers_its_type_id_and_interrupt_0_from_the_lv1_capture() {
     let cases = [
@@ -222,8 +218,7 @@ fn lookup_absent_matches_only_a_listed_key_at_a_listed_firmware() {
 
 /// After device 1, the device loop reads the type of device 2, and the
 /// handler of a later device of type 4 reads its id
-/// [OFW-4.93 lv2_kernel a:0x8000000000093484-0x8000000000093490]. The
-/// capture's `node.tsv` holds type 4 at 0x68A7F8 and id 2 at 0x68A778.
+/// [OFW-4.93 lv2_kernel a:0x8000000000093484-0x8000000000093490].
 #[test]
 fn device_2_of_bus_1_answers_type_4_and_id_2_from_the_lv1_capture() {
     assert_eq!(

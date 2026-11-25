@@ -382,10 +382,18 @@ pub trait ExecutionUnit {
         None
     }
 
-    /// The registers at this unit's next instruction boundary, with the
-    /// decrementer at the guest tick `tick`, or `None` for a unit with no
-    /// supervisor registers.
-    fn boundary_registers(&self, _tick: cellgov_time::GuestTicks) -> Option<BoundaryRegisters> {
+    /// The registers at this unit's next instruction boundary, or `None`
+    /// for a unit with no supervisor registers.
+    ///
+    /// The decrementer reads the later of two time bases:
+    /// - the time base of the guest tick `tick`;
+    /// - `time_base`, the highest time base that any unit read
+    ///   ([`crate::ExecutionContext::time_base`]).
+    fn boundary_registers(
+        &self,
+        _tick: cellgov_time::GuestTicks,
+        _time_base: u64,
+    ) -> Option<BoundaryRegisters> {
         None
     }
 

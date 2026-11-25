@@ -48,7 +48,7 @@ pub(super) const SIZE_PART: &str = "a reply with these request and reply sizes";
 /// module of lv1 derives from data of the console.
 ///
 /// CellGov may serve identity-derived bytes only from one committed
-/// synthetic console identity. It commits no such identity yet.
+/// synthetic console identity. CellGov commits no such identity.
 pub(super) const IDENTITY_PART: &str =
     "the data bytes of this reply, which an isolated SPU module of lv1 derives from the \
      console's identity";
@@ -56,15 +56,12 @@ pub(super) const IDENTITY_PART: &str =
 /// The random data bytes that CellGov gives in each reply to a request of
 /// [`cellgov_ps3_abi::lv1::uart::GAME_OS_RANDOM_DISPATCHER_REQUESTS`].
 ///
-/// The value is synthetic: the 24 ASCII bytes of the label
-/// `CellGov synthetic random`. It is never a draw of lv1, and no
-/// operator can change it. CellGov serves random bytes that lv1 draws as
-/// one committed synthetic value, so a run reproduces on every machine.
+/// CellGov serves random bytes that lv1 draws as one committed synthetic
+/// value, so a run reproduces on every machine.
 pub(super) const SYNTHETIC_RANDOM_DATA: [u8; DISPATCHER_RANDOM_DATA_BYTES] =
     *b"CellGov synthetic random";
 
-/// The counts, the status word and the data bytes of a reply that
-/// CellGov builds.
+/// The fields of a reply that a table row gives.
 struct ServedReply {
     /// The count of request bytes and the count of reply bytes.
     bytes: u32,

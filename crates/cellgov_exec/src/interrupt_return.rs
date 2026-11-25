@@ -41,6 +41,6 @@ pub struct BoundaryRegisters {
     pub pc: u64,
     /// The thread's MSR.
     pub msr: u64,
-    /// The thread's decrementer at the guest tick of the read.
+    /// The thread's decrementer at the time base of the read.
     pub dec: u32,
 }

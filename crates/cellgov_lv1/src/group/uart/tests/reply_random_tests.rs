@@ -26,9 +26,7 @@ fn random_body() -> Vec<u8> {
 /// The status word is 0 because lv1 writes the random data bytes only on
 /// the path where its worker returns 0, and the kernel keeps its seed
 /// only for that status [OFW-4.93 lv1 a:0x50B534-0x50B558]
-/// [OFW-4.93 lv2_kernel a:0x8000000000228470-0x800000000022847c]. The data
-/// bytes are the ASCII label that the doc of [`SYNTHETIC_RANDOM_DATA`]
-/// gives.
+/// [OFW-4.93 lv2_kernel a:0x8000000000228470-0x800000000022847c].
 #[test]
 fn the_kernel_s_request_0x5003_of_service_0x5000_gets_status_0_and_the_synthetic_random_data() {
     let request = random_body();

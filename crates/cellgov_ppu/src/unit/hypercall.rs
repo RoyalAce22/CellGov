@@ -108,17 +108,24 @@ impl PpuExecutionUnit {
         })
     }
 
-    /// The registers at the thread's next instruction boundary, with the
-    /// decrementer at the guest tick `tick`, or `None` for a thread with
-    /// no supervisor registers.
+    /// The registers at the thread's next instruction boundary, or `None`
+    /// for a thread with no supervisor registers.
     ///
-    /// The decrementer reads the time base of `tick`, or the time base
-    /// that the thread last read where that one is later.
-    pub(super) fn registers_at_boundary(&self, tick: GuestTicks) -> Option<BoundaryRegisters> {
+    /// The decrementer reads the latest of three time bases, as the
+    /// thread's own read at `tick` does:
+    /// - the time base of `tick`;
+    /// - the time base that the thread last read;
+    /// - `time_base`, the highest time base that any unit read.
+    pub(super) fn registers_at_boundary(
+        &self,
+        tick: GuestTicks,
+        time_base: u64,
+    ) -> Option<BoundaryRegisters> {
         let sup = self.state.supervisor()?;
         let tb = PPU_TIME_BASE_ORIGIN
             .wrapping_add(cellgov_time::ticks_to_tb(tick.raw()))
-            .max(self.state.tb);
+            .max(self.state.tb)
+            .max(time_base);
         Some(BoundaryRegisters {
             pc: self.state.pc,
             msr: sup.msr,

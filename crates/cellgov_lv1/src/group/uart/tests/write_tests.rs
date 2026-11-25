@@ -240,8 +240,8 @@ fn a_write_of_0_bytes_to_a_service_port_writes_no_byte_and_carries_no_change() {
 }
 
 /// A buffer that ends at its region's end passes the check of the r5 bytes
-/// from r4 to the end [OFW-4.93 lv1 a:0x2F2CB0-0x2F2CC0]. The storage
-/// holds 0 bytes, so a 16-byte write is a header that counts 0 payload
+/// from r4 to the end [OFW-4.93 lv1 a:0x2F2CB0-0x2F2CC0]. Each byte of
+/// the storage is 0, so a 16-byte write is a header that counts 0 payload
 /// bytes.
 #[test]
 fn a_write_of_bytes_to_the_system_manager_s_port_passes_lv1_s_region_checks() {

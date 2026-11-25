@@ -370,9 +370,13 @@ fn cites_untracked_tree(line: &str) -> Option<&'static str> {
     })
 }
 
-/// Whether a line names a decision record by number: `ADR` or `ADRs`,
-/// then an optional space, then an optional hyphen or `#`, then digits,
-/// as a whole word.
+/// Whether a line names a decision record by number.
+///
+/// The match is one whole word, in this order:
+/// 1. `ADR` or `ADRs`;
+/// 2. an optional space;
+/// 3. an optional hyphen or `#`;
+/// 4. one or more digits.
 fn names_a_decision_record(line: &str) -> bool {
     line.match_indices("ADR").any(|(at, _)| {
         let before = line[..at].chars().next_back();

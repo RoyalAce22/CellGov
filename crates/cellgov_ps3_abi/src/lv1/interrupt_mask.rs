@@ -88,8 +88,9 @@
 //! [OFW-4.93 lv1 a:0x18D0-0x18DC], in these cases:
 //! - the saved `MSR[EE]` is 0 [OFW-4.93 lv1 a:0x187C];
 //! - the bytes at +1832 and +1833 of the context are both set
-//!   [OFW-4.93 lv1 a:0x1880-0x1888] [OFW-4.93 lv1 a:0x18C4-0x18CC]. No
-//!   image read gives the meaning of these bytes;
+//!   [OFW-4.93 lv1 a:0x1880-0x1888] [OFW-4.93 lv1 a:0x18C4-0x18CC]. While
+//!   the thread runs guest code, +1833 is clear; see the context bytes
+//!   below;
 //! - the saved pc is [`MEDIATED_UNDELIVERED_PC`].
 //!
 //! # The interprocessor interrupt
@@ -114,8 +115,8 @@
 //!    set [OFW-4.93 lv1 a:0x2C56CC-0x2C56D4] [OFW-4.93 lv1 a:0x2C5714].
 //!    So LPCR\[LPES\] is 0b01, and LPES bit 0 is 0
 //!    [CBE-Handbook p:306 s:10.4.3].
-//! 4. With LPES bit 0 = 0, a direct external interrupt is enabled whenever
-//!    the thread is out of hypervisor state, whatever its `MSR[EE]`
+//! 4. With LPES bit 0 = 0, the thread can take a direct external interrupt
+//!    whenever it is out of hypervisor state, whatever its `MSR[EE]`
 //!    [CBE-Handbook p:276 s:9.7]. So the thread takes the interrupt at its
 //!    next instruction boundary, at lv1's vector 0x500
 //!    [OFW-4.93 lv1 a:0x0500-0x0524].
@@ -138,8 +139,9 @@
 //!    [OFW-4.93 lv1 a:0x1A44] [OFW-4.93 lv1 a:0x1B88-0x1BA0].
 //! 4. It reloads the LPCR from +504, which clears [`LPCR_MER`]
 //!    [OFW-4.93 lv1 a:0x1A40] [OFW-4.93 lv1 a:0x1A5C].
-//! 5. For a thread in hypervisor state with `MSR[PR]` = 0, it returns
-//!    with no shadow test [OFW-4.93 lv1 a:0x1A48-0x1A60].
+//! 5. For a thread in hypervisor state with `MSR[PR]` = 0 and the byte at
+//!    +1832 clear, it returns with no shadow test
+//!    [OFW-4.93 lv1 a:0x1A38-0x1A60].
 //! 6. It makes the shadow test [OFW-4.93 lv1 a:0x1A84-0x1AD4]. For a
 //!    nonzero result, the function [OFW-4.93 lv1 a:0x1870] enters the
 //!    vector or sets [`LPCR_MER`], as for the mediated take.
@@ -151,6 +153,65 @@
 //! handler calls on each entry [OFW-4.93 lv1 a:0x1A00-0x1A04]
 //! [OFW-4.93 lv1 a:0x2C631C] [OFW-4.93 lv1 a:0x1ADC]. The `sc` vector's
 //! return calls the third one too [OFW-4.93 lv1 a:0x1024].
+//!
+//! # The context bytes
+//!
+//! The handler reads the bytes at +1826, +1832 and +1833 of the thread's
+//! lv1 context, at HSPRG0 - 28544 [OFW-4.93 lv1 a:0x1AD0]. The context
+//! constructor clears them [OFW-4.93 lv1 a:0x2C3EB4]
+//! [OFW-4.93 lv1 a:0x2C3FB8] [OFW-4.93 lv1 a:0x2C3FD0-0x2C3FD4].
+//!
+//! lv1 runs parts of its own code with `MSR[EE]` set, in a bracket of two
+//! functions. The opening function [OFW-4.93 lv1 a:0x304F50] does these
+//! steps:
+//! 1. It saves the MSR in the caller's record [OFW-4.93 lv1 a:0x304F6C-0x304F74].
+//! 2. For a saved `MSR[EE]` of 0 and a clear +1833, it sets +1833 and
+//!    marks the record [OFW-4.93 lv1 a:0x305024-0x305044]
+//!    [OFW-4.93 lv1 a:0x2C3590-0x2C3594].
+//! 3. It clears +1832 [OFW-4.93 lv1 a:0x304FA8-0x304FAC]
+//!    [OFW-4.93 lv1 a:0x2C3584-0x2C3588].
+//! 4. It sets `MSR[EE]` [OFW-4.93 lv1 a:0x304FEC-0x304FF4].
+//!
+//! The closing function [OFW-4.93 lv1 a:0x304E48] does these steps:
+//! 1. It clears `MSR[EE]` [OFW-4.93 lv1 a:0x304E60-0x304E64].
+//! 2. It sets +1832 [OFW-4.93 lv1 a:0x304ECC-0x304ED0]
+//!    [OFW-4.93 lv1 a:0x2C4920-0x2C4934].
+//! 3. For a marked record, it clears +1833 [OFW-4.93 lv1 a:0x304ED4-0x304EDC]
+//!    [OFW-4.93 lv1 a:0x304F14-0x304F18] [OFW-4.93 lv1 a:0x2C4838-0x2C4840].
+//! 4. It restores `MSR[EE]` from the record [OFW-4.93 lv1 a:0x304EE0-0x304EE4]
+//!    [OFW-4.93 lv1 a:0x304F1C-0x304F20].
+//!
+//! The caller at [OFW-4.93 lv1 a:0x2E5A90] keeps the record in its own
+//! stack frame, and closes the bracket before it returns
+//! [OFW-4.93 lv1 a:0x2E5A9C-0x2E5AE0]. No image read shows a return to
+//! guest code inside an open bracket, and no image read gives another
+//! store to +1833. One other function sets +1832
+//! [OFW-4.93 lv1 a:0x375238-0x375240].
+//!
+//! While the thread runs guest code, the bytes hold these values:
+//! - +1833 is clear. For a take with `MSR[EE]` set, the function
+//!   [OFW-4.93 lv1 a:0x1870] then enters the vector whatever +1832 holds
+//!   [OFW-4.93 lv1 a:0x1880-0x18CC].
+//! - +1832 is set once the thread closed a bracket. The entry test acts
+//!   on it only for a thread in hypervisor state [OFW-4.93 lv1 a:0x1A38-0x1A60].
+//! - +1826 is clear in CellGov's hypervisor; see below.
+//!
+//! +1832 acts on the path of a negative decrementer. There, with +1833
+//! clear, the handler clears +1830 and sets the decrementer to 0
+//! [OFW-4.93 lv1 a:0x1B88-0x1BA0]. With +1832 set, it then gives the
+//! interrupted context the saved pc [`MEDIATED_UNDELIVERED_PC`], and
+//! clears bits 48 to 63 of its MSR [OFW-4.93 lv1 a:0x1BA4-0x1BBC]
+//! [OFW-4.93 lv1 a:0x1840-0x1868].
+//!
+//! +1826 asks the thread to switch to another lv1 context. Three lv1
+//! functions set it, then signal the thread unless +1825 is set
+//! [OFW-4.93 lv1 a:0x2C5A60-0x2C5A80] [OFW-4.93 lv1 a:0x2C6750-0x2C6784]
+//! [OFW-4.93 lv1 a:0x2C7104-0x2C7124]. One of them is the loop that each
+//! hardware thread runs from lv1's start [OFW-4.93 lv1 a:0x3AF148-0x3AF14C].
+//! With +1826 set, the handler saves the context for a switch
+//! [OFW-4.93 lv1 a:0x1A6C-0x1A7C] [OFW-4.93 lv1 a:0x1CFC-0x1D90].
+//! CellGov's hypervisor runs one context on each hardware thread, so it
+//! makes no such request.
 //!
 //! # The kernel's calls
 //!

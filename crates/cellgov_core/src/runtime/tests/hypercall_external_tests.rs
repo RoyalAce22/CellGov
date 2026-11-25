@@ -10,8 +10,8 @@ use std::rc::Rc;
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{
-    ExecutionContext, ExecutionStepResult, ExecutionUnit, InterruptRecord, LocalDiagnostics,
-    SaveRestore, UnitStatus, YieldReason,
+    BoundaryRegisters, ExecutionContext, ExecutionStepResult, ExecutionUnit, InterruptRecord,
+    LocalDiagnostics, SaveRestore, UnitStatus, YieldReason,
 };
 use cellgov_lv1::HypercallRefusal;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
@@ -35,6 +35,15 @@ mod wake;
 
 #[path = "hypercall_external_take_tests.rs"]
 mod take;
+
+#[path = "hypercall_external_decrementer_tests.rs"]
+mod decrementer;
+
+#[path = "hypercall_external_time_base_tests.rs"]
+mod time_base;
+
+#[path = "hypercall_external_clock_tests.rs"]
+mod clock;
 
 /// The `sc` of the kernel's port call in the setup of a thread's record
 /// [OFW-4.93 lv2_kernel a:0x8000000000007d8c]. The console gave thread 1's
@@ -99,6 +108,9 @@ struct Seen {
     mediated_takes: u32,
     /// Whether the thread yielded its `pause`.
     paused: bool,
+    /// The decrementer that the thread's boundary registers give at time
+    /// base 0. It counts down by one for each time base tick.
+    decrementer: u32,
 }
 
 type Shared = Rc<RefCell<Seen>>;
@@ -137,6 +149,21 @@ impl ExecutionUnit for Thread {
     }
     fn ppe_thread(&self) -> Option<u8> {
         Some(self.thread)
+    }
+    fn boundary_registers(
+        &self,
+        _tick: cellgov_time::GuestTicks,
+        time_base: u64,
+    ) -> Option<BoundaryRegisters> {
+        Some(BoundaryRegisters {
+            pc: self.take_srr0,
+            msr: self.msr,
+            dec: self
+                .seen
+                .borrow()
+                .decrementer
+                .wrapping_sub(time_base as u32),
+        })
     }
     fn system_call_save_restore(&self) -> Option<SaveRestore> {
         Some(SaveRestore {
