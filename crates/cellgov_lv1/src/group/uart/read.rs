@@ -2,17 +2,21 @@
 //! receive buffer of a port of the partition's virtual UART.
 //!
 //! lv1's answer to a call that passes its checks depends on the bytes in
-//! the buffer. lv1's services write those bytes at times that no image
-//! read shows; see [`cellgov_ps3_abi::lv1::uart`]. So CellGov answers only
-//! the calls that fail a check. The answer reads only the memory regions
-//! that the hypervisor holds, and carries no change.
+//! the buffer. lv1's services write those bytes; see
+//! [`cellgov_ps3_abi::lv1::uart`]. CellGov answers these calls:
+//! - a call that fails a check;
+//! - a read of a service port, whose receive buffer holds no byte while
+//!   CellGov answers no `write_virtual_uart`.
+//!
+//! The answer reads only the memory regions that the hypervisor holds, and
+//! carries no change.
 
 use cellgov_ps3_abi::lv1::call::READ_VIRTUAL_UART;
 use cellgov_ps3_abi::lv1::interrupt::region_lookup_base;
 use cellgov_ps3_abi::lv1::uart::{
-    game_os_virtual_uart_port, virtual_uart_read_handler, READ_VIRTUAL_UART_NO_PORT_R3,
-    READ_VIRTUAL_UART_NO_REGION_R3, READ_VIRTUAL_UART_REGION_R3, VIRTUAL_UART_PORT_MAX,
-    VIRTUAL_UART_READ_ADDRESS_MAX,
+    game_os_service_port, game_os_virtual_uart_port, virtual_uart_read_handler,
+    READ_VIRTUAL_UART_NO_PORT_R3, READ_VIRTUAL_UART_NO_REGION_R3, READ_VIRTUAL_UART_REGION_R3,
+    VIRTUAL_UART_PORT_MAX, VIRTUAL_UART_READ_ADDRESS_MAX,
 };
 
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
@@ -75,8 +79,18 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// - r4 is in a region that CellGov does not hold;
 /// - r4 is in the real mode region, and no source gives the real mode
 ///   size for `firmware`;
-/// - the call passes the checks, because no source gives the bytes in the
-///   port's receive buffer.
+/// - the call passes the checks for a port that is not a service port,
+///   because no source gives the bytes in that port's receive buffer.
+///
+/// A call that passes the checks for a service port gets r3 = 0 and
+/// r4 = 0:
+/// - The port's service writes nothing to the port before the partition's
+///   first request; see [`cellgov_ps3_abi::lv1::uart`].
+/// - The partition sends a request with `write_virtual_uart`, which CellGov
+///   does not answer. So the port's receive buffer is empty.
+/// - lv1's read function reads 0 bytes from an empty buffer with a live
+///   peer [OFW-4.93 lv1 a:0x2F09F8-0x2F0A64]. The handler stores the sum,
+///   0, in r4 [OFW-4.93 lv1 a:0x2F452C-0x2F4538].
 pub(crate) fn read(
     request: &HypercallRequest,
     firmware: Option<&str>,
@@ -128,6 +142,9 @@ pub(crate) fn read(
     if region_size - offset < size {
         return lv1_answer(READ_VIRTUAL_UART_REGION_R3);
     }
+    if game_os_service_port(firmware, port).is_some() {
+        return lv1_answer(0);
+    }
     refuse(
         request,
         "a virtual UART read of a port whose receive buffer an lv1 service fills",
@@ -157,3 +174,7 @@ fn allocated_region_size(regions: &[MemoryRegion], base: u64) -> Option<u64> {
 #[cfg(test)]
 #[path = "tests/read_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/read_service_port_tests.rs"]
+mod service_port_tests;

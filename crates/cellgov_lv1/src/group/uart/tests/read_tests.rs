@@ -2,18 +2,29 @@ use super::*;
 use crate::Hypervisor;
 use cellgov_event::UnitId;
 use cellgov_mem::GuestMemory;
+use cellgov_ps3_abi::lv1::call::ALLOCATE_MEMORY;
+use cellgov_ps3_abi::lv1::uart::GAME_OS_VIRTUAL_UART_PORTS;
 use cellgov_time::GuestTicks;
 
 /// The `sc` of the 4.93 kernel's read
 /// [OFW-4.93 lv2_kernel a:0x8000000000016b7c].
 const KERNEL_SC: u64 = 0x8000_0000_0001_6b7c;
 
-/// The ports that the 4.93 kernel opened on the console, from the capture
-/// `lv2_vuart_port_params`.
-const KERNEL_PORTS: [u64; 3] = [0, 2, 10];
+/// The port that the 4.93 kernel opened on the console, from the capture
+/// `lv2_vuart_port_params`, whose peer no image read shows: the one 4.93
+/// row of [`GAME_OS_VIRTUAL_UART_PORTS`] that no service holds.
+fn non_service_port() -> u64 {
+    let ports: Vec<u64> = GAME_OS_VIRTUAL_UART_PORTS
+        .iter()
+        .filter(|row| row.firmware == "4.93" && game_os_service_port("4.93", row.port).is_none())
+        .map(|row| row.port)
+        .collect();
+    assert_eq!(ports.len(), 1, "{ports:?}");
+    ports[0]
+}
 
-/// The system manager port, whose receive loop makes the kernel's first
-/// read [OFW-4.93 lv2_kernel a:0x8000000000264388].
+/// The system manager port, which the kernel's system manager loop opens
+/// [OFW-4.93 lv2_kernel a:0x8000000000264388].
 const SYSTEM_MANAGER_PORT: u64 = 2;
 
 /// The bytes of the system manager's message header, which the receive
@@ -78,25 +89,13 @@ fn refused(r: &HypercallRequest, what: &'static str) -> HypercallDisposition {
     })
 }
 
-#[test]
-fn the_kernel_s_header_read_of_the_system_manager_port_is_a_refusal() {
-    let r = request(SYSTEM_MANAGER_PORT, BUFFER, HEADER_BYTES);
-    assert_eq!(at_4_93(&r), refused(&r, READ_WHAT));
-}
-
 /// A size of 0 passes lv1's checks, and lv1 still calls the read function
 /// [OFW-4.93 lv1 a:0x2F447C-0x2F44F4].
 #[test]
-fn a_read_that_passes_the_checks_is_a_refusal_for_each_kernel_port_and_size() {
-    for port in KERNEL_PORTS {
-        for (address, size) in [(BUFFER, HEADER_BYTES), (BUFFER, 0), (RM_SIZE - 16, 16)] {
-            let r = request(port, address, size);
-            assert_eq!(
-                at_4_93(&r),
-                refused(&r, READ_WHAT),
-                "{port} {address:#x} {size}"
-            );
-        }
+fn a_read_of_the_non_service_port_that_passes_the_checks_is_a_refusal_for_each_size() {
+    for (address, size) in [(BUFFER, HEADER_BYTES), (BUFFER, 0), (RM_SIZE - 16, 16)] {
+        let r = request(non_service_port(), address, size);
+        assert_eq!(at_4_93(&r), refused(&r, READ_WHAT), "{address:#x} {size}");
     }
 }
 
@@ -200,14 +199,14 @@ fn a_buffer_in_a_region_that_cellgov_does_not_hold_is_a_refusal() {
 }
 
 #[test]
-fn a_read_into_an_allocated_region_that_passes_the_checks_is_a_refusal() {
+fn a_read_of_the_non_service_port_into_an_allocated_region_that_passes_the_checks_is_a_refusal() {
     let base = ALLOCATED.lpar_address;
     for (address, size) in [
         (base, HEADER_BYTES),
         (base + 0x1_0070, HEADER_BYTES),
         (base + ALLOCATED.size - 16, 16),
     ] {
-        let r = request(SYSTEM_MANAGER_PORT, address, size);
+        let r = request(non_service_port(), address, size);
         assert_eq!(
             with_allocated(&r),
             refused(&r, READ_WHAT),
@@ -246,7 +245,7 @@ fn a_read_at_a_firmware_whose_handler_is_not_read_is_a_refusal() {
 }
 
 #[test]
-fn the_hypervisor_dispatches_162_to_the_read_and_keeps_its_state() {
+fn the_hypervisor_dispatches_162_to_the_read_with_its_allocated_regions_and_keeps_its_state() {
     let mut hv = Hypervisor::new();
     hv.set_firmware("4.93");
     let storage = GuestMemory::new(0x1000);
@@ -256,10 +255,21 @@ fn the_hypervisor_dispatches_162_to_the_read_and_keeps_its_state() {
         hv.dispatch_with(&checked, &storage),
         lv1_r3(READ_VIRTUAL_UART_NO_PORT_R3)
     );
-    let kernel = request(SYSTEM_MANAGER_PORT, BUFFER, HEADER_BYTES);
+    let other = request(non_service_port(), BUFFER, HEADER_BYTES);
     assert_eq!(
-        hv.dispatch_with(&kernel, &storage),
-        refused(&kernel, READ_WHAT)
+        hv.dispatch_with(&other, &storage),
+        refused(&other, READ_WHAT)
     );
+    let mut allocation = request(0, 0, 0);
+    allocation.number = ALLOCATE_MEMORY;
+    allocation.inputs[..2].copy_from_slice(&[ALLOCATED.size, 20]);
+    assert!(matches!(
+        hv.dispatch_with(&allocation, &storage),
+        HypercallDisposition::Answered(_)
+    ));
+    assert_eq!(hv.memory().regions().len(), 1);
+    let base = hv.memory().regions()[0].lpar_address;
+    let held = request(non_service_port(), base, HEADER_BYTES);
+    assert_eq!(hv.dispatch_with(&held, &storage), refused(&held, READ_WHAT));
     assert_eq!(hv.groups().uart(), &before);
 }

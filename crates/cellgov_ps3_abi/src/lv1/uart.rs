@@ -8,7 +8,10 @@
 //! - the handler of `set_virtual_uart_param` (hypercall 164), its checks,
 //!   and the interrupt status that lv1 computes after each call;
 //! - the handler of `read_virtual_uart` (hypercall 162), its checks, and
-//!   the writers of a port's receive buffer.
+//!   the writers of a port's receive buffer;
+//! - the ports of lv1's system manager and dispatcher manager, and the
+//!   bytes that their receive buffers hold at the GameOS kernel's first
+//!   read.
 //!
 //! The facts come from the 4.93 `lv1.self`, decrypted offline and read
 //! with `cellgov dev disasm`. The repository holds no byte of lv1, only
@@ -309,21 +312,118 @@
 //!
 //! One of these functions [OFW-4.93 lv1 a:0x2F30A0] serves a write whose
 //! buffer lv1 translates through the function [OFW-4.93 lv1 a:0x29D074]
-//! [OFW-4.93 lv1 a:0x2A9DB8] [OFW-4.93 lv1 a:0x2A9E20]. No image read
-//! shows when lv1's services make these writes to a port of the GameOS
-//! partition, or which bytes they write. So no source gives the bytes in
-//! a receive buffer at the kernel's reads.
+//! [OFW-4.93 lv1 a:0x2A9DB8] [OFW-4.93 lv1 a:0x2A9E20]. For most ports, no
+//! image read shows when lv1's services make these writes, or which bytes
+//! they write. The two service ports are the exception; see the next
+//! section.
 //!
-//! The 4.93 kernel's first read is the receive loop of its system manager
-//! port, port 2 [OFW-4.93 lv2_kernel a:0x8000000000264388]. The loop reads
-//! a 16-byte message header
-//! [OFW-4.93 lv2_kernel a:0x8000000000264bb0-0x8000000000264bc0], and its
-//! read sends hypercall 162
-//! [OFW-4.93 lv2_kernel a:0x8000000000016b6c-0x8000000000016b7c].
-//! CellGov's hypervisor refuses `write_virtual_uart`, and CellGov's boot
-//! of the kernel reaches this read with no such call before it. When lv1
-//! reads 0 bytes, the kernel adds the value 2 to the port's interrupt mask
-//! with hypercall 164, and waits for the port's interrupt
+//! # The service ports
+//!
+//! lv1 carries a process archive [OFW-4.93 lv1 a:0x400000-0x4000E4]. Two of
+//! its files hold the peer of a port of the GameOS partition:
+//! - `sysmgr_ss.fself`, lv1's system manager, holds port 2. Its entry is
+//!   the second [OFW-4.93 lv1 a:0x400014-0x40001C].
+//! - `ss_server3.fself` holds port 10 for its dispatcher manager. Its
+//!   entry is the eighth [OFW-4.93 lv1 a:0x40005C-0x400064].
+//!
+//! Each service writes its port to reply to the partition's request, or on
+//! an event that CellGov does not model. So each port's receive buffer is
+//! empty at the partition's first read. The next two sections give the
+//! evidence for each service.
+//!
+//! ## The system manager
+//!
+//! The system manager's boot function for a partition does these steps in
+//! this order:
+//! 1. It calls the port function [OFW-4.93 lv1 a:0x44E990]. That function
+//!    constructs port 2 of the partition's virtual UART with a buffer of
+//!    2048 bytes, through process system call 0x10084
+//!    [OFW-4.93 lv1 a:0x44CF04-0x44CF24] [OFW-4.93 lv1 a:0x464BC8-0x464BD8].
+//!    It then opens the port's peer as a file, keeps the descriptor, and
+//!    gives the descriptor a receive function
+//!    [OFW-4.93 lv1 a:0x44CF58-0x44CF9C].
+//! 2. It activates the partition's logical PU [OFW-4.93 lv1 a:0x44E9B8].
+//! 3. It tells two other services that the boot is done
+//!    [OFW-4.93 lv1 a:0x44E9E8] [OFW-4.93 lv1 a:0x44B26C-0x44B2AC]. That
+//!    step does not use the descriptor.
+//!
+//! The system manager writes the port only through the descriptor. Four
+//! functions of its image read the descriptor:
+//! - The send function writes a 16-byte header and a payload
+//!   [OFW-4.93 lv1 a:0x44C4C4] [OFW-4.93 lv1 a:0x44C544-0x44C558].
+//! - The receive function reads a header and a payload. It then calls the
+//!   request handler of the header's service id through a table
+//!   [OFW-4.93 lv1 a:0x44CD54] [OFW-4.93 lv1 a:0x44CD80-0x44CE44]
+//!   [OFW-4.93 lv1 a:0x46FD60-0x46FF4C].
+//! - One request handler writes more bytes after its reply
+//!   [OFW-4.93 lv1 a:0x44DF70-0x44DF7C] [OFW-4.93 lv1 a:0x44DFEC-0x44DFF8].
+//! - The teardown function closes the descriptor and destructs the port
+//!   [OFW-4.93 lv1 a:0x44CE60-0x44CEC8].
+//!
+//! Each call of the send function sends one of these messages:
+//! - a reply, from a request handler that the receive function calls;
+//! - a command, service id 3, when the system manager shuts the partition
+//!   down [OFW-4.93 lv1 a:0x44CC10-0x44CC1C] [OFW-4.93 lv1 a:0x44F54C];
+//! - an external event, service id 4, of a power or thermal event
+//!   [OFW-4.93 lv1 a:0x44CC80-0x44CC8C] [OFW-4.93 lv1 a:0x452FE8-0x452FFC].
+//!
+//! Linux `drivers/ps3/ps3-sys-manager.c` gives the same direction for each
+//! of these service ids, in `enum ps3_sys_manager_service_id`. It gives the
+//! codes 3, 4, 7 and 8 of the events in `enum ps3_sys_manager_event`.
+//!
+//! So the system manager writes nothing to port 2 before the partition
+//! sends a request, unless a shutdown or an external event comes first.
+//! CellGov models neither. The system manager keeps the peer's descriptor
+//! open until the teardown.
+//!
+//! ## The dispatcher manager
+//!
+//! The secure loader code of `ss_server3.fself` asks the dispatcher
+//! manager for the partition's service port, port 10
+//! [OFW-4.93 lv1 a:0x5B7E44-0x5B7E80]. The dispatcher manager constructs
+//! the port with a buffer of 4096 bytes, through process system call
+//! 0x10084 [OFW-4.93 lv1 a:0x5BF1F0-0x5BF1FC] [OFW-4.93 lv1 a:0x5CA8FC-0x5CA90C].
+//!
+//! The dispatcher manager relays requests and replies. Its receive loop
+//! calls one of two functions for a socket that has data
+//! [OFW-4.93 lv1 a:0x5BE5D4] [OFW-4.93 lv1 a:0x5BE5E8]:
+//! - The port function reads the partition's packet and sends it to a
+//!   socket that it connects to the packet's service
+//!   [OFW-4.93 lv1 a:0x5BD888] [OFW-4.93 lv1 a:0x5BDC88]. In other cases,
+//!   it replies to the port with a return value alone
+//!   [OFW-4.93 lv1 a:0x5BD980] [OFW-4.93 lv1 a:0x5BDAFC].
+//! - The service function reads a service's reply from such a socket, and
+//!   writes it to the port [OFW-4.93 lv1 a:0x5BD3F0]
+//!   [OFW-4.93 lv1 a:0x5BD524] [OFW-4.93 lv1 a:0x5BD540].
+//!
+//! The service function's send function has no other caller. Two other
+//! socket write functions are reached only through tables of function
+//! descriptors [OFW-4.93 lv1 a:0x5D356C] [OFW-4.93 lv1 a:0x5D3674]. The
+//! image read does not show which objects call them. Each write to the
+//! port that the image read shows is a reply to a request. So the reading
+//! that the evidence supports is this: the dispatcher manager writes
+//! nothing to port 10 before the partition sends a request.
+//!
+//! ## The kernel's reads
+//!
+//! At the 4.93 kernel's first read of a service port, the port's receive
+//! buffer is empty, and the port has a peer with a reference. The capture
+//! [`VIRTUAL_UART_PORT_CAPTURE`] gives each service port a transmit buffer
+//! size other than 0 at the kernel's open. That value is 0 when the port
+//! has no such peer; see [`VIRTUAL_UART_PARAM_TX_BUFFER_SIZE`]. So lv1's
+//! read function returns 0 bytes, and the handler returns r3 = 0 and
+//! r4 = 0.
+//!
+//! The kernel reads each port through one function, which sends
+//! hypercall 162 with the port from its port record
+//! [OFW-4.93 lv2_kernel a:0x8000000000016b6c-0x8000000000016b7c]. Its
+//! system manager loop opens port 2
+//! [OFW-4.93 lv2_kernel a:0x8000000000264388], and reads a 16-byte message
+//! header [OFW-4.93 lv2_kernel a:0x8000000000264bb0-0x8000000000264bc0].
+//! CellGov's hypervisor refuses `write_virtual_uart`. CellGov's boot of
+//! the kernel makes its first read on port 10, with no such call before
+//! it. When lv1 reads 0 bytes, the kernel adds the value 2 to the port's
+//! interrupt mask with hypercall 164, and waits for the port's interrupt
 //! [OFW-4.93 lv2_kernel a:0x8000000000016b9c-0x8000000000016be0]
 //! [OFW-4.93 lv2_kernel a:0x8000000000016aa8-0x8000000000016ac8].
 
@@ -782,6 +882,67 @@ pub const READ_VIRTUAL_UART_NO_REGION_R3: u64 = 0x0000_0002_FFFF_FFFA;
 /// - the r5 bytes from r4 to the region's end.
 pub const READ_VIRTUAL_UART_REGION_R3: u64 = 0x0000_0002_FFFF_FFF8;
 
+/// An lv1 service that holds the peer of a port of the GameOS partition's
+/// virtual UART.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VirtualUartService {
+    /// The system manager, `sysmgr_ss.fself` of lv1's process archive.
+    SystemManager,
+    /// The dispatcher manager of `ss_server3.fself` of lv1's process
+    /// archive.
+    DispatcherManager,
+}
+
+/// A port of the GameOS partition's virtual UART that an lv1 service
+/// constructs at one firmware.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameOsServicePort {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The port number.
+    pub port: u64,
+    /// The service that holds the port's peer.
+    pub service: VirtualUartService,
+    /// The bytes of the buffer that the service gives the port.
+    pub buffer_bytes: u64,
+}
+
+/// The service ports for each firmware whose lv1 image shows them, by
+/// ascending port number.
+///
+/// Each service gives process system call 0x10084 the port and the buffer
+/// size:
+/// - the 4.93 system manager, port 2 and 2048 bytes
+///   [OFW-4.93 lv1 a:0x44CF04-0x44CF0C] [OFW-4.93 lv1 a:0x44CF24];
+/// - the 4.93 dispatcher manager, the port that the secure loader code
+///   gives it and 4096 bytes [OFW-4.93 lv1 a:0x5BF1F8-0x5BF1FC]. That port
+///   is 10 [OFW-4.93 lv1 a:0x5B7E7C-0x5B7E80].
+///
+/// Each port's receive buffer holds no byte at the GameOS kernel's first
+/// read; see [`crate::lv1::uart`].
+pub const GAME_OS_SERVICE_PORTS: &[GameOsServicePort] = &[
+    GameOsServicePort {
+        firmware: "4.93",
+        port: 2,
+        service: VirtualUartService::SystemManager,
+        buffer_bytes: 0x800,
+    },
+    GameOsServicePort {
+        firmware: "4.93",
+        port: 10,
+        service: VirtualUartService::DispatcherManager,
+        buffer_bytes: 0x1000,
+    },
+];
+
+/// The service port `port` at the firmware version `firmware`, or `None`
+/// when no lv1 image read shows a service that holds its peer.
+pub fn game_os_service_port(firmware: &str, port: u64) -> Option<&'static GameOsServicePort> {
+    GAME_OS_SERVICE_PORTS
+        .iter()
+        .find(|row| row.firmware == firmware && row.port == port)
+}
+
 #[cfg(test)]
 #[path = "tests/uart_tests.rs"]
 mod tests;
@@ -809,3 +970,7 @@ mod set_param_console_tests;
 #[cfg(test)]
 #[path = "tests/uart_read_tests.rs"]
 mod read_tests;
+
+#[cfg(test)]
+#[path = "tests/uart_service_port_tests.rs"]
+mod service_port_tests;

@@ -12,6 +12,15 @@
 /// [`crate::lv1::uart`].
 pub const READ_VIRTUAL_UART: u64 = 162;
 
+/// `write_virtual_uart`: three inputs and one output.
+/// - r3 is the number of a port of the partition's virtual UART.
+/// - r4 is the logical partition address of the bytes to send.
+/// - r5 is the number of bytes to send.
+/// - r4 returns the number of bytes that lv1 wrote.
+///
+/// Linux `drivers/ps3/ps3-vuart.c` makes the call in this form.
+pub const WRITE_VIRTUAL_UART: u64 = 163;
+
 /// `set_virtual_uart_param`: three inputs and no output.
 /// - r3 is the number of a port of the partition's virtual UART.
 /// - r4 is the id of the port's parameter.
