@@ -66,12 +66,8 @@ fn after_calls(code: &Code) -> impl Iterator<Item = u64> + '_ {
 
 /// What the paths to one word bring in CTR.
 ///
-/// A path can also bring a CTR that no word of the scan writes, such as
-/// a value that the code loads. The bound takes such a CTR to hold a
-/// named address, or in real mode a word of
-/// [`IndirectBound::real_named`]. So the state does not record it.
-///
-/// [`IndirectBound::real_named`]: super::IndirectBound::real_named
+/// The default state holds no path. It is the state of a word before a
+/// path reaches it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct Ctr {
     /// The constants that the paths bring in CTR, by the address of the
@@ -85,9 +81,31 @@ struct Ctr {
     /// Only CTR itself holds such a value. A copy of it is lost, so a
     /// copy that a word changes cannot leave the class.
     ranged: bool,
+    /// Whether a path brings a CTR that no word of the scan writes, such
+    /// as a value that the code loads.
+    ///
+    /// The bound takes such a CTR to hold a named address, or in real
+    /// mode a word of [`IndirectBound::real_named`]. So a `bcctr` of it
+    /// adds no target. A step that changes it gives a value that the
+    /// scan cannot prove.
+    ///
+    /// Only CTR itself holds such a value. A copy of it is a GPR with no
+    /// copy that the state records.
+    ///
+    /// [`IndirectBound::real_named`]: super::IndirectBound::real_named
+    unwritten: bool,
 }
 
 impl Ctr {
+    /// CTR where a path starts that the flow does not follow, or after
+    /// an `mtctr` of a value that no word of the scan writes.
+    fn unwritten() -> Self {
+        Self {
+            unwritten: true,
+            ..Self::default()
+        }
+    }
+
     /// CTR after the word at `by` writes the constants `value`.
     fn written(by: u64, value: Value) -> Self {
         Self {
@@ -115,12 +133,12 @@ impl Ctr {
 
     /// CTR after a step that keeps no constant of it.
     ///
-    /// Each constant, and each value of a class, becomes a value that the
-    /// scan cannot prove. A CTR that no word of the scan writes stays out
-    /// of the state.
+    /// Each value of a path becomes a value that the scan cannot prove:
+    /// a constant, a value of a class, and a CTR that no word of the scan
+    /// writes. A state that holds no path stays so.
     fn unproved(&self) -> Self {
         Self {
-            lost: self.lost || self.ranged || !self.known.is_empty(),
+            lost: self.lost || self.ranged || self.unwritten || !self.known.is_empty(),
             ..Self::default()
         }
     }
@@ -133,7 +151,7 @@ impl Ctr {
         Self {
             known: self.known.clone(),
             lost: self.lost || self.ranged,
-            ranged: false,
+            ..Self::default()
         }
     }
 
@@ -166,7 +184,7 @@ impl Ctr {
                 .map(|(&by, value)| (by, value.map(&part)))
                 .collect(),
             lost: self.lost || self.ranged,
-            ranged: false,
+            ..Self::default()
         }
     }
 
@@ -186,14 +204,18 @@ impl Ctr {
                 .unwrap_or_default(),
             lost: self.lost,
             ranged: self.ranged,
+            unwritten: self.unwritten,
         }
     }
 
     /// Joins `other` into `self`, and returns whether `self` changed.
     fn join(&mut self, other: &Self) -> bool {
-        let changed = (other.lost && !self.lost) || (other.ranged && !self.ranged);
+        let changed = (other.lost && !self.lost)
+            || (other.ranged && !self.ranged)
+            || (other.unwritten && !self.unwritten);
         self.lost |= other.lost;
         self.ranged |= other.ranged;
+        self.unwritten |= other.unwritten;
         join_known(&mut self.known, &other.known) || changed
     }
 }
@@ -248,7 +270,7 @@ impl GprCopies {
         (lost || known.is_some()).then(|| Ctr {
             known: known.cloned().unwrap_or_default(),
             lost,
-            ranged: false,
+            ..Ctr::default()
         })
     }
 
@@ -761,10 +783,12 @@ impl StackAccess {
 /// - the first word of the routine that a call runs;
 /// - the target of an indirect branch, an `rfid` or an interrupt.
 ///
-/// A path to one of these words brings a CTR that the bound takes to
-/// hold a named address. The word after a call gets a CTR that the scan
-/// cannot prove. The word after an `sc` gets the CTR before the `sc`, so
-/// the flow takes the handler to return with CTR unchanged.
+/// A path to one of these words brings a CTR that no word of the scan
+/// writes, which the bound takes to hold a named address. So each such
+/// word, and each word that [`Reach::started`] gives, starts a path with
+/// that CTR. The word after a call gets a CTR that the scan cannot
+/// prove. The word after an `sc` gets the CTR before the `sc`, so the
+/// flow takes the handler to return with CTR unchanged.
 ///
 /// A `b` or a `bc` that links to the next word calls no routine, so the
 /// next word gets the CTR before the branch. A return can reach that
@@ -820,18 +844,34 @@ pub(super) struct CtrWrites<'a> {
 }
 
 impl<'a> CtrFlow<'a> {
-    /// The flow before its first step, with no CTR on any word. The flow
-    /// steps the words that `reach` holds.
+    /// The flow before its first step. The flow steps the words that
+    /// `reach` holds.
+    ///
+    /// Each word that [`Reach::started`] gives starts with a CTR that no
+    /// word of the scan writes. Each other word starts with no path.
     pub(super) fn new(code: &'a Code, writes: CtrWrites<'a>, reach: &'a Reach<'a>) -> Self {
+        let at = code
+            .segments()
+            .iter()
+            .enumerate()
+            .map(|(index, segment)| {
+                (0..segment.words.len())
+                    .map(|word| CtrState {
+                        ctr: if reach.started(index, word) {
+                            Ctr::unwritten()
+                        } else {
+                            Ctr::default()
+                        },
+                        ..CtrState::default()
+                    })
+                    .collect()
+            })
+            .collect();
         Self {
             code,
             reach,
             writes,
-            at: code
-                .segments()
-                .iter()
-                .map(|segment| vec![CtrState::default(); segment.words.len()])
-                .collect(),
+            at,
         }
     }
 
@@ -999,7 +1039,7 @@ impl<'a> CtrFlow<'a> {
     /// `position` holds the index of the segment and of the word there. A
     /// word that does not decode passes no state, as the scan of the code
     /// constants forgets each constant there. A call passes no copy to its
-    /// target.
+    /// target, and a CTR that no word of the scan writes.
     fn steps(
         &self,
         position: (usize, usize),
@@ -1020,7 +1060,10 @@ impl<'a> CtrFlow<'a> {
         };
         let taken = taken.map(|(target, ctr)| {
             let state = if calls(address, raw) {
-                CtrState::default()
+                CtrState {
+                    ctr,
+                    ..CtrState::default()
+                }
             } else {
                 with(ctr)
             };
@@ -1035,7 +1078,9 @@ impl<'a> CtrFlow<'a> {
     /// and `state` is what the paths to it bring.
     ///
     /// An `mtctr` of a GPR that holds a copy of CTR joins the copy into
-    /// the constants that `writes` holds for the `mtctr`.
+    /// the constants that `writes` holds for the `mtctr`. An `mtctr` with
+    /// no constant, no copy and no lost or ranged value copies a value
+    /// that no word of the scan writes.
     ///
     /// [PPC-Book1 p:81 s:3.3.13] `mtlr` and `mtctr`, forms of `mtspr`, copy RS into LR or CTR.
     fn ctr_steps(
@@ -1060,6 +1105,9 @@ impl<'a> CtrFlow<'a> {
                 }
                 if self.writes.ranged.contains(&(index, address)) {
                     ctr.join(&Ctr::ranged());
+                }
+                if ctr == Ctr::default() {
+                    ctr = Ctr::unwritten();
                 }
                 (Some(ctr), None)
             }
@@ -1134,7 +1182,7 @@ impl<'a> CtrFlow<'a> {
 /// [PPC-Book1 p:24 s:2.4] A `bc` with BO bit 2 at 0 decrements CTR.
 fn taken(address: u64, raw: u32, bo: u8, ctr: &Ctr) -> Ctr {
     if calls(address, raw) {
-        return Ctr::default();
+        return Ctr::unwritten();
     }
     if bo & PPC_BO_BIT2 == 0 {
         ctr.unproved()
@@ -1261,3 +1309,7 @@ mod ranged_tests;
 #[cfg(test)]
 #[path = "../tests/indirect_entry_ctr_flow_widen_tests.rs"]
 mod widen_tests;
+
+#[cfg(test)]
+#[path = "../tests/indirect_entry_ctr_flow_unwritten_tests.rs"]
+mod unwritten_tests;

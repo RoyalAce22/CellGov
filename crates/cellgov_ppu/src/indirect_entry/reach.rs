@@ -51,8 +51,13 @@ pub(super) struct Reach<'a> {
     /// Whether control can reach each word, in one vector for each code
     /// segment.
     reached: Vec<Vec<bool>>,
+    /// Whether a start enters each word, in one vector for each code
+    /// segment.
+    started: Vec<Vec<bool>>,
     /// The number of words in `reached` that control can reach.
     count: usize,
+    /// The number of words in `started` that a start enters.
+    starts: usize,
     /// The number of words of the code.
     words: usize,
 }
@@ -68,17 +73,23 @@ impl<'a> Reach<'a> {
         let words = reached.iter().map(Vec::len).sum();
         Self {
             code,
+            started: reached.clone(),
             reached,
             count: 0,
+            starts: 0,
             words,
         }
     }
 
-    /// The set with every word of `code`.
+    /// The set with every word of `code`, and with no word that a start
+    /// enters.
     #[cfg(test)]
     pub(super) fn every(code: &'a Code) -> Self {
         let mut reach = Self::new(code);
-        reach.fill();
+        for words in &mut reach.reached {
+            words.fill(true);
+        }
+        reach.count = reach.words;
         reach
     }
 
@@ -92,31 +103,59 @@ impl<'a> Reach<'a> {
             .unwrap_or(false)
     }
 
-    /// Adds every word, and returns whether the set grew.
+    /// Whether a start enters the word `word` of the segment at `index`.
+    ///
+    /// A path that a start begins holds a CTR that no word of the scan
+    /// writes.
+    pub(super) fn started(&self, index: usize, word: usize) -> bool {
+        self.started
+            .get(index)
+            .and_then(|words| words.get(word))
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Adds every word, as a word that a start enters, and returns
+    /// whether the set or its starts grew.
     pub(super) fn fill(&mut self) -> bool {
-        if self.count == self.words {
+        if self.count == self.words && self.starts == self.words {
             return false;
         }
-        for words in &mut self.reached {
+        for words in self.reached.iter_mut().chain(&mut self.started) {
             words.fill(true);
         }
         self.count = self.words;
+        self.starts = self.words;
         true
     }
 
     /// Adds each word that control can reach from an address of
-    /// `starts`, and returns whether the set grew.
+    /// `starts`, and returns whether the set or its starts grew.
     ///
     /// The walk ends the steps from one start before it takes the next
     /// start, so a long run of starts keeps only one walk in memory.
     pub(super) fn grow(&mut self, starts: impl IntoIterator<Item = u64>) -> bool {
-        let before = self.count;
+        let before = (self.count, self.starts);
         let mut pending = Vec::new();
         for start in starts {
-            pending.extend(spread(self.code, start));
+            for address in spread(self.code, start) {
+                self.start(address);
+                pending.push(address);
+            }
             self.walk(&mut pending);
         }
-        self.count != before
+        (self.count, self.starts) != before
+    }
+
+    /// Records each word at `address` as a word that a start enters.
+    fn start(&mut self, address: u64) {
+        for (index, word) in positions(self.code, address) {
+            let started = &mut self.started[index][word];
+            if !*started {
+                *started = true;
+                self.starts += 1;
+            }
+        }
     }
 
     /// Adds each word that control can reach from an address of

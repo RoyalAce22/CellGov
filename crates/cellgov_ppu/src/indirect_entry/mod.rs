@@ -70,7 +70,7 @@
 //! - each `bcctr` that a path reaches with a CTR that the scan cannot
 //!   prove:
 //!   - a CTR after a call;
-//!   - a CTR after a decrement of a constant that the scan records;
+//!   - a CTR after a decrement;
 //!   - a CTR from a GPR that can hold a constant that the scan dropped;
 //! - each `bclr` that a path reaches with an LR that can hold a constant
 //!   the scan dropped;

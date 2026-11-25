@@ -1093,3 +1093,7 @@ mod hypercall_ctr_memory_copy_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_string_slots_console_tests.rs"]
 mod string_slots_console_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_ctr_unwritten_tests.rs"]
+mod hypercall_ctr_unwritten_tests;

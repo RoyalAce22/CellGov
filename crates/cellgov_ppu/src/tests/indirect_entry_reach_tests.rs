@@ -197,18 +197,22 @@ fn a_start_reaches_each_segment_at_its_real_address() {
 }
 
 #[test]
-fn grow_and_fill_return_whether_the_set_took_a_word() {
+fn grow_and_fill_return_whether_the_set_took_a_word_or_a_start() {
     let code = Code::new(vec![CodeSegment {
         vaddr: BASE,
         words: vec![PPC_NOP, PPC_BLR, PPC_NOP],
     }]);
     let mut reach = Reach::new(&code);
     assert!(reach.grow([BASE]));
+    assert!(!reach.started(0, 1));
+    assert!(reach.grow([BASE + 4]));
+    assert!(reach.started(0, 1));
     assert!(!reach.grow([BASE + 4]));
     assert!(!reach.grow([BASE + 0x1000]));
     assert!(!reach.contains(0, 2));
     assert!(reach.fill());
     assert!(reach.contains(0, 2));
+    assert!(reach.started(0, 2));
     assert!(!reach.fill());
     assert!(!reach.grow([BASE + 8]));
     let all = Code::new(vec![CodeSegment {
@@ -217,6 +221,8 @@ fn grow_and_fill_return_whether_the_set_took_a_word() {
     }]);
     let mut every = Reach::new(&all);
     assert!(every.grow([BASE]));
+    assert!(every.fill());
+    assert!(every.started(0, 1));
     assert!(!every.fill());
 }
 

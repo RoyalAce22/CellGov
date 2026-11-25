@@ -218,8 +218,8 @@ pub(crate) struct IndirectBound {
     ///
     /// A path reaches the `bcctr` after one of these steps, with no CTR
     /// write between:
-    /// - a decrement of a constant, because a loop can run it more than
-    ///   once;
+    /// - a decrement of a constant, or of a CTR that no word of the scan
+    ///   writes, because a loop can run it more than once;
     /// - a call, because its routine can write CTR before it returns;
     /// - an `mtctr` of a GPR that can hold a constant that `JoinFlow`
     ///   dropped.

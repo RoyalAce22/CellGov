@@ -87,12 +87,17 @@ fn a_real_mode_bctr_after_a_loop_that_keeps_ctr_reaches_the_built_address() {
     assert_eq!(sites(segments), [(SC, None), (QUIET_SC, Some(77))]);
 }
 
-/// The CTR of the loop is a value that the code loads, which the bound
-/// takes to hold a named address. The loop falls through with CTR at 0.
+/// The CTR of the loop is a value that the code loads. Each pass loads
+/// a word and compares it into CR0, so the `blt` can leave the loop
+/// after any pass, with CTR at that value less the passes that the loop
+/// ran, which the scan cannot prove.
 ///
+/// [PPC-Book1 p:37 s:3.3.2] `lwz` loads the word at EA into RT 32:63 and sets RT 0:31 to 0.
+/// [PPC-Book1 p:60 s:3.3.9] `cmpi` with L = 0 compares RA 32:63 with SI as signed integers and places the result into CR field BF.
 /// [PPC-Book1 p:20 s:2.4.1] BO 1a00t decrements CTR, then branches if CTR M:63 is not 0, with M = 0 in 64-bit mode and M = 32 in 32-bit mode.
 #[test]
-fn a_real_mode_bctr_after_an_early_exit_from_a_loop_with_a_loaded_count_adds_no_path() {
+fn a_real_mode_bctr_after_an_early_exit_from_a_loop_with_a_loaded_count_leaves_every_site_unresolved(
+) {
     let words = [
         word(PpuInstruction::Ld {
             rt: 3,
@@ -100,14 +105,21 @@ fn a_real_mode_bctr_after_an_early_exit_from_a_loop_with_a_loaded_count_adds_no_
             imm: 0,
         }),
         word(PpuInstruction::Mtctr { rs: 3 }),
+        word(PpuInstruction::Lwz {
+            rt: 4,
+            ra: 1,
+            imm: 8,
+        }),
+        word(PpuInstruction::Cmpwi {
+            bf: 0,
+            ra: 4,
+            imm: 0,
+        }),
         bc(0b01100, 8),
-        bc(0b10000, -4),
+        bc(0b10000, -12),
         bctr(),
     ];
-    assert_eq!(
-        sites(code(VECTOR, &words)),
-        [(SC, Some(75)), (QUIET_SC, Some(77))]
-    );
+    assert_eq!(sites(code(VECTOR, &words)), [(SC, None), (QUIET_SC, None)]);
 }
 
 /// The vector word branches past the `bctr` to a CTR write, which
