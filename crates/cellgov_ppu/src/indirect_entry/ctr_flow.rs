@@ -498,14 +498,7 @@ impl CtrState {
         let mut slots = self.slots.clone();
         let access = StackAccess::of(decoded);
         if let Some(access) = &access {
-            for &(slot, gpr) in &access.parts {
-                if access.load == Load::None {
-                    let copy = gpr.and_then(|gpr| self.copies.get(gpr));
-                    slots.store(slot, copy.as_ref());
-                } else {
-                    copied.extend(gpr.map(|gpr| (gpr, self.slots.loaded(slot, access.load))));
-                }
-            }
+            self.stack_step(access, &mut slots, &mut copied);
         }
         let written = surely_written_gprs(decoded);
         let mut copies = self.copies.clone();
@@ -527,6 +520,29 @@ impl CtrState {
             };
         }
         (copies, slots)
+    }
+
+    /// Writes into `slots` each slot that the store `access` writes, or
+    /// adds to `copied` the copy that the load `access` gives each GPR.
+    fn stack_step(
+        &self,
+        access: &StackAccess,
+        slots: &mut SlotCopies,
+        copied: &mut Vec<(u8, Ctr)>,
+    ) {
+        for part in &access.parts {
+            match (part.gpr, access.load) {
+                (None, Load::None) => slots.store(part.slot, None),
+                (None, _) => {}
+                (Some(gpr), Load::None) => {
+                    let copy = self.copies.get(gpr).map(|copy| part.stored(copy));
+                    slots.store(part.slot, copy.as_ref());
+                }
+                (Some(gpr), load) => {
+                    copied.push((gpr, part.loaded(self.slots.loaded(part.slot, load))));
+                }
+            }
+        }
     }
 }
 
@@ -578,13 +594,51 @@ impl Load {
     }
 }
 
+/// The slot of one register that a word loads or stores at a constant
+/// offset from r1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Part {
+    slot: Slot,
+    /// The GPR, or `None` for the FPR of a floating-point load or store.
+    gpr: Option<u8>,
+    /// The number of low-order bits of the GPR below the bytes that the
+    /// word moves.
+    ///
+    /// The value is 0 for each word other than a string word. A string
+    /// word moves the high-order bytes of the low-order word of its last
+    /// GPR.
+    shift: u32,
+}
+
+impl Part {
+    /// The bytes that a store of the copy `copy` in the GPR writes, as
+    /// the low-order bytes of a copy.
+    fn stored(&self, copy: Ctr) -> Ctr {
+        if self.shift == 0 {
+            copy
+        } else {
+            copy.part(|value| value >> self.shift)
+        }
+    }
+
+    /// The GPR after a load puts the bytes `loaded` into it.
+    ///
+    /// `loaded` holds the bytes as the low-order bytes of a copy.
+    fn loaded(&self, loaded: Ctr) -> Ctr {
+        if self.shift == 0 {
+            loaded
+        } else {
+            loaded.part(|value| value << self.shift)
+        }
+    }
+}
+
 /// A load or a store that a word makes at a constant offset from r1.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StackAccess {
     load: Load,
-    /// The slot of each GPR that the word loads or stores, and the GPR.
-    /// The GPR is `None` for the FPR of a floating-point load or store.
-    parts: Vec<(Slot, Option<u8>)>,
+    /// The slot of each register that the word loads or stores.
+    parts: Vec<Part>,
     /// The constant that the update form adds to r1.
     moves_r1: Option<i64>,
 }
@@ -632,12 +686,18 @@ impl StackAccess {
             I::Stfdu { ra, imm, .. } => (Load::None, ra, imm, 8, None, true),
             I::Lmw { rt, ra, imm } => return Self::multiple(Load::Zero, rt, ra, imm),
             I::Stmw { rs, ra, imm } => return Self::multiple(Load::None, rs, ra, imm),
+            I::Lswi { rt, ra, nb } => return Self::string(Load::Zero, rt, ra, nb),
+            I::Stswi { rs, ra, nb } => return Self::string(Load::None, rs, ra, nb),
             _ => return None,
         };
         let offset = i64::from(imm);
         (ra == 1).then(|| Self {
             load,
-            parts: vec![((offset, width), gpr)],
+            parts: vec![Part {
+                slot: (offset, width),
+                gpr,
+                shift: 0,
+            }],
             moves_r1: update.then_some(offset),
         })
     }
@@ -648,7 +708,37 @@ impl StackAccess {
         (ra == 1).then(|| Self {
             load,
             parts: (first..32)
-                .map(|gpr| ((i64::from(imm) + 4 * i64::from(gpr - first), 4), Some(gpr)))
+                .map(|gpr| Part {
+                    slot: (i64::from(imm) + 4 * i64::from(gpr - first), 4),
+                    gpr: Some(gpr),
+                    shift: 0,
+                })
+                .collect(),
+            moves_r1: None,
+        })
+    }
+
+    /// The access of an `lswi` or an `stswi` of `nb` bytes from the GPRs
+    /// from `first` up at 0 from RA.
+    ///
+    /// Each GPR takes four bytes, and the last GPR can take fewer. A GPR
+    /// moves the high-order bytes of its low-order word, from the left.
+    ///
+    /// [PPC-Book1 p:48 s:3.3.6] `lswi` loads n bytes from EA = (RA|0) into the low-order words of RT onward, left to right, with GPR 0 after GPR 31, and sets the high-order word and the unfilled bytes to 0.
+    /// [PPC-Book1 p:49 s:3.3.6] `stswi` stores n bytes from the low-order words of RS onward, left to right, to EA = (RA|0).
+    fn string(load: Load, first: u8, ra: u8, nb: u8) -> Option<Self> {
+        let bytes = if nb == 0 { 32 } else { u32::from(nb) };
+        (ra == 1).then(|| Self {
+            load,
+            parts: (0..bytes.div_ceil(4))
+                .map(|n| {
+                    let width = (bytes - 4 * n).min(4);
+                    Part {
+                        slot: (i64::from(4 * n), width as u8),
+                        gpr: Some(((u32::from(first) + n) % 32) as u8),
+                        shift: 8 * (4 - width),
+                    }
+                })
                 .collect(),
             moves_r1: None,
         })

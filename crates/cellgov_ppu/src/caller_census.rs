@@ -1085,3 +1085,11 @@ mod hypercall_unfollowed_write_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_ctr_bcctr_return_copy_tests.rs"]
 mod hypercall_ctr_bcctr_return_copy_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_ctr_memory_copy_tests.rs"]
+mod hypercall_ctr_memory_copy_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_string_slots_console_tests.rs"]
+mod string_slots_console_tests;

@@ -146,6 +146,7 @@ mod console_ppu_shm_alias;
 mod console_ppu_span_shm_maps;
 mod console_ppu_spu_reserved_loads;
 mod console_ppu_storage;
+mod console_ppu_string_word_slots;
 mod console_ppu_supervisor_problem_state;
 mod console_ppu_sync_l3;
 mod console_ppu_synced_code_store;

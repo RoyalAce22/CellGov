@@ -61,7 +61,7 @@ fn addi_r1(imm: i16) -> u32 {
 /// control enters in real mode, runs `bl ROUTINE; ld r5,16(r1);
 /// mtctr r5; bctr`, and [`routine`] writes 0x3004 into CTR and then runs
 /// `body`.
-fn after_a_routine_that_returns_a_slot(body: &[u32]) -> Vec<(u64, Option<u16>)> {
+pub(super) fn after_a_routine_that_returns_a_slot(body: &[u32]) -> Vec<(u64, Option<u16>)> {
     let offset = i32::try_from(ROUTINE.wrapping_sub(VECTOR).cast_signed()).expect("in reach");
     let caller = [
         word(PpuInstruction::B {
@@ -93,7 +93,11 @@ fn after_a_routine_that_returns_a_slot(body: &[u32]) -> Vec<(u64, Option<u16>)> 
 /// enters `nop`. A stub at [`OUTSIDE`] builds `KERNEL | low` in CTR,
 /// stores a copy of CTR at 16(r1), runs `between`, moves r0 into CTR,
 /// and branches there. A code pointer names the stub.
-fn after_a_load_of_part_of_a_copy(nop: u16, low: u16, between: &[u32]) -> Vec<(u64, Option<u16>)> {
+pub(super) fn after_a_load_of_part_of_a_copy(
+    nop: u16,
+    low: u16,
+    between: &[u32],
+) -> Vec<(u64, Option<u16>)> {
     let to_nop = word(PpuInstruction::B {
         offset: i32::from(nop),
         aa: true,
@@ -113,9 +117,9 @@ fn after_a_load_of_part_of_a_copy(nop: u16, low: u16, between: &[u32]) -> Vec<(u
     ordinals(NO_ENTRY, &segments)
 }
 
-const UNRESOLVED: [(u64, Option<u16>); 2] = [(SC, None), (QUIET_SC, None)];
+pub(super) const UNRESOLVED: [(u64, Option<u16>); 2] = [(SC, None), (QUIET_SC, None)];
 
-const RESOLVED: [(u64, Option<u16>); 2] = [(SC, Some(75)), (QUIET_SC, Some(77))];
+pub(super) const RESOLVED: [(u64, Option<u16>); 2] = [(SC, Some(75)), (QUIET_SC, Some(77))];
 
 /// The routine that the `bl` calls can return with any CTR, and the
 /// copy in the stack slot at 16(r1) keeps that CTR.

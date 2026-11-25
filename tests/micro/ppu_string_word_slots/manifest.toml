@@ -1,0 +1,17 @@
+[test]
+name = "ppu_string_word_slots"
+
+# A hardware probe of where lswi and stswi put the bytes of a
+# doubleword in problem state: the byte order in each register, a short
+# last register, the wrap from r31 to r0, the zeroed high-order word of
+# each lswi target, and a byte count of 0. ppu/main.c's header lists the
+# cases.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 192 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 192 },
+]
+
+[expect]
+outcome = "completed"
