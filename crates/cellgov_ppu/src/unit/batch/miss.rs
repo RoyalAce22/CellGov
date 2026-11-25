@@ -1,0 +1,199 @@
+//! The views a batch runs against, and two rules for a translating
+//! thread: the retired instructions that end its batch, and an access
+//! that misses every view.
+
+use super::exit::{Attempt, FaultExit};
+use super::regions::RegionTable;
+use crate::exec::PpuFault;
+use crate::instruction;
+use crate::mmu::Access;
+use crate::unit::ppu_unit::PpuExecutionUnit;
+use cellgov_effects::Effect;
+
+/// What a translating thread does after an access missed every view.
+pub(super) enum MissStep {
+    /// The instruction stops with this fault.
+    Stop(FaultExit),
+    /// The batch ends before the instruction, which the next batch runs
+    /// again.
+    EndBatch,
+    /// The instruction runs again against the rebuilt views.
+    Rerun,
+}
+
+impl PpuExecutionUnit {
+    /// The views a batch runs against: a translating thread's
+    /// translations at their effective addresses, after it follows its
+    /// translation registers, or else the regions of `mem`.
+    #[inline]
+    pub(super) fn batch_views<'m>(
+        &mut self,
+        mem: &'m cellgov_mem::GuestMemory,
+        translating: bool,
+    ) -> RegionTable<'m> {
+        if !translating {
+            return RegionTable::new(mem.region_views());
+        }
+        self.follow_translation();
+        RegionTable::new(self.translated_views(mem).into_iter())
+    }
+
+    /// Whether a translating thread's batch ends after `insn`, which
+    /// retired with the store buffer grown from `stores_before`.
+    #[inline]
+    pub(super) fn translation_ends_batch(
+        &self,
+        insn: &instruction::PpuInstruction,
+        stores_before: usize,
+    ) -> bool {
+        // A move of the MSR, the SLB or the partition ends the batch: the
+        // next one runs against the translations it gives, and this one's
+        // buffered stores publish under the old ones.
+        let retranslates = matches!(insn, instruction::PpuInstruction::PpePrivileged { .. })
+            && self.translation_moved();
+        // A store to real bytes that a second cached translation also
+        // reaches ends the batch, so no later load reads them through the
+        // other alias while the store sits in the buffer.
+        let aliased =
+            self.store_buf.len() > stores_before && self.buffered_store_aliased(stores_before);
+        // [PPC-Book3 p:59 s:4.12] `ptesync` orders the page table stores before it ahead of the next table search.
+        // A search reads committed memory, so the batch ends and the next
+        // one searches after the stores commit.
+        let table_synced = matches!(insn, instruction::PpuInstruction::Sync { l: 2 });
+        retranslates || aliased || table_synced
+    }
+
+    /// What `attempt`, which faulted with `exit`, does next after a
+    /// translation miss: run again, end the batch, or stop.
+    ///
+    /// A fault that is not a miss stops at `exit`.
+    #[inline]
+    pub(super) fn miss_step<'m>(
+        &mut self,
+        mem: &'m cellgov_mem::GuestMemory,
+        effects: &mut Vec<Effect>,
+        regions: &mut RegionTable<'m>,
+        translating: bool,
+        attempt: &Attempt,
+        exit: FaultExit,
+    ) -> MissStep {
+        // A translating thread's access that no view holds is a miss:
+        // the unit translates the address, and the instruction runs
+        // again against the new views. A translation that refuses
+        // the access is the instruction's interrupt. A fault at an
+        // address the cache translates already is no miss. The views
+        // hold each piece of storage the cached translations reach. So
+        // a held address refuses as unmapped only for an access that
+        // wraps the effective space. An address no view holds then has
+        // no storage at its real address. A hit and a miss of the
+        // cache then give one stop.
+        let (true, FaultExit::Mem(cellgov_mem::MemError::Unmapped(miss), store)) =
+            (translating, &exit)
+        else {
+            return MissStep::Stop(exit);
+        };
+        let access = if *store { Access::Store } else { Access::Load };
+        let marks = (attempt.effects_before, attempt.stores_before);
+        let step = self.translation_miss(
+            mem,
+            &attempt.insn,
+            regions,
+            effects,
+            marks,
+            (miss.addr, access),
+        );
+        match step {
+            MissStep::Stop(_) => {}
+            // The instruction runs again: in the next batch after
+            // `EndBatch`, or at once after `Rerun`. That run logs its
+            // reads, so a miss logs them once, as a hit of the cache does.
+            MissStep::EndBatch | MissStep::Rerun => self.retract_missed_attempt(
+                mem,
+                attempt.step_pc,
+                attempt.reads_before,
+                attempt.witnesses,
+            ),
+        }
+        step
+    }
+
+    /// What a translating thread's access at `ea` that no view held does
+    /// next: translate it and run again, end the batch, or stop.
+    ///
+    /// A miss truncates the attempt's effects and buffered stores to
+    /// `attempt` and refills the cache. A rerun finds `regions` rebuilt
+    /// from the new translations.
+    #[inline]
+    fn translation_miss<'m>(
+        &mut self,
+        mem: &'m cellgov_mem::GuestMemory,
+        insn: &instruction::PpuInstruction,
+        regions: &mut RegionTable<'m>,
+        effects: &mut Vec<Effect>,
+        (effects_before, stores_before): (usize, usize),
+        (ea, access): (u64, Access),
+    ) -> MissStep {
+        let refilled = if self.translations.lookup(access, ea).is_some() {
+            None
+        } else {
+            effects.truncate(effects_before);
+            self.store_buf.truncate(stores_before);
+            Some(self.refill_for(mem, ea, access))
+        };
+        let t = match refilled {
+            // A held address refuses as unmapped only when the access
+            // wraps past the end of the effective space.
+            None if views_hold(regions.as_slice(), ea) => {
+                return MissStep::Stop(FaultExit::Verdict(PpuFault::Unmodelled(
+                    "an access that wraps the effective address space",
+                )));
+            }
+            None => {
+                return MissStep::Stop(self.unbacked_access(
+                    insn,
+                    mem,
+                    regions.as_slice(),
+                    ea,
+                    access,
+                ));
+            }
+            Some(Err(refused)) => return MissStep::Stop(FaultExit::Verdict(refused)),
+            Some(Ok(t)) => t,
+        };
+        if self.alias_with_buffered_stores(&t) {
+            return MissStep::EndBatch;
+        }
+        *regions = RegionTable::new(self.translated_views(mem).into_iter());
+        if views_hold(regions.as_slice(), ea) {
+            return MissStep::Rerun;
+        }
+        // The access translates to a real address no storage holds.
+        MissStep::Stop(self.unbacked_access(insn, mem, regions.as_slice(), ea, access))
+    }
+
+    /// Takes back what an attempt whose access missed in the translation
+    /// cache did before the instruction runs again: its break skip, its
+    /// provisional reads and its reservation witnesses.
+    #[inline]
+    fn retract_missed_attempt(
+        &mut self,
+        mem: &cellgov_mem::GuestMemory,
+        step_pc: u64,
+        reads_before: u64,
+        witnesses: Option<(u64, u64)>,
+    ) {
+        if self.break_pc == Some(step_pc) {
+            self.break_skip += 1;
+        }
+        mem.rewind_provisional_reads(reads_before);
+        self.restore_witnesses(witnesses);
+    }
+}
+
+/// Whether a view of `views` holds the byte at `ea`.
+#[inline]
+fn views_hold(views: &[cellgov_mem::RegionView<'_>], ea: u64) -> bool {
+    views
+        .iter()
+        .any(|v| v.base <= ea && ea - v.base < v.bytes.len() as u64)
+}
