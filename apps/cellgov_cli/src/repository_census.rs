@@ -35,14 +35,16 @@ enum RepositoryCensusError {
     Boot(#[from] KernelRunError),
     #[error(
         "the boot reached the step cap of {max_steps} after {steps} steps and {reads} repository \
-         reads, before CellGov's hypervisor stopped it; {}; raise --max-steps",
-        render_position(kernel.as_ref())
+         reads, before CellGov's hypervisor stopped it; {}; {}; raise --max-steps",
+        render_position(0, threads[0].as_ref()),
+        render_position(1, threads[1].as_ref())
     )]
     StepCap {
         max_steps: usize,
         steps: usize,
         reads: usize,
-        kernel: Option<KernelPosition>,
+        /// Where hardware threads 0 and 1 are, boxed to keep the error small.
+        threads: Box<[Option<KernelPosition>; 2]>,
     },
     #[error(transparent)]
     MixedRead(#[from] lv1_archive::MixedRepositoryRead),
@@ -86,8 +88,8 @@ pub(crate) fn run(
     let boot = emit(args, &elf)
         .map_err(|error| CommandError::failed(format!("repository-census: {error}")))?;
     println!(
-        "repository-census: firmware {} PUP {} -> {} reads of {} nodes in {} steps; stopped at {} \
-         ({} under {})",
+        "repository-census: firmware {} PUP {} -> {} reads of {} nodes in {} steps; stopped at {}; \
+         {}; {} ({} under {})",
         args.fw,
         args.pup_sha256,
         boot.repository_reads.len(),
@@ -98,6 +100,8 @@ pub(crate) fn run(
             .len(),
         boot.steps,
         stop_text(&boot.stop),
+        render_position(0, boot.thread0.as_ref()),
+        render_position(1, boot.thread1.as_ref()),
         REPOSITORY_READ.file(),
         args.output_dir.display()
     );
@@ -112,20 +116,33 @@ fn stop_text(stop: &KernelRunStop) -> String {
         }
         KernelRunStop::Refused(refusal) => format!("a refused hypercall: {refusal}"),
         KernelRunStop::Fault {
+            thread,
             fault,
             pc: Some(pc),
         } => {
-            format!("a kernel fault {fault:?} at pc 0x{pc:016x}")
+            format!("a fault {fault:?} of hardware thread {thread} at pc 0x{pc:016x}")
         }
-        KernelRunStop::Fault { fault, pc: None } => format!("a kernel fault {fault:?}"),
-        KernelRunStop::SiblingFault {
+        KernelRunStop::Fault {
+            thread,
             fault,
-            pc: Some(pc),
-        } => {
-            format!("a placeholder sibling fault {fault:?} at pc 0x{pc:016x}")
-        }
-        KernelRunStop::SiblingFault { fault, pc: None } => {
-            format!("a placeholder sibling fault {fault:?}")
+            pc: None,
+        } => format!("a fault {fault:?} of hardware thread {thread}"),
+        KernelRunStop::NoWake { paused } => {
+            let threads = paused
+                .iter()
+                .map(|p| {
+                    let wake = if p.decrementer_wakes {
+                        "its decrementer wakes it"
+                    } else {
+                        "no decrementer wake"
+                    };
+                    format!("thread {} ({wake})", p.thread)
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "a pause of every hardware thread that no wake CellGov delivers ends: {threads}"
+            )
         }
         KernelRunStop::StepCap => "the step cap".to_string(),
         KernelRunStop::Step(error) => format!("a step refusal: {error}"),
@@ -133,10 +150,11 @@ fn stop_text(stop: &KernelRunStop) -> String {
     }
 }
 
-/// One clause that says where the kernel's unit is when a boot stops.
-fn render_position(kernel: Option<&KernelPosition>) -> String {
+/// One clause that says where hardware thread `thread` is when a boot
+/// stops.
+fn render_position(thread: u8, kernel: Option<&KernelPosition>) -> String {
     let Some(kernel) = kernel else {
-        return "the run gives no state for the kernel unit".to_string();
+        return format!("the run gives no state for hardware thread {thread}");
     };
     let status = match kernel.status {
         Some(status) => format!("{status:?}"),
@@ -153,16 +171,16 @@ fn render_position(kernel: Option<&KernelPosition>) -> String {
         None => "it made no hypercall".to_string(),
     };
     format!(
-        "the kernel unit is at pc 0x{:016x} with MSR 0x{:016x} and status {status}; {call}; {}",
+        "hardware thread {thread} is at pc 0x{:016x} with MSR 0x{:016x} and status {status}; \
+         {call}; {}",
         kernel.pc,
         kernel.msr,
         recent_text(&kernel.recent_pcs)
     )
 }
 
-/// One clause that names the step-end pcs `recent` of the kernel's unit.
-/// A cap below the kernel's first step (`--max-steps 0` or 1, where the
-/// sibling steps first) leaves `recent` empty.
+/// One clause that names the step-end pcs `recent` of a hardware thread.
+/// A cap below the thread's first step leaves `recent` empty.
 fn recent_text(recent: &[u64]) -> String {
     let pcs = recent
         .iter()
@@ -214,7 +232,7 @@ fn census_rows(
             max_steps,
             steps: boot.steps,
             reads: boot.repository_reads.len(),
-            kernel: boot.kernel.clone(),
+            threads: Box::new([boot.thread0.clone(), boot.thread1.clone()]),
         });
     }
     lv1_archive::repository_read_rows_of(pup_sha256, &boot.repository_reads)
@@ -257,3 +275,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/repository_census_position_tests.rs"]
 mod position_tests;
+
+#[cfg(test)]
+#[path = "tests/repository_census_stop_tests.rs"]
+mod stop_tests;

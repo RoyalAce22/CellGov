@@ -65,7 +65,7 @@
 //! The first two sites are in the kernel's mask update
 //! [OFW-4.93 lv2_kernel a:0x8000000000007e94]. It compares its record
 //! with SPRG0 [OFW-4.93 lv2_kernel a:0x8000000000007ed0-0x8000000000007ee4],
-//! and goes on in these cases:
+//! and continues in these cases:
 //! - SPRG0 holds the record's address;
 //! - the halfword at +0xC0 of the record is 3.
 //!
@@ -102,7 +102,7 @@ pub fn interrupt_mask_handler(firmware: &str) -> Option<&'static InterruptMaskHa
 /// logical PPE of the partition: `LV1_NO_ENTRY` (-6), with r3 marked in
 /// the high word [OFW-4.93 lv1 a:0x2E9508-0x2E9514].
 ///
-/// As with `allocate_memory`, bit 32 marks r3 and bit 33 r4. The handler
+/// As with `allocate_memory`, bit 32 marks r3 and bit 33 marks r4. The handler
 /// checks the arguments in this order, and the first failure is the
 /// answer:
 /// 1. the logical PPE id in r3: the object's class word at +48 must be

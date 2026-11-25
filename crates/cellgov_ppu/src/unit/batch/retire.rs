@@ -176,7 +176,10 @@ impl PpuExecutionUnit {
         // A runnable sibling shares the PPE's issue for this batch.
         self.timing
             .set_siblings(ctx.ppe_siblings(), ctx.ppe_sibling_pressure());
-        self.state.ctrl = ctrl_for_placement(ctx.ppe_siblings(), ctx.ppe_older_sibling());
+        self.state.ctrl = match self.fixed_ctrl {
+            Some(fixed) => fixed_ctrl_for(fixed, ctx.ppe_siblings()),
+            None => ctrl_for_placement(ctx.ppe_siblings(), ctx.ppe_older_sibling()),
+        };
     }
 
     /// Records one retirement at `step_pc`: the full-state window entry,
@@ -273,4 +276,26 @@ impl PpuExecutionUnit {
                 && self.translation_ends_batch(&attempt.insn, attempt.stores_before))
             || self.leads_sibling(ctx, entry)
     }
+}
+
+/// The CTRL value that a thread with the fixed CTRL `fixed` reads beside
+/// `siblings` runnable PPE threads.
+///
+/// With no runnable sibling, the other thread is in an lv1 pause, and lv1
+/// suspends a paused thread. So TE holds only the reader's own thread. In
+/// the `ppu_ctrl_threads` capture, a thread that runs alone reads only its
+/// own TE bit.
+///
+/// [CBE-Handbook p:321 s:10.8.1] The only way software can suspend a thread is to execute the mtctrl instruction with an operand that leaves the thread's Thread Enable bit cleared to '0'.
+fn fixed_ctrl_for(fixed: u32, siblings: u32) -> u32 {
+    use cellgov_ps3_abi::hw::ppu_spr::{CTRL_CT_THREAD0, CTRL_TE_THREAD0, CTRL_TE_THREAD1};
+    if siblings > 0 {
+        return fixed;
+    }
+    let own = if fixed & CTRL_CT_THREAD0 != 0 {
+        CTRL_TE_THREAD0
+    } else {
+        CTRL_TE_THREAD1
+    };
+    (fixed & !(CTRL_TE_THREAD0 | CTRL_TE_THREAD1)) | own
 }

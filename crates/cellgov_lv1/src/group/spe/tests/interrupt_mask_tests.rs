@@ -150,7 +150,7 @@ fn r6_to_r10_do_not_change_the_answer() {
 }
 
 /// The boot SPE's outlet and port ids and the id 2 name objects of other
-/// classes, and 12 names an object that no read gives.
+/// kinds, and 12 names an object that no read gives.
 #[test]
 fn an_spe_id_that_names_no_constructed_spe_is_refused() {
     let what = "an SPE interrupt mask call on an spe id that the hypervisor did not construct";

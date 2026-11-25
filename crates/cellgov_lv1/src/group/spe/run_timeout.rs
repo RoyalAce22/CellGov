@@ -31,7 +31,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
 pub struct RunTimeout {
     /// The spe id.
     pub spe: u64,
-    /// The limit in timebase ticks, which lv1 keeps at +584 of the SPE.
+    /// The limit as a time base count, which lv1 keeps at +584 of the SPE.
     pub limit: u64,
 }
 
@@ -45,9 +45,10 @@ impl LaneValue for RunTimeout {
 
 /// The run time limit of each logical SPE, by spe id.
 ///
-/// An SPE with no entry has the limit 0, as the type 1 worker leaves it.
-/// A limit of 0 removes the entry, so that the state of an SPE with the
-/// limit 0 is one state.
+/// An SPE with no entry has the limit 0, as the type 1 worker of
+/// `construct_logical_spe` leaves it. A limit of 0 removes the entry, so
+/// the state is the same for an SPE that got the limit 0 and an SPE that
+/// got no limit.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RunTimeoutState {
     timeouts: BTreeMap<u64, RunTimeout>,

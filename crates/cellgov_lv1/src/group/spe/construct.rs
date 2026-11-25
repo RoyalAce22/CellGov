@@ -4,10 +4,8 @@
 //! lv1 gives a new SPE an id in the partition's object table and two
 //! regions: an area and a shadow page; see [`cellgov_ps3_abi::lv1::spe`].
 //! Later SPE calls find the SPE by its id, so the hypervisor keeps each
-//! SPE and hashes it.
-//!
-//! lv1 also gives a type 1 SPE three irq outlets, which
-//! `connect_irq_plug_ext` connects as ports. So the answer gives the
+//! SPE and hashes it. lv1 also gives a type 1 SPE three irq outlets,
+//! which `connect_irq_plug_ext` connects as ports. So the answer gives the
 //! interrupt group each outlet, and that group keeps it.
 //!
 //! lv1 gives the SPE the first free id of the partition's object table,

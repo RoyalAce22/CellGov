@@ -50,8 +50,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
 /// slot, so the ports and the outlets give each thread's plug table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EventReceivePort {
-    /// The port id in the partition's object table, which the answer put
-    /// in r4.
+    /// The id in the partition's object table.
     pub id: u64,
     /// The thread whose plug table the port's +128 names, or `None` for
     /// no connection.

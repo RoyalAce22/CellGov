@@ -19,13 +19,13 @@ fn a_capped_run_names_the_kernels_last_hypercall_and_the_sc_that_made_it() {
     ];
     let run = run_kernel_from_entry(&kernel_elf(code), FW, 100).unwrap();
     assert_eq!(run.stop, KernelRunStop::StepCap);
-    let kernel = run.kernel.expect("the run gives the kernel's position");
+    let kernel = run.thread0.expect("the run gives thread 0's position");
     assert_eq!(
         kernel.last_hypercall,
         Some(KernelHypercall {
             number: READ_REPOSITORY_NODE,
             pc: ENTRY + 4 * 6,
-            step: 2,
+            step: 1,
         })
     );
     assert_eq!(kernel.pc, ENTRY + 4 * 7);
@@ -36,7 +36,7 @@ fn a_capped_run_names_the_kernels_last_hypercall_and_the_sc_that_made_it() {
 fn a_capped_run_of_a_kernel_that_makes_no_hypercall_names_its_spin_pc_and_no_call() {
     let run = run_kernel_from_entry(&kernel_elf(&[B_SELF]), FW, 50).unwrap();
     assert_eq!(run.stop, KernelRunStop::StepCap);
-    let kernel = run.kernel.expect("the run gives the kernel's position");
+    let kernel = run.thread0.expect("the run gives thread 0's position");
     assert_eq!(kernel.pc, ENTRY);
     assert_eq!(kernel.msr, MSR_SF);
     assert_eq!(kernel.status, Some(UnitStatus::Runnable));
@@ -54,8 +54,8 @@ fn the_recent_pcs_keep_the_newest_step_ends_oldest_first() {
     let run = run_kernel_from_entry(&elf, FW, 30).unwrap();
     let shorter = run_kernel_from_entry(&elf, FW, 28).unwrap();
     assert_eq!(run.stop, KernelRunStop::StepCap);
-    let kernel = run.kernel.expect("the run gives the kernel's position");
-    let earlier = shorter.kernel.expect("the run gives the kernel's position");
+    let kernel = run.thread0.expect("the run gives thread 0's position");
+    let earlier = shorter.thread0.expect("the run gives thread 0's position");
     assert_eq!(kernel.recent_pcs.len(), RECENT_PCS);
     assert!(
         kernel.recent_pcs.windows(2).all(|pair| pair[0] < pair[1]),
@@ -79,7 +79,7 @@ fn a_refused_run_leaves_the_kernels_pc_on_the_refused_sc_and_names_that_call() {
         "{:?}",
         run.stop
     );
-    let kernel = run.kernel.expect("the run gives the kernel's position");
+    let kernel = run.thread0.expect("the run gives thread 0's position");
     let second_sc = ENTRY + 4 * 11;
     assert_eq!(kernel.pc, second_sc);
     let call = kernel
@@ -97,7 +97,7 @@ fn a_kernel_step_that_faults_adds_no_recent_pc_and_leaves_the_pc_where_it_began(
         "{:?}",
         run.stop
     );
-    let kernel = run.kernel.expect("the run gives the kernel's position");
+    let kernel = run.thread0.expect("the run gives thread 0's position");
     assert_eq!(kernel.pc, ENTRY);
     assert!(kernel.recent_pcs.is_empty(), "{:x?}", kernel.recent_pcs);
 }
@@ -107,7 +107,7 @@ fn the_position_gives_the_msr_that_the_kernel_set() {
     let code = &[MFMSR_R8, ORI_R9_R8_DR, MTMSRD_R9, ISYNC, B_SELF];
     let run = run_kernel_from_entry(&kernel_elf(code), FW, 50).unwrap();
     assert_eq!(run.stop, KernelRunStop::StepCap);
-    let kernel = run.kernel.expect("the run gives the kernel's position");
+    let kernel = run.thread0.expect("the run gives thread 0's position");
     assert_eq!(kernel.msr, MSR_SF | MSR_DR);
     assert_eq!(kernel.pc, ENTRY + 4 * 4);
 }

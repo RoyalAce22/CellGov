@@ -18,7 +18,7 @@ fn boot_spe_id() -> u64 {
 }
 
 /// The limit of the kernel's boot call when `sys.flash.ext` has bit 1
-/// set: 120 times the timebase frequency
+/// set: 120 times the time base frequency
 /// [OFW-4.93 lv2_kernel a:0x800000000004f260-0x800000000004f26c].
 const BOOT_LIMIT: u64 = 120 * CELL_PPU_TIMEBASE_HZ;
 
@@ -117,7 +117,7 @@ fn r5_to_r10_do_not_change_the_answer() {
 }
 
 /// The boot SPE's outlet and port ids and the id 2 name objects of other
-/// classes, and 12 names an object that no read gives.
+/// kinds, and 12 names an object that no read gives.
 #[test]
 fn an_spe_id_that_names_no_constructed_spe_is_refused() {
     let what = "an SPE run timeout call on an spe id that the hypervisor did not construct";

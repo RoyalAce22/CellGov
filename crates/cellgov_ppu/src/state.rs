@@ -192,7 +192,8 @@ pub struct PpuState {
     /// buffer-full retry or a fault does not count.
     pub dcbz_executed: u64,
     /// The CTRL value an `mfspr 136` returns (hash-excluded): the unit
-    /// sets it from the PPE placement at the start of each batch.
+    /// sets it at the start of each batch, from the PPE placement or from
+    /// the value that `PpuExecutionUnit::fix_ctrl` fixed.
     pub ctrl: u32,
     /// The time base this unit last read.
     ///
@@ -262,7 +263,7 @@ impl PpuState {
             mem_fault_arm_entries: _,
             mem_fault_unmapped_routed: _,
             dcbz_executed: _,
-            // The PPE placement sets it; no guest write reaches it.
+            // The unit sets it from its placement; no guest write reaches it.
             ctrl: _,
             tb,
             reservation,

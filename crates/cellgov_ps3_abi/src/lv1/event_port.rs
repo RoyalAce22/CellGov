@@ -151,7 +151,8 @@ const fn call(thread: u8, sc: u64, id: u64) -> GameOsPortCall {
 /// The partition's other objects decide each id, so no image read gives
 /// it. On each hardware thread the 4.93 kernel makes these calls:
 /// - one call in the setup of the thread's record;
-/// - calls A, B and C in the thread's start.
+/// - calls A, B and C in the thread's start;
+/// - one call with the thread's record, after the calls of the start.
 ///
 /// The capture `lv2_event_port_ids` reads the id of each of these calls.
 /// Its README cites the place where the kernel stores each id.

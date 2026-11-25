@@ -59,6 +59,7 @@ pub use group::interrupt::bitmap::{
     IrqStateBitmapKey, IrqStateBitmapRegistration, IrqStateBitmapState,
 };
 pub use group::interrupt::event_port::{EventReceivePort, EventReceivePortState};
+pub use group::interrupt::pause::{PausedThread, PausedThreadState};
 pub use group::interrupt::{InterruptChange, InterruptGroupState};
 pub use group::memory::address_space::{AddressSpace, AddressSpaceChange, AddressSpaceState};
 pub use group::memory::page_table::{

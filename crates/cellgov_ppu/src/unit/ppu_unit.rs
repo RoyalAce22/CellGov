@@ -114,6 +114,10 @@ pub struct PpuExecutionUnit {
     /// `Clone` shares the tap, so a cloned unit reports to the same
     /// observer. A runtime snapshot holds such a clone.
     pub(super) tap: Option<std::rc::Rc<dyn PpuTap>>,
+    /// The CTRL value the thread reads beside a runnable sibling in place
+    /// of the value from the PPE placement, or `None` when the placement
+    /// gives it.
+    pub(super) fixed_ctrl: Option<u32>,
 }
 
 impl PpuExecutionUnit {
@@ -149,7 +153,20 @@ impl PpuExecutionUnit {
             operand_profile: crate::profile::OperandProfile::default(),
             load_profile: crate::profile::LoadProfile::default(),
             tap: None,
+            fixed_ctrl: None,
         }
+    }
+
+    /// Makes the thread read `ctrl` from CTRL at every batch that a
+    /// runnable PPE sibling shares, in place of the value from the PPE
+    /// placement.
+    ///
+    /// The caller places the thread on a fixed PPE hardware thread, and
+    /// `ctrl` holds that thread in CT and the enabled threads in TE. In a
+    /// batch with no runnable sibling, TE holds only the thread's own bit.
+    pub fn fix_ctrl(&mut self, ctrl: u32) {
+        self.fixed_ctrl = Some(ctrl);
+        self.state.ctrl = ctrl;
     }
 
     /// Report every dispatched instruction to `tap`.
@@ -283,6 +300,8 @@ impl PpuExecutionUnit {
             operand_profile: _,
             load_profile: _,
             tap: _,
+            // The thread's placement, which the caller fixed.
+            fixed_ctrl: _,
         } = self;
         state.apply(unit_state);
         *unit_status = status;

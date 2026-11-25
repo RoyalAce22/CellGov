@@ -36,12 +36,12 @@ pub(crate) const GROUP: Group = Group {
         HashedSurface {
             name: "the run time limit of each logical SPE",
             source: Some(LOGICAL_SPE_RUN_TIMEOUT_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(28),
         },
         HashedSurface {
             name: "the interrupt mask of each class of each logical SPE",
             source: Some(LOGICAL_SPE_INTERRUPT_MASK_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(28),
         },
     ],
 };
@@ -62,8 +62,7 @@ pub(crate) const LOGICAL_SPE_RUN_TIMEOUT_SOURCE: u8 = 194;
 /// per mask that is not 0, in spe id and class order.
 pub(crate) const LOGICAL_SPE_INTERRUPT_MASK_SOURCE: u8 = 195;
 
-/// The logical SPE group's state: the partition's logical SPEs, their
-/// transition notifiers, their run time limits and their interrupt masks.
+/// The logical SPE group's state; each accessor gives one part of it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SpeState {
     spes: LogicalSpeState,
@@ -104,8 +103,7 @@ impl SpeState {
         }
     }
 
-    /// The sync-state terms of the logical SPEs, their notifiers, their
-    /// run time limits and their interrupt masks.
+    /// The sum of the sync-state terms of each part of the state.
     pub fn sync_term(&self) -> u128 {
         self.spes
             .sync_term()

@@ -47,7 +47,7 @@ pub const SET_SPE_TRANSITION_NOTIFIER: u64 = 64;
 
 /// `logical_spu_set_run_timeout`: two inputs and no output.
 ///
-/// The inputs are the spe id in r3 and the run time limit in timebase
+/// The inputs are the spe id in r3 and the run time limit in time base
 /// ticks in r4.
 ///
 /// The OtherOS++ copy of `lv1call.h` gives the call two inputs and no

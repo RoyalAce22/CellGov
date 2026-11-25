@@ -11,7 +11,7 @@
 //! - memory and page table: [`memory`], [`address_space`],
 //!   [`page_table`];
 //! - interrupt delivery: [`interrupt`], [`interrupt_mask`],
-//!   [`event_port`], [`irq_plug`];
+//!   [`event_port`], [`irq_plug`], [`pause`];
 //! - partition, console and time: [`partition`], [`ppe`],
 //!   [`repository`], [`console`];
 //! - device bus: [`device_bus`];
@@ -39,6 +39,7 @@ pub mod memory;
 pub mod network;
 pub mod page_table;
 pub mod partition;
+pub mod pause;
 pub mod ppe;
 pub mod repository;
 pub mod spe;

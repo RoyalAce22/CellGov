@@ -5,7 +5,7 @@ use cellgov_ps3_abi::lv1::repository::{
     field, first_field, RepositoryKey, BOOT_RECORD_4_93, BOOT_RECORD_CAPTURE, READ_WRAPPER_SC_4_93,
 };
 
-use super::{kernel_elf, run_kernel_from_entry, KernelRunStop, BASE, B_SELF, LI_R11_91, SC_1};
+use super::{kernel_elf, run_kernel_from_entry, KernelRunStop, B_SELF, ENTRY, LI_R11_91, SC_1};
 use super::{LIS_R4_BI, LI_R3_2, SLDI_R5_32};
 
 /// The return address of the 4.93 kernel's `bi.rgntotal` accessor
@@ -61,9 +61,9 @@ const LI_R7_0: u32 = 0x38e0_0000;
 const NOP: u32 = 0x6000_0000;
 
 /// The index in the code of the word at `addr`. The code starts at
-/// `BASE + 0x100`.
+/// [`ENTRY`].
 fn slot(addr: u64) -> usize {
-    ((addr - BASE - 0x100) / 4) as usize
+    ((addr - ENTRY) / 4) as usize
 }
 
 /// `b` or `bl` from `from` to `to`.
@@ -74,7 +74,7 @@ fn branch(from: u64, to: u64, link: bool) -> u32 {
 /// A kernel whose `bl` at `call` reaches an `sc` that reads
 /// `bi.rgntotal`, at the address of the 4.93 read wrapper's `sc`.
 fn rgntotal_kernel(call: u64) -> Vec<u8> {
-    let entry = BASE + 0x100;
+    let entry = ENTRY;
     let setup = call - 4 * 10;
     let mut code = vec![NOP; slot(READ_WRAPPER_SC_4_93) + 2];
     code[0] = branch(entry, setup, false);

@@ -20,7 +20,8 @@ const ISYNC: u32 = 0x4C00_012C;
 /// The doubleword that the program stores and loads back.
 const VALUE: u32 = 0x1234_5678;
 
-/// Runs `access`, an access through r20, with data translation on.
+/// The words that run `access`, an access through r20, with data
+/// translation on.
 fn translated(access: u32) -> [u32; 6] {
     [
         MFMSR_R8,

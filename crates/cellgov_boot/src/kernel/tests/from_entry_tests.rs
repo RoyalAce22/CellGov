@@ -22,24 +22,39 @@ mod allocated;
 #[path = "from_entry_position_tests.rs"]
 mod position;
 
+#[path = "from_entry_threads_tests.rs"]
+mod threads;
+
 /// A firmware for which CellGov serves the repository values of the
 /// psdevwiki dump.
 const FW: &str = "1.50";
 
 const BASE: u64 = LV2_KERNEL_LINK_BASE;
-const ENTRY: u64 = BASE + 0x100;
+/// The entry of thread 0, one word past the `b .` that hardware thread 1
+/// runs from its reset vector at real 0x100.
+const ENTRY: u64 = BASE + 0x104;
 
 /// A big-endian PPC64 executable with one read-execute PT_LOAD at the
-/// link base that holds `code` from offset 0x100, and its entry there.
+/// link base. The PT_LOAD holds a `b .` at offset 0x100 and `code` from
+/// offset 0x104, and the entry is at offset 0x104.
 fn kernel_elf(code: &[u32]) -> Vec<u8> {
     kernel_elf_at(BASE, 0, code)
 }
 
 /// [`kernel_elf`] with its PT_LOAD at `vaddr`, its entry at `vaddr +
-/// 0x100`, and `bss` zero-fill bytes past its file bytes.
+/// 0x104`, and `bss` zero-fill bytes past its file bytes.
 fn kernel_elf_at(vaddr: u64, bss: u64, code: &[u32]) -> Vec<u8> {
+    let mut words = vec![B_SELF];
+    words.extend_from_slice(code);
+    elf_image(vaddr, bss, &words, 0x104)
+}
+
+/// A big-endian PPC64 executable with its entry at `vaddr +
+/// entry_offset` and one read-execute PT_LOAD at `vaddr`. The PT_LOAD
+/// holds `words` from offset 0x100, and `bss` zero-fill bytes past them.
+fn elf_image(vaddr: u64, bss: u64, words: &[u32], entry_offset: u64) -> Vec<u8> {
     let mut text = vec![0u8; 0x100];
-    for word in code {
+    for word in words {
         text.extend_from_slice(&word.to_be_bytes());
     }
     let phoff = 64usize;
@@ -50,7 +65,7 @@ fn kernel_elf_at(vaddr: u64, bss: u64, code: &[u32]) -> Vec<u8> {
     buf[6] = 1;
     buf[16..18].copy_from_slice(&2u16.to_be_bytes());
     buf[18..20].copy_from_slice(&21u16.to_be_bytes());
-    buf[24..32].copy_from_slice(&(vaddr + 0x100).to_be_bytes());
+    buf[24..32].copy_from_slice(&(vaddr + entry_offset).to_be_bytes());
     buf[32..40].copy_from_slice(&(phoff as u64).to_be_bytes());
     buf[54..56].copy_from_slice(&56u16.to_be_bytes());
     buf[56..58].copy_from_slice(&1u16.to_be_bytes());
@@ -111,13 +126,13 @@ fn a_read_of_a_node_with_no_row_stops_the_kernel_at_a_refusal_that_names_the_key
                     ..bare_bi
                 },
                 values: Some((1, 0)),
-                unit: UnitId::new(1),
+                unit: UnitId::new(0),
                 pc: ENTRY + 4 * 6,
             },
             RepositoryRead {
                 key: bare_bi,
                 values: None,
-                unit: UnitId::new(1),
+                unit: UnitId::new(0),
                 pc: second_sc,
             },
         ]
@@ -132,12 +147,12 @@ const MFSPR_R0_PVR: u32 = 0x7c1f_42a6;
 const MFSPR_R0_BP_VR: u32 = 0x7c1e_faa6;
 
 #[test]
-fn a_kernel_fault_stops_the_run_at_the_faulting_pc_and_the_sibling_runs_no_further() {
+fn a_thread_0_fault_stops_the_run_at_the_faulting_pc_and_names_thread_0() {
     let run = run_kernel_from_entry(&kernel_elf(&[LI_R3_2, MFSPR_R0_PVR]), FW, 10_000).unwrap();
-    let KernelRunStop::Fault { pc, .. } = run.stop else {
+    let KernelRunStop::Fault { thread, pc, .. } = run.stop else {
         panic!("the run stopped at {:?}", run.stop);
     };
-    assert_eq!(pc, Some(ENTRY + 4));
+    assert_eq!((thread, pc), (0, Some(ENTRY + 4)));
     assert!(run.steps < 10_000, "{} steps", run.steps);
 }
 
@@ -171,37 +186,31 @@ fn a_kernel_that_never_calls_out_stops_at_the_step_cap() {
     assert!(run.repository_reads.is_empty());
 }
 
-const LI_R4_0: u32 = 0x3880_0000;
-const LIS_R3_0400: u32 = 0x3c60_0400;
-/// `stw r4, -4(r3)`.
-const STW_R4_M4_R3: u32 = 0x9083_fffc;
-
 #[test]
-fn a_kernel_store_over_the_sibling_word_stops_the_run_at_a_sibling_fault_on_that_word() {
-    // Writes 0 over real 0x3fffffc, the sibling's `b .`, then spins.
-    let code = &[LI_R4_0, LIS_R3_0400, STW_R4_M4_R3, B_SELF];
-    let stored_word = 0x0400_0000 - 4;
-    let run = run_kernel_from_entry(&kernel_elf(code), FW, 10_000).unwrap();
-    assert!(
-        matches!(run.stop, KernelRunStop::SiblingFault { pc: Some(pc), .. } if pc == stored_word),
-        "the run stopped at {:?}",
-        run.stop
-    );
-    assert!(run.steps < 10_000, "{} steps", run.steps);
-}
-
-#[test]
-fn a_segment_whose_zero_fill_reaches_the_sibling_word_is_refused_and_one_word_lower_runs() {
+fn a_segment_whose_zero_fill_passes_the_region_end_is_refused_and_one_ending_there_maps() {
     let real = KERNEL_SPAN_LIMIT - 0x1000;
-    let file_len = 0x104;
-    let reaching = kernel_elf_at(BASE + real, 0x1000 - file_len, &[B_SELF]);
-    let error = run_kernel_from_entry(&reaching, FW, 4).unwrap_err();
+    // The file holds 0x100 bytes of padding, thread 1's `b .` and one
+    // `b .` of code.
+    let file_len = 0x108;
+    let past = kernel_elf_at(BASE + real, 0x1000 - file_len + 4, &[B_SELF]);
+    let error = run_kernel_from_entry(&past, FW, 4).unwrap_err();
     assert!(
-        matches!(error, KernelRunError::OutsideRegion { at, len } if (at, len) == (real, 0x1000)),
+        matches!(error, KernelRunError::OutsideRegion { at, len } if (at, len) == (real, 0x1004)),
         "{error}"
     );
 
-    let below = kernel_elf_at(BASE + real, 0x1000 - file_len - 4, &[B_SELF]);
-    let run = run_kernel_from_entry(&below, FW, 4).unwrap();
-    assert_eq!(run.stop, KernelRunStop::StepCap);
+    // Thread 0 takes the first step. Its pc stays on the mapped `b .` at
+    // its entry only when the segment's bytes are in the region; an
+    // unmapped word faults and adds no recent pc.
+    let ending = kernel_elf_at(BASE + real, 0x1000 - file_len, &[B_SELF]);
+    let run = run_kernel_from_entry(&ending, FW, 4).unwrap();
+    let entry = BASE + real + 0x104;
+    let thread0 = run.thread0.expect("the run gives thread 0's position");
+    assert_eq!(thread0.pc, entry);
+    assert_eq!(
+        thread0.recent_pcs.first(),
+        Some(&entry),
+        "the run stopped at {:?}",
+        run.stop
+    );
 }

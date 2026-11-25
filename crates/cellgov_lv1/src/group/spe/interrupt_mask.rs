@@ -55,8 +55,8 @@ impl LaneValue for InterruptMask {
 /// class.
 ///
 /// A class with no entry has the mask 0, as the interrupt object's
-/// constructor leaves it. A mask of 0 removes the entry, so that the state
-/// of a class with the mask 0 is one state.
+/// constructor leaves it. A mask of 0 removes the entry, so the state is
+/// the same for a class that got the mask 0 and a class that got no mask.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InterruptMaskState {
     masks: BTreeMap<(u64, u64), InterruptMask>,

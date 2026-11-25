@@ -18,8 +18,7 @@ fn outlets(outlets: &[EventReceivePort]) -> EventReceivePortState {
 /// The list holds every nonzero lane of a state with one outlet, of id
 /// 13, connected to plug 9 of thread 7 of the logical PPE 5. Each field
 /// has a different value, so a field that moves to another lane changes
-/// the sum. The lane source is the fixed 144, so a moved source changes
-/// it too.
+/// the sum.
 #[test]
 fn connected_outlet_sync_term_lane_vector_golden() {
     let lane = |field, value| contribution(LaneIndex::new(144, 0, field, 0), value);

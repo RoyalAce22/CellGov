@@ -14,6 +14,12 @@ pub const fn word_bit(bit: u32) -> u32 {
     1 << (31 - bit)
 }
 
+/// System reset interrupt vector of PPE hardware thread 1, where the
+/// thread starts and resumes.
+///
+/// [CBE-Handbook p:246 s:9.5.1] The system reset interrupt vector for thread 1 is fixed at real address 0x100.
+pub const VECTOR_SYSTEM_RESET_THREAD1: u64 = 0x100;
+
 /// Machine check interrupt vector.
 ///
 /// [PPC-Book3 p:65 s:5.5] Figure 36 gives each interrupt vector's effective address.

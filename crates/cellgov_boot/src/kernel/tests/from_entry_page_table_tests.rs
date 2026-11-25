@@ -15,7 +15,7 @@ pub(super) const ESID_EA: u32 = 0xC000;
 pub(super) const VSID: u32 = 0x123;
 /// The data page: page 1 of the segment, at real address 0x2_0000.
 pub(super) const DATA_PAGE: u32 = 0x1000;
-const DATA_RA_HIGH: u32 = 0x2;
+pub(super) const DATA_RA_HIGH: u32 = 0x2;
 /// PP = 2: loads and stores for both keys.
 pub(super) const PP_READ_WRITE: u32 = 0x2;
 /// The data page's entry: slot 0 of its primary group, whose hash is the

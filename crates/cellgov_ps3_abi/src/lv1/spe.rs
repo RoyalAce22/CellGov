@@ -233,7 +233,7 @@
 //!   [OFW-4.93 lv1 a:0x358498] [OFW-4.93 lv1 a:0x3580D8].
 //! - The port constructor sets +148 to 1 when the object constructor
 //!   writes no status [OFW-4.93 lv1 a:0x2DF668-0x2DF694]. The type 1
-//!   worker gives it a status slot of 0, and goes on only when the slot
+//!   worker gives it a status slot of 0, and continues only when the slot
 //!   is still 0
 //!   [OFW-4.93 lv1 a:0x315A7C-0x315A8C] [OFW-4.93 lv1 a:0x315ABC-0x315ACC].
 //! - After the port constructor, the outlet constructor writes only +0
@@ -336,9 +336,9 @@
 //! The type 1 worker sets +584 to 0
 //! [OFW-4.93 lv1 a:0x315908] [OFW-4.93 lv1 a:0x315958]. The start step
 //! of the SPE reads +584 [OFW-4.93 lv1 a:0x3165B8-0x3165C0]. When it is
-//! not 0, the step adds it to the timebase, and arms a timer for that
+//! not 0, the step adds it to the time base, and arms a timer for that
 //! deadline [OFW-4.93 lv1 a:0x3165C4-0x316604]. So r4 is the SPE's run
-//! time limit in timebase ticks, and 0 is no limit.
+//! time limit in time base ticks, and 0 is no limit.
 //!
 //! The handler of `set_spe_interrupt_mask` [OFW-4.93 lv1 a:0x2FE570]
 //! gives r3, r4 and r5 to the worker [OFW-4.93 lv1 a:0x2FE600-0x2FE60C].

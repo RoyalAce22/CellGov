@@ -51,8 +51,8 @@ fn request(plug: u64, id: u64) -> HypercallRequest {
     }
 }
 
-/// The hypervisor's state for a connect step on thread 0: the bitmap of
-/// thread 0, the ports `ports` and the outlets `outlets`.
+/// The disposition of the connect step `r` against a state that holds the
+/// bitmap of thread 0, the ports `ports` and the outlets `outlets`.
 fn connect(
     r: &HypercallRequest,
     ports: &[EventReceivePort],

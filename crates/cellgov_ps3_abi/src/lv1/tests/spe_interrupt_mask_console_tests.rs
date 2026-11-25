@@ -73,8 +73,6 @@ fn the_console_lv1_reaches_the_and_and_the_store_from_the_call() {
     );
 }
 
-/// Each cited code range of the call is the shipped image's code on the
-/// console, the handler of the live table entry among them.
 #[test]
 fn the_console_lv1_runs_the_shipped_code_of_the_call() {
     let rows = rows("code.tsv", "first\tlast\tholds\tdoublewords\tagree\tstock");

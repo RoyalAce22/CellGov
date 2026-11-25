@@ -6,10 +6,9 @@
 //! at a real address that no call gives the partition; see
 //! [`WRITE_HTAB_ALLOCATED_PAGE_SIZE_R3`]. CellGov keeps the pages in
 //! guest storage at [`ALLOCATED_STORAGE_BASE`], so that the PPU reads
-//! them through the page table. Each region gets the next range of the
-//! storage, aligned to its page size, when the range fits. No two regions
-//! get the same byte, so each range holds 0, as lv1's pages do after the
-//! allocation.
+//! them through the page table. Each region that fits gets its own range
+//! of the storage; see [`placement`]. No two regions get the same byte,
+//! so each range holds 0, as lv1's pages do after the allocation.
 
 use cellgov_mem::{PageSize, Region};
 use cellgov_ps3_abi::lv1::memory::WRITE_HTAB_ALLOCATED_PAGE_SIZE_R3;
@@ -28,8 +27,10 @@ use super::region::{MemoryRegion, MemoryState};
 /// The compiler checks the second property.
 pub const ALLOCATED_STORAGE_BASE: u64 = 0x1200_0000;
 
-/// The size of the storage in bytes. CellGov chooses the size; a region
-/// past it gets no storage.
+/// The size of the storage in bytes.
+///
+/// CellGov chooses the size. A region whose range does not fit in the
+/// storage gets no storage.
 pub const ALLOCATED_STORAGE_BYTES: u64 = 16 << 20;
 
 const _: () = assert!(ALLOCATED_STORAGE_BASE + ALLOCATED_STORAGE_BYTES - 1 <= STORED_MEMORY_LIMIT);

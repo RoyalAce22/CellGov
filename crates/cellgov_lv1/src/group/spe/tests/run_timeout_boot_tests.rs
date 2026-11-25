@@ -50,7 +50,7 @@ fn boot_setup() -> [HypercallRequest; 2] {
     ]
 }
 
-/// The kernel's call with the spe id in r3 and 120 times the timebase
+/// The kernel's call with the spe id in r3 and 120 times the time base
 /// frequency in r4
 /// [OFW-4.93 lv2_kernel a:0x800000000004f260-0x800000000004f278]. The
 /// captured `sys.flash.ext` value 0xFE selects that limit; see

@@ -5,6 +5,7 @@ use cellgov_mem::scheme::{HashedSurface, Stamp};
 
 use super::bitmap::{self, IrqStateBitmapRegistration, IrqStateBitmapState};
 use super::event_port::{self, EventReceivePort, EventReceivePortState};
+use super::pause::{self, PausedThread, PausedThreadState};
 use super::{irq_plug, mask};
 use crate::group::state::StateChange;
 use crate::group::table::Group;
@@ -17,6 +18,7 @@ pub(crate) const GROUP: Group = Group {
         event_port::HYPERCALLS,
         irq_plug::HYPERCALLS,
         mask::HYPERCALLS,
+        pause::HYPERCALLS,
     ],
     lanes: &[81..=82, 144..=159],
     hashed_surfaces: &[
@@ -38,7 +40,12 @@ pub(crate) const GROUP: Group = Group {
         HashedSurface {
             name: "the irq outlets of the logical SPEs and their plug connections",
             source: Some(IRQ_OUTLET_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(28),
+        },
+        HashedSurface {
+            name: "the paused PPE hardware threads and their decrementer wake flags",
+            source: Some(PAUSED_THREAD_SOURCE),
+            stamp: Stamp::Version(28),
         },
     ],
 };
@@ -55,12 +62,17 @@ pub(crate) const EVENT_RECEIVE_PORT_SOURCE: u8 = 82;
 /// outlet in id order.
 pub(crate) const IRQ_OUTLET_SOURCE: u8 = 144;
 
+/// The lane source of the PPE hardware threads that lv1 paused, one
+/// object per thread in thread order.
+pub(crate) const PAUSED_THREAD_SOURCE: u8 = 145;
+
 /// The interrupt group's state: the interrupt state bitmaps, the event
-/// receive ports and the irq outlets.
+/// receive ports, the irq outlets and the paused threads.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InterruptGroupState {
     bitmaps: IrqStateBitmapState,
     ports: EventReceivePortState,
+    paused: PausedThreadState,
 }
 
 impl InterruptGroupState {
@@ -76,6 +88,11 @@ impl InterruptGroupState {
         &self.ports
     }
 
+    /// The PPE hardware threads that lv1 paused.
+    pub fn paused(&self) -> &PausedThreadState {
+        &self.paused
+    }
+
     /// Applies `change`.
     pub(crate) fn apply(&mut self, change: InterruptChange) {
         match change {
@@ -84,14 +101,17 @@ impl InterruptGroupState {
             InterruptChange::PlugConnect(port) => self.ports.connect(port),
             InterruptChange::OutletConstructed(outlet) => self.ports.construct_outlet(outlet),
             InterruptChange::OutletPlugConnect(outlet) => self.ports.connect_outlet(outlet),
+            InterruptChange::ThreadPaused(paused) => self.paused.pause(paused),
         }
     }
 
-    /// The sync-state terms of the bitmaps, the ports and the irq outlets.
+    /// The sync-state terms of the bitmaps, the ports, the irq outlets and
+    /// the paused threads.
     pub fn sync_term(&self) -> u128 {
         self.bitmaps
             .sync_term()
             .wrapping_add(self.ports.sync_term())
+            .wrapping_add(self.paused.sync_term())
     }
 }
 
@@ -110,6 +130,8 @@ pub enum InterruptChange {
     /// The call's connect step left the irq outlet with this id in this
     /// state, as [`Self::PlugConnect`] leaves a port.
     OutletPlugConnect(EventReceivePort),
+    /// The call paused this thread.
+    ThreadPaused(PausedThread),
 }
 
 impl From<InterruptChange> for StateChange {

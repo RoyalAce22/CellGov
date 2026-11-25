@@ -10,6 +10,7 @@ mod console_ppu_alignment;
 mod console_ppu_code_call_raw_spu;
 mod console_ppu_code_patch;
 mod console_ppu_cr_spr_moves;
+mod console_ppu_ctrl_fixed;
 mod console_ppu_ctrl_threads;
 mod console_ppu_divw_quotient;
 mod console_ppu_entry_state;

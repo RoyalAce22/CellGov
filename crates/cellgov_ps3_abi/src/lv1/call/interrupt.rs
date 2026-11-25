@@ -1,5 +1,13 @@
 //! The numbers of the interrupt delivery hypercalls.
 
+/// `pause`: one input and no output. r3 is the mode, which says whether
+/// a decrementer interrupt wakes the thread.
+///
+/// Linux `arch/powerpc/platforms/ps3/setup.c`, `ps3_power_save`, makes
+/// the call in this form. The lv1 handler [OFW-4.93 lv1 a:0x2EB618] reads
+/// the input in this form; see [`crate::lv1::pause`].
+pub const PAUSE: u64 = 9;
+
 /// `configure_irq_state_bitmap`: register the interrupt state bitmap of
 /// one hardware thread of a logical PPE.
 ///

@@ -52,6 +52,11 @@ pub struct HypercallAnswer {
     /// The changes to the hypercall groups' state, which the hypervisor
     /// applies in order.
     pub changes: Vec<StateChange>,
+    /// Whether lv1 pauses the calling thread at the call.
+    ///
+    /// When it is set, the runtime parks the caller. The caller gets the
+    /// return only when a wake makes it runnable again.
+    pub pauses_caller: bool,
 }
 
 /// How lv1's vector returns to the caller.
@@ -144,6 +149,7 @@ impl HypercallAnswer {
             console: None,
             page_table: None,
             changes: Vec::new(),
+            pauses_caller: false,
         }
     }
 

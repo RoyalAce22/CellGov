@@ -6,11 +6,15 @@
 //! The answer reaches the guest in three parts:
 //! - its memory writes land at dispatch time through
 //!   [`Runtime::host_write`];
-//! - a page table load reaches the caller at dispatch time;
+//! - a page table load reaches the caller, and every other unit with
+//!   supervisor registers, at dispatch time;
 //! - the caller's next step gets these committed inputs, as with an LV2
 //!   call's return, and then steps past `sc`:
 //!   - the status in r3 and the values for r4 to r10;
 //!   - the r0, r11, r12 and CR fields that lv1's return leaves.
+//!
+//! An answer that pauses the caller also parks it. The caller takes its
+//! committed inputs at its first step after a wake makes it runnable.
 //!
 //! A refusal answers nothing. The hypervisor keeps it, and the next
 //! [`Runtime::step`] stops the run with it.
@@ -122,6 +126,10 @@ impl Runtime {
             });
         }
         self.registry.set_syscall_return(unit, status);
+        if answer.pauses_caller {
+            self.registry
+                .set_status_override(unit, cellgov_exec::UnitStatus::Blocked);
+        }
     }
 
     /// Gives the caller of `request` the r0, r11, r12 and CR fields that
@@ -162,18 +170,21 @@ impl Runtime {
     }
 
     /// Gives `unit` the page table and large page sizes of `load`, as
-    /// lv1 loads them on the calling thread.
+    /// lv1 loads them on the calling thread, and gives them to every
+    /// other unit with supervisor registers too.
     ///
     /// The hypervisor loads only values that name its page table storage,
     /// which a thread with supervisor registers takes. A unit with no
     /// supervisor registers can also reach the hypervisor through `sc`
     /// with LEV = 1, and it refuses them. The runtime then logs an
     /// invariant break, and the hypervisor's selection and the caller's
-    /// r3 stand.
+    /// r3 stand. Another unit that refuses the values keeps its own.
+    ///
+    /// [CBE-Handbook p:297 s:10.2] The two PPE threads run in one logical-partition context and share its virtual-memory-mapping tables.
     ///
     /// # Panics
     ///
-    /// Panics in a debug build where the unit refuses the values.
+    /// Panics in a debug build where the calling unit refuses the values.
     fn load_page_table(&mut self, unit: UnitId, load: PageTableLoad) {
         let loaded = self
             .registry
@@ -185,6 +196,11 @@ impl Runtime {
                 "dispatch.hypervisor_page_table_refused",
                 format_args!("{unit:?} refused the page table load {load:?}"),
             );
+            return;
+        }
+        for (_, other) in self.registry.iter_mut().filter(|(id, _)| *id != unit) {
+            // A unit with no supervisor registers refuses, and keeps its state.
+            let _ = other.load_page_table(load.sdr1, load.lb);
         }
     }
 

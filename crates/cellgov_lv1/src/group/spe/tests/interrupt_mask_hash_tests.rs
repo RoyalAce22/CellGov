@@ -33,8 +33,7 @@ fn interrupt_mask_sync_term_lane_vector_golden() {
     assert_eq!(masks(&[mask(11, 2)]).sync_term(), sum);
 }
 
-/// The masks take the objects 0 and 1 in spe id and class order. The
-/// state sets the mask of spe 12 first.
+/// The state sets the mask of spe 12 first.
 #[test]
 fn interrupt_mask_sync_term_numbers_the_masks_in_spe_id_and_class_order() {
     let lane = |object, field, value| contribution(LaneIndex::new(195, object, field, 0), value);

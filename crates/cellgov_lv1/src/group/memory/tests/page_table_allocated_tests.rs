@@ -78,7 +78,6 @@ fn boot_regions() -> MemoryState {
     memory
 }
 
-/// The page table storage and the storage of the allocated regions.
 fn storage() -> GuestMemory {
     GuestMemory::from_regions(vec![page_table_storage(), allocated_storage()]).expect("storage")
 }

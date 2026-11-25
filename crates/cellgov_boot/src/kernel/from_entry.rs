@@ -11,14 +11,18 @@ use cellgov_effects::FaultKind;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionStepResult, UnitStatus};
 use cellgov_lv1::{
-    allocated_storage, page_table_storage, shadow_storage, HypercallRefusal, RepositoryRead,
+    allocated_storage, page_table_storage, shadow_storage, HypercallRefusal, PausedThread,
+    RepositoryRead,
 };
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, MemError, PageSize, Region};
 use cellgov_ppu::loader::checked_pt_loads;
 use cellgov_ppu::supervisor::SupervisorState;
 use cellgov_ppu::PpuExecutionUnit;
-use cellgov_ps3_abi::hw::ppc_isa::PPC_B_OPCODE_NO_LK;
+use cellgov_ps3_abi::hw::ppu_interrupt::VECTOR_SYSTEM_RESET_THREAD1;
 use cellgov_ps3_abi::hw::ppu_mmu::REAL_MODE_IGNORED_EA;
+use cellgov_ps3_abi::hw::ppu_spr::{
+    CTRL_CT_THREAD0, CTRL_CT_THREAD1, CTRL_TE_THREAD0, CTRL_TE_THREAD1,
+};
 use cellgov_ps3_abi::hw::ppu_supervisor::MSR_SF;
 use cellgov_time::Budget;
 
@@ -28,32 +32,56 @@ use crate::diag::is_hypercall;
 /// The budget of one step of either unit.
 const STEP_BUDGET: u64 = 256;
 
-/// The real address of the placeholder sibling's `b .`: the region's
-/// last word.
-const SPIN_WORD: u64 = KERNEL_SPAN_LIMIT - 4;
-
-/// How many step-end pcs of the kernel's unit a run keeps.
+/// How many step-end pcs of each hardware thread a run keeps.
 pub const RECENT_PCS: usize = 8;
+
+/// The CTRL TE bits of the PPE hardware threads that CellGov enables at
+/// the boot: both of them.
+///
+/// The kernel cannot start or stop a hardware thread: a TE write outside
+/// hypervisor state is ignored [CBE-Handbook p:321 s:10.8.1]. So CellGov,
+/// as the hypervisor, decides. It enables thread 1 with thread 0, and
+/// thread 1 waits in the kernel's claim-word spin until thread 0 releases
+/// it. The `lv2_record_port_ids` console capture shows thread 1 run
+/// kernel code during the boot.
+const ENABLED_THREADS: u32 = CTRL_TE_THREAD0 | CTRL_TE_THREAD1;
+
+/// The CTRL value that hardware thread `thread` reads while its sibling
+/// runs: its own thread in CT and [`ENABLED_THREADS`] in TE.
+///
+/// [CBE-Handbook p:307 s:10.4.4] CT names the thread that reads CTRL, and TE holds the enabled threads.
+fn ctrl_of(thread: u8) -> u32 {
+    let current = match thread {
+        0 => CTRL_CT_THREAD0,
+        _ => CTRL_CT_THREAD1,
+    };
+    current | ENABLED_THREADS
+}
 
 /// Why a kernel run from its entry stopped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KernelRunStop {
     /// CellGov's hypervisor refused a hypercall.
     Refused(HypercallRefusal),
-    /// The kernel's unit faulted.
+    /// A hardware thread faulted.
     Fault {
+        /// The PPE hardware thread that faulted.
+        thread: u8,
         /// The fault.
         fault: FaultKind,
         /// The address of the faulting instruction, when the unit named it.
         pc: Option<u64>,
     },
-    /// The placeholder sibling faulted, most often because the kernel
-    /// wrote over its `b .`. The run's thread placement no longer holds.
-    SiblingFault {
-        /// The fault.
-        fault: FaultKind,
-        /// The address of the faulting instruction, when the unit named it.
-        pc: Option<u64>,
+    /// lv1 paused every hardware thread, and CellGov delivers no wake.
+    ///
+    /// On the console, one of these wakes a paused thread:
+    /// - an interrupt on an unmasked plug;
+    /// - in mode 0, the thread's decrementer.
+    ///
+    /// CellGov models neither wake, so the run cannot continue.
+    NoWake {
+        /// The paused threads, in thread order.
+        paused: Vec<PausedThread>,
     },
     /// The run reached its step cap.
     StepCap,
@@ -74,20 +102,23 @@ pub struct KernelRun {
     pub repository_reads: Vec<RepositoryRead>,
     /// Every byte the kernel wrote to the logical console.
     pub console: Vec<u8>,
-    /// Where the kernel's unit is when the run stops. `None` when the
-    /// runtime holds no PPU unit with supervisor registers under the
-    /// kernel's id.
-    pub kernel: Option<KernelPosition>,
+    /// Where hardware thread 0 is when the run stops. It is `None` when
+    /// the runtime holds no PPU unit with supervisor registers under its id.
+    pub thread0: Option<KernelPosition>,
+    /// Where hardware thread 1 is when the run stops, as for
+    /// [`Self::thread0`].
+    pub thread1: Option<KernelPosition>,
 }
 
-/// The kernel's unit when a run from its entry stops.
+/// One hardware thread's unit when a run from its entry stops.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KernelPosition {
     /// The address of the next instruction that the unit runs, or of the
-    /// `sc` of a hypercall whose answer has not reached the unit. The PPU
-    /// keeps the `sc` as the pc until the answer moves it past
-    /// (cellgov_ppu `unit/hypercall.rs` `hypercall_yield`), so a run that
-    /// a refused hypercall stops leaves the pc on that `sc`.
+    /// `sc` of a hypercall before its answer reaches the unit. The PPU
+    /// keeps the `sc` as the pc until the answer moves it past the `sc`
+    /// (cellgov_ppu `unit/hypercall.rs` `hypercall_yield`). So a run that
+    /// a refused hypercall stops leaves the pc on that `sc`, and so does a
+    /// pause that no wake ends.
     pub pc: u64,
     /// The unit's machine state register.
     pub msr: u64,
@@ -104,7 +135,7 @@ pub struct KernelPosition {
     pub recent_pcs: Vec<u64>,
 }
 
-/// One hypercall of the kernel's unit.
+/// One hypercall of a hardware thread.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KernelHypercall {
     /// The hypercall number from r11.
@@ -115,7 +146,7 @@ pub struct KernelHypercall {
     pub step: usize,
 }
 
-/// What a run records about the kernel's unit as it steps.
+/// What a run records about one hardware thread's unit as it steps.
 #[derive(Debug, Default)]
 struct KernelTrail {
     last_hypercall: Option<KernelHypercall>,
@@ -130,6 +161,21 @@ impl KernelTrail {
             self.recent_pcs.pop_front();
         }
         self.recent_pcs.push_back(pc);
+    }
+}
+
+/// The units of the two hardware threads, by thread.
+#[derive(Debug, Clone, Copy)]
+struct Threads([UnitId; 2]);
+
+impl Threads {
+    /// The hardware thread whose unit is `unit`, or `None` for another
+    /// unit.
+    fn thread_of(&self, unit: UnitId) -> Option<u8> {
+        (0u8..)
+            .zip(self.0)
+            .find(|&(_, id)| id == unit)
+            .map(|(t, _)| t)
     }
 }
 
@@ -153,11 +199,10 @@ pub enum KernelRunError {
         /// Its file size.
         len: u64,
     },
-    /// A segment, its zero fill included, reaches past the region or
-    /// onto the placeholder sibling's word.
+    /// A segment, its zero fill included, reaches past the region.
     #[error(
         "kernel segment at real address 0x{at:016x} with 0x{len:x} bytes reaches past \
-         real address 0x{SPIN_WORD:x}, where the real-mode kernel region ends"
+         real address 0x{KERNEL_SPAN_LIMIT:x}, where the real-mode kernel region ends"
     )]
     OutsideRegion {
         /// The segment's real address.
@@ -168,14 +213,22 @@ pub enum KernelRunError {
 }
 
 /// Runs the kernel ELF `elf` of the firmware version `firmware` from its
-/// entry, in supervisor state with 64-bit mode on, for at most
-/// `step_cap` steps.
+/// entry, on both PPE hardware threads, for at most `step_cap` steps.
 ///
 /// Each kernel segment lies at its real address. Real mode ignores the
 /// two high effective-address bits, so the link address loses its top
 /// bit. CellGov's hypervisor answers the kernel's repository reads with
 /// the values for `firmware`. [`KernelRunStop`] gives the reason the run
 /// stops.
+///
+/// Each thread starts in supervisor state with 64-bit mode on, MSR\[SF\],
+/// and with every other register at 0:
+/// - thread 0 at the ELF's entry;
+/// - thread 1 at its system reset vector, [`VECTOR_SYSTEM_RESET_THREAD1`].
+///
+/// Each thread reads its own thread in CTRL CT, and both enabled threads
+/// in TE. While lv1 holds the other thread paused, TE holds only the
+/// reader's own thread.
 ///
 /// # Errors
 ///
@@ -187,48 +240,46 @@ pub fn run_kernel_from_entry(
     step_cap: usize,
 ) -> Result<KernelRun, KernelRunError> {
     let entry = map_kernel(elf)?.entry;
-    let mut mem = real_mode_image(elf)?;
-    // Stand-in until the runtime places the boot thread on hardware thread
-    // 0 itself: CellGov places a lone PPE unit on thread 1, and the
-    // kernel's boot path reads CTRL and runs only on thread 0. A runnable
-    // older sibling that branches to itself moves the kernel's unit to
-    // thread 0. The sibling's `b .` sits in the region's last word.
-    // The `b` template with a zero displacement is `b .`.
-    let spin = SPIN_WORD;
-    commit(&mut mem, spin, &PPC_B_OPCODE_NO_LK.to_be_bytes())?;
+    let mem = real_mode_image(elf)?;
     let mut rt = Runtime::new(mem, Budget::new(STEP_BUDGET), step_cap);
     rt.set_mode(RuntimeMode::FaultDriven);
     rt.set_hypervisor_firmware(firmware);
-    rt.register_unit_with(|id| {
-        let mut unit = PpuExecutionUnit::new(id);
-        unit.state_mut().pc = spin;
-        unit
-    });
-    let kernel = rt.register_unit_with(|id| {
-        let mut unit = PpuExecutionUnit::new(id);
-        unit.state_mut()
-            .set_supervisor(Some(SupervisorState::new(MSR_SF)));
-        unit.state_mut().pc = entry;
-        unit
-    });
-    let mut trail = KernelTrail::default();
-    let stop = drive(&mut rt, kernel, &mut trail);
+    let threads = Threads([
+        register_thread(&mut rt, 0, entry),
+        register_thread(&mut rt, 1, VECTOR_SYSTEM_RESET_THREAD1),
+    ]);
+    let mut trails = [KernelTrail::default(), KernelTrail::default()];
+    let stop = drive(&mut rt, threads, &mut trails);
+    let [trail0, trail1] = trails;
     Ok(KernelRun {
         steps: rt.steps_taken(),
         stop,
         repository_reads: rt.hypervisor().repository_reads().to_vec(),
         console: rt.hypervisor().console_text().to_vec(),
-        kernel: position(&rt, kernel, trail),
+        thread0: position(&rt, threads.0[0], trail0),
+        thread1: position(&rt, threads.0[1], trail1),
     })
 }
 
-/// The unit `kernel` of `rt`, with what `trail` recorded about it.
-fn position(rt: &Runtime, kernel: UnitId, trail: KernelTrail) -> Option<KernelPosition> {
-    let state = ppu_unit(rt, kernel)?.state();
+/// Registers the unit of hardware thread `thread` in `rt`, at `pc`.
+fn register_thread(rt: &mut Runtime, thread: u8, pc: u64) -> UnitId {
+    rt.register_unit_with(|id| {
+        let mut unit = PpuExecutionUnit::new(id);
+        unit.state_mut()
+            .set_supervisor(Some(SupervisorState::new(MSR_SF)));
+        unit.state_mut().pc = pc;
+        unit.fix_ctrl(ctrl_of(thread));
+        unit
+    })
+}
+
+/// The unit `unit` of `rt`, with what `trail` recorded about it.
+fn position(rt: &Runtime, unit: UnitId, trail: KernelTrail) -> Option<KernelPosition> {
+    let state = ppu_unit(rt, unit)?.state();
     Some(KernelPosition {
         pc: state.pc,
         msr: state.supervisor()?.msr,
-        status: rt.registry().effective_status(kernel),
+        status: rt.registry().effective_status(unit),
         last_hypercall: trail.last_hypercall,
         recent_pcs: trail.recent_pcs.into(),
     })
@@ -242,47 +293,66 @@ fn ppu_unit(rt: &Runtime, id: UnitId) -> Option<&PpuExecutionUnit> {
         .downcast_ref::<PpuExecutionUnit>()
 }
 
-/// Steps `rt` until it stops, and says why. Each step of the unit
-/// `kernel` goes into `trail`.
+/// Steps `rt` until it stops, and says why. Each step of the unit of
+/// hardware thread `t` goes into `trails[t]`.
 ///
 /// The loop has no bound of its own: the runtime's step cap ends it.
-fn drive(rt: &mut Runtime, kernel: UnitId, trail: &mut KernelTrail) -> KernelRunStop {
+fn drive(rt: &mut Runtime, threads: Threads, trails: &mut [KernelTrail; 2]) -> KernelRunStop {
     loop {
         let mut step = match rt.step() {
             Ok(step) => step,
-            Err(StepError::HypercallRefused) => {
-                return match rt.hypervisor().refusal() {
-                    Some(refusal) => KernelRunStop::Refused(refusal),
-                    None => KernelRunStop::Step(StepError::HypercallRefused),
-                }
-            }
-            Err(StepError::MaxStepsExceeded) => return KernelRunStop::StepCap,
-            Err(error) => return KernelRunStop::Step(error),
+            Err(error) => return step_refusal(rt, error),
         };
-        let own = step.unit == kernel;
-        if own {
+        let thread = threads.thread_of(step.unit);
+        if let Some(trail) = thread.and_then(|t| trails.get_mut(usize::from(t))) {
             trail.last_hypercall =
                 hypercall_of(&step.result, rt.steps_taken()).or(trail.last_hypercall);
         }
-        // A sibling fault stops the run too: the sibling holds the kernel's
-        // unit on thread 0, and a run without it goes on a broken setup.
         let pc = step.result.local_diagnostics.pc;
-        let fault = step.result.fault.map(|fault| {
-            if step.unit == kernel {
-                KernelRunStop::Fault { fault, pc }
-            } else {
-                KernelRunStop::SiblingFault { fault, pc }
-            }
-        });
+        let fault = step
+            .result
+            .fault
+            .zip(thread)
+            .map(|(fault, thread)| KernelRunStop::Fault { thread, fault, pc });
         if let Err(error) = rt.commit_step(&mut step) {
             return KernelRunStop::Commit(error.to_string());
         }
         if let Some(stop) = fault {
             return stop;
         }
-        if let (true, Some(unit)) = (own, ppu_unit(rt, kernel)) {
+        let trail = thread.and_then(|t| trails.get_mut(usize::from(t)));
+        if let (Some(trail), Some(unit)) = (trail, ppu_unit(rt, step.unit)) {
             trail.push_pc(unit.state().pc);
         }
+    }
+}
+
+/// The stop for the step refusal `error` of `rt`.
+///
+/// A run whose units are all parked, with a thread that lv1 paused,
+/// stops at [`KernelRunStop::NoWake`].
+fn step_refusal(rt: &Runtime, error: StepError) -> KernelRunStop {
+    match error {
+        StepError::HypercallRefused => match rt.hypervisor().refusal() {
+            Some(refusal) => KernelRunStop::Refused(refusal),
+            None => KernelRunStop::Step(StepError::HypercallRefused),
+        },
+        StepError::MaxStepsExceeded => KernelRunStop::StepCap,
+        StepError::AllBlocked => {
+            let paused: Vec<PausedThread> = rt
+                .hypervisor()
+                .groups()
+                .interrupt()
+                .paused()
+                .threads()
+                .collect();
+            if paused.is_empty() {
+                KernelRunStop::Step(StepError::AllBlocked)
+            } else {
+                KernelRunStop::NoWake { paused }
+            }
+        }
+        error => KernelRunStop::Step(error),
     }
 }
 
@@ -312,7 +382,7 @@ fn hypercall_of(result: &ExecutionStepResult, step: usize) -> Option<KernelHyper
 /// The caller has mapped `elf` with `map_kernel`, which checks the
 /// segments and bounds their span by [`KERNEL_SPAN_LIMIT`]. That span
 /// starts at the lowest segment, so this function checks that each
-/// segment ends at or below [`SPIN_WORD`].
+/// segment ends inside the region.
 fn real_mode_image(elf: &[u8]) -> Result<GuestMemory, KernelRunError> {
     let segments = checked_pt_loads(elf).map_err(|source| KernelMapError::Elf { source })?;
     let mut mem = GuestMemory::from_regions(vec![
@@ -325,9 +395,11 @@ fn real_mode_image(elf: &[u8]) -> Result<GuestMemory, KernelRunError> {
     for s in segments.iter().filter(|s| s.memsz != 0) {
         // [PPC-Book3 p:29 s:4.2.6] Real addressing ignores EA bit 1, and EA bit 0 picks the mechanism that forms the real address.
         let real = s.vaddr & !REAL_MODE_IGNORED_EA;
-        // A segment past the region would lose its zero fill unreported,
-        // and one over the sibling's word would lose that word to `b .`.
-        if real.checked_add(s.memsz).is_none_or(|end| end > SPIN_WORD) {
+        // A segment past the region would lose its zero fill unreported.
+        if real
+            .checked_add(s.memsz)
+            .is_none_or(|end| end > KERNEL_SPAN_LIMIT)
+        {
             return Err(KernelRunError::OutsideRegion {
                 at: real,
                 len: s.memsz,

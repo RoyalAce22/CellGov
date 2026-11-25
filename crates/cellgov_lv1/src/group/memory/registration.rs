@@ -42,7 +42,7 @@ pub(crate) const GROUP: Group = Group {
         HashedSurface {
             name: "the real address of each memory region's storage",
             source: Some(REGION_STORAGE_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(28),
         },
     ],
 };
@@ -75,7 +75,7 @@ pub struct MemoryGroupState {
 }
 
 impl MemoryGroupState {
-    /// The partition's memory regions and its region counter.
+    /// The partition's memory regions, their storage and its region counter.
     pub fn regions(&self) -> &MemoryState {
         &self.regions
     }

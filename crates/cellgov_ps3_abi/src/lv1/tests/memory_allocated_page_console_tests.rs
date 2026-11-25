@@ -132,8 +132,6 @@ fn the_console_lv1_dispatches_an_allocated_page_to_the_cited_method() {
     assert_eq!(method_range.0, method);
 }
 
-/// Each code citation of the constant lies in a range that the console's
-/// lv1 holds as the shipped image's code.
 #[test]
 fn the_console_lv1_runs_the_shipped_code_of_each_cite_of_the_allocated_page_r3() {
     let data = [

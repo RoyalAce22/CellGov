@@ -77,6 +77,8 @@ impl ExecutionUnit for PpuExecutionUnit {
             operand_profile: _,
             load_profile: _,
             tap: _,
+            // The thread's placement, which a restore keeps.
+            fixed_ctrl: _,
         } = self;
         PpuSnapshot {
             state: PpuArchitecturalState::capture(state),
