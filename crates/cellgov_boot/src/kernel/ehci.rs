@@ -64,7 +64,7 @@ const RULES: [RegisterRule; EHCI_CONTROLLERS.len()] = [store_operational::<0>];
 ///
 /// # Errors
 ///
-/// Returns one of these for the first controller that has it:
+/// Returns one of these for the first controller that fails:
 /// - [`DeviceMmioError::NoEhciRule`] when `firmware` has no rule;
 /// - [`DeviceMmioError::NoRealAddress`] when the controller's region has
 ///   no real address.

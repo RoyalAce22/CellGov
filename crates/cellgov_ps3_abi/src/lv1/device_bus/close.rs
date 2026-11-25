@@ -161,11 +161,49 @@
 //! [OFW-4.93 lv1 a:0x2DA434-0x2DA470] [OFW-4.93 lv1 a:0x2D9D20-0x2D9D4C]
 //! [OFW-4.93 lv1 a:0x2D9E1C-0x2D9E38] [OFW-4.93 lv1 a:0x2D9694-0x2D96A8].
 //! The free gives back a segment only when a call on the segment's object
-//! returns 0 [OFW-4.93 lv1 a:0x2D8AA8-0x2D8AB4]. For a segment that has an
-//! owner, a lookup of that owner must also succeed
-//! [OFW-4.93 lv1 a:0x2D8A50] [OFW-4.93 lv1 a:0x2D8C18-0x2D8C44]. No image
-//! read shows the result of either call. So no source shows the address of
-//! a region after a close frees the last entry of a block.
+//! returns 0 [OFW-4.93 lv1 a:0x2D8AA8-0x2D8AB4]. That call does these
+//! steps:
+//! - When the object's byte at +432 is set, it returns 7
+//!   [OFW-4.93 lv1 a:0x2D5DE4-0x2D5DF0].
+//! - Otherwise it sets the byte, drops the object's mappings and returns 0
+//!   [OFW-4.93 lv1 a:0x2D5DF4-0x2D5E18] [OFW-4.93 lv1 a:0x2D5F20-0x2D5F40].
+//!
+//! The allocate clears the byte when it makes the object
+//! [OFW-4.93 lv1 a:0x2D9944].
+//!
+//! For a segment that has an owner, a lookup of that owner must also
+//! succeed [OFW-4.93 lv1 a:0x2D8A50] [OFW-4.93 lv1 a:0x2D8C18-0x2D8C44]. A
+//! miss returns 0 and does not give back the segment
+//! [OFW-4.93 lv1 a:0x2D8F60-0x2D8F64]. The free passes 0 in r5, so it
+//! skips a compare of the owner [OFW-4.93 lv1 a:0x2D8A54-0x2D8A60].
+//!
+//! The owner is the object that the block's word at +8 selects from a
+//! global table [OFW-4.93 lv1 a:0x22A708] [OFW-4.93 lv1 a:0x22A748-0x22A788]
+//! [OFW-4.93 lv1 a:0x2DA2D4-0x2DA414]. The allocate stores it at +56 of
+//! the segment's object [OFW-4.93 lv1 a:0x2DA470] [OFW-4.93 lv1 a:0x2D9D68]
+//! [OFW-4.93 lv1 a:0x2D9ED8] [OFW-4.93 lv1 a:0x2D98D0]. The allocate also
+//! finds or makes a record for the owner [OFW-4.93 lv1 a:0x2D9F14-0x2D9F20]:
+//! - The record is in a hash at +104 of the table entry, with the owner's
+//!   word at +80 as its key [OFW-4.93 lv1 a:0x2D7818-0x2D782C]
+//!   [OFW-4.93 lv1 a:0x2D7854-0x2D78A4].
+//! - The free's lookup reads the same hash with the same key
+//!   [OFW-4.93 lv1 a:0x2D8C20-0x2D8C30] [OFW-4.93 lv1 a:0x2D4288-0x2D4368]
+//!   [OFW-4.93 lv1 a:0x2D4410-0x2D441C].
+//! - When lv1 makes the record, it adds a listener to the owner's list at
+//!   +128 [OFW-4.93 lv1 a:0x2D5BDC-0x2D5C20].
+//!
+//! The listener removes the record from the hash only for event 3
+//! [OFW-4.93 lv1 a:0x2D3E40-0x2D3E88] [OFW-4.93 lv1 a:0x2D7658-0x2D7680]
+//! [OFW-4.93 lv1 a:0x2D76A4-0x2D772C]. The teardown of the record makes the
+//! same call on the head of the record's segment list
+//! [OFW-4.93 lv1 a:0x2D714C-0x2D7178]. It then unlinks that segment and
+//! makes the call again on each new head until the list is empty
+//! [OFW-4.93 lv1 a:0x2D72D4-0x2D7308]. The allocate links each segment's
+//! object into that list [OFW-4.93 lv1 a:0x2D9F7C-0x2D9F98]. So event 3
+//! makes both conditions of the free fail. No read shows which code sends
+//! event 3 to the owner's listeners, or whether it can come before a close.
+//! So no source shows the address of a region after a close frees the last
+//! entry of a block.
 //!
 //! The entry at +120 gave each mapping of the partition its I/O address
 //! when `map_device_dma_region` made the mapping. It used the same bus

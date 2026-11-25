@@ -122,8 +122,11 @@ const OTHER_HELD: UnmodelledError = UnmodelledError::new(
 /// when a call on the segment's object returns 0
 /// [OFW-4.93 lv1 a:0x2D8AA8-0x2D8AB4]. For a segment that has an owner,
 /// a lookup of that owner must also succeed [OFW-4.93 lv1 a:0x2D8A50]
-/// [OFW-4.93 lv1 a:0x2D8C18-0x2D8C44]. No read shows the result of either
-/// call. So no source shows the address after the close.
+/// [OFW-4.93 lv1 a:0x2D8C18-0x2D8C44]. Each condition fails after the
+/// owner's listeners get event 3 [OFW-4.93 lv1 a:0x2D7658-0x2D7680]
+/// [OFW-4.93 lv1 a:0x2D76A4-0x2D772C] [OFW-4.93 lv1 a:0x2D714C-0x2D7178]
+/// [OFW-4.93 lv1 a:0x2D72D4-0x2D7308]. No read shows which code sends that
+/// event. So no source shows the address after the close.
 ///
 /// The refusal holds for the closed device alone. lv1's init gives the
 /// word at +160 the value 2 for device 0, 8 for device 1 and 9 for
