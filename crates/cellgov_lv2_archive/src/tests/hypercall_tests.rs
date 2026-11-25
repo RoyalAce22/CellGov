@@ -73,7 +73,7 @@ fn a_number_row_joins_the_call_table_the_kernels_and_the_hypervisor() {
     let numbers: Vec<u64> = rows.iter().map(|r| r.number).collect();
     assert_eq!(
         numbers,
-        [0, 5, 74, 91, 105, 107, 109],
+        [0, 2, 5, 7, 74, 91, 105, 107, 109],
         "each called number and each answered one"
     );
     let row = |number: u64| &rows[numbers.iter().position(|n| *n == number).expect("a row")];

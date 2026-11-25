@@ -11,8 +11,8 @@ use cellgov_time::GuestTicks;
 
 use super::{null_backend, vector_disposition};
 use crate::hypervisor::{
-    answer, HypercallAnswer, HypercallDisposition, HypercallRefusal, HypercallRequest,
-    HypercallWitness, Hypervisor, MemoryState, ANSWERED,
+    answer, AddressSpaceState, HypercallAnswer, HypercallDisposition, HypercallRefusal,
+    HypercallRequest, HypercallWitness, Hypervisor, MemoryState, ANSWERED,
 };
 
 fn request(number: u64, problem_state: bool) -> HypercallRequest {
@@ -35,6 +35,7 @@ fn answered(r3: u64, outputs: Vec<u64>) -> HypercallDisposition {
         effects: Vec::new(),
         console: None,
         region: None,
+        address_space: None,
     })
 }
 
@@ -69,7 +70,12 @@ fn a_number_past_the_table_reaches_the_null_backend_where_no_image_gives_the_cou
         let r = request(256, false);
         assert_eq!(vector_disposition(&r, firmware), None, "{firmware:?}");
         assert_eq!(
-            answer(&r, firmware, &MemoryState::default()),
+            answer(
+                &r,
+                firmware,
+                &MemoryState::default(),
+                &AddressSpaceState::default()
+            ),
             unmodelled(&r),
             "{firmware:?}"
         );
@@ -82,7 +88,12 @@ fn every_problem_state_call_below_256_answers_no_privilege_at_4_93() {
     for number in 0..256 {
         let r = request(number, true);
         assert_eq!(
-            answer(&r, Some("4.93"), &MemoryState::default()),
+            answer(
+                &r,
+                Some("4.93"),
+                &MemoryState::default(),
+                &AddressSpaceState::default()
+            ),
             answered(PROBLEM_STATE_DENIED_R3, vec![0; 7]),
             "number {number}"
         );
@@ -141,7 +152,7 @@ fn an_entry_invalid_at_4_93_stops_the_run_at_another_firmware() {
 
 #[test]
 fn every_answered_number_has_a_handler_in_the_live_4_93_table() {
-    assert_eq!(ANSWERED.len(), 6);
+    assert_eq!(ANSWERED.len(), 8);
     for &number in ANSWERED {
         assert!(
             matches!(table_entry("4.93", number), Some(TableEntry::Handler(_))),

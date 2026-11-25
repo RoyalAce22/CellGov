@@ -80,6 +80,27 @@ pub fn lookup(number: u64) -> Option<&'static Lv1Call> {
 /// gives the same registers.
 pub const ALLOCATE_MEMORY: u64 = 0;
 
+/// `construct_virtual_address_space`: create a virtual address space
+/// with its own hashed page table.
+///
+/// The inputs:
+/// - r3 is the page table size exponent.
+/// - r4 is the number of page sizes.
+/// - r5 holds the page shifts, 8 bits each from the most significant
+///   byte.
+///
+/// On success, r4 holds the vas id and r5 the page table size in bytes.
+/// Linux `arch/powerpc/platforms/ps3/mm.c`, `ps3_mm_vas_create`, makes
+/// the call in this form.
+/// [PS3DEVWIKI-HV-SYSCALL-REF s:lv1_construct_virtual_address_space]
+/// gives the same registers.
+pub const CONSTRUCT_VIRTUAL_ADDRESS_SPACE: u64 = 2;
+
+/// `select_virtual_address_space`: the vas id in r3, and no output.
+/// Linux `ps3_mm_vas_create` makes the call with the id that
+/// [`CONSTRUCT_VIRTUAL_ADDRESS_SPACE`] returned.
+pub const SELECT_VIRTUAL_ADDRESS_SPACE: u64 = 7;
+
 /// `get_logical_partition_id`: no input, and the caller's partition id
 /// in r4.
 pub const GET_LOGICAL_PARTITION_ID: u64 = 74;

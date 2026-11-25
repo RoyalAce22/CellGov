@@ -16,25 +16,25 @@ fn whole() -> usize {
 #[test]
 fn a_frame_of_the_expected_whole_pairs_parses() {
     let len = u32::try_from(whole()).expect("small");
-    assert_eq!(frame_pairs("f", &frame(len, whole())).len(), READS);
+    assert_eq!(frame_pairs("f", &frame(len, whole()), READS).len(), READS);
 }
 
 #[test]
 #[should_panic(expected = "f: 27 whole (address, doubleword) pairs")]
 fn a_frame_with_a_trailing_partial_pair_is_refused() {
     let len = u32::try_from(whole() + 5).expect("small");
-    frame_pairs("f", &frame(len, whole() + 5));
+    frame_pairs("f", &frame(len, whole() + 5), READS);
 }
 
 #[test]
 #[should_panic(expected = "f: the frame length is the rest of the file")]
 fn a_frame_cut_short_of_its_length_is_refused() {
     let len = u32::try_from(whole()).expect("small");
-    frame_pairs("f", &frame(len, whole() - 1));
+    frame_pairs("f", &frame(len, whole() - 1), READS);
 }
 
 #[test]
 #[should_panic(expected = "f: 3 bytes, short of the 8-byte frame header")]
 fn a_file_shorter_than_the_header_names_the_file() {
-    frame_pairs("f", b"CGO");
+    frame_pairs("f", b"CGO", READS);
 }

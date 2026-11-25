@@ -226,6 +226,11 @@ pub mod source {
     pub const HYPERVISOR_REGION: u8 = 77;
     /// The hypervisor's region counter for the partition.
     pub const HYPERVISOR_REGION_COUNTER: u8 = 78;
+    /// The virtual address spaces the hypervisor constructed, one object
+    /// per address space in the order of construction.
+    pub const HYPERVISOR_ADDRESS_SPACE: u8 = 79;
+    /// The vas id that the partition's PPE selected.
+    pub const HYPERVISOR_SELECTED_ADDRESS_SPACE: u8 = 80;
 }
 
 const OBJECT_BITS: u32 = 32;

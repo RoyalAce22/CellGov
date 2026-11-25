@@ -55,7 +55,7 @@ impl Runtime {
     ///   - the RSX call stack
     ///   - the deferred RSX effects
     ///   - the pending child inits
-    ///   - the hypervisor's memory regions
+    ///   - the hypervisor's memory regions and virtual address spaces
     /// - The LV2 host adds its partial.
     ///
     /// Replay tooling compares pairs via the `SyncState` checkpoint
@@ -125,3 +125,7 @@ impl Runtime {
 #[cfg(test)]
 #[path = "tests/hypervisor_hash_tests.rs"]
 mod hypervisor_hash_tests;
+
+#[cfg(test)]
+#[path = "tests/hypervisor_address_space_hash_tests.rs"]
+mod hypervisor_address_space_hash_tests;

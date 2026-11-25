@@ -7,6 +7,7 @@ use cellgov_ps3_abi::lv1::call::LOGICAL_CONSOLE_SEND_MAX;
 use cellgov_ps3_abi::lv1::repository::RepositoryKey;
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
+use super::address_space::AddressSpaceChange;
 use super::memory::MemoryRegion;
 
 /// Bytes a logical console send gave the console.
@@ -43,6 +44,9 @@ pub struct HypercallAnswer {
     pub console: Option<ConsoleWrite>,
     /// The memory region the call created, which the hypervisor keeps.
     pub region: Option<MemoryRegion>,
+    /// The change to the virtual address spaces, which the hypervisor
+    /// applies.
+    pub address_space: Option<AddressSpaceChange>,
 }
 
 impl HypercallAnswer {
@@ -60,6 +64,7 @@ impl HypercallAnswer {
             effects: Vec::new(),
             console: None,
             region: None,
+            address_space: None,
         }
     }
 }

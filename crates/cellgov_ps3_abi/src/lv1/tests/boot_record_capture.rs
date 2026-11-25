@@ -1,9 +1,11 @@
-//! Reads the committed console capture of the 4.93 boot repository record.
+//! Reads the committed console captures of kernel records: frames of
+//! (address, doubleword) pairs that a probe read through the CFW's lv2
+//! peek.
 
 use crate::lv1::repository::BOOT_RECORD_CAPTURE;
 
-/// The reads of `cgov_frame.bin`: the probe's three locator words and the
-/// record's 24 words.
+/// The reads of the boot repository record's `cgov_frame.bin`: the
+/// probe's three locator words and the record's 24 words.
 const READS: usize = 27;
 
 /// The frame header: the magic `CGOV` and the big-endian payload length.
@@ -12,20 +14,33 @@ const HEADER: usize = 8;
 /// One read: the big-endian address and the big-endian doubleword.
 const PAIR: usize = 16;
 
-/// The doubleword that the capture read at `address`.
+/// The doubleword that the boot repository record capture read at
+/// `address`.
 ///
 /// # Panics
 ///
-/// Panics, with the path of the frame, when the frame is missing or
-/// malformed, or when the capture does not read `address` exactly once.
+/// Panics as [`captured_doubleword_in`] does.
 pub(crate) fn captured_doubleword(address: u64) -> u64 {
+    captured_doubleword_in(BOOT_RECORD_CAPTURE, READS, address)
+}
+
+/// The doubleword that the capture in the directory `capture`, of `reads`
+/// reads, read at `address`.
+///
+/// # Panics
+///
+/// Panics, with the path of the frame, in these cases:
+/// - the frame is missing or malformed;
+/// - the frame does not hold `reads` reads;
+/// - the capture does not read `address` exactly once.
+pub(crate) fn captured_doubleword_in(capture: &str, reads: usize, address: u64) -> u64 {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
-        .join(BOOT_RECORD_CAPTURE)
+        .join(capture)
         .join("cgov_frame.bin");
     let name = path.display().to_string();
     let frame = std::fs::read(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
-    let hits: Vec<u64> = frame_pairs(&name, &frame)
+    let hits: Vec<u64> = frame_pairs(&name, &frame, reads)
         .into_iter()
         .filter(|(at, _)| *at == address)
         .map(|(_, value)| value)
@@ -44,8 +59,8 @@ pub(crate) fn captured_doubleword(address: u64) -> u64 {
 /// # Panics
 ///
 /// Panics, with `name`, when `frame` is not the magic, a length equal to
-/// the rest of the file, and [`READS`] whole pairs.
-fn frame_pairs(name: &str, frame: &[u8]) -> Vec<(u64, u64)> {
+/// the rest of the file, and `reads` whole pairs.
+fn frame_pairs(name: &str, frame: &[u8], reads: usize) -> Vec<(u64, u64)> {
     let Some((header, body)) = frame.split_at_checked(HEADER) else {
         panic!(
             "{name}: {} bytes, short of the {HEADER}-byte frame header",
@@ -61,8 +76,8 @@ fn frame_pairs(name: &str, frame: &[u8]) -> Vec<(u64, u64)> {
     );
     assert_eq!(
         body.len(),
-        READS * PAIR,
-        "{name}: {READS} whole (address, doubleword) pairs"
+        reads * PAIR,
+        "{name}: {reads} whole (address, doubleword) pairs"
     );
     body.chunks_exact(PAIR)
         .map(|pair| {

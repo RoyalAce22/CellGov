@@ -1,0 +1,15 @@
+[test]
+name = "lv2_vas_boot_record"
+
+# A hardware probe: the virtual address space the running kernel got from lv1 at boot,
+# read back from the kernel's static record through the CFW's lv2 peek.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# per read, the address and the doubleword there: 14 reads, 224 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 224 },
+]
+
+[expect]
+outcome = "completed"
