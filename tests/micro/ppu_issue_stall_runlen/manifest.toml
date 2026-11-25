@@ -1,0 +1,20 @@
+[test]
+name = "ppu_issue_stall_runlen"
+
+# A hardware probe of whether a loop's cost beside a stalling sibling
+# depends on how long each timed run lasts: loops of 8 or 16 addi, a hit
+# and a store, each timed over 2048, 16384 and 65536 iterations, alone and
+# beside a sibling of dependent fdiv. The console capture is the answer;
+# ppu/main.c's header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 1232 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 1232 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 300000

@@ -8,6 +8,7 @@
 //! do not settle whether the stall delays a line's busy time.
 
 use crate::console_ppu_issue_sibling_rate::SIBLINGS;
+use crate::console_ppu_issue_stall_kinds::REPEATED;
 use crate::console_ppu_issue_timing::{replay, replay_beside, Replay, Seed, Sibling};
 use cellgov_ps3_abi::hw::ppu_issue::PPU_CYCLES_PER_TB_TICK;
 
@@ -172,17 +173,22 @@ const TOUCH_BESIDE: (usize, usize) = (FDIV, 1);
 /// sibling may lie from it.
 const TOUCH_BAND: f64 = 0.06;
 
-/// The cells, as (phase, chain), the model does not hold:
+/// The cells, as (phase, chain), the model times under the console.
 ///
-/// - over the console: a hit and 8 `addi` beside the sibling, 137.90
-///   cycles an iteration against 84.92;
-/// - under the console: alone, a store, a store-back of the same line and
-///   a load of it, 55 against 217.48;
-/// - under the console, beside the sibling: the store-back loop (204.80
-///   against 409.12), the store loop (191.80 against 334.43), and the two
-///   `mtvscr` loops (98.72 against 241.82, and 188.56 against 330.51).
-const OVER: [(usize, usize); 1] = [(FDIV, 2)];
-const UNDER: [(usize, usize); 5] = [(0, 4), (FDIV, 4), (FDIV, 5), (FDIV, 6), (FDIV, 7)];
+/// Both cells are the loop of a store, a store-back of the same line and a
+/// load of it, alone and beside the sibling.
+const UNDER: [(usize, usize); 2] = [(0, 4), (FDIV, 4)];
+
+/// The cells beside the sibling whose loop the `ppu_issue_stall_kinds`
+/// capture repeats.
+///
+/// There the same loop's fastest run differs from this capture's by up to
+/// 3.3 times. A band about one capture's fastest run therefore does not
+/// hold them. `console_ppu_issue_stall_kinds` holds each within the runs
+/// both captures span.
+fn repeated() -> impl Iterator<Item = (usize, usize)> {
+    REPEATED.iter().map(|&(chain, _)| (FDIV, chain))
+}
 
 /// Each cell, with CellGov's cycles and the console's fastest run.
 fn cells() -> Vec<(usize, usize, f64, f64)> {
@@ -198,9 +204,9 @@ fn each_held_loop_lies_within_the_band() {
     let rows = cells();
     let held: Vec<_> = rows
         .iter()
-        .filter(|(p, c, ..)| !OVER.contains(&(*p, *c)) && !UNDER.contains(&(*p, *c)))
+        .filter(|(p, c, ..)| !UNDER.contains(&(*p, *c)) && !repeated().any(|r| r == (*p, *c)))
         .collect();
-    assert_eq!(held.len(), 2 * CHAINS - OVER.len() - UNDER.len());
+    assert_eq!(held.len(), 2 * CHAINS - UNDER.len() - REPEATED.len());
     for &&(p, c, cellgov, console) in &held {
         assert!(
             (cellgov - console).abs() / console <= BAND,
@@ -251,14 +257,6 @@ fn each_other_loop_is_a_known_difference() {
             .find(|row| (row.0, row.1) == (p, c))
             .expect("the cell")
     };
-    for (p, c) in OVER {
-        let (_, _, cellgov, console) = find(p, c);
-        assert!(
-            cellgov > (1.0 + BAND) * console,
-            "phase {p} loop {c}: CellGov {cellgov:.2} cycles an iteration, the console's \
-             fastest {console:.2}",
-        );
-    }
     for (p, c) in UNDER {
         let (_, _, cellgov, console) = find(p, c);
         assert!(
