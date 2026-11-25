@@ -7,6 +7,8 @@ use cellgov_ps3_abi::lv1::call::LOGICAL_CONSOLE_SEND_MAX;
 use cellgov_ps3_abi::lv1::repository::RepositoryKey;
 use cellgov_ps3_abi::lv1::status::LV1_SUCCESS;
 
+use super::memory::MemoryRegion;
+
 /// Bytes a logical console send gave the console.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConsoleWrite {
@@ -36,6 +38,8 @@ pub struct HypercallAnswer {
     pub effects: Vec<Effect>,
     /// Bytes for the guest TTY sink.
     pub console: Option<ConsoleWrite>,
+    /// The memory region the call created, which the hypervisor keeps.
+    pub region: Option<MemoryRegion>,
 }
 
 impl HypercallAnswer {
@@ -46,6 +50,7 @@ impl HypercallAnswer {
             outputs,
             effects: Vec::new(),
             console: None,
+            region: None,
         }
     }
 }

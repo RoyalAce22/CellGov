@@ -15,23 +15,24 @@ fn request(number: u64, tick: u64, inputs: [u64; 8]) -> HypercallRequest {
 
 #[test]
 fn the_null_backend_counts_each_numbers_hits_and_first_tick_and_keeps_the_first_refusal() {
+    // Neither copy of lv1call.h lists 5 or 8.
     let mut hv = Hypervisor::new();
-    let first = hv.dispatch(&request(0, 5, [0; 8]));
-    hv.dispatch(&request(0, 9, [0; 8]));
-    hv.dispatch(&request(7, 12, [0; 8]));
+    let first = hv.dispatch(&request(5, 5, [0; 8]));
+    hv.dispatch(&request(5, 9, [0; 8]));
+    hv.dispatch(&request(8, 12, [0; 8]));
     let witnesses: Vec<_> = hv.witnesses().iter().map(|(n, w)| (*n, *w)).collect();
     assert_eq!(
         witnesses,
         vec![
             (
-                0,
+                5,
                 HypercallWitness {
                     hits: 2,
                     first_tick: GuestTicks::new(5)
                 }
             ),
             (
-                7,
+                8,
                 HypercallWitness {
                     hits: 1,
                     first_tick: GuestTicks::new(12)
@@ -40,10 +41,10 @@ fn the_null_backend_counts_each_numbers_hits_and_first_tick_and_keeps_the_first_
         ]
     );
     let HypercallDisposition::Refused(refusal) = first else {
-        panic!("hypercall 0 has no handler");
+        panic!("hypercall 5 has no handler");
     };
     assert_eq!(hv.refusal(), Some(refusal));
-    assert_eq!(refusal.number(), 0);
+    assert_eq!(refusal.number(), 5);
 }
 
 #[test]

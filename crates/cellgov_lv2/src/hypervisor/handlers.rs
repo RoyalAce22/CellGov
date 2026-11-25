@@ -1,18 +1,20 @@
 //! The handler of each hypercall number CellGov answers.
 
 use cellgov_ps3_abi::lv1::call::{
-    GET_LOGICAL_PARTITION_ID, LOGICAL_CONSOLE_CONSTRUCT, LOGICAL_CONSOLE_FLUSH,
+    ALLOCATE_MEMORY, GET_LOGICAL_PARTITION_ID, LOGICAL_CONSOLE_CONSTRUCT, LOGICAL_CONSOLE_FLUSH,
     LOGICAL_CONSOLE_SEND, READ_REPOSITORY_NODE,
 };
 use cellgov_ps3_abi::lv1::partition::LPAR_ID_GAME_OS;
 
 use super::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
+use super::memory::MemoryState;
 use super::request::HypercallRequest;
-use super::{console, repository};
+use super::{console, memory, repository};
 
 /// The numbers a handler answers, ascending. Every other number takes
 /// the null backend.
 pub const ANSWERED: &[u64] = &[
+    ALLOCATE_MEMORY,
     GET_LOGICAL_PARTITION_ID,
     READ_REPOSITORY_NODE,
     LOGICAL_CONSOLE_CONSTRUCT,
@@ -26,9 +28,14 @@ pub fn answers(number: u64) -> bool {
 }
 
 /// The disposition of `request` from a hypervisor that answers for the
-/// firmware version `firmware`.
-pub fn answer(request: &HypercallRequest, firmware: Option<&str>) -> HypercallDisposition {
+/// firmware version `firmware` and holds the memory regions `memory`.
+pub fn answer(
+    request: &HypercallRequest,
+    firmware: Option<&str>,
+    memory: &MemoryState,
+) -> HypercallDisposition {
     match request.number {
+        ALLOCATE_MEMORY => memory::allocate(request, firmware, memory),
         GET_LOGICAL_PARTITION_ID => {
             HypercallDisposition::Answered(HypercallAnswer::success(vec![LPAR_ID_GAME_OS]))
         }

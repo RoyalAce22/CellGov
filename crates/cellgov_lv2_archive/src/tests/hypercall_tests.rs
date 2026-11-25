@@ -73,11 +73,12 @@ fn a_number_row_joins_the_call_table_the_kernels_and_the_hypervisor() {
     let numbers: Vec<u64> = rows.iter().map(|r| r.number).collect();
     assert_eq!(
         numbers,
-        [5, 74, 91, 105, 107, 109],
+        [0, 5, 74, 91, 105, 107, 109],
         "each called number and each answered one"
     );
+    let row = |number: u64| &rows[numbers.iter().position(|n| *n == number).expect("a row")];
     assert_eq!(
-        rows[1],
+        *row(74),
         HypercallRow {
             number: 74,
             name: Some("get_logical_partition_id"),
@@ -91,7 +92,7 @@ fn a_number_row_joins_the_call_table_the_kernels_and_the_hypervisor() {
         }
     );
     assert_eq!(
-        rows[0],
+        *row(5),
         HypercallRow {
             number: 5,
             name: None,
@@ -104,7 +105,7 @@ fn a_number_row_joins_the_call_table_the_kernels_and_the_hypervisor() {
             state: HypercallState::NullBackend,
         }
     );
-    assert_eq!((rows[2].fw.len(), rows[2].sites), (0, 0), "91 is uncalled");
+    assert_eq!((row(91).fw.len(), row(91).sites), (0, 0), "91 is uncalled");
     let text = hypercall_tsv(&rows).expect("the rows fit the schema");
     assert!(text.contains(
         "\n74\tget_logical_partition_id\t0\t1\tpartition\tdispatch\t1.50,4.93\t3\tanswered\n"

@@ -103,6 +103,45 @@ No other code writes the word:
 CellGov's PPU answers a supervisor-state read of BP_VR with this value
 (`cellgov_ps3_abi::hw::ppu::CELL_BP_VR`).
 
+## The memory allocations
+
+After the fill function, the kernel makes two lv1 `allocate_memory`
+calls (hypercall 0) in the function at 0x8000000000265368. Each call
+takes its size from the record and stores the address that lv1 returns
+in r4 back into the record:
+
+| `sc` | r3, the size | r4, the page size exponent | r4 out stored at |
+|---|---|---|---|
+| 0x80000000002653c0 | +0x90 | 20 | +0x88 |
+| 0x800000000026541c | +0xa0, low 16 bits cleared | 16 | +0x98 |
+
+r5 and r6 are 0 at both calls. The kernel takes the first size from the
+record when +0x70 is greater than 1, and the second when +0x70 is
+greater than 2; +0x70 is 3 here. It skips a call whose size is 0. It
+stores r4 only when r3 is 0, and calls its panic routine on any other
+status. Neither path reads r5, the memory
+unit id: the success path copies r3 over r5 before any read of it.
+
+The capture reads 0x00006c0010000000 at +0x88 and 0x0000500000300000 at
++0x98. A logical partition address holds the region's size exponent at
+bit 42 and the partition's region counter above the exponent
+(psdevwiki "Hypervisor Reverse Engineering", "Encoding LPAR Memory
+Region Start Addresses and Sizes"):
+
+| Size | Exponent | Address | Counter |
+|---|---|---|---|
+| 0x07900000 | 27 | 0x00006c0010000000 | 2 |
+| 0x000a0000 | 20 | 0x0000500000300000 | 3 |
+
+Neither size is a power of two, so the exponent is the size's log2
+rounded up. The counter takes 2 at the first call and 3 at the second.
+CellGov's hypervisor answers the kernel's allocations from this
+(`cellgov_ps3_abi::lv1::memory`).
+
+The two sizes add up to 0x079a0000, which is `bi.rgntotal` less
+`rm_size`. Linux `ps3_mm_init` asks lv1 for the same amount: the region
+total less the real mode size.
+
 ## Method
 
 - Firmware 4.93, the `cech20-cex-493` reference profile; captured
@@ -134,7 +173,9 @@ CellGov's PPU answers a supervisor-state read of BP_VR with this value
 | 0x800000000037a608 | 0x000000000f9a0000 | `bi.rgntotal` |
 | 0x800000000037a610 | 0x0000000000000003 | low 20 bits not 0 |
 | 0x800000000037a620 | 0x0000000008000000 | `rm_size` again |
+| 0x800000000037a628 | 0x00006c0010000000 | the first allocation's address |
 | 0x800000000037a630 | 0x0000000007900000 | 0x0f9a0000 - 0x08000000 - 0x000a0000 |
+| 0x800000000037a638 | 0x0000500000300000 | the second allocation's address |
 | 0x800000000037a640 | 0x00000000000a0000 | 0x0f9a0000 & 0xfffff |
 | 0x800000000037a648 | 0x436f6b4731310000 | `plat.id` = "CokG11" |
 | 0x800000000037a650 | 0x0000000004c1a6c0 | `be.0.clock` = 79 800 000 |
@@ -153,3 +194,13 @@ CellGov's PPU answers a supervisor-state read of BP_VR with this value
   repository dump, which CellGov serves to the older firmware. `rm_size`
   does not: the dump gives 16 MiB, and this console gives 128 MiB at
   4.93.
+- The two allocation addresses decode by the psdevwiki address encoding
+  to the sizes the kernel passed, and to consecutive counter values. The
+  psdevwiki list of the 3.41 GameOS regions holds a region of the same
+  kind: 0xE900000 bytes in 2^20-byte pages with flags 0, at
+  0x700020000000, which is counter 2 with the exponent rounded up to 28.
+  psdevwiki lists the second address, 0x500000300000 with 0xA0000 bytes,
+  for 3.41 too.
+- A webMAN `peek.lv2` of 0x800000000037a580 on 2026-11-10, after the
+  capture, returned the same two allocation addresses and the same
+  record words.

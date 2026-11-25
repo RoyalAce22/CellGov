@@ -65,6 +65,21 @@ pub fn lookup(number: u64) -> Option<&'static Lv1Call> {
         .map(|at| &LV1_CALLS[at])
 }
 
+/// `allocate_memory`: create a memory region in the caller's partition.
+///
+/// The inputs:
+/// - r3 is the region size, a multiple of the page size.
+/// - r4 is the page size exponent.
+/// - r5 is 0.
+/// - r6 holds the flags.
+///
+/// On success, r4 holds the region's logical partition address and r5
+/// its memory unit id. Linux `arch/powerpc/platforms/ps3/mm.c`,
+/// `ps3_mm_region_create`, makes the call in this form and keeps r4 as
+/// the region base. [PS3DEVWIKI-HV-SYSCALL-REF s:lv1_allocate_memory]
+/// gives the same registers.
+pub const ALLOCATE_MEMORY: u64 = 0;
+
 /// `get_logical_partition_id`: no input, and the caller's partition id
 /// in r4.
 pub const GET_LOGICAL_PARTITION_ID: u64 = 74;

@@ -221,6 +221,11 @@ pub mod source {
     pub const PPE_PLACEMENT: u8 = 75;
     /// The PPE run-queue sequence counter.
     pub const PPE_QUEUE_SEQ: u8 = 76;
+    /// The memory regions the hypervisor created, one object per region
+    /// in the order of creation.
+    pub const HYPERVISOR_REGION: u8 = 77;
+    /// The hypervisor's region counter for the partition.
+    pub const HYPERVISOR_REGION_COUNTER: u8 = 78;
 }
 
 const OBJECT_BITS: u32 = 32;

@@ -146,8 +146,10 @@ fn program(trials: u64) -> Vec<u32> {
         p.push(16 << 26 | 16 << 21 | (back as u32 & 0xFFFC)); // bdnz head
     }
     // The run continues past a trap, which takes the program interrupt
-    // at the kernel's vector. `sc 1` with r11 = 0 is a hypercall that
-    // CellGov's hypervisor does not model, so the run stops there.
+    // at the kernel's vector. `sc 1` with r11 = 5, a number neither copy
+    // of lv1call.h lists, is a hypercall that CellGov's hypervisor does
+    // not model, so the run stops there.
+    p.push(d_form(14, 11, 0, 5)); // li r11, 5
     p.push(0x4400_0022); // sc 1
     p
 }
@@ -215,7 +217,7 @@ fn run(trials: u64) -> [[u64; 2]; CASES] {
     assert_eq!(
         result.outcome,
         ScenarioOutcome::HypercallRefused(HypercallRefusal::Unmodelled {
-            number: 0,
+            number: 5,
             unit: UnitId::new(0),
             pc: last,
         }),

@@ -155,7 +155,8 @@ fn an_answered_hypercall_hands_r3_and_its_outputs_to_the_callers_next_step() {
 
 #[test]
 fn an_unmodelled_hypercall_answers_nothing_and_stops_the_run() {
-    let (mut rt, received) = runtime_on(0, [1, 2, 3, 4, 5, 6, 7, 8], Some(1));
+    // Neither copy of lv1call.h lists 5.
+    let (mut rt, received) = runtime_on(5, [1, 2, 3, 4, 5, 6, 7, 8], Some(1));
     step(&mut rt).expect("the hypercall step");
     for _ in 0..2 {
         assert_eq!(step(&mut rt), Err(StepError::HypercallRefused));
@@ -165,13 +166,13 @@ fn an_unmodelled_hypercall_answers_nothing_and_stops_the_run() {
     assert_eq!(
         rt.hypervisor().refusal(),
         Some(HypercallRefusal::Unmodelled {
-            number: 0,
+            number: 5,
             unit,
             pc: PC
         })
     );
     assert_eq!(
-        rt.hypervisor().witnesses().get(&0),
+        rt.hypervisor().witnesses().get(&5),
         Some(&HypercallWitness {
             hits: 1,
             first_tick: GuestTicks::new(3)
@@ -181,7 +182,7 @@ fn an_unmodelled_hypercall_answers_nothing_and_stops_the_run() {
         records(&rt),
         vec![TraceRecord::HypercallEntered {
             unit,
-            number: 0,
+            number: 5,
             args: [1, 2, 3, 4, 5, 6, 7, 8],
             pc: PC,
             thread: Some(1),

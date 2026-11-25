@@ -55,6 +55,7 @@ impl Runtime {
     ///   - the RSX call stack
     ///   - the deferred RSX effects
     ///   - the pending child inits
+    ///   - the hypervisor's memory regions
     /// - The LV2 host adds its partial.
     ///
     /// Replay tooling compares pairs via the `SyncState` checkpoint
@@ -96,6 +97,7 @@ impl Runtime {
             lanes::value_term(source::RSX_LABEL_BASE, 0, &u64::from(self.rsx_label_base)),
             self.rsx_call_stack.sync_term(),
             self.ppe_placement.sync_term(),
+            self.hypervisor.sync_term(),
         ] {
             sum = sum.wrapping_add(term);
         }
@@ -119,3 +121,7 @@ impl Runtime {
         sum
     }
 }
+
+#[cfg(test)]
+#[path = "tests/hypervisor_hash_tests.rs"]
+mod hypervisor_hash_tests;

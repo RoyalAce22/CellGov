@@ -110,16 +110,16 @@ impl Runtime {
 
     // -- Hypervisor --
 
-    /// CellGov's hypervisor: its witnesses, its TTY sink and the refusal
-    /// that stopped the run.
+    /// CellGov's hypervisor: the partition's memory regions, its
+    /// witnesses, its TTY sink and the refusal that stopped the run.
     #[inline]
     pub fn hypervisor(&self) -> &cellgov_lv2::hypervisor::Hypervisor {
         &self.hypervisor
     }
 
-    /// Makes CellGov's hypervisor answer repository reads for the
-    /// firmware version `version`, such as `"4.93"`. Call it before the
-    /// first step.
+    /// Makes CellGov's hypervisor answer repository reads and memory
+    /// allocations for the firmware version `version`, such as `"4.93"`.
+    /// Call it before the first step.
     pub fn set_hypervisor_firmware(&mut self, version: &str) {
         self.hypervisor.set_firmware(version);
     }

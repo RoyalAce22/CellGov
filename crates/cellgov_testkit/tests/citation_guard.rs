@@ -128,6 +128,10 @@ const WEB_SOURCES: &[(&str, &str)] = &[
         "https://web.archive.org/web/20260914175021/https://www.psdevwiki.com/ps3/HV_Syscalls",
     ),
     (
+        "PS3DEVWIKI-HV-SYSCALL-REF",
+        "https://web.archive.org/web/20260724151518/https://www.psdevwiki.com/ps3/HV_Syscall_Reference",
+    ),
+    (
         "PS3DEVWIKI-LV2-SYSCALLS",
         "https://web.archive.org/web/20260818233001/https://www.psdevwiki.com/ps3/LV2_Functions_and_Syscalls",
     ),

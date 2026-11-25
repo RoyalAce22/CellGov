@@ -1,5 +1,6 @@
-//! The hypervisor's own records: the null-backend witnesses, the guest
-//! TTY sink, the repository reads and the refusal that stopped the run.
+//! The hypervisor's state: the partition's memory regions, and its own
+//! records of the null-backend witnesses, the guest TTY sink, the
+//! repository reads and the refusal that stopped the run.
 
 use std::collections::BTreeMap;
 
@@ -8,6 +9,7 @@ use cellgov_time::GuestTicks;
 
 use super::answer::{HypercallDisposition, HypercallRefusal};
 use super::handlers::answer;
+use super::memory::MemoryState;
 use super::repository::{read_record, RepositoryRead};
 use super::request::HypercallRequest;
 
@@ -20,14 +22,17 @@ pub struct HypercallWitness {
     pub first_tick: GuestTicks,
 }
 
-/// CellGov's hypervisor, the firmware version it answers for, and its
-/// records.
+/// CellGov's hypervisor, the firmware version it answers for, the
+/// partition's memory regions, and its records.
 ///
-/// No answer depends on the records, so they hold no guest state. The
-/// firmware version selects the repository values a read answers.
+/// The firmware version selects the values that the repository reads
+/// and the allocations answer. The answers depend on the memory regions,
+/// so the regions are guest state, and [`Self::sync_term`] hashes them.
+/// No answer depends on the records.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Hypervisor {
     firmware: Option<String>,
+    memory: MemoryState,
     witnesses: BTreeMap<u64, HypercallWitness>,
     console: Vec<u8>,
     repository_reads: Vec<RepositoryRead>,
@@ -52,19 +57,24 @@ impl Hypervisor {
         self.firmware.as_deref()
     }
 
-    /// The disposition of `request`, after the records note it:
+    /// The disposition of `request`, after the state and the records note
+    /// it:
+    /// - a created memory region joins the partition's regions;
     /// - a console write appends its bytes to the TTY sink;
     /// - a repository read appends its record, answered or refused;
     /// - a number with no handler counts toward its witness;
     /// - the first refusal is kept.
     pub fn dispatch(&mut self, request: &HypercallRequest) -> HypercallDisposition {
-        let disposition = answer(request, self.firmware.as_deref());
+        let disposition = answer(request, self.firmware.as_deref(), &self.memory);
         if request.number == READ_REPOSITORY_NODE {
             self.repository_reads
                 .push(read_record(request, &disposition));
         }
         match &disposition {
             HypercallDisposition::Answered(answer) => {
+                if let Some(region) = answer.region {
+                    self.memory.create(region);
+                }
                 if let Some(write) = &answer.console {
                     self.console.extend_from_slice(write.bytes());
                 }
@@ -83,6 +93,17 @@ impl Hypervisor {
             }
         }
         disposition
+    }
+
+    /// The partition's memory regions and its region counter.
+    pub fn memory(&self) -> &MemoryState {
+        &self.memory
+    }
+
+    /// The sync-state terms of the hypervisor's guest state: its memory
+    /// regions. The records add no term.
+    pub fn sync_term(&self) -> u128 {
+        self.memory.sync_term()
     }
 
     /// Each number the null backend saw, ascending.
