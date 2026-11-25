@@ -1,6 +1,6 @@
 //! The registers of the EHCI USB host controllers of the system bus, the
 //! loads of them that the 4.93 kernel makes in its controller reset, and
-//! the stores to the PS3 setup registers that follow the reset.
+//! the accesses to the PS3 setup registers that follow the reset.
 //!
 //! The MMIO region at slot 2 of devices 1 and 2 of bus 1 is the register
 //! space of an EHCI host controller:
@@ -44,6 +44,19 @@ pub const USBINTR: u64 = 0x8;
 /// `insnreg01`, a PS3 internal setup register that holds the burst
 /// transfer counts.
 pub const INSNREG01: u64 = 0x84;
+
+/// The offset of the second PS3 setup register from the operational base.
+///
+/// The EHCI specification gives no register at this offset. Linux
+/// `drivers/usb/host/ehci-ps3.c`, `ps3_ehci_setup_insnreg`, names it
+/// `insnreg02` and does not read or write it.
+pub const INSNREG02: u64 = 0x88;
+
+/// The bit of [`INSNREG02`] that the kernel sets.
+///
+/// No source gives the value of the register or the effect of this bit
+/// on the controller.
+pub const INSNREG02_KERNEL_BIT: u32 = 0x0000_0800;
 
 /// The offset of the third PS3 setup register from the operational base.
 ///
@@ -255,6 +268,54 @@ pub const EHCI_SETUP_STORES: &[EhciSetupStore] = &[
     },
 ];
 
+/// A load of a PS3 setup register and the store that writes the loaded
+/// word back with some bits set, by two kernel instructions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EhciSetupBitSet {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The offset of the register from the operational base.
+    pub register: u64,
+    /// The effective address of the instruction that makes the load.
+    pub reader: u64,
+    /// The effective address of the store instruction.
+    pub store: u64,
+    /// The bits that the code sets in the loaded word before the store.
+    /// The store writes each other bit back unchanged.
+    pub bits: u32,
+}
+
+/// The loads of the PS3 setup registers that the kernel writes back with
+/// bits set, at each controller of [`EHCI_CONTROLLERS`].
+///
+/// The kernel does these steps when the word that it compares with
+/// 0x300100 is greater
+/// [OFW-4.93 lv2_kernel a:0x80000000002459C8-0x80000000002459DC]
+/// [OFW-4.93 lv2_kernel a:0x8000000000245F00-0x8000000000245F34]:
+/// 1. It calls the register read helper with offset 0x98. The helper
+///    loads the word and stores it to a stack slot of the caller
+///    [OFW-4.93 lv2_kernel a:0x800000000023F9E8-0x800000000023F9EC].
+/// 2. It loads the slot and sets bit 0x800.
+/// 3. It calls the register write helper with offset 0x98 and that word.
+///
+/// The code compares no bit of the loaded word. After step 3, the
+/// function does not load the slot again. So the run can give the load
+/// a word with no known bit, and the store writes that word back.
+///
+/// The reader keeps no bit, so it answers each load of the helper, from
+/// any caller. The kernel calls the read helper only at step 1
+/// [OFW-4.93 lv2_kernel a:0x8000000000245F10]. A new row needs the same
+/// check of the callers of its helper.
+pub const EHCI_SETUP_BIT_SETS: &[EhciSetupBitSet] = &[EhciSetupBitSet {
+    firmware: "4.93",
+    register: INSNREG02,
+    // [OFW-4.93 lv2_kernel a:0x800000000023F9E8] lwzx r0,r5,r11.
+    reader: 0x8000_0000_0023_F9E8,
+    // [OFW-4.93 lv2_kernel a:0x800000000023F964] stwx r6,r5,r9.
+    store: 0x8000_0000_0023_F964,
+    bits: INSNREG02_KERNEL_BIT,
+}];
+
 #[cfg(test)]
 #[path = "tests/ehci_tests.rs"]
 mod tests;
@@ -262,3 +323,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/ehci_setup_tests.rs"]
 mod setup_tests;
+
+#[cfg(test)]
+#[path = "tests/ehci_bit_set_tests.rs"]
+mod bit_set_tests;

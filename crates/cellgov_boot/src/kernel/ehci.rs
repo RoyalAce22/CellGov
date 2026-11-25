@@ -4,7 +4,7 @@
 //! The run models these registers of each controller of
 //! [`EHCI_CONTROLLERS`] as register words:
 //! - USBCMD, USBSTS and USBINTR;
-//! - the PS3 setup registers `insnreg01` and `insnreg03`.
+//! - the PS3 setup registers `insnreg01`, `insnreg02` and `insnreg03`.
 //!
 //! No source gives their state when the kernel starts, so each word
 //! starts with no known bit. The rule accepts only these stores, and a
@@ -18,17 +18,23 @@
 //! - a store to a setup register of the word that a row of
 //!   [`EHCI_SETUP_STORES`] at the controller's firmware gives for it.
 //!   The setup register then holds that word. The run declares the store
-//!   instruction of each such row as a writer of the register. It
-//!   declares no reader of a setup register, so each load of one stops
-//!   the run.
+//!   instruction of each such row as a writer of the register;
+//! - a store to a setup register that writes back the word that a row of
+//!   [`EHCI_SETUP_BIT_SETS`] loads, with the row's bits set. This rule
+//!   rests on an assumption that no source supports.
+//!
+//! The run declares the load of each [`EHCI_SETUP_BIT_SETS`] row as a
+//! reader that keeps no bit. Each other load of a setup register stops
+//! the run.
 
 use cellgov_mem::{
     GuestMemory, MemError, RegisterPassBack, RegisterRule, RegisterStore, RegisterWord,
 };
 use cellgov_ps3_abi::hw::ehci::{
-    EhciSetupStore, EHCI_CONTROLLERS, EHCI_RESET_READERS, EHCI_SETUP_STORES, INSNREG01, INSNREG03,
-    USBCMD, USBCMD_HCRESET, USBCMD_PARK_BITS, USBCMD_RESET_VALUE, USBCMD_RS, USBINTR,
-    USBINTR_RESET_VALUE, USBSTS, USBSTS_HCHALTED, USBSTS_RESET_VALUE,
+    EhciSetupBitSet, EhciSetupStore, EHCI_CONTROLLERS, EHCI_RESET_READERS, EHCI_SETUP_BIT_SETS,
+    EHCI_SETUP_STORES, INSNREG01, INSNREG02, INSNREG03, USBCMD, USBCMD_HCRESET, USBCMD_PARK_BITS,
+    USBCMD_RESET_VALUE, USBCMD_RS, USBINTR, USBINTR_RESET_VALUE, USBSTS, USBSTS_HCHALTED,
+    USBSTS_RESET_VALUE,
 };
 
 use super::mmio_real::{DeviceMmioError, MmioTables};
@@ -37,19 +43,24 @@ use super::mmio_real::{DeviceMmioError, MmioTables};
 #[path = "tests/ehci_firmware_rule_tests.rs"]
 mod firmware_rule_tests;
 
+#[cfg(test)]
+#[path = "tests/ehci_bit_set_rule_tests.rs"]
+mod bit_set_rule_tests;
+
 /// The index of each register in a controller's register file.
 const CMD: usize = 0;
 const STS: usize = 1;
 const INTR: usize = 2;
 const INSN01: usize = 3;
 const INSN03: usize = 4;
+const INSN02: usize = 5;
 
 /// The number of words in a controller's register file.
-const WORDS: usize = 5;
+const WORDS: usize = 6;
 
 /// The offset of each register of the file from the operational base, in
 /// the order of the indexes.
-const REGISTERS: [u64; WORDS] = [USBCMD, USBSTS, USBINTR, INSNREG01, INSNREG03];
+const REGISTERS: [u64; WORDS] = [USBCMD, USBSTS, USBINTR, INSNREG01, INSNREG03, INSNREG02];
 
 /// The rule of each controller of [`EHCI_CONTROLLERS`], in the order of
 /// the table. The array has the length of the table, so a new controller
@@ -110,7 +121,10 @@ fn rule_of(firmware: &str) -> Option<RegisterRule> {
 /// also declares these:
 /// - the readers of [`EHCI_RESET_READERS`];
 /// - the store instruction of each row of [`EHCI_SETUP_STORES`] at
-///   `firmware`, as a writer of its setup register.
+///   `firmware`, as a writer of its setup register;
+/// - for each row of [`EHCI_SETUP_BIT_SETS`] at `firmware`, its load as
+///   a reader that keeps no bit, and its store as the writer that passes
+///   back each bit outside the row's bits.
 ///
 /// # Errors
 ///
@@ -139,29 +153,51 @@ pub(super) fn declare_ehci(
         for store in stores {
             mem.declare_register_writer(base + store.register, store.store)?;
         }
+        let sets = EHCI_SETUP_BIT_SETS
+            .iter()
+            .filter(|s| s.firmware == firmware);
+        for set in sets {
+            let real = base + set.register;
+            let pass_back = RegisterPassBack {
+                store: set.store,
+                bits: !set.bits,
+            };
+            mem.declare_register_reader(real, set.reader, 0, Some(pass_back))?;
+            mem.declare_register_writer(real, set.store)?;
+        }
     }
     Ok(())
 }
 
 /// The rule of the register file of the controller at index `C` of
-/// [`EHCI_CONTROLLERS`]. A setup register takes only the words of the
-/// [`EHCI_SETUP_STORES`] rows at that controller's firmware.
+/// [`EHCI_CONTROLLERS`]. A setup register takes only the stores of the
+/// [`EHCI_SETUP_STORES`] and [`EHCI_SETUP_BIT_SETS`] rows at that
+/// controller's firmware.
 fn store_operational<const C: usize>(
     words: &mut [RegisterWord],
     index: usize,
     store: RegisterStore,
 ) -> bool {
     let firmware = const { EHCI_CONTROLLERS[C].firmware };
-    apply_store(firmware, EHCI_SETUP_STORES, words, index, store)
+    apply_store(
+        firmware,
+        EHCI_SETUP_STORES,
+        EHCI_SETUP_BIT_SETS,
+        words,
+        index,
+        store,
+    )
 }
 
-/// Applies `store` to the word at `index` of a controller at `firmware`,
-/// whose setup registers take only the words of the `setup` rows at
-/// `firmware`. The file holds the words of [`REGISTERS`]; the rule
-/// refuses every store to a file of another length.
+/// Applies `store` to the word at `index` of a controller at `firmware`.
+/// Its setup registers take only the stores of the `setup` and
+/// `bit_sets` rows at `firmware`. The file holds the words of
+/// [`REGISTERS`]; the rule refuses every store to a file of another
+/// length.
 fn apply_store(
     firmware: &str,
     setup: &[EhciSetupStore],
+    bit_sets: &[EhciSetupBitSet],
     words: &mut [RegisterWord],
     index: usize,
     store: RegisterStore,
@@ -173,8 +209,48 @@ fn apply_store(
         CMD => store_usbcmd(words, store),
         INTR => store_usbintr(words, store),
         INSN01 | INSN03 => store_setup(firmware, setup, words, index, store),
+        INSN02 => store_setup_bits(firmware, bit_sets, words, index, store),
         _ => false,
     }
+}
+
+/// A store to a setup register that writes the word back with the bits
+/// of a `bit_sets` row at `firmware` set.
+///
+/// The rule accepts the store when all of these hold:
+/// - the store sets each bit of the row;
+/// - each other bit that the code sets itself is known, and the store
+///   does not change it.
+///
+/// Each other bit is a bit that the store passes back. It keeps its
+/// state, so an unknown bit stays unknown, and the rule invents no value
+/// for it. The rule assumes that the store changes nothing else. No
+/// source gives the effect of the row's bits on the controller. The run
+/// models no such effect, so no other word and no transfer changes.
+fn store_setup_bits(
+    firmware: &str,
+    bit_sets: &[EhciSetupBitSet],
+    words: &mut [RegisterWord; WORDS],
+    index: usize,
+    store: RegisterStore,
+) -> bool {
+    let Some(set) = bit_sets
+        .iter()
+        .find(|s| s.firmware == firmware && s.register == REGISTERS[index])
+    else {
+        return false;
+    };
+    let word = words[index];
+    let others = store.own & !set.bits;
+    let sets_bits = store.own & store.value & set.bits == set.bits;
+    if !sets_bits || others & !word.known != 0 || (store.value ^ word.value) & others != 0 {
+        return false;
+    }
+    words[index] = RegisterWord {
+        value: word.value | set.bits,
+        known: word.known | set.bits,
+    };
+    true
 }
 
 /// A store to a setup register: only a word that a `setup` row at
@@ -251,6 +327,7 @@ fn store_usbcmd(words: &mut [RegisterWord; WORDS], store: RegisterStore) -> bool
         // says that a host controller reset returns the setup registers
         // to their chip defaults. No source gives those defaults.
         words[INSN01] = RegisterWord::UNKNOWN;
+        words[INSN02] = RegisterWord::UNKNOWN;
         words[INSN03] = RegisterWord::UNKNOWN;
         return true;
     }

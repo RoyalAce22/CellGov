@@ -54,7 +54,7 @@ fn takes(firmware: &str, setup: &[EhciSetupStore], index: usize, value: u32) -> 
         value,
         own: u32::MAX,
     };
-    apply_store(firmware, setup, &mut words, index, store)
+    apply_store(firmware, setup, &[], &mut words, index, store)
 }
 
 #[test]
