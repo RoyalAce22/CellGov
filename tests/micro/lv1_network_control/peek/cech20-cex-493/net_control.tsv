@@ -1,0 +1,5 @@
+address	field	width	reads	agree	value
+0x00000000003682b0	global	8	2	yes	0x000000000007c110
+0x000000000007c120	device	8	2	yes	0x000000000007c1a0
+0x000000000007c1a0	device_flag	1	2	yes	0x01
+0x000000000007c1a8	device_state	4	2	yes	0x00000002
