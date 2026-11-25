@@ -95,9 +95,15 @@ pub(crate) struct CoreOsFileDoc {
 
 /// The command that writes a `[core_os]` block into an installed
 /// firmware entry, as one literal the not-recorded texts share.
+///
+/// The hint names the source PUP because a kernel-only install refuses
+/// a PUP whose SHA-256 differs from the one the record holds.
 macro_rules! kernel_only_hint {
     () => {
-        "add it with `cellgov firmware install <PS3UPDAT.PUP> --kernel-only`"
+        concat!(
+            "add it with `cellgov firmware install <PUP> --kernel-only`, giving the PUP ",
+            "this entry was installed from, whose sha256 `cellgov firmware show <VERSION>` prints"
+        )
     };
 }
 

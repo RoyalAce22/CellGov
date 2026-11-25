@@ -69,7 +69,8 @@ fn a_record_without_the_block_names_the_hypervisor_and_the_kernel_only_install()
     assert_eq!(
         HYPERVISOR_NOT_RECORDED,
         "not unpacked (installed before the hypervisor was kept; add it with \
-         `cellgov firmware install <PS3UPDAT.PUP> --kernel-only`)"
+         `cellgov firmware install <PUP> --kernel-only`, giving the PUP this entry was \
+         installed from, whose sha256 `cellgov firmware show <VERSION>` prints)"
     );
 }
 

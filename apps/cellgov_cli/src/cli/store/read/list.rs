@@ -332,3 +332,7 @@ mod version_label_tests;
 #[cfg(test)]
 #[path = "tests/shipped_firmware_tests.rs"]
 mod shipped_firmware_tests;
+
+#[cfg(test)]
+#[path = "tests/kernel_only_source_pup_tests.rs"]
+mod kernel_only_source_pup_tests;

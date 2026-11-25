@@ -138,7 +138,8 @@ fn a_record_from_before_stored_kernels_names_the_bare_reason() {
     assert_eq!(
         KERNEL_NOT_RECORDED_REASON,
         "installed before the kernel was kept; add it with \
-         `cellgov firmware install <PS3UPDAT.PUP> --kernel-only`"
+         `cellgov firmware install <PUP> --kernel-only`, giving the PUP this entry was \
+         installed from, whose sha256 `cellgov firmware show <VERSION>` prints"
     );
     assert_eq!(
         super::super::model::KERNEL_NOT_RECORDED,
