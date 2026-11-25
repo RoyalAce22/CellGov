@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "capture_id": "micro:ppu_lv2_call_untimed#fd255dd5b1cd",
+  "captured_at": "2026-11-06T05:41:59Z",
+  "console": {
+    "profile": "cech20-cex-493",
+    "model": "CECH-2001A",
+    "kernel": "cex",
+    "firmware": "4.93",
+    "cfw": "EvilNAT 4.93 PEX",
+    "cobra": "8.5",
+    "webman": "1.47.48t",
+    "debugger_attached": false,
+    "load_at_start": {
+      "cpu_c": 67,
+      "rsx_c": 63,
+      "fan_percent": 42
+    }
+  },
+  "transport": {
+    "kind": "webman-filedrop"
+  },
+  "harness": {
+    "runner": "runner_ps3",
+    "revision": "c279ddf83bcb7c34964596dbb2dcdb6467ed8bea",
+    "link": "https://github.com/RoyalAce22/CellGov/commit/c279ddf83bcb7c34964596dbb2dcdb6467ed8bea"
+  },
+  "microtest": {
+    "name": "ppu_lv2_call_untimed",
+    "manifest_sha256": "bdfd6d6b9dc8d2f2c8d84949f769e460abfb4541d7d9bbde3ecc5d64170e4c46",
+    "sources": {
+      "../common/cgov_cases.h": "2cc9df4e06e27071ec36fd32a33acdec781c8ed863f2871ccc1b31e8b30b3f78",
+      "../common/cgov_lv2.h": "18efe6e4e763676e4b215a12af9d37a68f82a01f93e6ee816a882abee5132c0e",
+      "../common/cgov_out.h": "dcd53f330ba62b8aba0acd9cff2a580b5bfdcdc4f18c9e4d5ac64caee4efab9a",
+      "../common/cgov_spu_load.h": "999392b83cb8965f4cd5612632a73b8021861a6a588d9e3ebb2c405cfdf726c3",
+      "../common/crt0.S": "a0e5c9e27431ef06df31507e0320d001b10098b154b59c3a6639b7916d76b8d9",
+      "../common/package_ps3.sh": "78e6be20e91352ffd7afa3e89e06d7ce57bc9842181c3c59e0b86670ecbd8abf",
+      "../common/param_sfo.xml": "0fe1608eeeb92cc1e033cd012a07991997cc91c7c8eac3bc8c31b212ef892c97",
+      "../common/patch_ctrl_flags.py": "86a0ec46658144b0a50e9179ac3e2323b96532a89227612e6a640a469ea4bf4d",
+      "../common/patch_toc.py": "6218bae28d718aeb19ab94b5fc464e526dbb46270e2614ed10922a8773edd229",
+      "../common/test_patch_toc.py": "9bb95d499c2e7c9da88bcaf56ee34fb724edfb17a8fc566189b79fad48d4f5b6",
+      "build.sh": "16a31ea23f22dc3ad348fdc0c7fc0530dd52282566cf9cc80c8fc0d1b32d7574",
+      "ppu/main.c": "e4638e17be1beb504a0f3f86e782d098d0e670cce93e21f86b0e875f77978d65"
+    }
+  },
+  "artifacts": {
+    "eboot_sha256": "74f6ebca255ffc3266d62e2d152ea75afe214ff4478f90bee8ebd94381b401d0",
+    "ps3_elf_sha256": "f01a8bc0c99b0c975cfcb1778e807086872c7be804cb531b6ab651f449a708f8",
+    "reference_elf_sha256": "079fe1bd1dd5cd49939ba0553cb3d8314e67e744293c87384c1f60c67502bfb3",
+    "siblings": {},
+    "param_sfo_sha256": "50df682af00fce4ae05c9a16aacb5314b23db899a3fdc33e6d8096419d5240c4"
+  },
+  "frame": {
+    "file": "cgov_frame.bin",
+    "sha256": "fd255dd5b1cdf390878d0bf5fa3ca45acb87412ae119f50a9e5f468f966eb8bf",
+    "bytes": 520,
+    "result_path": "/dev_hdd0/tmp/cgov_ppu_lv2_call_untimed.bin"
+  },
+  "digest": "fd255dd5b1cdf390878d0bf5fa3ca45acb87412ae119f50a9e5f468f966eb8bf  micro:ppu_lv2_call_untimed  520",
+  "recapture_reason": null
+}
