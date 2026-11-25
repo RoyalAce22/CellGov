@@ -354,3 +354,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/interrupt_mask_external_tests.rs"]
 mod external_tests;
+
+#[cfg(test)]
+#[path = "tests/interrupt_mask_ppe_id_source_tests.rs"]
+mod ppe_id_source_tests;
