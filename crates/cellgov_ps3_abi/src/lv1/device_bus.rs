@@ -133,8 +133,127 @@
 //!   array [OFW-4.93 lv1 a:0x237760-0x23777C], which lv1's init makes for
 //!   slot 4 [OFW-4.93 lv1 a:0x23DB28-0x23DB54]
 //!   [OFW-4.93 lv1 a:0x23DBD4-0x23DBDC].
+//!
+//! # `allocate_device_dma_region`
+//!
+//! The handler [OFW-4.93 lv1 a:0x306A6C] keeps r3 to r7
+//! [OFW-4.93 lv1 a:0x306A80] [OFW-4.93 lv1 a:0x306AA0-0x306AAC] and does
+//! these steps:
+//! 1. It refuses a bus id above [`OPEN_DEVICE_BUS_MAX`] with
+//!    [`DMA_REGION_BUS_RANGE_R3`] [OFW-4.93 lv1 a:0x306B0C-0x306B10]
+//!    [OFW-4.93 lv1 a:0x306BE8-0x306BF8].
+//! 2. It refuses flags above [`DMA_REGION_FLAGS_MAX`] with
+//!    [`DMA_REGION_FLAGS_RANGE_R3`] [OFW-4.93 lv1 a:0x306B14-0x306B18]
+//!    [OFW-4.93 lv1 a:0x306BFC-0x306C0C].
+//! 3. It zeroes the return slot of r4, HSPRG0 - 0x6A38, and calls the
+//!    allocate function [OFW-4.93 lv1 a:0x236F88] with the caller's
+//!    partition, r3 to r7 and the address of that slot
+//!    [OFW-4.93 lv1 a:0x306B1C-0x306B54].
+//! 4. It returns that function's r3 [OFW-4.93 lv1 a:0x306B58]
+//!    [OFW-4.93 lv1 a:0x306BC0]. The vector's entry zeroes the other
+//!    slots [OFW-4.93 lv1 a:0x0C08], so r5 to r10 return 0.
+//!
+//! The allocate function writes the slot only on success
+//! [OFW-4.93 lv1 a:0x23707C-0x237088], so a failure returns r4 = 0. For
+//! device 0 of bus 1 it does these steps. The first failure is the
+//! answer:
+//! 1. The access check [OFW-4.93 lv1 a:0x2363E0]
+//!    [OFW-4.93 lv1 a:0x236FE0-0x236FE8], which
+//!    [`network`](super::network) describes. Bus 0 gets
+//!    [`DMA_REGION_NO_BUS_R3`]. A partition that did not open the device
+//!    gets [`DMA_REGION_NOT_OPEN_R3`].
+//! 2. The device lookup [OFW-4.93 lv1 a:0x236FEC-0x237004]. For bus 1 it
+//!    is the lookup of the access check, so it finds device 0.
+//! 3. Bus 1 takes a path of its own for devices 1 and 2
+//!    [OFW-4.93 lv1 a:0x237008-0x23700C]
+//!    [OFW-4.93 lv1 a:0x237108-0x237118]. Device 0 continues.
+//! 4. Flags other than 0 get [`DMA_REGION_FLAGS_R3`]
+//!    [OFW-4.93 lv1 a:0x237010-0x237024].
+//! 5. The device's allocate function [OFW-4.93 lv1 a:0x2267FC], with the
+//!    device, the partition, r5, r6 and two outputs
+//!    [OFW-4.93 lv1 a:0x237058-0x237070]: the address and a register
+//!    mark. On a nonzero r3 the allocate function zero-extends it and
+//!    sets bit (mark + 31) for a mark other than 0
+//!    [OFW-4.93 lv1 a:0x2370B8-0x2370E4]. On 0 it stores the address in
+//!    the slot of r4 and returns 0 [OFW-4.93 lv1 a:0x23707C-0x237088].
+//!
+//! The device's allocate function holds the device's lock at +88
+//! [OFW-4.93 lv1 a:0x226820-0x226844] and does these steps:
+//! 1. A size of 0 gets [`DMA_REGION_SIZE_R3`]
+//!    [OFW-4.93 lv1 a:0x226848-0x22684C] [OFW-4.93 lv1 a:0x226928-0x226930].
+//! 2. A page shift other than those of [`DMA_REGION_PAGE_SHIFTS`] gets
+//!    [`DMA_REGION_PAGE_SHIFT_R3`] [OFW-4.93 lv1 a:0x226850-0x226878]
+//!    [OFW-4.93 lv1 a:0x226964-0x22696C].
+//! 3. A size that is not a multiple of the page gets
+//!    [`DMA_REGION_SIZE_R3`] [OFW-4.93 lv1 a:0x226880-0x22688C].
+//! 4. It clears the mark and calls the device's entry at +152 with the
+//!    device, the size, the page shift and the partition
+//!    [OFW-4.93 lv1 a:0x226890-0x2268B0]. A nonzero r3 of the entry is
+//!    the answer [OFW-4.93 lv1 a:0x2268B4-0x2268D0].
+//! 5. Otherwise it gives the caller +48 of the region that the entry
+//!    made [OFW-4.93 lv1 a:0x2268EC-0x2268F4].
+//!
+//! Device 0's entry at +152 [OFW-4.93 lv1 a:0x35C910-0x35C914]
+//! [OFW-4.93 lv1 a:0x32D300-0x32D304] does these steps:
+//! 1. It calls the device's entry at +88 [OFW-4.93 lv1 a:0x226BF0-0x226C1C],
+//!    which picks the bus address; see below. A nonzero r3 is the answer,
+//!    sign-extended [OFW-4.93 lv1 a:0x226C20-0x226C58].
+//! 2. It allocates an 80-byte region [OFW-4.93 lv1 a:0x226C5C-0x226C70].
+//!    It fills the region [OFW-4.93 lv1 a:0x225CAC-0x225CDC] with the
+//!    partition at +8, the address at +16 and +48, the size at +56 and
+//!    the page shift at +64.
+//! 3. It links the region into the device's list at +96 and returns 0
+//!    [OFW-4.93 lv1 a:0x226C8C-0x226D0C].
+//!
+//! When the allocation of the region fails, the entry returns
+//! `LV1_RESOURCE_SHORTAGE` (-2) [OFW-4.93 lv1 a:0x226D88-0x226D94]. No
+//! input of the call selects that case.
+//!
+//! Device 0's entry at +88 [OFW-4.93 lv1 a:0x35C8D0-0x35C8D4]
+//! [OFW-4.93 lv1 a:0x32E0E0-0x32E0E4] does these steps:
+//! 1. When +120 of the device holds -1, it returns -17
+//!    [OFW-4.93 lv1 a:0x22D990-0x22D9B0]. lv1's init fills +120
+//!    [OFW-4.93 lv1 a:0x22DDF8-0x22DE08], and the capture
+//!    [`DMA_REGION_CAPTURE`] reads 2 there.
+//! 2. It calls the pool function [OFW-4.93 lv1 a:0x22D3A4] with the
+//!    device's backend at +136 and index at +128
+//!    [OFW-4.93 lv1 a:0x22D9B4-0x22D9BC]. lv1's init sets them to the
+//!    system bus object and 0 [OFW-4.93 lv1 a:0x3A9924-0x3A9938]
+//!    [OFW-4.93 lv1 a:0x3A9768-0x3A9780] [OFW-4.93 lv1 a:0x22DDD8-0x22DDDC].
+//!    So the pool is slot 0 of that object, the device itself.
+//! 3. The pool function rounds the size up to a power of two; see
+//!    [`dma_region_rounded_size`]. A rounded size above
+//!    [`DMA_REGION_SIZE_MAX`] gets -17 [OFW-4.93 lv1 a:0x22D3FC-0x22D42C]
+//!    [OFW-4.93 lv1 a:0x22D4B8-0x22D4D0] [OFW-4.93 lv1 a:0x22D56C-0x22D580].
+//!    The allocate function zero-extends it with no mark, so the answer
+//!    is [`DMA_REGION_TOO_LARGE_R3`].
+//! 4. It searches the pool for a free range of that size
+//!    [OFW-4.93 lv1 a:0x22D434-0x22D440] [OFW-4.93 lv1 a:0x22CEF8]. The
+//!    search walks lists that lv1's own allocations change, under a
+//!    global lock [OFW-4.93 lv1 a:0x22AC9C-0x22AD44].
+//! 5. For index 0 it subtracts the sum of the pool's words at +168 and
+//!    +176 from the found address, and adds 0x80000000
+//!    [OFW-4.93 lv1 a:0x22D584-0x22D598] [OFW-4.93 lv1 a:0x22D6B8-0x22D6F0].
+//!
+//! The bus address therefore depends on the pool's state, which
+//! CellGov does not model. [`GAME_OS_DMA_REGIONS`] gives the address
+//! that the console's lv1 gave the 4.93 kernel's call.
+//!
+//! # The 4.93 kernel's call of `allocate_device_dma_region`
+//!
+//! The kernel's wrapper sends the call with these inputs
+//! [OFW-4.93 lv2_kernel a:0x8000000000095848-0x800000000009585C]:
+//! - r3 and r4: the bus id at +144 and the device id at +152 of its
+//!   device record [OFW-4.93 lv2_kernel a:0x80000000000AA488-0x80000000000AA4A0];
+//! - r5: the size;
+//! - r6: the base-2 logarithm of the page size, 12, 16, 20 or 24
+//!   [OFW-4.93 lv2_kernel a:0x8000000000095794-0x80000000000957FC];
+//! - r7: 0.
+//!
+//! When r3 is 0, the wrapper stores r4 as the region's address
+//! [OFW-4.93 lv2_kernel a:0x8000000000095860-0x8000000000095880].
 
-use super::status::{zero_extended, LV1_BUSY};
+use super::status::{zero_extended, LV1_BUSY, LV1_ILLEGAL_PARAMETER_VALUE, LV1_WRONG_STATE};
 
 /// The handler of hypercall 170 in one firmware's lv1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,6 +336,200 @@ pub const fn open_device_bus_r3(bus: u64) -> Option<u64> {
     }
 }
 
+/// The handler of hypercall 174 in one firmware's lv1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DmaRegionHandler {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The address of the `allocate_device_dma_region` handler.
+    pub handler: u32,
+}
+
+/// Each firmware whose lv1 image shows the handler, ascending.
+///
+/// The address is the entry of hypercall 174 in the live 4.93 hypercall
+/// table ([`super::table::LIVE_TABLE_HANDLERS`]).
+pub const DMA_REGION_HANDLERS: &[DmaRegionHandler] = &[DmaRegionHandler {
+    firmware: "4.93",
+    handler: 0x306A6C,
+}];
+
+/// The handler of the firmware version `firmware`, or `None` when no lv1
+/// image read shows it.
+pub fn dma_region_handler(firmware: &str) -> Option<&'static DmaRegionHandler> {
+    DMA_REGION_HANDLERS
+        .iter()
+        .find(|handler| handler.firmware == firmware)
+}
+
+/// The r3 of `allocate_device_dma_region` for a bus id above
+/// [`OPEN_DEVICE_BUS_MAX`]: `LV1_ILLEGAL_PARAMETER_VALUE` (-17), with r3
+/// marked in the high word [OFW-4.93 lv1 a:0x306BE8-0x306BF4].
+///
+/// Bit 32 marks r3, bit 33 r4, bit 34 r5, bit 35 r6 and bit 36 r7.
+pub const DMA_REGION_BUS_RANGE_R3: u64 = 0x0000_0001_FFFF_FFEF;
+
+/// The largest flags value that the handler passes, unsigned
+/// [OFW-4.93 lv1 a:0x306B14-0x306B18].
+pub const DMA_REGION_FLAGS_MAX: u64 = 3;
+
+/// The r3 for flags above [`DMA_REGION_FLAGS_MAX`]:
+/// `LV1_ILLEGAL_PARAMETER_VALUE` (-17), with r7 marked
+/// [OFW-4.93 lv1 a:0x306BFC-0x306C08].
+pub const DMA_REGION_FLAGS_RANGE_R3: u64 = 0x0000_0010_FFFF_FFEF;
+
+/// The r3 for bus id 0: `LV1_NO_ENTRY` (-6), with r3 marked
+/// [OFW-4.93 lv1 a:0x236420-0x236428] [OFW-4.93 lv1 a:0x2370B8-0x2370E4].
+pub const DMA_REGION_NO_BUS_R3: u64 = 0x0000_0001_FFFF_FFFA;
+
+/// The r3 when the calling partition did not open the device:
+/// `LV1_WRONG_STATE` (-11), zero-extended
+/// [OFW-4.93 lv1 a:0x236534-0x236538] [OFW-4.93 lv1 a:0x2370B8-0x2370C4].
+pub const DMA_REGION_NOT_OPEN_R3: u64 = zero_extended(LV1_WRONG_STATE);
+
+/// The r3 for device 0 of bus 1 with flags other than 0:
+/// `LV1_UNSUPPORTED_PARAMETER_VALUE` (-15), with r7 marked
+/// [OFW-4.93 lv1 a:0x237018-0x237024].
+pub const DMA_REGION_FLAGS_R3: u64 = 0x0000_0010_FFFF_FFF1;
+
+/// The r3 for a size of 0 or a size that is not a multiple of the page:
+/// `LV1_ILLEGAL_PARAMETER_VALUE` (-17), with r5 marked
+/// [OFW-4.93 lv1 a:0x226928-0x226930] [OFW-4.93 lv1 a:0x2370B8-0x2370E4].
+pub const DMA_REGION_SIZE_R3: u64 = 0x0000_0004_FFFF_FFEF;
+
+/// The r3 for a page shift that is not in [`DMA_REGION_PAGE_SHIFTS`]:
+/// `LV1_ILLEGAL_PARAMETER_VALUE` (-17), with r6 marked
+/// [OFW-4.93 lv1 a:0x226964-0x22696C] [OFW-4.93 lv1 a:0x2370B8-0x2370E4].
+pub const DMA_REGION_PAGE_SHIFT_R3: u64 = 0x0000_0008_FFFF_FFEF;
+
+/// The page shifts that the device's allocate function accepts: pages of
+/// 4 KB, 64 KB, 1 MB and 16 MB [OFW-4.93 lv1 a:0x226850-0x22687C].
+pub const DMA_REGION_PAGE_SHIFTS: [u64; 4] = [12, 16, 20, 24];
+
+/// The largest rounded size that the pool function accepts
+/// [OFW-4.93 lv1 a:0x22D420-0x22D42C] [OFW-4.93 lv1 a:0x22D4C0-0x22D4CC].
+pub const DMA_REGION_SIZE_MAX: u64 = 1 << 32;
+
+/// The r3 for a rounded size above [`DMA_REGION_SIZE_MAX`]:
+/// `LV1_ILLEGAL_PARAMETER_VALUE` (-17), zero-extended
+/// [OFW-4.93 lv1 a:0x22D4D0] [OFW-4.93 lv1 a:0x2370B8-0x2370C4].
+pub const DMA_REGION_TOO_LARGE_R3: u64 = zero_extended(LV1_ILLEGAL_PARAMETER_VALUE);
+
+/// The size that the pool function searches for, from the nonzero size
+/// `size`.
+///
+/// A power of two stays as it is [OFW-4.93 lv1 a:0x22D404-0x22D41C].
+/// Another size becomes twice its highest set bit
+/// [OFW-4.93 lv1 a:0x22D4B8-0x22D4BC] [OFW-4.93 lv1 a:0x22D56C-0x22D570].
+/// lv1 doubles at 64 bits, so a size above 2^63 that is not a power of
+/// two becomes 0.
+pub const fn dma_region_rounded_size(size: u64) -> u64 {
+    if size == 0 {
+        return 0;
+    }
+    let top = 1u64 << (63 - size.leading_zeros());
+    if top == size {
+        size
+    } else {
+        top.wrapping_shl(1)
+    }
+}
+
+/// The r3 of the size and page shift checks for `size` and `page_shift`,
+/// or `None` when they pass.
+///
+/// The checks run in this order:
+/// 1. a size of 0 gets [`DMA_REGION_SIZE_R3`];
+/// 2. a page shift that is not in [`DMA_REGION_PAGE_SHIFTS`] gets
+///    [`DMA_REGION_PAGE_SHIFT_R3`];
+/// 3. a size that is not a multiple of the page gets
+///    [`DMA_REGION_SIZE_R3`];
+/// 4. a rounded size above [`DMA_REGION_SIZE_MAX`] gets
+///    [`DMA_REGION_TOO_LARGE_R3`].
+///
+/// lv1 compares each value at 64 bits.
+pub const fn dma_region_shape_r3(size: u64, page_shift: u64) -> Option<u64> {
+    if size == 0 {
+        return Some(DMA_REGION_SIZE_R3);
+    }
+    let shifts = DMA_REGION_PAGE_SHIFTS;
+    if page_shift != shifts[0]
+        && page_shift != shifts[1]
+        && page_shift != shifts[2]
+        && page_shift != shifts[3]
+    {
+        return Some(DMA_REGION_PAGE_SHIFT_R3);
+    }
+    if !size.is_multiple_of(1u64 << page_shift) {
+        return Some(DMA_REGION_SIZE_R3);
+    }
+    if dma_region_rounded_size(size) > DMA_REGION_SIZE_MAX {
+        return Some(DMA_REGION_TOO_LARGE_R3);
+    }
+    None
+}
+
+/// The DMA region that the console's lv1 gave one call of the GameOS
+/// kernel's boot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameOsDmaRegion {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The bus id of the call.
+    pub bus: u64,
+    /// The device id of the call.
+    pub device: u64,
+    /// The size of the call, in bytes.
+    pub size: u64,
+    /// The page shift of the call.
+    pub page_shift: u64,
+    /// The bus address that lv1 returned in r4.
+    pub address: u64,
+}
+
+/// Each region of a kernel's boot call, by firmware.
+///
+/// The 4.93 row is the network device's 1 MB region of 1 MB pages. The
+/// capture [`DMA_REGION_CAPTURE`] finds it in the device's list, with
+/// the game OS partition at +8 and the address at +48.
+pub const GAME_OS_DMA_REGIONS: &[GameOsDmaRegion] = &[GameOsDmaRegion {
+    firmware: "4.93",
+    bus: 1,
+    device: 0,
+    size: 0x10_0000,
+    page_shift: 20,
+    address: 0xC000_0000,
+}];
+
+/// The bus address that lv1 gave the kernel's boot call for device
+/// `device` of bus `bus` with `size` and `page_shift`, or `None` when no
+/// capture gives that call.
+pub fn game_os_dma_region(
+    firmware: &str,
+    bus: u64,
+    device: u64,
+    size: u64,
+    page_shift: u64,
+) -> Option<u64> {
+    GAME_OS_DMA_REGIONS
+        .iter()
+        .find(|region| {
+            region.firmware == firmware
+                && region.bus == bus
+                && region.device == device
+                && region.size == size
+                && region.page_shift == page_shift
+        })
+        .map(|region| region.address)
+}
+
+/// The console capture of the DMA regions that lv1 holds for the network
+/// device.
+///
+/// The path is relative to the workspace root. Its README gives the
+/// method and the analysis.
+pub const DMA_REGION_CAPTURE: &str = "tests/micro/lv1_device_dma_region";
+
 #[cfg(test)]
 #[path = "tests/device_bus_open_tests.rs"]
 mod tests;
@@ -224,3 +537,11 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/device_bus_open_device_1_tests.rs"]
 mod device_1_tests;
+
+#[cfg(test)]
+#[path = "tests/device_bus_dma_region_tests.rs"]
+mod dma_region_tests;
+
+#[cfg(test)]
+#[path = "tests/device_bus_dma_region_console_tests.rs"]
+mod dma_region_console_tests;

@@ -74,8 +74,11 @@ fn a_second_open_of_one_device_leaves_the_state_and_term() {
 
 #[test]
 fn the_group_surface_is_on_its_own_lane_source() {
-    assert_eq!(GROUP.hashed_surfaces.len(), 1);
-    let surface = GROUP.hashed_surfaces[0];
-    assert_eq!(surface.source, Some(OPEN_DEVICE_SOURCE));
+    let surfaces: Vec<_> = GROUP
+        .hashed_surfaces
+        .iter()
+        .filter(|surface| surface.source == Some(OPEN_DEVICE_SOURCE))
+        .collect();
+    assert_eq!(surfaces.len(), 1);
     assert_eq!(OPEN_DEVICE_SOURCE, 176);
 }
