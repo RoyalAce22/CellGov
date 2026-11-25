@@ -6,10 +6,11 @@
 //! resolution, TLS and kernel-context setup, the `module_start` pass,
 //! and the two step loops with their fault classifiers. [`compose`]
 //! resolves the store's firmware and title selections into the guest
-//! tree a boot runs against. The crate writes to no console and ends no
-//! process: every refusal is a typed error, [`BootError`] for the boot
-//! itself, and every line of narration goes to a caller-supplied
-//! [`BootSink`].
+//! tree a boot runs against. [`kernel`] maps the selected firmware's
+//! LV2 kernel at its link address. The crate writes to no console and
+//! ends no process: every refusal is a typed error, [`BootError`] for
+//! the boot itself, and every line of narration goes to a
+//! caller-supplied [`BootSink`].
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
@@ -27,6 +28,7 @@ mod stack_walk;
 pub mod classifier_context;
 pub mod compose;
 pub mod diag;
+pub mod kernel;
 pub mod manifest;
 pub mod observation;
 pub mod prepare;

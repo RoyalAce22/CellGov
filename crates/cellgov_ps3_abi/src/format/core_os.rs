@@ -89,3 +89,10 @@ const _: () = assert!(CORE_OS_ENTRY_NAME_FIELD + CORE_OS_ENTRY_NAME_SIZE == CORE
 /// Every generation read so far carries it under this name, as an
 /// SCE-wrapped SELF.
 pub const LV2_KERNEL_SELF: &str = "lv2_kernel.self";
+
+/// The link address of the LV2 kernel's first PT_LOAD segment.
+///
+/// The decrypted kernels of firmware 1.50, 1.94, 3.70 and 4.93 all
+/// link here. Each enters 0x100 above this address, and none has a
+/// segment below it.
+pub const LV2_KERNEL_LINK_BASE: u64 = 0x8000_0000_0000_0000;

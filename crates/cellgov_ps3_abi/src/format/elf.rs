@@ -185,6 +185,9 @@ pub const SHF_EXECINSTR: u64 = 0x4;
 /// ELF64 section-header-entry size (`e_shentsize`).
 pub const ELF64_SHENT_SIZE: usize = 64;
 
+/// Byte offset of `e_entry` inside the ELF64 header.
+pub const ELF64_E_ENTRY: usize = 24;
+
 /// Byte offset of `e_shoff` inside the ELF64 header.
 pub const ELF64_E_SHOFF: usize = 40;
 
@@ -224,6 +227,7 @@ pub const SHT_STRTAB: u32 = 3;
 // bounds check on the container size (`elf_data.len() >=
 // ELF_HEADER_SIZE` or `shentsize >= ELF64_SHENT_SIZE`) covers every
 // per-field read below.
+const _: () = assert!(ELF64_E_ENTRY + 8 <= ELF_HEADER_SIZE);
 const _: () = assert!(ELF64_E_SHOFF + 8 <= ELF_HEADER_SIZE);
 const _: () = assert!(ELF64_E_SHENTSIZE + 2 <= ELF_HEADER_SIZE);
 const _: () = assert!(ELF64_E_SHNUM + 2 <= ELF_HEADER_SIZE);
