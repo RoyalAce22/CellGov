@@ -5,7 +5,7 @@ use cellgov_mem::scheme::{HashedSurface, Stamp};
 
 use super::bitmap::{self, IrqStateBitmapRegistration, IrqStateBitmapState};
 use super::event_port::{self, EventReceivePort, EventReceivePortState};
-use super::irq_plug;
+use super::{irq_plug, mask};
 use crate::group::state::StateChange;
 use crate::group::table::Group;
 
@@ -16,6 +16,7 @@ pub(crate) const GROUP: Group = Group {
         bitmap::HYPERCALLS,
         event_port::HYPERCALLS,
         irq_plug::HYPERCALLS,
+        mask::HYPERCALLS,
     ],
     lanes: &[81..=82, 144..=159],
     hashed_surfaces: &[

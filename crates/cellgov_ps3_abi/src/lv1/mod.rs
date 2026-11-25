@@ -10,7 +10,8 @@
 //! Each other module holds the facts of one hypercall group:
 //! - memory and page table: [`memory`], [`address_space`],
 //!   [`page_table`];
-//! - interrupt delivery: [`interrupt`], [`event_port`], [`irq_plug`];
+//! - interrupt delivery: [`interrupt`], [`interrupt_mask`],
+//!   [`event_port`], [`irq_plug`];
 //! - partition, console and time: [`partition`], [`ppe`],
 //!   [`repository`], [`console`];
 //! - device bus: [`device_bus`];
@@ -32,6 +33,7 @@ pub mod dispatch;
 pub mod event_port;
 pub mod gpu;
 pub mod interrupt;
+pub mod interrupt_mask;
 pub mod irq_plug;
 pub mod memory;
 pub mod network;

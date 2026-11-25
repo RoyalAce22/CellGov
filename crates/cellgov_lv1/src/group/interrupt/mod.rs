@@ -1,9 +1,10 @@
-//! The interrupt delivery hypercalls: the interrupt state bitmaps, the
-//! event receive ports and the plugs that connect them.
+//! The interrupt delivery hypercalls: the interrupt state bitmaps and
+//! their masks, the event receive ports and the plugs that connect them.
 
 pub(crate) mod bitmap;
 pub(crate) mod event_port;
 pub(crate) mod irq_plug;
+pub(crate) mod mask;
 mod registration;
 
 pub use registration::{InterruptChange, InterruptGroupState};

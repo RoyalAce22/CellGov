@@ -32,3 +32,13 @@ pub const CONNECT_IRQ_PLUG_EXT: u64 = 12;
 /// the output the outlet. The lv1 handler [OFW-4.93 lv1 a:0x2EF424]
 /// writes the output in this form; see [`crate::lv1::event_port`].
 pub const CONSTRUCT_EVENT_RECEIVE_PORT: u64 = 18;
+
+/// `did_update_interrupt_mask`: two inputs and no output.
+/// - r3 is the logical PPE id.
+/// - r4 is the hardware thread whose interrupt mask changed.
+///
+/// Linux `arch/powerpc/platforms/ps3/interrupt.c`, `ps3_chip_mask`, makes
+/// the call in this form after it changes the mask of its bitmap. The lv1
+/// handler [OFW-4.93 lv1 a:0x2E9354] reads the inputs in this form; see
+/// [`crate::lv1::interrupt_mask`].
+pub const DID_UPDATE_INTERRUPT_MASK: u64 = 31;
