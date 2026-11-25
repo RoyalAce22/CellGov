@@ -15,10 +15,12 @@
 //! - an entry of a relative jump table: a 32-bit offset from a named
 //!   address, or from the word after a `bcctr`.
 //!
-//! A straight-line path from a function's first word starts with r2 set
-//! to the TOC that the function's descriptor gives. The bound does not
-//! hold an address that the code computes in another way, such as from
-//! a value it loads at run time.
+//! On each word of a function that a descriptor names, and on each word
+//! of a routine with no descriptor that a direct call from the function
+//! reaches, r2 holds the TOC that the descriptor gives. The bound gives
+//! no TOC to a word that functions with two different TOCs reach. The
+//! bound does not hold an address that the code computes in another
+//! way, such as from a value it loads at run time.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -27,7 +29,7 @@ use cellgov_ps3_abi::hw::ppu_interrupt::INTERRUPT_VECTOR_REAL_ADDRESSES;
 use cellgov_ps3_abi::hw::ppu_mmu::REAL_MODE_IGNORED_EA;
 
 use crate::caller_census::{written_gprs, CallerScanError};
-use crate::hypercall_cfg::{Code, CodeSegment};
+use crate::hypercall_cfg::{branch_target, Code, CodeSegment};
 use crate::instruction::PpuInstruction;
 use crate::local_cfg::falls_through;
 
@@ -94,32 +96,268 @@ impl FileSegment<'_> {
 ///
 /// A descriptor counts only when its environment is zero, as each LV2
 /// descriptor's is. A word that two descriptors give different TOCs
-/// gets no TOC.
+/// gets [`FunctionToc::Disputed`].
 ///
 /// [OFW-4.93 lv2_kernel a:0x80000000002765e4-0x8000000000276600] A call through a descriptor loads LR from its first doubleword and r2 from its second.
-fn function_tocs(files: &[FileSegment<'_>], code: &Code) -> BTreeMap<u64, u64> {
-    let mut tocs: BTreeMap<u64, Option<u64>> = BTreeMap::new();
+fn function_tocs(files: &[FileSegment<'_>], code: &Code) -> BTreeMap<u64, FunctionToc> {
+    let mut tocs: BTreeMap<u64, FunctionToc> = BTreeMap::new();
     for [entry, toc, environment] in files.iter().flat_map(FileSegment::descriptors) {
         if environment != 0 || !code.holds(entry) {
             continue;
         }
-        tocs.entry(entry)
-            .and_modify(|known| {
-                if *known != Some(toc) {
-                    *known = None;
-                }
-            })
-            .or_insert(Some(toc));
+        let known = tocs.entry(entry).or_insert(FunctionToc::Outside);
+        *known = known.join(FunctionToc::Toc(toc));
     }
-    tocs.into_iter()
-        .filter_map(|(entry, toc)| Some((entry, toc?)))
-        .collect()
+    tocs
+}
+
+/// The TOC that r2 holds on one word, from the functions that reach it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FunctionToc {
+    /// No function that a descriptor names reaches the word.
+    Outside,
+    /// Each function that reaches the word has this TOC.
+    Toc(u64),
+    /// Functions with two different TOCs reach the word.
+    Disputed,
+}
+
+impl FunctionToc {
+    /// The TOC of a word that the functions of `self` and of `other`
+    /// reach.
+    fn join(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Outside, toc) | (toc, Self::Outside) => toc,
+            (Self::Toc(one), Self::Toc(other)) if one == other => self,
+            _ => Self::Disputed,
+        }
+    }
+}
+
+/// The [`FunctionToc`] of each word of the code, in one vector for each
+/// code segment.
+#[derive(Debug)]
+struct WordTocs {
+    segments: Vec<(u64, Vec<FunctionToc>)>,
+}
+
+impl WordTocs {
+    fn new(code: &Code) -> Self {
+        Self {
+            segments: code
+                .segments()
+                .iter()
+                .map(|segment| {
+                    (
+                        segment.vaddr,
+                        vec![FunctionToc::Outside; segment.words.len()],
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    /// The TOC of each word of the code segment at `index`.
+    fn segment(&self, index: usize) -> &[FunctionToc] {
+        &self.segments[index].1
+    }
+
+    /// The TOC that each segment keeps for its word at `address`.
+    fn at(&mut self, address: u64) -> impl Iterator<Item = &mut FunctionToc> + '_ {
+        self.segments.iter_mut().filter_map(move |(vaddr, tocs)| {
+            let offset = address.checked_sub(*vaddr)?;
+            if offset % 4 != 0 {
+                return None;
+            }
+            tocs.get_mut(usize::try_from(offset / 4).ok()?)
+        })
+    }
+
+    /// The TOC of the word at `address`.
+    fn get(&mut self, address: u64) -> FunctionToc {
+        self.at(address)
+            .fold(FunctionToc::Outside, |toc, known| toc.join(*known))
+    }
+
+    /// Joins `toc` into the word at `address`, and returns whether the
+    /// word's TOC changed.
+    fn join(&mut self, address: u64, toc: FunctionToc) -> bool {
+        let mut changed = false;
+        for known in self.at(address) {
+            let joined = known.join(toc);
+            changed |= joined != *known;
+            *known = joined;
+        }
+        changed
+    }
+}
+
+/// The TOC of each word of the code that is in a function that a
+/// descriptor names.
+///
+/// The words of a function are the words that control can reach from
+/// its first word with the steps of [`FunctionSteps`]. The steps do not
+/// enter the first word of another function.
+///
+/// The walk errs wide: a word that gets a TOC in error can only add
+/// words to the bound. An indirect branch reaches each named word, so
+/// the walk goes on as the named words grow.
+struct FunctionWords<'a> {
+    code: &'a Code,
+    /// Each function's first word, with its TOC.
+    functions: &'a BTreeMap<u64, FunctionToc>,
+    tocs: WordTocs,
+    /// The words whose TOC changed and whose steps the walk has not
+    /// taken since.
+    pending: Vec<u64>,
+    /// The join of the TOCs of the indirect branches that the walk
+    /// reached.
+    indirect: FunctionToc,
+    /// The named words that already have [`Self::indirect`].
+    carried: BTreeSet<u64>,
+}
+
+impl<'a> FunctionWords<'a> {
+    fn new(code: &'a Code, functions: &'a BTreeMap<u64, FunctionToc>) -> Self {
+        let mut tocs = WordTocs::new(code);
+        for (&first, &toc) in functions {
+            tocs.join(first, toc);
+        }
+        Self {
+            code,
+            functions,
+            tocs,
+            pending: functions.keys().copied().collect(),
+            indirect: FunctionToc::Outside,
+            carried: BTreeSet::new(),
+        }
+    }
+
+    /// Walks the steps from each word whose TOC changed, with an
+    /// indirect branch that reaches each word of `named`.
+    fn grow(&mut self, named: &BTreeSet<u64>) {
+        self.carry(named);
+        while let Some(at) = self.pending.pop() {
+            let toc = self.tocs.get(at);
+            let code = self.code;
+            for raw in code.words_at(at) {
+                let steps = FunctionSteps::of(at, raw);
+                if steps.next {
+                    if let Some(next) = at.checked_add(4) {
+                        self.reach(next, toc);
+                    }
+                }
+                if let Some(target) = steps.target {
+                    self.reach(target, toc);
+                }
+                if steps.indirect && self.indirect.join(toc) != self.indirect {
+                    self.indirect = self.indirect.join(toc);
+                    self.carried.clear();
+                    self.carry(named);
+                }
+            }
+        }
+    }
+
+    /// Gives [`Self::indirect`] to each word of `named` that does not
+    /// have it yet.
+    fn carry(&mut self, named: &BTreeSet<u64>) {
+        if self.indirect == FunctionToc::Outside {
+            return;
+        }
+        for &word in named {
+            if self.carried.insert(word) {
+                self.reach(word, self.indirect);
+            }
+        }
+    }
+
+    /// Joins `toc` into the word at `address`, unless the word is the
+    /// first word of a function.
+    fn reach(&mut self, address: u64, toc: FunctionToc) {
+        if !self.functions.contains_key(&address) && self.tocs.join(address, toc) {
+            self.pending.push(address);
+        }
+    }
+}
+
+/// The steps that control can take from one word with r2 unchanged.
+///
+/// A direct branch that links steps to its target and to the next word,
+/// where the call returns. The walk does not enter a target that is the
+/// first word of a function, so only a routine with no descriptor gets
+/// the TOC of its caller.
+///
+/// [PPC-Book1 p:24 s:2.4] The registers that a branch can alter are CTR and LR, so r2 at the target of a call is r2 at the call.
+#[derive(Debug, PartialEq, Eq)]
+struct FunctionSteps {
+    /// Control can go to the next word.
+    next: bool,
+    /// The target of a direct branch.
+    target: Option<u64>,
+    /// The word is an indirect branch that does not link.
+    indirect: bool,
+}
+
+impl FunctionSteps {
+    /// The steps from the word `raw` at `address`.
+    ///
+    /// A word that does not decode can cause an exception that a handler
+    /// emulates, so control can go to the next word.
+    fn of(address: u64, raw: u32) -> Self {
+        let Ok(decoded) = crate::decode::decode(raw) else {
+            return Self::to_next(true);
+        };
+        let direct = |displacement: i64, aa: bool| Some(branch_target(address, displacement, aa));
+        match decoded {
+            PpuInstruction::B { offset, aa, link } => Self {
+                next: link,
+                target: direct(i64::from(offset), aa),
+                indirect: false,
+            },
+            PpuInstruction::Bc {
+                bo,
+                offset,
+                aa,
+                link,
+                ..
+            } => Self {
+                next: falls_through(bo, link),
+                target: direct(i64::from(offset), aa),
+                indirect: false,
+            },
+            PpuInstruction::Bclr { bo, link, .. } | PpuInstruction::Bcctr { bo, link, .. } => {
+                Self {
+                    next: falls_through(bo, link),
+                    target: None,
+                    indirect: !link,
+                }
+            }
+            _ => Self::to_next(!never_falls_through(&decoded)),
+        }
+    }
+
+    /// The steps of a word that is not a branch.
+    fn to_next(next: bool) -> Self {
+        Self {
+            next,
+            target: None,
+            indirect: false,
+        }
+    }
 }
 
 /// The words of `code` that control can enter other than by a direct
 /// branch or a fall-through.
 ///
 /// `files` holds the file bytes of every segment of `elf`.
+///
+/// The scan repeats in rounds until a round names no new word, because
+/// each of these depends on the other:
+/// - an indirect branch in a function reaches each named word;
+/// - r2 on the words of a function names more words.
+///
+/// The named words only grow, so the rounds end.
 ///
 /// # Errors
 ///
@@ -133,20 +371,31 @@ pub(crate) fn indirect_entries(
     let mut bound = Bound {
         code,
         files,
-        entries: real_mode_entries(elf, code),
+        named: BTreeSet::new(),
         tables: BTreeSet::new(),
     };
-    let tocs = function_tocs(files, code);
-    for segment in code.segments() {
-        bound.code_constants(segment, &tocs);
-    }
     for file in files {
         for value in file.doublewords() {
             bound.name(value);
         }
     }
-    bound.jump_tables()?;
-    Ok(bound.entries)
+    bound.tables.extend(tables_after_bcctr(code));
+    let functions = function_tocs(files, code);
+    let mut words = FunctionWords::new(code, &functions);
+    loop {
+        let before = bound.named.len();
+        words.grow(&bound.named);
+        for (index, segment) in code.segments().iter().enumerate() {
+            bound.code_constants(segment, &functions, words.tocs.segment(index));
+        }
+        bound.jump_tables()?;
+        if bound.named.len() == before {
+            break;
+        }
+    }
+    let mut entries = real_mode_entries(elf, code);
+    entries.extend(bound.named);
+    Ok(entries)
 }
 
 /// The words of `code` where control enters in real mode:
@@ -174,13 +423,33 @@ pub(crate) fn real_mode_entries(elf: &[u8], code: &Code) -> BTreeSet<u64> {
     elf_entry.into_iter().chain(vectors).collect()
 }
 
-/// The bound as it grows.
+/// The address of the word after each `bcctr` of `code` that does not
+/// link. A relative jump table can start there.
+///
+/// [PPC-Book1 p:25 s:2.4] `bcctr` branches to the address in CTR.
+fn tables_after_bcctr(code: &Code) -> impl Iterator<Item = u64> + '_ {
+    code.segments()
+        .iter()
+        .flat_map(CodeSegment::addressed)
+        .filter(|&(_, raw)| {
+            matches!(
+                crate::decode::decode(raw),
+                Ok(PpuInstruction::Bcctr { link: false, .. })
+            )
+        })
+        .filter_map(|(address, _)| address.checked_add(4))
+}
+
+/// The bound as it grows, without the real-mode entries.
 struct Bound<'a> {
     code: &'a Code,
     files: &'a [FileSegment<'a>],
-    /// The words that control can enter in another way.
-    entries: BTreeSet<u64>,
-    /// The named addresses that a relative jump table can start at.
+    /// The words of the code that the image names, and the targets of
+    /// the relative jump tables.
+    named: BTreeSet<u64>,
+    /// The addresses that a relative jump table can start at, which the
+    /// next call to [`Self::jump_tables`] reads. A later round can add
+    /// an address again.
     tables: BTreeSet<u64>,
 }
 
@@ -188,7 +457,7 @@ impl Bound<'_> {
     /// Adds `address` to the bound when it is a word of the code.
     fn enter(&mut self, address: u64) {
         if self.code.holds(address) {
-            self.entries.insert(address);
+            self.named.insert(address);
         }
     }
 
@@ -208,12 +477,23 @@ impl Bound<'_> {
 
     /// Names each constant that the code of `segment` builds in a GPR.
     ///
-    /// At each word that `tocs` holds, r2 gets the word's TOC.
-    fn code_constants(&mut self, segment: &CodeSegment, tocs: &BTreeMap<u64, u64>) {
+    /// `tocs` holds the TOC of each word of `segment`, as
+    /// [`FunctionWords`] gives it. r2 gets the TOC at these words:
+    /// - the first word of a function, which `functions` holds;
+    /// - another word of a function, when the path holds no constant in
+    ///   r2.
+    fn code_constants(
+        &mut self,
+        segment: &CodeSegment,
+        functions: &BTreeMap<u64, FunctionToc>,
+        tocs: &[FunctionToc],
+    ) {
         let mut constants = Constants::default();
-        for (address, raw) in segment.addressed() {
-            if let Some(&toc) = tocs.get(&address) {
-                constants.gprs[2] = Some(toc);
+        for ((address, raw), &toc) in segment.addressed().zip(tocs) {
+            if let FunctionToc::Toc(toc) = toc {
+                if constants.gprs[2].is_none() || functions.contains_key(&address) {
+                    constants.gprs[2] = Some(toc);
+                }
             }
             if let Some(value) = constants.step(address, raw) {
                 self.name(value);
@@ -221,30 +501,15 @@ impl Bound<'_> {
         }
     }
 
-    /// Adds each target of each relative jump table.
+    /// Adds each target of each relative jump table that starts at an
+    /// address of [`Self::tables`], and empties it.
     ///
     /// A table starts at a named address or at the word after a `bcctr`
     /// that does not link. Each entry is a 32-bit offset from the
     /// table's start. The run of entries ends at the first offset that:
     /// - reaches no word of the code; or
     /// - reaches back into the run itself.
-    ///
-    /// [PPC-Book1 p:25 s:2.4] `bcctr` branches to the address in CTR.
     fn jump_tables(&mut self) -> Result<(), CallerScanError> {
-        let after_bcctr: Vec<u64> = self
-            .code
-            .segments()
-            .iter()
-            .flat_map(CodeSegment::addressed)
-            .filter(|&(_, raw)| {
-                matches!(
-                    crate::decode::decode(raw),
-                    Ok(PpuInstruction::Bcctr { link: false, .. })
-                )
-            })
-            .filter_map(|(address, _)| address.checked_add(4))
-            .collect();
-        self.tables.extend(after_bcctr);
         let tables = std::mem::take(&mut self.tables);
         for start in tables {
             self.jump_table(start)?;
@@ -271,7 +536,7 @@ impl Bound<'_> {
             if index == JUMP_TABLE_LIMIT {
                 return Err(CallerScanError::JumpTableTooLong { start });
             }
-            self.entries.extend(targets);
+            self.named.extend(targets);
         }
         Ok(())
     }
@@ -445,3 +710,7 @@ mod toc_tests;
 #[cfg(test)]
 #[path = "tests/indirect_entry_path_end_tests.rs"]
 mod path_end_tests;
+
+#[cfg(test)]
+#[path = "tests/indirect_entry_function_toc_tests.rs"]
+mod function_toc_tests;

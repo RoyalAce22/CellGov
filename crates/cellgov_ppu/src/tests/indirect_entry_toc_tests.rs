@@ -5,10 +5,10 @@ use super::*;
 use cellgov_ps3_abi::hw::ppc_isa::PPC_NOP;
 
 /// The address of the data segment that holds the descriptors.
-const DATA: u64 = 0x2_0000;
+pub(super) const DATA: u64 = 0x2_0000;
 
 /// The TOC of the descriptors. No file byte lies at it.
-const TOC: u64 = DATA + 0x8000;
+pub(super) const TOC: u64 = DATA + 0x8000;
 
 /// The `addis` and `addi` immediates that add `target - toc` to the TOC.
 ///
@@ -22,7 +22,7 @@ fn toc_halves(target: u64, toc: u64) -> (i16, i16) {
 
 /// The words `addis r9,r2,..; addi r9,r9,..`, which build `target` in r9
 /// from the TOC `toc`.
-fn build_from_toc(target: u64, toc: u64) -> [u32; 2] {
+pub(super) fn build_from_toc(target: u64, toc: u64) -> [u32; 2] {
     let (high, low) = toc_halves(target, toc);
     [
         word(PpuInstruction::Addis {
@@ -39,7 +39,7 @@ fn build_from_toc(target: u64, toc: u64) -> [u32; 2] {
 }
 
 /// The bytes of one function descriptor.
-fn descriptor_bytes(entry: u64, toc: u64, environment: u64) -> Vec<u8> {
+pub(super) fn descriptor_bytes(entry: u64, toc: u64, environment: u64) -> Vec<u8> {
     [entry, toc, environment]
         .iter()
         .flat_map(|doubleword| doubleword.to_be_bytes())
