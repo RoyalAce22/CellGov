@@ -5,8 +5,9 @@
 //! real address of each region's storage, and the partition's region
 //! counter. These calls read them:
 //! - `allocate_memory` reads the regions and the counter;
-//! - `map_htab` and `construct_logical_spe` read the counter, and the
-//!   regions they create take only a counter value here;
+//! - `map_htab`, `construct_logical_spe` and `map_device_mmio_region`
+//!   read the counter, and the regions they create take only a counter
+//!   value here;
 //! - `write_htab_entry` reads the regions and their storage.
 
 use std::collections::BTreeMap;

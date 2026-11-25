@@ -54,7 +54,19 @@ fn kernel_mapping() -> MmioMapping {
         bus_address: row.bus_address,
         size: row.size,
         lpar_address: row.lpar_address,
+        page_shift: row.page_shift,
     }
+}
+
+/// The region counter value that the kernel's call takes in CellGov's
+/// run of the 4.93 kernel.
+const KERNEL_COUNTER: u64 = 7;
+
+/// A memory state whose next region counter value is [`KERNEL_COUNTER`].
+fn memory() -> MemoryState {
+    let mut memory = MemoryState::default();
+    memory.take_counter(KERNEL_COUNTER - 1);
+    memory
 }
 
 /// The state with `devices` open.
@@ -67,7 +79,7 @@ fn opened(devices: &[OpenDevice]) -> DeviceBusState {
 }
 
 fn map(state: &DeviceBusState, request: &HypercallRequest) -> HypercallDisposition {
-    map_mmio(request, Some("4.93"), state)
+    map_mmio(request, Some("4.93"), state, &memory())
 }
 
 fn answered(r3: u64) -> HypercallDisposition {
@@ -88,6 +100,7 @@ fn the_kernel_call_gets_the_captured_lpar_address_in_r4_and_carries_the_mapping(
     let mapping = kernel_mapping();
     let mut expected = HypercallAnswer::lv1_status(0, [mapping.lpar_address, 0, 0, 0, 0, 0, 0]);
     expected.push_change(DeviceBusChange::MmioRegionMapped(mapping));
+    expected.push_change(MemoryChange::CounterTaken(KERNEL_COUNTER));
     assert_eq!(
         map(&opened(&[DEVICE_1]), &kernel_call()),
         HypercallDisposition::Answered(expected)
@@ -170,23 +183,10 @@ fn each_path_without_a_source_is_a_refusal_that_names_it() {
         map(&open, &device_2),
         refused(&device_2, UNREAD_REGIONS.what)
     );
-    for call in [
-        request(1, 1, 0x381_0000, 0x1_0000, 12),
-        request(1, 1, 0x301_0000, 0x8000, 12),
-        request(1, 1, 0x301_0000, 0x1_0000, 16),
-        request(1, 1, 0x2400, 0x200, 12),
-    ] {
-        assert_eq!(
-            map(&open, &call),
-            refused(&call, OTHER_SHAPE.what),
-            "{:x?}",
-            call.inputs
-        );
-    }
     let call = kernel_call();
     for firmware in [None, Some("4.92"), Some("3.70")] {
         assert_eq!(
-            map_mmio(&call, firmware, &open),
+            map_mmio(&call, firmware, &open, &memory()),
             refused(&call, UNREAD_FIRMWARE.what),
             "{firmware:?}"
         );
@@ -194,15 +194,14 @@ fn each_path_without_a_source_is_a_refusal_that_names_it() {
 }
 
 #[test]
-fn a_second_map_refuses_after_the_size_and_page_shift_checks_and_a_close_clears_the_mapping() {
+fn the_size_and_page_shift_checks_answer_with_a_mapping_held_and_a_close_clears_the_mapping() {
     let mut state = opened(&[DEVICE_1]);
     state.apply(DeviceBusChange::MmioRegionMapped(kernel_mapping()));
     let call = kernel_call();
-    assert_eq!(map(&state, &call), refused(&call, NEXT_MAPPING.what));
     assert_eq!(state.mmio_mappings().count(), 1);
 
-    // The size and page shift checks still answer before the mapping
-    // check, and the mapping of one region leaves the others unmapped.
+    // The size and page shift checks answer with the region mapped, and
+    // the mapping of one region leaves the others unmapped.
     for (mapped_call, r3) in [
         (request(1, 1, 0x301_0000, 0, 12), MMIO_MAP_SIZE_R3),
         (
@@ -212,11 +211,6 @@ fn a_second_map_refuses_after_the_size_and_page_shift_checks_and_a_close_clears_
     ] {
         assert_eq!(map(&state, &mapped_call), answered(r3), "{r3:x}");
     }
-    let other_region = request(1, 1, 0x381_0000, 0x1_0000, 12);
-    assert_eq!(
-        map(&state, &other_region),
-        refused(&other_region, OTHER_SHAPE.what)
-    );
     assert_eq!(state.mmio_mapping(1, 1, 0x381_0000), None);
     assert_eq!(state.mmio_mapping(1, 2, 0x301_0000), None);
     assert_eq!(state.mmio_mapping(2, 1, 0x301_0000), None);

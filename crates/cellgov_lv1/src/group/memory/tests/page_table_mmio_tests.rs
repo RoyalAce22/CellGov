@@ -28,6 +28,7 @@ const MAPPING: MmioMapping = MmioMapping {
     bus_address: 0x301_0000,
     size: 0x1_0000,
     lpar_address: 0x4000_0007_0000,
+    page_shift: 12,
 };
 
 /// The entry index, doubleword 0 and doubleword 1 of the call that
@@ -137,19 +138,6 @@ fn a_64_kb_page_in_the_4_kb_page_mapping_gets_lv1s_page_size_r3() {
     assert_eq!(
         write(KERNEL_D0 | PTE_L, d1, &mapped(MAPPING)),
         lv1_answer(WRITE_HTAB_MMIO_PAGE_SIZE_R3)
-    );
-}
-
-#[test]
-fn a_mapping_that_no_captured_call_made_is_refused_for_its_page_shift() {
-    let other = MmioMapping {
-        lpar_address: 0x4000_0008_0000,
-        ..MAPPING
-    };
-    let d1 = other.lpar_address | (KERNEL_D1 & 0xFFF);
-    assert_eq!(
-        refusal_what(&write(KERNEL_D0, d1, &mapped(other))),
-        Some("a valid entry in an MMIO mapping whose page shift no capture gives")
     );
 }
 

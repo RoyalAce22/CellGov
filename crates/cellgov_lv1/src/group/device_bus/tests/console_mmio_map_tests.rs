@@ -5,7 +5,7 @@
 use super::*;
 use crate::{answered_numbers, Hypervisor};
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::lv1::call::{CLOSE_DEVICE, OPEN_DEVICE};
+use cellgov_ps3_abi::lv1::call::{ALLOCATE_MEMORY, CLOSE_DEVICE, OPEN_DEVICE};
 use cellgov_ps3_abi::lv1::device_bus::MMIO_MAP_CAPTURE;
 use cellgov_time::GuestTicks;
 
@@ -64,6 +64,13 @@ fn the_hypervisor_answers_the_census_call_with_the_captured_lpar_and_the_close_c
         r3_r4(&hv.dispatch(&kernel_request(OPEN_DEVICE, &[1, 1, 0]))),
         Some((0, 0))
     );
+    // Five 64 KB regions take the region counter values 2 to 6, as the
+    // kernel's regions before the call do in CellGov's run.
+    for _ in 0..5 {
+        let allocate = kernel_request(ALLOCATE_MEMORY, &[0x1_0000, 16]);
+        assert!(matches!(r3_r4(&hv.dispatch(&allocate)), Some((0, _))));
+    }
+    assert_eq!(hv.groups().memory().regions().next_counter(), Some(7));
     let opened = hv.sync_term();
 
     // The game OS mapping is the one of partition 2, in the region of
@@ -87,10 +94,10 @@ fn the_hypervisor_answers_the_census_call_with_the_captured_lpar_and_the_close_c
             bus_address,
             size,
             lpar_address: lpar,
+            page_shift: 12,
         }]
     );
     assert_ne!(hv.sync_term(), opened);
-    assert_eq!(r3_r4(&hv.dispatch(&call)), None);
 
     assert_eq!(
         r3_r4(&hv.dispatch(&kernel_request(CLOSE_DEVICE, &[1, 1]))),

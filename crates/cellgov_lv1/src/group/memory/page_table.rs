@@ -403,8 +403,10 @@ fn real_page(
     let allocated = storage::region_page(regions.allocated, page.address, page.shift);
     let mmio = mmio_page::mapping_page(firmware, regions.device_bus, page.address, page.shift);
     // Each region of the partition takes its own value of the region
-    // counter, so no two lv1 regions share a page. CellGov gives an MMIO
-    // mapping its captured address and takes no counter value for it.
+    // counter, so no two lv1 regions share a page. The MMIO map handler
+    // takes a counter value for each mapping as lv1's allocator does
+    // [OFW-4.93 lv1 a:0x2CED84-0x2CED94], so a page in two regions is a
+    // break of the model's own state.
     if mmio.is_some() && (in_mapping.is_some() || spe.is_some() || allocated.is_some()) {
         return Err(NoRealPage::Refused(
             "a valid entry whose page lies in an MMIO mapping and in another region",
@@ -660,3 +662,11 @@ mod allocated_tests;
 #[cfg(test)]
 #[path = "tests/page_table_mmio_tests.rs"]
 mod mmio_tests;
+
+#[cfg(test)]
+#[path = "tests/page_table_mmio_shift_tests.rs"]
+mod mmio_shift_tests;
+
+#[cfg(test)]
+#[path = "tests/page_table_mmio_bounds_tests.rs"]
+mod mmio_bounds_tests;

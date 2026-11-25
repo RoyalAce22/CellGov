@@ -9,11 +9,9 @@
 //!
 //! [`STORED_MEMORY_LIMIT`]: cellgov_ps3_abi::lv1::page_table::STORED_MEMORY_LIMIT
 
-use cellgov_ps3_abi::lv1::device_bus::{
-    mmio_real_address, GAME_OS_MMIO_MAPPINGS, WRITE_HTAB_MMIO_PAGE_SIZE_R3,
-};
+use cellgov_ps3_abi::lv1::device_bus::{mmio_real_address, WRITE_HTAB_MMIO_PAGE_SIZE_R3};
 
-use crate::group::device_bus::{DeviceBusState, MmioMapping};
+use crate::group::device_bus::DeviceBusState;
 
 /// The answer of `write_htab_entry` for a valid entry whose page lies in
 /// an MMIO mapping.
@@ -41,12 +39,7 @@ pub(crate) fn mapping_page(
     let mapping = device_bus
         .mmio_mappings()
         .find(|m| address >= m.lpar_address && address - m.lpar_address < m.size)?;
-    let Some(page_shift) = page_shift(firmware, &mapping) else {
-        return Some(MmioPage::Refused(
-            "a valid entry in an MMIO mapping whose page shift no capture gives",
-        ));
-    };
-    if u64::from(shift) > page_shift {
+    if u64::from(shift) > mapping.page_shift {
         return Some(MmioPage::Lv1(WRITE_HTAB_MMIO_PAGE_SIZE_R3));
     }
     let base = mmio_real_address(firmware, mapping.bus, mapping.device, mapping.bus_address);
@@ -56,22 +49,4 @@ pub(crate) fn mapping_page(
             "a valid entry in an MMIO mapping whose real address no lv1 image read gives",
         ),
     })
-}
-
-/// The page shift of the call that made `mapping`.
-///
-/// `map_device_mmio_region` makes a mapping only for a call that a row of
-/// [`GAME_OS_MMIO_MAPPINGS`] records, so the row gives the shift.
-fn page_shift(firmware: &str, mapping: &MmioMapping) -> Option<u64> {
-    GAME_OS_MMIO_MAPPINGS
-        .iter()
-        .find(|row| {
-            row.firmware == firmware
-                && row.bus == mapping.bus
-                && row.device == mapping.device
-                && row.bus_address == mapping.bus_address
-                && row.size == mapping.size
-                && row.lpar_address == mapping.lpar_address
-        })
-        .map(|row| row.page_shift)
 }

@@ -4,21 +4,25 @@
 //! The handler answers the call for devices 0, 1 and 2 of bus 1, as far
 //! as a source gives lv1's path; see
 //! [`cellgov_ps3_abi::lv1::device_bus`]. The state holds each mapping
-//! that lv1 made for the partition.
+//! that lv1 made for the partition. Each mapping takes a value of the
+//! partition's region counter, which the memory group keeps.
 
 use cellgov_mem::lanes::{LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::call::MAP_DEVICE_MMIO_REGION;
 use cellgov_ps3_abi::lv1::device_bus::{
-    game_os_mmio_mapping, mmio_map_handler, mmio_region, mmio_regions_read, open_device_path_read,
-    MMIO_MAP_BUS_RANGE_R3, MMIO_MAP_DEVICE_0_R3, MMIO_MAP_NOT_OPEN_R3, MMIO_MAP_NO_BUS_R3,
-    MMIO_MAP_NO_REGION_R3, MMIO_MAP_PAGE_SHIFTS, MMIO_MAP_PAGE_SHIFT_R3, MMIO_MAP_SIZE_R3,
-    OPEN_DEVICE_BUS_MAX, OPEN_DEVICE_READ_BUS,
+    mmio_map_handler, mmio_region, mmio_regions_read, open_device_path_read, MMIO_MAP_BUS_RANGE_R3,
+    MMIO_MAP_DEVICE_0_R3, MMIO_MAP_NOT_OPEN_R3, MMIO_MAP_NO_BUS_R3, MMIO_MAP_NO_REGION_R3,
+    MMIO_MAP_PAGE_SHIFTS, MMIO_MAP_PAGE_SHIFT_R3, MMIO_MAP_SIZE_R3, OPEN_DEVICE_BUS_MAX,
+    OPEN_DEVICE_READ_BUS,
 };
+use cellgov_ps3_abi::lv1::memory::{game_os_region_counter_at_boot, region_address};
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
 use super::{DeviceBusChange, DeviceBusState, OpenDevice};
 use crate::answer::{HypercallAnswer, HypercallDisposition, UnmodelledError};
 use crate::group::hypercall::Hypercall;
+use crate::group::memory::region::MemoryState;
+use crate::group::memory::MemoryChange;
 use crate::request::HypercallRequest;
 
 /// The hypercalls this module answers.
@@ -26,7 +30,14 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
     number: MAP_DEVICE_MMIO_REGION,
     name: "map_device_mmio_region",
     cost: None,
-    handler: |request, input| map_mmio(request, input.firmware, input.groups.device_bus()),
+    handler: |request, input| {
+        map_mmio(
+            request,
+            input.firmware,
+            input.groups.device_bus(),
+            input.groups.memory().regions(),
+        )
+    },
 }];
 
 /// One mapping that lv1 made in an MMIO region of a device for the
@@ -34,8 +45,10 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
 ///
 /// lv1 keeps the partition, the logical partition address and the length
 /// in its mapping object [OFW-4.93 lv1 a:0x225E78-0x225EB4], and the
-/// address again at +80 [OFW-4.93 lv1 a:0x228DD4]. CellGov's hypervisor
-/// runs one partition, so the state keeps no partition.
+/// address again at +80 [OFW-4.93 lv1 a:0x228DD4]. The memory region that
+/// lv1 makes for the address keeps the call's page shift
+/// [OFW-4.93 lv1 a:0x229E84]. CellGov's hypervisor runs one partition, so
+/// the state keeps no partition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MmioMapping {
     /// The bus id, from r3.
@@ -48,10 +61,13 @@ pub struct MmioMapping {
     pub size: u64,
     /// The logical partition address that the answer gave in r4.
     pub lpar_address: u64,
+    /// The page shift, from r7.
+    pub page_shift: u64,
 }
 
 /// Fields 1 to 5: the bus id, the device id, the bus address, the length
-/// and the logical partition address.
+/// and the logical partition address. The page shift hashes under a lane
+/// source of its own.
 impl LaneValue for MmioMapping {
     fn lanes(&self, lanes: &mut ObjectLanes) {
         lanes.lane(1, 0, self.bus);
@@ -83,16 +99,14 @@ const UNREAD_REGIONS: UnmodelledError = UnmodelledError::new(
     "a map_device_mmio_region for an open device of bus 1 whose MMIO regions no capture reads",
 );
 
-/// A call after the partition holds a mapping of the region.
-const NEXT_MAPPING: UnmodelledError = UnmodelledError::new(
-    "a map_device_mmio_region of a region that the partition already maps, whose logical \
-     partition address depends on lv1's allocator state",
+/// The call at a firmware whose region counter no source gives.
+const NO_COUNTER: UnmodelledError = UnmodelledError::new(
+    "a map_device_mmio_region at a firmware whose region counter no source gives",
 );
 
-/// A call whose shape no console capture gives.
-const OTHER_SHAPE: UnmodelledError = UnmodelledError::new(
-    "a map_device_mmio_region whose region, size and page shift no console capture gives, whose \
-     logical partition address depends on lv1's allocator state",
+/// The call when the region encoding cannot hold the address.
+const NO_ENCODING: UnmodelledError = UnmodelledError::new(
+    "a map_device_mmio_region whose logical partition address the region encoding cannot hold",
 );
 
 /// lv1's own r3 with r4 to r10 cleared.
@@ -106,31 +120,35 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// lv1's checks gets lv1's own r3 and r4 to r10 cleared. See
 /// [`cellgov_ps3_abi::lv1::device_bus`] for the checks and their order.
 /// A call that passes them gets 0 in r3, the logical partition address
-/// in r4 and r5 to r10 cleared, and the answer carries the mapping.
+/// in r4 and r5 to r10 cleared. The answer carries the mapping and the
+/// counter value that it took.
 ///
-/// lv1 takes the logical partition address from an allocator whose state
-/// CellGov does not model. The answer gives the captured address to the
-/// partition's first mapping of the region, for the captured size and
-/// page shift.
+/// The address is the region of the call's size for the next value of
+/// the partition's region counter in `memory`. Before the first region,
+/// that value is the firmware's boot value.
 ///
 /// The model makes these assumptions:
-/// - The console's lv1 made the captured mapping for the kernel's first
-///   call, and the kernel did not unmap and map the region again.
-/// - The address function's checks of lv1's own state pass for that
-///   first call, as the captured mapping shows.
-/// - lv1's allocation of its 96-byte mapping object succeeds.
+/// - The address function's checks of the partition pass, as both
+///   captured mappings show.
+/// - The allocator's first address for the counter value is free, so no
+///   retry takes a further value. Both captured mappings took the next
+///   value.
+/// - lv1's allocations of its 176-byte region object and its 96-byte
+///   mapping object succeed.
+/// - A close that frees a mapping's address leaves the counter as it is.
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
 /// - r3 is bus 2, 3 or 4;
 /// - r4 names a device of bus 1 above device 2;
 /// - the device is open, and no capture reads its regions;
-/// - the partition already maps the region;
-/// - no console capture gives the call's shape.
+/// - no source gives the region counter for `firmware`;
+/// - the region encoding cannot hold the address.
 pub(crate) fn map_mmio(
     request: &HypercallRequest,
     firmware: Option<&str>,
     state: &DeviceBusState,
+    memory: &MemoryState,
 ) -> HypercallDisposition {
     let Some(firmware) = firmware.filter(|fw| mmio_map_handler(fw).is_some()) else {
         return UNREAD_FIRMWARE.refusal(request);
@@ -172,22 +190,29 @@ pub(crate) fn map_mmio(
     if !MMIO_MAP_PAGE_SHIFTS.contains(&page_shift) {
         return lv1_answer(MMIO_MAP_PAGE_SHIFT_R3);
     }
-    if state.mmio_mapping(bus, device, bus_address).is_some() {
-        return NEXT_MAPPING.refusal(request);
+    if size & ((1 << page_shift) - 1) != 0 {
+        return lv1_answer(MMIO_MAP_SIZE_R3);
     }
-    let Some(row) = game_os_mmio_mapping(firmware, bus, device, bus_address, size, page_shift)
+    let Some(counter) = memory
+        .next_counter()
+        .or_else(|| game_os_region_counter_at_boot(firmware))
     else {
-        return OTHER_SHAPE.refusal(request);
+        return NO_COUNTER.refusal(request);
+    };
+    let Some(lpar_address) = region_address(size, counter) else {
+        return NO_ENCODING.refusal(request);
     };
     let mapping = MmioMapping {
         bus,
         device,
         bus_address,
         size,
-        lpar_address: row.lpar_address,
+        lpar_address,
+        page_shift,
     };
-    let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), [row.lpar_address]);
+    let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), [lpar_address]);
     answer.push_change(DeviceBusChange::MmioRegionMapped(mapping));
+    answer.push_change(MemoryChange::CounterTaken(counter));
     HypercallDisposition::Answered(answer)
 }
 
@@ -198,3 +223,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/console_mmio_map_tests.rs"]
 mod console_tests;
+
+#[cfg(test)]
+#[path = "tests/mmio_map_counter_tests.rs"]
+mod counter_tests;

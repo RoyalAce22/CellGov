@@ -8,6 +8,7 @@ fn mapping(bus_address: u64, lpar_address: u64) -> MmioMapping {
         bus_address,
         size: 0x1_0000,
         lpar_address,
+        page_shift: 0,
     }
 }
 
@@ -37,6 +38,8 @@ fn mmio_mapping_sync_term_lane_vector_golden() {
         lane(1, 3, 0x381_0000),
         lane(1, 4, 0x1_0000),
         lane(1, 5, 0x4000_0008_0000),
+        contribution(LaneIndex::new(184, 0, 0, 0), 1),
+        contribution(LaneIndex::new(184, 1, 0, 0), 1),
     ]
     .into_iter()
     .fold(0u128, u128::wrapping_add);

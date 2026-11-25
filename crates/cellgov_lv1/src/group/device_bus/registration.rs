@@ -66,6 +66,11 @@ pub(crate) const GROUP: Group = Group {
             source: Some(MMIO_MAPPING_SOURCE),
             stamp: Stamp::Version(34),
         },
+        HashedSurface {
+            name: "the page shift of each MMIO mapping",
+            source: Some(MMIO_PAGE_SHIFT_SOURCE),
+            stamp: Stamp::Version(35),
+        },
     ],
 };
 
@@ -101,6 +106,10 @@ pub(crate) const STORAGE_DEVICE_PORT_SOURCE: u8 = 182;
 /// The lane source of the MMIO mappings: one object for each mapping,
 /// keyed by its index in bus, device and bus address order.
 pub(crate) const MMIO_MAPPING_SOURCE: u8 = 183;
+
+/// The lane source of the page shifts of the MMIO mappings: one object
+/// for each mapping, with the key of [`MMIO_MAPPING_SOURCE`].
+pub(crate) const MMIO_PAGE_SHIFT_SOURCE: u8 = 184;
 
 /// The event receive port that lv1 connected to the partition's slot of
 /// one storage device.
@@ -152,8 +161,9 @@ impl DeviceBusState {
         self.mmio_mappings.iter().copied()
     }
 
-    /// The partition's MMIO mapping of the region at `bus_address` of
-    /// device `device` of bus `bus`, if any.
+    /// The partition's first MMIO mapping of the region at `bus_address`
+    /// of device `device` of bus `bus`, in length and logical partition
+    /// address order, if any. A region can hold more than one mapping.
     pub fn mmio_mapping(&self, bus: u64, device: u64, bus_address: u64) -> Option<MmioMapping> {
         self.mmio_mappings().find(|mapping| {
             mapping.bus == bus && mapping.device == device && mapping.bus_address == bus_address
@@ -305,6 +315,11 @@ impl DeviceBusState {
             .zip(self.mmio_mappings())
             .fold(storage_device_ports, |sum, (index, mapping)| {
                 sum.wrapping_add(lanes::value_term(MMIO_MAPPING_SOURCE, index, &mapping))
+                    .wrapping_add(lanes::value_term(
+                        MMIO_PAGE_SHIFT_SOURCE,
+                        index,
+                        &mapping.page_shift,
+                    ))
             })
     }
 }
@@ -373,3 +388,7 @@ mod storage_device_port_hash_tests;
 #[cfg(test)]
 #[path = "tests/mmio_map_hash_tests.rs"]
 mod mmio_map_hash_tests;
+
+#[cfg(test)]
+#[path = "tests/mmio_page_shift_hash_tests.rs"]
+mod mmio_page_shift_hash_tests;

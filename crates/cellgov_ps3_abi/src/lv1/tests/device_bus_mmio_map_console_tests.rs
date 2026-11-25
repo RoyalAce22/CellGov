@@ -109,7 +109,7 @@ fn the_device_slots_hold_the_regions_of_lv1s_init_and_no_other() {
 fn the_kernel_call_mapping_is_the_one_game_os_mapping_of_its_region() {
     let rows = rows();
     let row = GAME_OS_MMIO_MAPPINGS[0];
-    assert_eq!(GAME_OS_MMIO_MAPPINGS.len(), 1);
+    assert_eq!(GAME_OS_MMIO_MAPPINGS.len(), 2);
     let region =
         mmio_region(row.firmware, row.bus, row.device, row.bus_address).expect("the call's region");
     let object = at(&rows, "device_slot_1", DEVICE_1 + 24 + 8 * region.slot);

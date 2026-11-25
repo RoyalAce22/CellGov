@@ -120,27 +120,3 @@ fn the_regions_are_read_only_for_device_1_of_bus_1_at_4_93() {
     assert!(!mmio_regions_read("4.93", 2, 1));
     assert!(!mmio_regions_read("4.92", 1, 1));
 }
-
-#[test]
-fn the_console_record_answers_only_the_call_of_its_own_shape() {
-    let row = GAME_OS_MMIO_MAPPINGS[0];
-    let found = game_os_mmio_mapping("4.93", 1, 1, 0x301_0000, 0x1_0000, 12);
-    assert_eq!(found, Some(&row));
-    for (bus, device, address, size, shift) in [
-        (2, 1, 0x301_0000, 0x1_0000, 12),
-        (1, 2, 0x301_0000, 0x1_0000, 12),
-        (1, 1, 0x381_0000, 0x1_0000, 12),
-        (1, 1, 0x301_0000, 0x1000, 12),
-        (1, 1, 0x301_0000, 0x1_0000, 16),
-    ] {
-        assert_eq!(
-            game_os_mmio_mapping("4.93", bus, device, address, size, shift),
-            None,
-            "{bus} {device} {address:#x} {size:#x} {shift}"
-        );
-    }
-    assert_eq!(
-        game_os_mmio_mapping("4.92", 1, 1, 0x301_0000, 0x1_0000, 12),
-        None
-    );
-}
