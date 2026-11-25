@@ -1,5 +1,5 @@
 //! Hypercall 91, `read_repository_node`, answered from the compiled-in
-//! node table.
+//! node table and from the nodes of lv1's storage device registrations.
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv1::call::READ_REPOSITORY_NODE;
@@ -9,6 +9,8 @@ use cellgov_ps3_abi::lv1::repository::{
 
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
+use crate::group::storage::device_registration::registered_node;
+use crate::group::storage::StorageState;
 use crate::request::HypercallRequest;
 
 /// The hypercalls this module answers.
@@ -16,7 +18,9 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
     number: READ_REPOSITORY_NODE,
     name: "read_repository_node",
     cost: None,
-    handler: |request, input| read_node(request, input.firmware),
+    handler: |request, input| {
+        read_node_after_registrations(request, input.firmware, input.groups.storage())
+    },
 }];
 
 /// One repository read the kernel made.
@@ -41,6 +45,30 @@ fn key_of(request: &HypercallRequest) -> RepositoryKey {
         n2: request.r(5),
         n3: request.r(6),
         n4: request.r(7),
+    }
+}
+
+/// Answers the node that r3 to r7 name, after the storage device
+/// registrations of `storage`.
+///
+/// A key that [`read_node`] refuses as unsourced gets the two values of
+/// the node that a registration wrote. Each other read gets the answer
+/// of [`read_node`].
+pub(crate) fn read_node_after_registrations(
+    request: &HypercallRequest,
+    firmware: Option<&str>,
+    storage: &StorageState,
+) -> HypercallDisposition {
+    let disposition = read_node(request, firmware);
+    if !matches!(
+        disposition,
+        HypercallDisposition::Refused(HypercallRefusal::RepositoryNode { .. })
+    ) {
+        return disposition;
+    }
+    match registered_node(storage, firmware, &key_of(request)) {
+        Some((v1, v2)) => HypercallDisposition::Answered(HypercallAnswer::success([v1, v2])),
+        None => disposition,
     }
 }
 
@@ -102,8 +130,8 @@ fn unsourced(key: RepositoryKey, request: &HypercallRequest) -> HypercallDisposi
     })
 }
 
-/// The record of the read `request` made, which `read_node` answered
-/// with `disposition`.
+/// The record of the read `request` made, which
+/// [`read_node_after_registrations`] answered with `disposition`.
 pub(crate) fn read_record(
     request: &HypercallRequest,
     disposition: &HypercallDisposition,
@@ -171,3 +199,11 @@ mod console_bus_device_tests;
 #[cfg(test)]
 #[path = "tests/console_repository_device_1_tests.rs"]
 mod console_device_1_tests;
+
+#[cfg(test)]
+#[path = "tests/repository_registration_tests.rs"]
+mod registration_tests;
+
+#[cfg(test)]
+#[path = "tests/console_repository_registration_tests.rs"]
+mod console_registration_tests;

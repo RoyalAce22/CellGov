@@ -1,7 +1,7 @@
 //! The storage group's registration, its state and the changes an
 //! answer carries to it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use cellgov_mem::lanes::{self, LaneValue, ObjectLanes};
 use cellgov_mem::scheme::{HashedSurface, Stamp};
@@ -26,6 +26,11 @@ pub(crate) const GROUP: Group = Group {
             source: Some(NOTIFY_EVENT_MASK_SOURCE),
             stamp: Stamp::Version(33),
         },
+        HashedSurface {
+            name: "the storage devices that lv1 registered for the partition",
+            source: Some(REGISTERED_DEVICE_SOURCE),
+            stamp: Stamp::Pending,
+        },
     ],
 };
 
@@ -36,6 +41,10 @@ pub(crate) const NOTIFY_REQUEST_SOURCE: u8 = 208;
 /// The lane source of the event mask: object 0 while lv1 holds a mask
 /// for the partition.
 pub(crate) const NOTIFY_EVENT_MASK_SOURCE: u8 = 209;
+
+/// The lane source of the registered storage devices: one object for
+/// each device, keyed by its id.
+pub(crate) const REGISTERED_DEVICE_SOURCE: u8 = 210;
 
 /// A notification request that lv1 holds for the partition on the
 /// storage bus.
@@ -62,11 +71,14 @@ impl LaneValue for NotifyRequest {
 ///
 /// The state holds these values:
 /// - each notification request that lv1 holds for the partition;
-/// - the event mask that lv1 stored in the partition's storage bus open.
+/// - the event mask that lv1 stored in the partition's storage bus open;
+/// - the id of each storage device that lv1 registered for the
+///   partition.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StorageState {
     requests: BTreeMap<u8, NotifyRequest>,
     event_mask: Option<u64>,
+    registered: BTreeSet<u64>,
 }
 
 impl StorageState {
@@ -79,6 +91,12 @@ impl StorageState {
     /// lv1 stored no mask.
     pub fn notify_event_mask(&self) -> Option<u64> {
         self.event_mask
+    }
+
+    /// The id of each storage device that lv1 registered for the
+    /// partition, ascending.
+    pub fn registered_devices(&self) -> impl Iterator<Item = u64> + '_ {
+        self.registered.iter().copied()
     }
 
     /// The tags of the partition's notification requests, one bit for
@@ -101,12 +119,16 @@ impl StorageState {
             StorageChange::NotifyRequestTaken(tag) => {
                 self.requests.remove(&tag);
             }
+            StorageChange::DeviceRegistered(device) => {
+                self.registered.insert(device);
+            }
         }
     }
 
     /// The sum of the sync-state terms of the group's hashed surfaces.
     ///
-    /// A state with no request and no event mask gives 0.
+    /// A state with no request, no event mask and no registered device
+    /// gives 0.
     pub fn sync_term(&self) -> u128 {
         let requests = self.notify_requests().fold(0u128, |sum, request| {
             sum.wrapping_add(lanes::value_term(
@@ -115,8 +137,11 @@ impl StorageState {
                 &request,
             ))
         });
-        self.event_mask.map_or(requests, |mask| {
+        let masked = self.event_mask.map_or(requests, |mask| {
             requests.wrapping_add(lanes::value_term(NOTIFY_EVENT_MASK_SOURCE, 0, &mask))
+        });
+        self.registered_devices().fold(masked, |sum, device| {
+            sum.wrapping_add(lanes::value_term(REGISTERED_DEVICE_SOURCE, device, &device))
         })
     }
 }
@@ -131,6 +156,9 @@ pub enum StorageChange {
     /// lv1 gave the partition the completed request of this tag, and
     /// freed the tag.
     NotifyRequestTaken(u8),
+    /// lv1 registered the storage device of this id for the partition,
+    /// and wrote the device's repository nodes.
+    DeviceRegistered(u64),
 }
 
 impl From<StorageChange> for StateChange {
@@ -142,3 +170,7 @@ impl From<StorageChange> for StateChange {
 #[cfg(test)]
 #[path = "tests/notify_hash_tests.rs"]
 mod hash_tests;
+
+#[cfg(test)]
+#[path = "tests/registered_device_hash_tests.rs"]
+mod registered_device_hash_tests;
