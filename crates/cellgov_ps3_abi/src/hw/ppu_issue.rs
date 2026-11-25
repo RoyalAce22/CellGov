@@ -110,18 +110,20 @@ pub const PPU_TOUCH_L2_INTERVAL_CYCLES: u64 = 9;
 /// [CBE-Handbook p:137 s:6.1.3.7] a load-miss queue entry takes a new request 7 cycles after the final data beat of its reload comes back from the L2.
 pub const PPU_LOAD_MISS_ENTRY_REUSE_CYCLES: u64 = 7;
 
-/// The touches of one L1 data cache set at which a load of a line that
-/// one of them still brings stops waiting for the set's later reloads.
+/// The touches in one set of the L1 data cache at which a load of a
+/// line that a touch still brings stops waiting for the set's later
+/// reloads.
 ///
 /// [CBE-Handbook p:134 s:6.1.2.2] The data prefetch engine holds 8 `dcbt` instructions.
 ///
 /// The documents do not say what the PPE does with a load of a line that
-/// a touch still brings. The `ppu_issue_touch_queue` capture shows:
-/// - a touch of a load's line and then 1 to 6 touches of other lines in
-///   its set cost the load about what those touches cost it without the
-///   touch of its line;
-/// - with 7 or 8 such touches, or 6 and a second touch of the load's
-///   line, the load waits for its line's touch alone;
+/// a touch still brings. The `ppu_issue_touch_queue` capture times a
+/// load after a touch of its line and then N touches of other lines in
+/// its set. It shows:
+/// - with N from 1 to 6, the load costs about what the N touches cost
+///   it with no touch of its line;
+/// - with N of 7 or 8, or N of 6 and a second touch of the load's line,
+///   the load waits for its line's touch alone;
 /// - touches in other sets do not count, and the spacing of the touches
 ///   does not change the count.
 pub const PPU_L1_SET_TOUCH_LIMIT: usize = 8;

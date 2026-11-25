@@ -1,7 +1,7 @@
 //! CellGov's PPU timing against the `ppu_issue_reload_return` console
 //! capture. Each loop loads four lines B0 to B3 of one L1 set in order,
-//! which makes B0 the set's next victim, and touches a fifth line B4 of
-//! the set in memory, whose reload evicts a line when it returns:
+//! so B0 becomes the set's next victim. A touch of a fifth line B4 of the
+//! set in memory follows, and B4's reload evicts a line when it returns:
 //!
 //! - loops 0 to 6: B4's touch, then 0, 6, 7, 8, 12, 16 or 32 touches of
 //!   memory lines in other sets, then a load of B0, then a wait that lets
@@ -13,7 +13,7 @@
 //! The `console_ppu_issue_touch_turn` tests assert what each touch of
 //! loops 1 to 6 adds to the pass. The tests do not assert the cycles of
 //! loops 0 to 8. A load of B0 right after B4's touch makes the console's
-//! pass about 76 cycles longer (loop 8 against loop 7), and CellGov's
+//! pass about 76 cycles longer (loop 8 against loop 7). It makes CellGov's
 //! pass 1 cycle longer.
 
 use crate::console_ppu_issue_timing::{replay, replay_beside_for, Replay, Seed, Sibling};

@@ -260,9 +260,7 @@ const PAGE_LINES: usize = (1 << SMALL_PAGE_LOG2) / k::PPU_CACHE_LINE_BYTES as us
 /// takes at the miss or at the return. A reload takes its way when it
 /// queues, and the tree then points away from that way. A hit on the
 /// line in that way before the reload returns does not keep the line.
-///
-/// In the `ppu_issue_reload_return` capture, a hit on the line that a
-/// touch reload will evict, before the reload returns, does not make a
+/// In the `ppu_issue_reload_return` capture, such a hit does not make a
 /// later load of the line faster.
 ///
 /// In the `ppu_issue_touch_reload` capture, 8 touches visit the same 8
@@ -272,7 +270,8 @@ const PAGE_LINES: usize = (1 << SMALL_PAGE_LOG2) / k::PPU_CACHE_LINE_BYTES as us
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct L1 {
     tags: Tags<{ k::PPU_L1D_SETS }, { k::PPU_L1D_WAYS }>,
-    /// The reloads that have not written their line, oldest first.
+    /// The queued reloads, oldest first. A reload leaves the table when it
+    /// writes its line.
     ///
     /// [CBE-Handbook p:135 s:6.1] The L1 data cache has an 8-entry load-miss queue that the two threads share.
     ///
@@ -417,9 +416,9 @@ impl L1 {
     /// - a later touch of its set found its line in the L1.
     ///
     /// The `ppu_issue_touch_queue` capture counts touches that miss the
-    /// L1. It does not show whether a touch that hits the L1 counts. In
-    /// the `ppu_issue_touch_reload` capture, 8 touches of the same lines
-    /// on each pass, some of which hit, fit neither answer:
+    /// L1. It does not show whether a touch that hits the L1 counts. The
+    /// `ppu_issue_touch_reload` capture fits neither answer. On each pass
+    /// of it, 8 touches visit the same lines, and some of them hit. In it:
     /// - a touch of the load's line, the 8 touches, and the load wait for
     ///   the later reloads;
     /// - a second touch of the load's line before the load ends the wait.
@@ -445,8 +444,8 @@ impl L1 {
     }
 
     /// Queues at cycle `t` a reload of `line` that writes the line at
-    /// cycle `at`, and that `touches` touches wait for. The copy of its
-    /// real line that another set holds goes at once.
+    /// cycle `at`, and that `touches` touches wait for. The L1 drops at
+    /// once the copy of its real line that another set holds.
     ///
     /// [CBE-Handbook p:138 s:6.1.3.10] The copy at the other congruence class is invalidated, and then the data comes in from the L2.
     ///
@@ -522,7 +521,7 @@ impl L1 {
         }
     }
 
-    /// Drop each reload of real line `real` that has not written it.
+    /// Drop each queued reload of real line `real`.
     fn forget(&mut self, real: u64) {
         while let Some(i) = self.reloads[..self.pending]
             .iter()
@@ -664,7 +663,7 @@ pub(crate) struct Caches {
     ///
     /// A touch that reloads a line holds its L1 set until its trip ends,
     /// plus [`k::PPU_LOAD_MISS_ENTRY_REUSE_CYCLES`]. CellGov takes the
-    /// trip as the cycle the reload's last beat returns. The evidence is
+    /// trip's end as the cycle the reload's last beat returns. The evidence is
     /// the `ppu_issue_touch_set_pressure` capture, in cycles a load:
     /// - 1, 2, 4 and 8 touches of L2-held lines in the load's L1 set add
     ///   49, 96, 190 and 370 to a chase through memory;
@@ -781,9 +780,8 @@ impl Caches {
     ///
     /// The first of these that applies gives the cycle:
     /// - a load of a line that a touch still brings starts no earlier
-    ///   than that touch's request, and no earlier than the last reload
-    ///   queued in its L1 set after the touch's reload writes its line,
-    ///   except in the cases that [`L1::behind`] lists;
+    ///   than that touch's request, and no earlier than the cycle that
+    ///   [`L1::behind`] gives;
     /// - an L1 hit waits for no set;
     /// - an L1 miss, or a load that skips the L1, waits for the reloads
     ///   that its L1 set holds, and then holds the set as a touch does.

@@ -75,7 +75,7 @@ const PROBE_TOUCHES: [u32; 2] = [0x7c00_322c, 0x7c00_31ec];
 /// maps no segment there.
 const PROBE_UNHELD: u64 = 0x100;
 /// The payload word of the marker after the probe's first touch. The
-/// probe writes marker n + 1 after hint n.
+/// probe writes marker n + 1 after touch n.
 const PROBE_TOUCH_MARKERS: usize = 10;
 
 #[test]

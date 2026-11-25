@@ -17,8 +17,8 @@
 //! The tests do not assert loop 1. The console's load waits for the
 //! eight touches and gets no help from the touch of its line. CellGov's
 //! load waits for that touch alone. In the `ppu_issue_touch_queue`
-//! capture, a load after a touch of its line waits for its set's later
-//! touch reloads until the set holds 8 touches that missed the L1. Some
+//! capture, such a load waits for its set's later touch reloads until
+//! the set holds 8 touches that missed the L1. Some
 //! of the eight touches here hit the L1, and that capture does not show
 //! whether a touch that hits counts. Loops 1 and 2 fit neither answer, so
 //! CellGov keeps the wait for the touch alone after such a hit.

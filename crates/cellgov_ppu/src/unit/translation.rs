@@ -111,30 +111,17 @@ fn read_pteg(
 /// interrupt ahead of the page-protection refusal of `t`'s page.
 ///
 /// The rule holds when the page refuses stores and its entry has C = 1.
-/// The page can be read-only, or a page the thread may not access at all.
-/// The page's I bit takes no part. Table 9-39 names one page table entry.
-/// The Handbook does not say which entry decides for an operand that
-/// spans two pages. CellGov assumes the entry of the page that refuses
-/// the store, for these reasons:
-/// - C moves the alignment interrupt across the page-protection
-///   interrupt only, and that interrupt belongs to the refusing page.
-/// - The handbook ties C to the store's table lookup of a page. The
-///   store takes its alignment interrupt before that lookup.
+/// The page can be read-only or have no access, and its I bit takes no
+/// part. The Handbook's Table 9-39 does not say which entry decides for
+/// an operand that spans two pages. CellGov assumes the entry of the page
+/// that refuses the store, because the interrupt that C moves belongs to
+/// that page.
 ///
-/// A cached view ([`push_views`]) and a refill ([`PpuExecutionUnit::refill_for`])
-/// both apply this rule to a read-only page. A hit of the translation
-/// cache thus gives the interrupt that a miss gives. A store that such a
-/// view refuses meets the next page in a probe
-/// ([`PpuExecutionUnit::protected_store`]).
-///
-/// The cache keeps no translation of a page with no access. A store meets
-/// that page in a probe ([`PpuExecutionUnit::refused_access`]) instead.
-///
-/// A page with this rule refuses a store before the store reaches the
-/// next page. So a probe learns the operand's reach first
-/// ([`PpuExecutionUnit::unheld_past_refusal`]). A store that runs into a
-/// caching-inhibited page that the cache does not hold thus takes the
-/// alignment interrupt.
+/// A cached view ([`push_views`]) and a refill
+/// ([`PpuExecutionUnit::refill_for`]) apply the rule alike, so a hit of
+/// the translation cache gives the interrupt that a miss gives. A page
+/// with the rule refuses a store before the store reaches the next page,
+/// so [`PpuExecutionUnit::unheld_past_refusal`] finds the operand's reach.
 ///
 /// [CBE-Handbook p:290 s:9.10] A store's alignment interrupt in caching-inhibited storage follows the page-protection data storage interrupt when C is 0, and precedes it when C is 1.
 /// [CBE-Handbook p:90 s:4.2.6.8] Footnote 4: a misaligned caching-inhibited store takes its alignment interrupt before its table lookup is performed.
@@ -325,22 +312,18 @@ impl PpuExecutionUnit {
     /// the instruction runs again against that page's storage too. The
     /// unit keeps nothing of either run of the instruction.
     ///
-    /// A page with [`store_alignment_first`] refuses a store before the run
-    /// reaches the next page. [`Self::unheld_past_refusal`] then tells
-    /// whether the operand runs into that page. A next page that refuses
-    /// the store too gives its I bit through the page that a load meets
-    /// ([`Self::probe_next`]). When the next page leaves the operand
-    /// cacheable, the refusal stands, and the unit keeps nothing of the
-    /// next page's search.
-    ///
-    /// The protection of that next page does not change the interrupt. The
-    /// first page has C = 1, and its data storage interrupt is the one that
-    /// competes, because it holds the first refused byte.
+    /// When a page with [`store_alignment_first`] refuses a store,
+    /// [`Self::unheld_past_refusal`] tells whether the operand runs into the
+    /// next page. A next page that refuses the store too gives its I bit
+    /// through the page that a load meets ([`Self::probe_next`]). The next
+    /// page's protection does not change the interrupt: the first page has
+    /// C = 1 and holds the first refused byte.
     ///
     /// The cache keeps no translation of the next page. The unit keeps the
     /// R write of that page's search and the groups the search read, as
-    /// [`Self::refill_for`] keeps them. The batch ends ahead of the access
-    /// when a buffered store reaches a byte that the search writes.
+    /// [`Self::refill_for`] keeps them, unless the refusal of `t`'s page
+    /// stands. The batch ends ahead of the access when a buffered store
+    /// reaches a byte that the search writes.
     ///
     /// [PPC-Book3 p:43 s:4.9] The pieces of an operand that crosses a page boundary are separate accesses for R and C.
     /// [PPC-Book3 p:45 s:4.10.1] Figure 30 permits a store only on a read/write entry, so PP 00 and PP 11 both refuse it with key 1.
@@ -432,9 +415,8 @@ impl PpuExecutionUnit {
     /// The first byte that `insn`'s store reaches past the page that
     /// refused it with `verdict`, when no view of `views` holds that byte.
     ///
-    /// The byte counts only when the refusing page takes the alignment
-    /// interrupt of a misaligned caching-inhibited store first
-    /// ([`store_alignment_first`]). That page refuses the store before the
+    /// The byte counts only when the refusing page has
+    /// [`store_alignment_first`]. That page refuses the store before the
     /// run reaches the next page. So the instruction runs again on a copy
     /// of the thread, with each such page writable. The unit keeps nothing
     /// of the run.
@@ -508,18 +490,16 @@ impl PpuExecutionUnit {
     ///
     /// The run is the first instruction of the next batch, which starts
     /// with no cached translation. So the run meets each page of its
-    /// operand through a search:
+    /// operand through a search of the page table that the next batch
+    /// reads ([`Self::next_batch_table`]):
     /// - a page gets the views of the translation [`Self::refill_for`]
     ///   gives it;
-    /// - a page that no storage holds gets zero bytes ([`stand_in`]).
+    /// - a page that no storage holds gets zero bytes ([`stand_in`]);
+    /// - a page past one with [`store_alignment_first`] gets its address
+    ///   from [`Self::unheld_past_refusal`].
     ///
-    /// A page with [`store_alignment_first`] refuses the store before the
-    /// run reaches the next page. The run learns that page from
-    /// [`Self::unheld_past_refusal`].
-    ///
-    /// Each search reads the page table that the next batch reads
-    /// ([`Self::next_batch_table`]). A run that meets a page whose search
-    /// refuses the store takes no alignment interrupt.
+    /// A run that meets a page whose search refuses the store takes no
+    /// alignment interrupt.
     pub(super) fn store_alignment_ahead(&self, insn: &PpuInstruction, mem: &GuestMemory) -> bool {
         let table = self.next_batch_table();
         let mut views = Vec::new();
@@ -559,14 +539,13 @@ impl PpuExecutionUnit {
     /// `table` over them. Returns `None` when the searches refuse the store.
     /// The unit keeps nothing of the searches.
     ///
-    /// A caching-inhibited page that refuses the store also gives the page
-    /// that a load meets, as [`Self::unperformed_refusal`] meets the next
-    /// page of a store that a page with [`store_alignment_first`] refused.
-    /// That page is its load translation, or the page that
-    /// [`Self::no_access_probe_page`] gives. When such a page is the first
-    /// page that refuses the store, the run takes no alignment interrupt,
-    /// because its views do not have [`store_alignment_first`] when its
-    /// entry has C = 0.
+    /// A page whose search refuses the store gives the page that a load
+    /// meets: its load translation, or the page that
+    /// [`Self::no_access_probe_page`] gives. That page counts when it is
+    /// caching-inhibited or has [`store_alignment_first`], as in
+    /// [`Self::unperformed_refusal`]. A caching-inhibited page with C = 0
+    /// that refuses the store first gives no alignment interrupt, because
+    /// its views lack [`store_alignment_first`].
     fn store_translation(
         &self,
         mem: &GuestMemory,
@@ -594,10 +573,9 @@ impl PpuExecutionUnit {
     /// - for a store, [`store_alignment_first`] holds for the page.
     ///
     /// A store thus meets the page as it meets a read-only page with
-    /// C = 1. A load meets the page whatever its C bit is.
-    ///
-    /// The lookup reads the groups with the bytes of `table` over them.
-    /// The unit keeps nothing of it.
+    /// C = 1. A load meets the page whatever its C bit is. The lookup reads
+    /// the groups with the bytes of `table` over them, and the unit keeps
+    /// nothing of it.
     ///
     /// [CBE-Handbook p:290 s:9.10] A fixed-point load's alignment interrupt in caching-inhibited storage precedes the page-protection data storage interrupt, with no condition on C.
     fn no_access_probe_page(
@@ -632,11 +610,11 @@ impl PpuExecutionUnit {
     ///
     /// The access stops at `refused` unless [`Self::no_access_probe_page`]
     /// gives a page. The cache keeps no translation of that page, because
-    /// a load in the batch would read through its views. The instruction
-    /// runs on a copy of the thread against `views` and the page instead,
-    /// as [`Self::unperformed_refusal`] runs it. So a misaligned
-    /// caching-inhibited load or store takes its alignment interrupt
-    /// there.
+    /// a later load in the batch reads through each cached view. The
+    /// instruction runs on a copy of the thread against `views` and the
+    /// page instead, as [`Self::unperformed_refusal`] runs it. So a
+    /// misaligned caching-inhibited load or store takes its alignment
+    /// interrupt there.
     ///
     /// [CBE-Handbook p:290 s:9.10] A store's alignment interrupt in caching-inhibited storage precedes the page-protection data storage interrupt when C is 1.
     /// [CBE-Handbook p:290 s:9.10] A word-aligned double-precision floating-point load that is not doubleword-aligned takes its alignment interrupt in caching-inhibited storage before the page-protection data storage interrupt.

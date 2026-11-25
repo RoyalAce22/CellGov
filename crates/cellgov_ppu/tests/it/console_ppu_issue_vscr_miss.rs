@@ -2,11 +2,13 @@
 //! capture: whether an `mtvscr` that holds an FP or VMX load in the VSU
 //! issue queue also delays the load's cache miss.
 //!
-//! Each loop is a pointer chase through FP or vector registers: the load
-//! reads the node, a store puts the node's first doubleword in a scratch
-//! doubleword at r8, and an `ld` takes it back into r9. The nodes are a
-//! shuffled 8 MB ring, one L2 miss a load, or one line that points to
-//! itself, one L1 hit a load.
+//! Each loop is a pointer chase through FP or vector registers. The load
+//! reads the node, and a store puts the node's first doubleword in a
+//! scratch doubleword at r8. An `ld` then takes it back into r9. The
+//! nodes are one of:
+//!
+//! - a shuffled 8 MB ring, where each load misses the L2;
+//! - one line that points to itself, where each load hits the L1.
 
 use crate::console_ppu_issue_timing::{replay_beside_for, Replay, Seed, Sibling, ONE_LINE};
 use cellgov_ps3_abi::hw::ppu_issue::PPU_CYCLES_PER_TB_TICK;
@@ -93,13 +95,13 @@ const HOLD_GAP: f64 = 8.0;
 /// The largest share of the console's fastest run a ring loop may sit
 /// from it.
 ///
-/// The node loops are not held one by one: CellGov times the FP chase
-/// over the node about 18 cycles an iteration short of the console.
+/// The tests do not hold each node loop to the console: CellGov times the
+/// FP chase over the node about 18 cycles an iteration short of it.
 const TOLERANCE: f64 = 0.05;
 
 /// Checks the hold an `mtvscr` adds to `chase` when each load misses the
-/// L2. `loop0` is the probe's ring loop of `chase` alone, the loop after
-/// it adds the `mtvscr`, and `loop0 + 4` and `loop0 + 5` are the same
+/// L2. `loop0` is the probe's ring loop of `chase` alone, and the loop
+/// after it adds the `mtvscr`. `loop0 + 4` and `loop0 + 5` are the same
 /// pair over the node.
 fn check_miss_hold(chase: &[u32], loop0: usize) {
     let w = console_words();

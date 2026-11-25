@@ -10,6 +10,9 @@ use cellgov_effects::Effect;
 #[cfg(test)]
 #[path = "tests/inhibited_operand_tests.rs"]
 mod inhibited_operand_tests;
+#[cfg(test)]
+#[path = "tests/inhibited_touch_tests.rs"]
+mod inhibited_touch_tests;
 
 /// The batch's region views, on the stack while they fit.
 ///
@@ -58,7 +61,7 @@ impl<'a> RegionTable<'a> {
     }
 
     /// Mark each load and store of `ops` that has a byte in a
-    /// caching-inhibited view.
+    /// caching-inhibited view, and cancel each touch of such a byte.
     ///
     /// A translating thread's view is caching-inhibited when its page or
     /// its region is. A byte that no view holds is not caching-inhibited.

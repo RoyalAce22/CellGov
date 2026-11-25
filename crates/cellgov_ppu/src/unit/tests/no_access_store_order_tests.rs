@@ -1,6 +1,6 @@
 //! A misaligned caching-inhibited store into a page that the thread may
 //! neither load from nor store to orders its interrupts as it does on a
-//! read-only page: the page's C bit decides whether the alignment
+//! read-only page. The page's C bit decides whether the alignment
 //! interrupt comes before the page-protection data storage interrupt.
 
 use super::*;

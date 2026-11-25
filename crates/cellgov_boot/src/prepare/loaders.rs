@@ -253,8 +253,14 @@ impl SpawnLoader {
     ///
     /// # Errors
     ///
-    /// A [`cellgov_core::ProcessSpawnLoadError`] for each refusal that
-    /// [`install_spawn_loader`] lists.
+    /// A [`cellgov_core::ProcessSpawnLoadError`] when one of these
+    /// refuses the child:
+    ///
+    /// - the key vault;
+    /// - the parse or the load of the child image;
+    /// - the child's region or its code floor;
+    /// - the firmware set;
+    /// - the TLS area.
     fn load(
         &self,
         elf_bytes: &[u8],

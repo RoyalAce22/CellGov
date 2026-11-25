@@ -76,7 +76,8 @@ const LOAD_E: I = I::Lwz {
 /// The instructions that put line E in the L2 alone and lines A to D in
 /// the L1:
 /// - `dcbz` puts E in the L2 alone;
-/// - each of A to D is loaded and its result used, so its reload writes.
+/// - a load of each of A to D and a use of its result make its reload
+///   write.
 ///
 /// A [`LOAD_E`] after them hits the L2, and its reload takes A's way.
 fn set_filled() -> Vec<I> {

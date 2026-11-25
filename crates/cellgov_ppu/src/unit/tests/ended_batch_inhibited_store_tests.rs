@@ -1,6 +1,6 @@
-//! A misaligned store that crosses from a cacheable page into a
-//! caching-inhibited page, and whose batch ends ahead of it, keeps no R
-//! write of its table searches in that batch. It takes the alignment
+//! A misaligned store crosses from a cacheable page into a
+//! caching-inhibited page, and its batch ends ahead of it. The store keeps
+//! no R write of its table searches in that batch. It takes the alignment
 //! interrupt in the next batch, so the R bytes of its pages stay as they
 //! were.
 

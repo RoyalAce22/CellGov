@@ -233,8 +233,7 @@ fn a_touch_of_a_cacheable_page_whose_entry_has_g_set_reloads_its_line() {
 }
 
 /// The entry of page 4 lies on page 7, which the store reaches. The
-/// touch's R write would publish ahead of the buffered store, so the batch
-/// ends ahead of the touch, as it ends ahead of a load miss there.
+/// touch's R write would publish ahead of the buffered store.
 #[test]
 fn a_touch_whose_r_write_meets_a_buffered_store_ends_the_batch_ahead_of_it() {
     const TABLE_PAGE: u64 = 7;
@@ -335,8 +334,7 @@ fn a_load_after_a_touch_that_reloaded_its_translation_reads_the_page() {
 }
 
 /// Pages 4 and 5 both lie on [`PAGE_RA`]. A load through page 5 would not
-/// see the store that the block buffers through page 4, so the batch ends
-/// ahead of the touch, as it ends ahead of a load miss there.
+/// see the store that the block buffers through page 4.
 #[test]
 fn a_touch_whose_new_translation_aliases_a_buffered_store_ends_the_batch_ahead_of_it() {
     let stw = word(I::Stw {

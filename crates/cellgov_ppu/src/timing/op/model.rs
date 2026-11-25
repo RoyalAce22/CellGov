@@ -239,25 +239,31 @@ impl Op {
         }
     }
 
-    /// Sets the caching-inhibited flag of the op's load or store to what
-    /// `inhibited` gives for its effective address and length.
+    /// Applies what `inhibited` gives for the op's effective address and
+    /// length.
     ///
-    /// An op that makes no load or store stays as it is.
+    /// - A load or store takes it as its caching-inhibited flag.
+    /// - A touch of a caching-inhibited byte becomes a cancelled touch. A
+    ///   touch has a length of 1.
+    /// - Any other op stays as it is.
+    ///
+    /// [CBE-Handbook p:145 s:6.1.6.2] A touch of a caching-inhibited page is cancelled, and the touch reloads no cache.
     pub(crate) fn mark_inhibited(&mut self, inhibited: impl Fn(u64, u8) -> bool) {
-        if let Kind::Load {
-            ea,
-            len,
-            inhibited: i,
-            ..
-        }
-        | Kind::Store {
-            ea,
-            len,
-            inhibited: i,
-            ..
-        } = &mut self.kind
-        {
-            *i = inhibited(*ea, *len);
+        match &mut self.kind {
+            Kind::Load {
+                ea,
+                len,
+                inhibited: i,
+                ..
+            }
+            | Kind::Store {
+                ea,
+                len,
+                inhibited: i,
+                ..
+            } => *i = inhibited(*ea, *len),
+            Kind::Touch { ea, ra } if inhibited(*ea, 1) => *ra = None,
+            _ => {}
         }
     }
 

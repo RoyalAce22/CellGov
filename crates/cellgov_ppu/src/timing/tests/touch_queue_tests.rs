@@ -14,7 +14,7 @@ use cellgov_ps3_abi::hw::ppu_issue as k;
 const LINE_A: u64 = 0x100_0000;
 /// The bytes between two lines in one L1 set.
 const SET_STRIDE: u64 = k::PPU_L1D_SETS as u64 * k::PPU_CACHE_LINE_BYTES;
-/// The cycle after which every reload of a load at cycle 0 has written.
+/// A cycle after every reload of a load at cycle 0 writes its line.
 const SETTLED: u64 = 1000;
 
 fn at(ea: u64) -> Operand {

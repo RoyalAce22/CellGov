@@ -74,7 +74,7 @@ impl PpuExecutionUnit {
     ///
     /// When the cache holds no translation of `ea`, the unit refills it as
     /// for a load miss. The search keeps its R write and its group reads,
-    /// also when the touch is cancelled. The touch is cancelled in these
+    /// also for a cancelled touch. The lookup cancels the touch in these
     /// cases:
     /// - the refill takes an interrupt;
     /// - the refill stops with a checkstop or an unmodelled stop. The

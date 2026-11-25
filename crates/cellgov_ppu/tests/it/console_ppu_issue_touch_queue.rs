@@ -259,9 +259,9 @@ fn returned_then(n: usize) -> usize {
         .expect("the capture times S(0), S(3) and S(7) after the wait")
 }
 
-/// The largest share of the cycles that later touches add to the
-/// console's load after its line's touch returns that the model may
-/// differ by.
+/// The largest share by which the model may differ from the cycles that
+/// later touches add to the console's load. The later touches come after
+/// the touch of the load's line returns.
 const RETURNED_GAP: f64 = 0.25;
 
 #[test]

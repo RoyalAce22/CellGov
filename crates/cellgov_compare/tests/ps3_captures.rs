@@ -6,11 +6,13 @@
 //! `not-portable` (cannot run on hardware as written; the manifest says
 //! so with the same reason) or `no-frame` (emits no CGOV frame).
 //!
-//! Two more guards hold the captures themselves: every committed capture
-//! is well formed and carries no console identifier or address, and
-//! every byte an emulator's observation answers differently from the
-//! console's is classified in the test's `hardware_peer.tsv`. The
-//! console is the reference; nothing is copied from either side.
+//! The console is the reference; nothing is copied from either side.
+//! Two more guards hold the captures themselves:
+//!
+//! - every committed capture is well formed and carries no console
+//!   identifier or address;
+//! - the test's `hardware_peer.tsv` classifies every byte that an
+//!   emulator's observation answers differently from the console's.
 
 use std::collections::BTreeMap;
 use std::fs;

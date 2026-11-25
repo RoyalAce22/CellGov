@@ -123,10 +123,10 @@ impl PpuExecutionUnit {
             // store that takes that interrupt there keeps none from this
             // batch. Each other access keeps its R writes, because its
             // table lookups are nonspeculative.
-            // The prediction reads the table writes that publish with this
-            // batch, so the unit drops the C writes first. The R writes of
-            // the attempts stay until then, and no R bit changes a
-            // translation.
+            // `store_alignment_ahead` reads the table writes that publish
+            // with this batch, so the unit drops the C writes before the
+            // call. The R writes of the attempts stay during the call, and
+            // no R bit changes a translation.
             MissStep::EndBatch => {
                 self.drop_change_writes(attempt.searches_before.0);
                 if store_miss
@@ -194,10 +194,10 @@ impl PpuExecutionUnit {
         // A store to a writable page whose entry has C = 0 is no fault
         // either: the unit writes C and the store runs again.
         //
-        // A page that refuses a store can take the alignment interrupt
-        // first. Its refusal then waits until the unit knows whether the
-        // store runs into a caching-inhibited page that the cache does
-        // not hold. A page that refuses a load waits in the same way.
+        // A store to a page that refuses it can take the alignment
+        // interrupt first. The refusal then waits until the unit knows
+        // whether the store reaches a caching-inhibited page that the
+        // cache does not hold. A refused load waits in the same way.
         let (true, FaultExit::Mem(refused, store)) = (translating, &exit) else {
             return MissStep::Stop(exit);
         };

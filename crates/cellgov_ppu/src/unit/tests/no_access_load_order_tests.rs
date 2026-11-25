@@ -1,7 +1,7 @@
 //! A misaligned load into caching-inhibited storage on a page that the
-//! thread may neither load from nor store to takes the alignment interrupt
-//! before the page-protection data storage interrupt, whatever the
-//! page's C bit is.
+//! thread may neither load from nor store to takes the alignment
+//! interrupt. That interrupt comes before the page-protection data storage
+//! interrupt, whatever the page's C bit is.
 
 use super::*;
 use cellgov_ps3_abi::hw::ppu_interrupt::DSISR_PROTECTION;

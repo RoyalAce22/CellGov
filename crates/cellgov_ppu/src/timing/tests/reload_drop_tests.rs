@@ -1,6 +1,5 @@
-//! A reload that has not written its line writes nothing when the line
-//! leaves the caches before the reload returns, and a stall delays the
-//! cycle it writes.
+//! A queued reload writes nothing when its line leaves the caches before
+//! the reload returns. A stall delays the cycle a reload writes.
 
 use super::{Caches, Level, Operand};
 use cellgov_ps3_abi::hw::ppu_issue as k;
@@ -20,7 +19,7 @@ fn at(ea: u64) -> Operand {
 }
 
 /// Caches after a load of `LINE_A` at cycle 0, whose reload from memory
-/// has not returned at cycle 1.
+/// is still on its way at cycle 1.
 fn line_a_on_its_way() -> Caches {
     let mut caches = Caches::new();
     assert_eq!(caches.load_queued(0, at(LINE_A), false).0, Level::Memory);

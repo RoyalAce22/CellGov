@@ -337,11 +337,10 @@ fn page_translation(ea: u64, p: u32, d1: u64, writable: bool) -> Translation {
 /// The translation of the page at `ea` when its entry lets the thread of
 /// `sup` neither load nor store there, or `None` for any other page.
 ///
-/// The translation is not writable. Translation refuses every data access
-/// to the page, so CellGov uses it only to order the interrupts of a load
-/// or a store that the page refuses.
-/// `pteg` reads the groups as [`translate_entry`] reads them, and the
-/// function writes no entry.
+/// [`translate_entry`] refuses every data access to such a page. CellGov
+/// uses the result only to order the interrupts of a load or a store that
+/// the page refuses. `pteg` reads the groups as [`translate_entry`] reads
+/// them, and the function writes no entry.
 ///
 /// [PPC-Book3 p:45 s:4.10.1] Figure 30: with key 1, PP 00 permits no access.
 pub fn no_access_page(

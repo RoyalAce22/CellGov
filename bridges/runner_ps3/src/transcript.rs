@@ -222,7 +222,7 @@ fn mac_spans(chars: &[char]) -> Vec<(usize, usize, &'static str)> {
 }
 
 /// The end of the decimal field from 0 to 255 that starts at `start`,
-/// when one does. A fourth digit makes the field too long.
+/// if a field starts there. A fourth digit makes the field too long.
 fn octet_end(chars: &[char], start: usize) -> Option<usize> {
     let end = chars[start..]
         .iter()
@@ -237,9 +237,10 @@ fn octet_end(chars: &[char], start: usize) -> Option<usize> {
     value.parse::<u8>().ok().map(|_| end)
 }
 
-/// The end of `count` fields from 0 to 255 that start at `start`, with
-/// each field after the first opening past a `separator` that
-/// `skip_spaces` lets spaces surround. Each field's end is returned.
+/// The end of each of `count` fields from 0 to 255 that start at `start`.
+///
+/// A `separator` opens each field after the first. With `skip_spaces`,
+/// spaces may stand on either side of a separator.
 fn octet_run(
     chars: &[char],
     start: usize,
@@ -270,7 +271,7 @@ fn octet_run(
 }
 
 /// Each dotted IPv4 address that no alphanumeric character, dot or
-/// further dotted field touches. A port after a colon stays.
+/// further dotted field touches. A span leaves out a port after a colon.
 fn dotted_host_spans(chars: &[char]) -> Vec<Span> {
     let mut spans = Vec::new();
     let mut at = 0;

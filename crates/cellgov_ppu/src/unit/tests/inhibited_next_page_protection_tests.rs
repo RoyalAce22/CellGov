@@ -1,5 +1,5 @@
-//! A misaligned store that runs from a cacheable page that refuses it with
-//! C = 1 into a caching-inhibited page with C = 0 that refuses it too. The
+//! A misaligned store runs from a cacheable page with C = 1 into a
+//! caching-inhibited page with C = 0, and both pages refuse it. The
 //! protection of the second page does not change the interrupt.
 
 use super::*;

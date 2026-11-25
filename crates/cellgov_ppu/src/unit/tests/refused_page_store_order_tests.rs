@@ -1,5 +1,5 @@
-//! A misaligned store from a caching-inhibited page into a read-only
-//! cacheable page takes one interrupt, whether a load cached the second
+//! A misaligned store runs from a caching-inhibited page into a read-only
+//! cacheable page. It takes one interrupt, whether a load cached the second
 //! page's translation or the store meets that page cold. The C bit of the
 //! read-only page decides which interrupt comes first.
 

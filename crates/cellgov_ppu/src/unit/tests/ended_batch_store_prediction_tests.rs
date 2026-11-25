@@ -1,7 +1,7 @@
 //! The prediction for a misaligned store whose batch ends ahead of it
-//! sees the page table and the translations that the store's run in the
-//! next batch sees: the table after this batch's stores commit, and each
-//! page through a search.
+//! sees what the store's run in the next batch sees:
+//! - the page table after this batch's stores commit;
+//! - each page through a search.
 
 use super::*;
 

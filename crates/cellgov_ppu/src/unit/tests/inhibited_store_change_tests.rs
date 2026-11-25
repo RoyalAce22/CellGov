@@ -1,7 +1,7 @@
-//! A store that caching-inhibited storage refuses at any alignment takes
-//! the alignment interrupt at an aligned operand in a writable page whose
-//! entry has C = 0. Its table searches publish their R writes and no C
-//! write. This is true in these cases:
+//! Caching-inhibited storage refuses some stores at any alignment. Such a
+//! store takes the alignment interrupt at an aligned operand in a writable
+//! page whose entry has C = 0. Its table searches publish their R writes
+//! and no C write. This is true in these cases:
 //!
 //! - the store stops in its batch;
 //! - the batch ends ahead of the store, and the next batch takes the

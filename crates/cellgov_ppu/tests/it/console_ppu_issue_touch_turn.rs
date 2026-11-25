@@ -1,7 +1,7 @@
 //! CellGov's PPU timing against loops 0 to 6 of the
 //! `ppu_issue_reload_return` console capture. Each loop touches a line
-//! in memory, then 0 to 32 lines in memory in other L1 sets, then loads
-//! a line that the L1 holds, and then waits long enough for each touch
+//! in memory, then 0 to 32 lines in memory in other L1 sets. It then
+//! loads a line that the L1 holds and waits long enough for each touch
 //! to send its request.
 //!
 //! Each touch sends its request one touch interval after the touch

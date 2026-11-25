@@ -1,13 +1,16 @@
 //! The transcript scan for the console's address. The runner's redactor
 //! writes the address as `<host>`, so four decimal fields in a committed
-//! transcript are a leak: joined by dots as an IPv4 address, or by
-//! commas as the host of a `227` reply to `PASV`.
+//! transcript are a leak when they stand in one of these forms:
+//!
+//! - joined by dots, as an IPv4 address;
+//! - joined by commas, as the host of an FTP host-port argument in a
+//!   `227` reply to `PASV` or a `PORT` command.
 
 /// The fields of an IPv4 address.
 const HOST_FIELDS: usize = 4;
 
-/// Each transcript line that holds four decimal fields joined by dots,
-/// or by commas with optional spaces.
+/// One leak for each transcript line and each form of four decimal
+/// fields it holds: joined by dots, or by commas with optional spaces.
 pub fn host_leaks(transcript: &str) -> Vec<String> {
     let mut leaks = Vec::new();
     for (n, line) in transcript.lines().enumerate() {

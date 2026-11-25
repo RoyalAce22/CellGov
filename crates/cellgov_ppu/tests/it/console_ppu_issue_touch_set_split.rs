@@ -13,8 +13,8 @@
 //!
 //! On the console a sector-crossing load that misses the L1 costs more
 //! than CellGov charges, and the 128 `addi` take longer than CellGov
-//! gives. The tests therefore compare differences of loops, and name the
-//! sector cost apart.
+//! gives. The tests therefore compare differences of loops, and a second
+//! test names the sector cost.
 
 use crate::console_ppu_issue_timing::{replay, Replay, Seed};
 use crate::console_ppu_issue_touch_set_forms::{console_cycles, console_words, touches};

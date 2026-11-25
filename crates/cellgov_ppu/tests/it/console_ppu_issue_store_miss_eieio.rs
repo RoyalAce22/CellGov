@@ -1,6 +1,11 @@
 //! CellGov's PPU timing against the `ppu_issue_store_miss_eieio` console
-//! capture: a `stw` to a flushed line, then an `eieio`, a `sync`, a load
-//! of a held line or nothing, then 256 dependent `addi`.
+//! capture. Each loop flushes the store's line or the next line, then
+//! runs one of these bodies and 256 dependent `addi`:
+//!
+//! - a `stw`, then an `eieio`, a `sync`, a load of a held line or nothing;
+//! - a `stw`, an `eieio`, then a load of a held line;
+//! - an `eieio` alone;
+//! - no instruction.
 //!
 //! The chain outlasts the line's trip from memory. An instruction that
 //! waits for the line adds the trip to the loop; one that does not wait
@@ -56,8 +61,8 @@ const CASES: [(&[u32], u64); 11] = [
 
 /// Loop `index`: `dcbf 0,r3; sync`, `body`, [`CHAIN`] times
 /// `addi r9,r9,1`, then `bdnz` to the `dcbf`, as the built images hold
-/// it. r3 holds `flushed`, r4 [`X`], r5 the loaded line and r8 the
-/// stored value.
+/// it. The replay seeds r3 with `flushed`, r4 with [`X`], r5 with the
+/// loaded line and r8 with the stored value.
 pub(crate) fn flush_store_loop(index: usize, body: &[u32], flushed: u64) -> Replay {
     let mut words = vec![DCBF, SYNC];
     words.extend_from_slice(body);
@@ -79,9 +84,9 @@ pub(crate) fn flush_store_loop(index: usize, body: &[u32], flushed: u64) -> Repl
     }
 }
 
-/// Each of `cases` loops' smallest cycles an iteration in the capture at
-/// `path`, a payload of `words` big-endian u32 words that ends with the
-/// held-word flag and `done`.
+/// The smallest cycles an iteration of each of `cases` loops in the
+/// capture at `path`. Its payload holds `words` big-endian u32 words and
+/// ends with the held-word flag and `done`.
 pub(crate) fn console_cycles(path: &str, words: usize, done: u64, cases: usize) -> Vec<f64> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
     let observation = cellgov_compare::baseline::load(&path)

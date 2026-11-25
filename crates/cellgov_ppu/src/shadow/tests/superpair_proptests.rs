@@ -782,9 +782,9 @@ pub(super) fn check_pair(
     }
     if refused && matches!(fused, PpuInstruction::Fused(FusedPair::StdStd { .. })) {
         // The std pair checks both doublewords' bounds before it stages
-        // either, and `run_pair` gives only plain regions, so a refused
-        // pair stages nothing. The batch's split rerun then
-        // stages the first doubleword, as the halves do
+        // either. `run_pair` gives only plain regions, so a refused pair
+        // stages nothing. The batch's split rerun then stages the first
+        // doubleword, as the halves do
         // (`unit/tests/fused_std_pair_region_end_tests.rs`).
         prop_assert_eq!(effects_pair, Vec::new());
     } else {

@@ -467,9 +467,9 @@ pub(crate) fn inhibited_load(
 ///
 /// A store that a region also refuses faults as that refusal. The one
 /// exception is a view with `store_alignment_first` set: a translating
-/// thread's page that refuses stores, whose page table entry has C = 1. There, the
-/// store faults on a byte that no view holds, at any place in the range,
-/// and otherwise takes the alignment interrupt.
+/// thread's page that refuses stores, whose page table entry has C = 1.
+/// There, the store faults on a byte that no view holds, at any place in
+/// the range, and otherwise takes the alignment interrupt.
 ///
 /// [CBE-Handbook p:290 s:9.10] A store's alignment interrupt in caching-inhibited storage follows the page-protection data storage interrupt when C is 0, and precedes it when C is 1.
 /// [CBE-Handbook p:290 s:9.10] The page-fault data storage interrupt precedes both.

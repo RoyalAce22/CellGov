@@ -1,7 +1,10 @@
 //! CellGov's PPU timing against the `ppu_issue_eieio_load_split` console
-//! capture: a `stw` to a flushed line, then no barrier, an `eieio` or an
-//! `lwsync`, each with or without a load of a held line after it, or a
-//! load and then an `eieio`, then 256 dependent `addi`.
+//! capture. Each loop flushes the store's line or the next line, then
+//! runs a `stw`, one of these bodies and 256 dependent `addi`:
+//!
+//! - no barrier, an `eieio` or an `lwsync`, with or without a load of a
+//!   held line after it;
+//! - a load of a held line, then an `eieio`.
 
 use crate::console_ppu_issue_store_miss_eieio::{
     cellgov_cycles, console_cycles, EIEIO, LWSYNC, LWZ, STW, X,

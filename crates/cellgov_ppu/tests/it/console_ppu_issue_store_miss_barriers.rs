@@ -1,6 +1,7 @@
 //! CellGov's PPU timing against the `ppu_issue_store_miss_barriers`
-//! console capture: a `stw` to a flushed line, then an `lwsync`, an
-//! `isync` or a `sync`, then 256 dependent `addi`.
+//! console capture. Each loop flushes the store's line or the next line,
+//! then runs a `stw`, one barrier and 256 dependent `addi`. The barrier
+//! is an `lwsync`, an `isync` or a `sync`.
 //!
 //! The chain outlasts the line's trip from memory. A barrier that waits
 //! for the line adds the trip to the loop; a barrier that does not wait

@@ -100,9 +100,6 @@ fn a_reload_past_the_tables_size_writes_the_first_returning_line_at_once() {
     assert_eq!(victim_after(LINE_CYCLES as u64), Level::L2);
 }
 
-/// The oldest reload is the touch of a fifth line in line 0's full set,
-/// from memory. The next is a touch of an L2-held line in another set,
-/// which returns first. The table then overflows by one.
 #[test]
 fn a_full_reload_table_writes_the_reload_that_returns_first_not_the_oldest() {
     let (mut caches, t) = full_set();
