@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::funcmap::{self, FuncMapError, FunctionName};
 use crate::hypercall_cfg::{Code, CodeSegment};
-use crate::indirect_entry::{indirect_entries, FileSegment};
+use crate::indirect_entry::{indirect_entries, real_mode_entries, FileSegment};
 use crate::instruction::PpuInstruction;
 use crate::loader::{pt_load_segments, LoadError, LoadSegment};
 use cellgov_ps3_abi::format::elf::{ELF_E_MACHINE_OFFSET, ELF_HEADER_SIZE, EM_PPC64};
@@ -98,8 +98,11 @@ pub fn scan_syscalls(elf: &[u8]) -> Result<Vec<CallerSite>, CallerScanError> {
 /// A site resolves when every path to it loads the same non-negative
 /// constant into r11 with `li r11`. A path follows the direct branches
 /// and fall-throughs of all the executable segments, and a direct
-/// branch may cross segments. A site stays unresolved when control can
-/// enter a word between the load and `sc` in one of these other ways:
+/// branch may cross segments. A branch may run in real mode when control
+/// can reach it from the ELF entry or an interrupt vector. An absolute
+/// branch that may run in real mode also reaches the word at the real
+/// address of its target. A site stays unresolved when control can enter
+/// a word between the load and `sc` in one of these other ways:
 /// - the ELF entry;
 /// - an interrupt vector;
 /// - an indirect branch to an address that the image names.
@@ -122,7 +125,7 @@ pub fn scan_hypercalls(elf: &[u8]) -> Result<Vec<CallerSite>, CallerScanError> {
     )?);
     let files = file_segments(elf, &segments)?;
     let entries = indirect_entries(elf, &files, &code)?;
-    let mut sites = crate::hypercall_cfg::scan(&code, &entries);
+    let mut sites = crate::hypercall_cfg::scan(&code, &entries, &real_mode_entries(elf, &code));
     sites.sort_by_key(|site| site.address);
     Ok(sites)
 }
@@ -399,6 +402,305 @@ pub(crate) fn maybe_writes_gpr(raw: u32, gpr: u32) -> bool {
     }
 }
 
+/// The GPRs that the decoded word `decoded` writes, as a mask with bit
+/// `n` set for GPR `n`.
+///
+/// The mask holds only the GPRs that the word writes, where
+/// [`maybe_writes_gpr`] holds each GPR that a register field names.
+/// The mask holds every GPR for these words:
+/// - `lswx`, which reads its byte count from XER at run time;
+/// - `sc`, whose handler can write any GPR;
+/// - a fused pair, which decode does not produce.
+///
+/// A word that the PPE refuses as illegal keeps the answer of
+/// [`maybe_writes_gpr`], because its error handler can emulate it. An
+/// illegal `lq` also writes RT and RT+1, which [`maybe_writes_gpr`]
+/// does not hold.
+pub(crate) fn written_gprs(decoded: &PpuInstruction) -> u32 {
+    use PpuInstruction as I;
+    match *decoded {
+        // [PPC-Book1 p:33 s:3.3.2] A load writes RT, and its update form also writes the EA into RA.
+        I::Lwz { rt, .. }
+        | I::Lbz { rt, .. }
+        | I::Lhz { rt, .. }
+        | I::Lha { rt, .. }
+        | I::Ld { rt, .. }
+        | I::Lwa { rt, .. }
+        | I::Lwzx { rt, .. }
+        | I::Lbzx { rt, .. }
+        | I::Ldx { rt, .. }
+        | I::Lhzx { rt, .. }
+        | I::Lhax { rt, .. }
+        | I::Lwax { rt, .. }
+        | I::Ldbrx { rt, .. }
+        | I::Lwbrx { rt, .. }
+        | I::Lhbrx { rt, .. }
+        | I::Ldarx { rt, .. }
+        | I::Lwarx { rt, .. } => gpr_run(rt, 1),
+        I::Lhau { rt, ra, .. }
+        | I::Lwzu { rt, ra, .. }
+        | I::Lbzu { rt, ra, .. }
+        | I::Lhzu { rt, ra, .. }
+        | I::Ldu { rt, ra, .. }
+        | I::Lwzux { rt, ra, .. }
+        | I::Lbzux { rt, ra, .. }
+        | I::Lhzux { rt, ra, .. }
+        | I::Ldux { rt, ra, .. }
+        | I::Lhaux { rt, ra, .. }
+        | I::Lwaux { rt, ra, .. } => gpr_run(rt, 1) | gpr_run(ra, 1),
+        // [PPC-Book1 p:46 s:3.3.5] `lmw` loads GPRs RT through 31.
+        I::Lmw { rt, .. } => gpr_run(rt, 32u32.saturating_sub(u32::from(rt))),
+        // [PPC-Book1 p:48 s:3.3.6] `lswi` loads NB bytes, or 32 when NB is 0, into GPRs from RT up, four bytes to each GPR, with GPR 0 after GPR 31.
+        I::Lswi { rt, nb, .. } => {
+            let bytes = if nb == 0 { 32 } else { u32::from(nb) };
+            gpr_run(rt, bytes.div_ceil(4))
+        }
+        // [PPC-Book1 p:40 s:3.3.3] A store writes no GPR, and its update form writes the EA into RA.
+        I::Stw { .. }
+        | I::Stb { .. }
+        | I::Sth { .. }
+        | I::Std { .. }
+        | I::Stmw { .. }
+        | I::Stwx { .. }
+        | I::Stdx { .. }
+        | I::Stbx { .. }
+        | I::Sthx { .. }
+        | I::Sdbrx { .. }
+        | I::Stwbrx { .. }
+        | I::Sthbrx { .. }
+        | I::Stswi { .. }
+        | I::Stswx { .. }
+        | I::Stdcx { .. }
+        | I::Stwcx { .. } => 0,
+        I::Stwu { ra, .. }
+        | I::Stdu { ra, .. }
+        | I::Stbu { ra, .. }
+        | I::Sthu { ra, .. }
+        | I::Stdux { ra, .. }
+        | I::Sthux { ra, .. }
+        | I::Stwux { ra, .. }
+        | I::Stbux { ra, .. } => gpr_run(ra, 1),
+        // [PPC-Book1 p:105 s:4.6.2] A floating-point load writes FRT, and its update form also writes the EA into RA.
+        // [PPC-Book1 p:107 s:4.6.3] A floating-point store with update writes the EA into RA.
+        I::Lfs { .. }
+        | I::Lfd { .. }
+        | I::Lfsx { .. }
+        | I::Lfdx { .. }
+        | I::Stfs { .. }
+        | I::Stfd { .. }
+        | I::Stfiwx { .. }
+        | I::Stfsx { .. }
+        | I::Stfdx { .. }
+        | I::Fp63 { .. }
+        | I::Fp59 { .. } => 0,
+        I::Lfsu { ra, .. }
+        | I::Lfdu { ra, .. }
+        | I::Lfsux { ra, .. }
+        | I::Lfdux { ra, .. }
+        | I::Stfsu { ra, .. }
+        | I::Stfdu { ra, .. }
+        | I::Stfsux { ra, .. }
+        | I::Stfdux { ra, .. } => gpr_run(ra, 1),
+        // [PPC-Book1 p:51 s:3.3.8] An arithmetic instruction places its result into RT.
+        I::Addi { rt, .. }
+        | I::Addis { rt, .. }
+        | I::Subfic { rt, .. }
+        | I::Mulli { rt, .. }
+        | I::Addic { rt, .. }
+        | I::AddicDot { rt, .. }
+        | I::Add { rt, .. }
+        | I::Subf { rt, .. }
+        | I::Subfc { rt, .. }
+        | I::Addc { rt, .. }
+        | I::Subfe { rt, .. }
+        | I::Neg { rt, .. }
+        | I::Mullw { rt, .. }
+        | I::Mulhwu { rt, .. }
+        | I::Mulhw { rt, .. }
+        | I::Mulhdu { rt, .. }
+        | I::Mulhd { rt, .. }
+        | I::Adde { rt, .. }
+        | I::Addze { rt, .. }
+        | I::Subfze { rt, .. }
+        | I::Subfme { rt, .. }
+        | I::Addme { rt, .. }
+        | I::Mulld { rt, .. }
+        | I::Divw { rt, .. }
+        | I::Divwu { rt, .. }
+        | I::Divd { rt, .. }
+        | I::Divdu { rt, .. }
+        | I::Li { rt, .. }
+        | I::Lis { rt, .. } => gpr_run(rt, 1),
+        // [PPC-Book1 p:65 s:3.3.11] A logical instruction places its result into RA.
+        // [PPC-Book1 p:71 s:3.3.12] A rotate or shift instruction returns its result to a GPR, RA.
+        I::Or { ra, .. }
+        | I::Orc { ra, .. }
+        | I::Ori { ra, .. }
+        | I::Oris { ra, .. }
+        | I::Xori { ra, .. }
+        | I::Xoris { ra, .. }
+        | I::And { ra, .. }
+        | I::Andc { ra, .. }
+        | I::Nor { ra, .. }
+        | I::Xor { ra, .. }
+        | I::Eqv { ra, .. }
+        | I::Nand { ra, .. }
+        | I::AndiDot { ra, .. }
+        | I::AndisDot { ra, .. }
+        | I::Extsh { ra, .. }
+        | I::Extsb { ra, .. }
+        | I::Extsw { ra, .. }
+        | I::Cntlzw { ra, .. }
+        | I::Cntlzd { ra, .. }
+        | I::Popcntb { ra, .. }
+        | I::Slw { ra, .. }
+        | I::Srw { ra, .. }
+        | I::Srawi { ra, .. }
+        | I::Sraw { ra, .. }
+        | I::Srad { ra, .. }
+        | I::Sradi { ra, .. }
+        | I::Sld { ra, .. }
+        | I::Srd { ra, .. }
+        | I::Rlwinm { ra, .. }
+        | I::Rlwimi { ra, .. }
+        | I::Rlwnm { ra, .. }
+        | I::Rldicl { ra, .. }
+        | I::Rldicr { ra, .. }
+        | I::Rldic { ra, .. }
+        | I::Rldimi { ra, .. }
+        | I::Rldcl { ra, .. }
+        | I::Rldcr { ra, .. }
+        | I::Mr { ra, .. }
+        | I::Slwi { ra, .. }
+        | I::Srwi { ra, .. }
+        | I::Clrlwi { ra, .. }
+        | I::Clrldi { ra, .. }
+        | I::Sldi { ra, .. }
+        | I::Srdi { ra, .. }
+        | I::RlwinmMask { ra, .. } => gpr_run(ra, 1),
+        // [PPC-Book1 p:82 s:3.3.13] A move from a system register places it into RT.
+        // [PPC-Book1 p:81 s:3.3.13] A move to a system register reads RS.
+        I::Mftb { rt }
+        | I::Mftbu { rt }
+        | I::Mfcr { rt }
+        | I::Mfocrf { rt, .. }
+        | I::Mflr { rt }
+        | I::Mfctr { rt }
+        | I::Mfxer { rt }
+        | I::Mfvrsave { rt }
+        | I::Mfctrl { rt }
+        | I::Mfsprg3 { rt } => gpr_run(rt, 1),
+        I::Mtcrf { .. }
+        | I::Mtocrf { .. }
+        | I::Mtlr { .. }
+        | I::Mtctr { .. }
+        | I::Mtxer { .. }
+        | I::Mtvrsave { .. }
+        | I::Mcrxr { .. } => 0,
+        I::Cmpwi { .. }
+        | I::Cmplwi { .. }
+        | I::Cmpdi { .. }
+        | I::Cmpldi { .. }
+        | I::Cmpw { .. }
+        | I::Cmplw { .. }
+        | I::Cmpd { .. }
+        | I::Cmpld { .. }
+        | I::CmpwZero { .. }
+        | I::CmpdZero { .. }
+        | I::Tw { .. }
+        | I::Td { .. }
+        | I::Twi { .. }
+        | I::Tdi { .. }
+        | I::B { .. }
+        | I::Bc { .. }
+        | I::Bclr { .. }
+        | I::Bcctr { .. }
+        | I::Bdnz { .. }
+        | I::BcTrue { .. }
+        | I::BcFalse { .. }
+        | I::Blr { .. }
+        | I::Mcrf { .. }
+        | I::Crand { .. }
+        | I::Crandc { .. }
+        | I::Cror { .. }
+        | I::Crorc { .. }
+        | I::Crxor { .. }
+        | I::Crnand { .. }
+        | I::Crnor { .. }
+        | I::Creqv { .. } => 0,
+        I::Vx { .. }
+        | I::Va { .. }
+        | I::Vxor { .. }
+        | I::Vsldoi { .. }
+        | I::Mfvscr { .. }
+        | I::Mtvscr { .. }
+        | I::Lvlx { .. }
+        | I::Lvrx { .. }
+        | I::Lvlxl { .. }
+        | I::Lvrxl { .. }
+        | I::Stvlx { .. }
+        | I::Stvrx { .. }
+        | I::Stvlxl { .. }
+        | I::Stvrxl { .. }
+        | I::Lvsl { .. }
+        | I::Lvebx { .. }
+        | I::Lvsr { .. }
+        | I::Lvehx { .. }
+        | I::Lvewx { .. }
+        | I::Lvx { .. }
+        | I::Lvxl { .. }
+        | I::Stvebx { .. }
+        | I::Stvehx { .. }
+        | I::Stvewx { .. }
+        | I::Stvx { .. }
+        | I::Stvxl { .. } => 0,
+        I::Dcbz { .. }
+        | I::Dcbst { .. }
+        | I::Dcbf { .. }
+        | I::Icbi { .. }
+        | I::Dcbt { .. }
+        | I::Dcbtst { .. }
+        | I::Dst { .. }
+        | I::Dstst { .. }
+        | I::Dss { .. }
+        | I::Sync { .. }
+        | I::Eieio
+        | I::Isync
+        | I::Nop
+        | I::Consumed => 0,
+        I::PpePrivileged { raw } => privileged_written_gprs(raw),
+        // [PPC-Book3 p:92 s:8.4] An `lq` with RT = RA invokes the illegal instruction error handler.
+        I::PpeIllegal { raw } => (0..32).fold(privileged_written_gprs(raw), |mask, gpr| {
+            if maybe_writes_gpr(raw, gpr) {
+                mask | 1 << gpr
+            } else {
+                mask
+            }
+        }),
+        I::Lswx { .. } | I::Sc { .. } | I::Fused(_) => u32::MAX,
+    }
+}
+
+/// The GPRs that the privileged word `raw` writes, as a mask.
+///
+/// [PPC-Book3 p:23 s:3.4] `mfmsr` places the MSR into RT.
+/// [PPC-Book1 p:82 s:3.3.13] `mfspr` places the SPR into RT.
+/// [PPC-Book3 p:52 s:4.11] `slbmfev` and `slbmfee` place SLB entry fields into RT.
+/// [PPC-Book3 p:92 s:8.4] `lq` loads the quadword into RT and RT+1.
+fn privileged_written_gprs(raw: u32) -> u32 {
+    let rt = ((raw >> 21) & 0x1f) as u8;
+    match (raw >> 26, (raw >> 1) & 0x3ff) {
+        (31, 83 | 339 | 851 | 915) => gpr_run(rt, 1),
+        (56, _) => gpr_run(rt, 2),
+        _ => 0,
+    }
+}
+
+/// The mask of `count` GPRs from `first` up, with GPR 0 after GPR 31.
+fn gpr_run(first: u8, count: u32) -> u32 {
+    (0..count.min(32)).fold(0, |mask, n| mask | 1 << ((u32::from(first) + n) % 32))
+}
+
 #[cfg(test)]
 #[path = "tests/caller_census_tests.rs"]
 mod tests;
@@ -422,3 +724,11 @@ mod hypercall_shape_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_entry_tests.rs"]
 mod hypercall_entry_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_real_mode_tests.rs"]
+mod hypercall_real_mode_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_written_gprs_tests.rs"]
+mod written_gprs_tests;

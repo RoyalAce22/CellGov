@@ -5,12 +5,12 @@ use cellgov_ps3_abi::hw::ppc_isa::PPC_NOP;
 /// The address of word 0 of the code in each test.
 const BASE: u64 = 0x1_0000;
 
-fn word(instruction: PpuInstruction) -> u32 {
+pub(super) fn word(instruction: PpuInstruction) -> u32 {
     encode(&instruction).expect("the instruction encodes")
 }
 
 /// The address of word `index` of the code.
-fn at(index: u64) -> u64 {
+pub(super) fn at(index: u64) -> u64 {
     BASE + 4 * index
 }
 
@@ -18,7 +18,7 @@ fn at(index: u64) -> u64 {
 ///
 /// With `readable` set, the code is also the file bytes that the bound
 /// reads for doublewords and jump tables.
-fn bound(words: &[u32], readable: bool) -> BTreeSet<u64> {
+pub(super) fn bound(words: &[u32], readable: bool) -> BTreeSet<u64> {
     let code = Code::new(vec![CodeSegment {
         vaddr: BASE,
         words: words.to_vec(),
@@ -110,7 +110,7 @@ fn a_jump_table_ends_at_an_offset_that_reaches_back_into_it() {
 }
 
 #[test]
-fn a_constant_is_forgotten_when_another_word_may_write_its_register() {
+fn a_constant_is_forgotten_when_another_word_writes_its_register() {
     let building = |between: u32| {
         let words = [
             word(PpuInstruction::Addis {

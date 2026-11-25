@@ -3,9 +3,10 @@
 //!
 //! The walk goes backward from `sc` along every path that can reach it.
 //! A path steps back over a fall-through or over a direct branch, and a
-//! direct branch may come from another segment. Each path must end at an
-//! `li r11` that loads the same constant. Some paths end where the walk
-//! cannot see r11:
+//! direct branch may come from another segment. An absolute branch that
+//! may run in real mode also reaches the word at the real address of its
+//! target. Each path must end at an `li r11` that loads the same
+//! constant. Some paths end where the walk cannot see r11:
 //! - a word that may write r11;
 //! - a call, which may change r11 before it returns;
 //! - a word that control can enter in another way, which
@@ -18,6 +19,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use cellgov_ps3_abi::hw::ppc_isa::PPC_SC_1;
+use cellgov_ps3_abi::hw::ppu_mmu::REAL_MODE_IGNORED_EA;
 
 use crate::caller_census::{maybe_clobbers_r11, CallerSite};
 use crate::instruction::PpuInstruction;
@@ -80,6 +82,21 @@ impl Code {
     pub(crate) fn holds(&self, address: u64) -> bool {
         self.words_at(address).next().is_some()
     }
+
+    /// The address of each word that a segment holds at the real address
+    /// of `address`.
+    ///
+    /// The real address of a word is its address without EA bits 0 and 1.
+    /// The kernel run loads each kernel segment at that real address.
+    ///
+    /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
+    /// [PPC-Book3 p:30 s:4.2.6.2] The offset real mode mechanism compares EA bits 2:63 with the RMLR limit and ORs them with the RMOR offset.
+    fn real_aliases(&self, address: u64) -> impl Iterator<Item = u64> + '_ {
+        let real = address & !REAL_MODE_IGNORED_EA;
+        (0..4u64)
+            .map(move |bits| real | (bits << REAL_MODE_IGNORED_EA.trailing_zeros()))
+            .filter(|&alias| self.holds(alias))
+    }
 }
 
 /// What one word does to r11 on the path that falls through it.
@@ -99,9 +116,14 @@ enum Flow {
 /// number every path to it loads into r11.
 ///
 /// `entries` holds the words that control may enter other than by a
-/// direct branch or a fall-through.
-pub(crate) fn scan(code: &Code, entries: &BTreeSet<u64>) -> Vec<CallerSite> {
-    let branches = branch_sources(code);
+/// direct branch or a fall-through. `real_mode_starts` holds the words
+/// where control enters in real mode.
+pub(crate) fn scan(
+    code: &Code,
+    entries: &BTreeSet<u64>,
+    real_mode_starts: &BTreeSet<u64>,
+) -> Vec<CallerSite> {
+    let branches = branch_sources(code, &real_mode_words(code, real_mode_starts));
     code.segments
         .iter()
         .flat_map(CodeSegment::addressed)
@@ -116,20 +138,61 @@ pub(crate) fn scan(code: &Code, entries: &BTreeSet<u64>) -> Vec<CallerSite> {
 /// Each address that a direct branch of `code` reaches, with the
 /// addresses of the branches that reach it. The map omits a target that
 /// no segment holds.
-fn branch_sources(code: &Code) -> BTreeMap<u64, Vec<u64>> {
+///
+/// `real_mode` holds the words that may run in real mode.
+fn branch_sources(code: &Code, real_mode: &BTreeSet<u64>) -> BTreeMap<u64, Vec<u64>> {
     let mut sources: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
     for (address, raw) in code.segments.iter().flat_map(CodeSegment::addressed) {
-        let (displacement, absolute) = match crate::decode::decode(raw) {
-            Ok(PpuInstruction::B { offset, aa, .. }) => (i64::from(offset), aa),
-            Ok(PpuInstruction::Bc { offset, aa, .. }) => (i64::from(offset), aa),
-            _ => continue,
-        };
-        let target = branch_target(address, displacement, absolute);
-        if code.holds(target) {
+        for target in direct_targets(code, address, raw, real_mode.contains(&address)) {
             sources.entry(target).or_default().push(address);
         }
     }
     sources
+}
+
+/// The words of `code` that the direct branch `raw` at `address` can
+/// reach, or no words when `raw` is not a direct branch.
+///
+/// When `real_mode` is set, the branch may run in real mode. An absolute
+/// branch there also reaches each word whose real address is the real
+/// address of its target.
+fn direct_targets(code: &Code, address: u64, raw: u32, real_mode: bool) -> BTreeSet<u64> {
+    let (displacement, absolute) = match crate::decode::decode(raw) {
+        Ok(PpuInstruction::B { offset, aa, .. }) => (i64::from(offset), aa),
+        Ok(PpuInstruction::Bc { offset, aa, .. }) => (i64::from(offset), aa),
+        _ => return BTreeSet::new(),
+    };
+    let target = branch_target(address, displacement, absolute);
+    let mut targets: BTreeSet<u64> = code.holds(target).then_some(target).into_iter().collect();
+    if absolute && real_mode {
+        targets.extend(code.real_aliases(target));
+    }
+    targets
+}
+
+/// The words of `code` that may run in real mode: each word that control
+/// can reach from a word of `starts` over fall-throughs and direct
+/// branches.
+///
+/// The set does not hold a word that runs in real mode only after one
+/// of these:
+/// - an `rfid` or an `mtmsrd`;
+/// - a `bclr` or a `bcctr` in real-mode code.
+fn real_mode_words(code: &Code, starts: &BTreeSet<u64>) -> BTreeSet<u64> {
+    let mut reached = BTreeSet::new();
+    let mut pending: Vec<u64> = starts.iter().copied().collect();
+    while let Some(at) = pending.pop() {
+        if !code.holds(at) || !reached.insert(at) {
+            continue;
+        }
+        for raw in code.words_at(at) {
+            if flow(raw) != Flow::Stops {
+                pending.extend(at.checked_add(4));
+            }
+            pending.extend(direct_targets(code, at, raw, true));
+        }
+    }
+    reached
 }
 
 /// The address that a direct branch at `address` reaches in 64-bit mode.

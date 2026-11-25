@@ -15,16 +15,18 @@
 //! - an entry of a relative jump table: a 32-bit offset from a named
 //!   address, or from the word after a `bcctr`.
 //!
-//! The bound does not hold an address that the code computes in another
-//! way, such as from a value it loads at run time.
+//! A straight-line path from a function's first word starts with r2 set
+//! to the TOC that the function's descriptor gives. The bound does not
+//! hold an address that the code computes in another way, such as from
+//! a value it loads at run time.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use cellgov_ps3_abi::format::elf::ELF64_E_ENTRY;
+use cellgov_ps3_abi::format::elf::{ppc64_function_descriptor as descriptor, ELF64_E_ENTRY};
 use cellgov_ps3_abi::hw::ppu_interrupt::INTERRUPT_VECTOR_REAL_ADDRESSES;
 use cellgov_ps3_abi::hw::ppu_mmu::REAL_MODE_IGNORED_EA;
 
-use crate::caller_census::{maybe_writes_gpr, CallerScanError};
+use crate::caller_census::{written_gprs, CallerScanError};
 use crate::hypercall_cfg::{Code, CodeSegment};
 use crate::instruction::PpuInstruction;
 use crate::local_cfg::falls_through;
@@ -63,6 +65,55 @@ impl FileSegment<'_> {
             .map_while(|offset| self.bytes.get(offset..offset.checked_add(8)?))
             .map(|bytes| u64::from_be_bytes(bytes.try_into().expect("eight bytes")))
     }
+
+    /// The code address, the TOC and the environment of a function
+    /// descriptor that starts at each word-aligned address.
+    fn descriptors(&self) -> impl Iterator<Item = [u64; 3]> + '_ {
+        let first = (4 - self.vaddr % 4) % 4;
+        (first as usize..)
+            .step_by(4)
+            .map_while(|offset| {
+                self.bytes
+                    .get(offset..offset.checked_add(descriptor::SIZE)?)
+            })
+            .map(|bytes| {
+                [
+                    descriptor::CODE_OFFSET,
+                    descriptor::TOC_OFFSET,
+                    descriptor::ENV_OFFSET,
+                ]
+                .map(|field| {
+                    u64::from_be_bytes(bytes[field..field + 8].try_into().expect("eight bytes"))
+                })
+            })
+    }
+}
+
+/// The TOC that a function descriptor in `files` gives each word of
+/// `code` that it names as a function's first word.
+///
+/// A descriptor counts only when its environment is zero, as each LV2
+/// descriptor's is. A word that two descriptors give different TOCs
+/// gets no TOC.
+///
+/// [OFW-4.93 lv2_kernel a:0x80000000002765e4-0x8000000000276600] A call through a descriptor loads LR from its first doubleword and r2 from its second.
+fn function_tocs(files: &[FileSegment<'_>], code: &Code) -> BTreeMap<u64, u64> {
+    let mut tocs: BTreeMap<u64, Option<u64>> = BTreeMap::new();
+    for [entry, toc, environment] in files.iter().flat_map(FileSegment::descriptors) {
+        if environment != 0 || !code.holds(entry) {
+            continue;
+        }
+        tocs.entry(entry)
+            .and_modify(|known| {
+                if *known != Some(toc) {
+                    *known = None;
+                }
+            })
+            .or_insert(Some(toc));
+    }
+    tocs.into_iter()
+        .filter_map(|(entry, toc)| Some((entry, toc?)))
+        .collect()
 }
 
 /// The words of `code` that control can enter other than by a direct
@@ -82,15 +133,12 @@ pub(crate) fn indirect_entries(
     let mut bound = Bound {
         code,
         files,
-        entries: BTreeSet::new(),
+        entries: real_mode_entries(elf, code),
         tables: BTreeSet::new(),
     };
-    if let Some(entry) = elf.get(ELF64_E_ENTRY..ELF64_E_ENTRY + 8) {
-        bound.enter(u64::from_be_bytes(entry.try_into().expect("eight bytes")));
-    }
+    let tocs = function_tocs(files, code);
     for segment in code.segments() {
-        bound.interrupt_vectors(segment);
-        bound.code_constants(segment);
+        bound.code_constants(segment, &tocs);
     }
     for file in files {
         for value in file.doublewords() {
@@ -99,6 +147,31 @@ pub(crate) fn indirect_entries(
     }
     bound.jump_tables()?;
     Ok(bound.entries)
+}
+
+/// The words of `code` where control enters in real mode:
+/// - the ELF entry, where the kernel run starts thread 0 with MSR\[IR\]
+///   and MSR\[DR\] at 0;
+/// - each word whose real address is in the interrupt vectors.
+///
+/// Real mode ignores EA bits 0 and 1, so the real address of a word is
+/// its address without them.
+///
+/// [PPC-Book3 p:62 s:5.4] An interrupt sets MSR bits IR and DR to 0 and MSR bit SF to 1.
+pub(crate) fn real_mode_entries(elf: &[u8], code: &Code) -> BTreeSet<u64> {
+    let elf_entry = elf
+        .get(ELF64_E_ENTRY..ELF64_E_ENTRY + 8)
+        .map(|entry| u64::from_be_bytes(entry.try_into().expect("eight bytes")))
+        .filter(|&entry| code.holds(entry));
+    let vectors = code
+        .segments()
+        .iter()
+        .flat_map(CodeSegment::addressed)
+        .map(|(address, _)| address)
+        .filter(|address| {
+            INTERRUPT_VECTOR_REAL_ADDRESSES.contains(&(address & !REAL_MODE_IGNORED_EA))
+        });
+    elf_entry.into_iter().chain(vectors).collect()
 }
 
 /// The bound as it grows.
@@ -133,22 +206,15 @@ impl Bound<'_> {
         }
     }
 
-    /// Adds each word of `segment` that an interrupt can enter.
-    ///
-    /// Real mode ignores EA bits 0 and 1, so the real address of a word
-    /// is its address without them.
-    fn interrupt_vectors(&mut self, segment: &CodeSegment) {
-        for (address, _) in segment.addressed() {
-            if INTERRUPT_VECTOR_REAL_ADDRESSES.contains(&(address & !REAL_MODE_IGNORED_EA)) {
-                self.entries.insert(address);
-            }
-        }
-    }
-
     /// Names each constant that the code of `segment` builds in a GPR.
-    fn code_constants(&mut self, segment: &CodeSegment) {
+    ///
+    /// At each word that `tocs` holds, r2 gets the word's TOC.
+    fn code_constants(&mut self, segment: &CodeSegment, tocs: &BTreeMap<u64, u64>) {
         let mut constants = Constants::default();
         for (address, raw) in segment.addressed() {
+            if let Some(&toc) = tocs.get(&address) {
+                constants.gprs[2] = Some(toc);
+            }
             if let Some(value) = constants.step(address, raw) {
                 self.name(value);
             }
@@ -240,25 +306,17 @@ impl Constants {
             PpuInstruction::Bc { bo, link, .. }
             | PpuInstruction::Bclr { bo, link, .. }
             | PpuInstruction::Bcctr { bo, link, .. } => self.after_branch(address, bo, link),
-            PpuInstruction::Lmw { rt, .. } => {
-                for gpr in &mut self.gprs[usize::from(rt)..] {
-                    *gpr = None;
-                }
-            }
-            PpuInstruction::Lswi { .. }
-            | PpuInstruction::Lswx { .. }
-            | PpuInstruction::Sc { .. } => {
-                self.gprs = [None; 32];
-            }
-            _ => self.forget_written(raw),
+            _ if never_falls_through(&decoded) => *self = Self::default(),
+            _ => self.forget_written(&decoded),
         }
         None
     }
 
-    /// Forgets the constant in each GPR that the word `raw` may write.
-    fn forget_written(&mut self, raw: u32) {
-        for (gpr, value) in (0u32..).zip(self.gprs.iter_mut()) {
-            if maybe_writes_gpr(raw, gpr) {
+    /// Forgets the constant in each GPR that `decoded` writes.
+    fn forget_written(&mut self, decoded: &PpuInstruction) {
+        let written = written_gprs(decoded);
+        for (gpr, value) in self.gprs.iter_mut().enumerate() {
+            if written >> gpr & 1 == 1 {
                 *value = None;
             }
         }
@@ -268,9 +326,9 @@ impl Constants {
     /// for a word that builds a constant.
     ///
     /// [PPC-Book1 p:51 s:3.3.8] `addi` and `addis` add EXTS(SI) or EXTS(SI || 0x0000) to RA, or to 0 when RA is 0.
-    /// [PPC-Book1 p:66 s:3.3.13] `ori` and `oris` OR UI or UI || 0x0000 into RS.
+    /// [PPC-Book1 p:66 s:3.3.11] `ori` and `oris` OR RS with UI or UI || 0x0000 and place the result into RA.
     /// [PPC-Book1 p:72 s:3.3.12.1] `rldicl` and `rldicr` rotate RS left by SH and AND it with MASK(MB, 63) or MASK(0, ME).
-    /// [PPC-Book1 p:82 s:3.3.16] `mflr` copies LR into RT.
+    /// [PPC-Book1 p:82 s:3.3.13] `mflr`, a form of `mfspr`, copies LR into RT.
     fn written(&self, decoded: PpuInstruction) -> Option<(u8, Option<u64>)> {
         let base = |ra: u8| if ra == 0 { Some(0) } else { self.gpr(ra) };
         Some(match decoded {
@@ -323,6 +381,67 @@ impl Constants {
     }
 }
 
+/// Whether control never goes from `decoded` to the next word, for a
+/// word that is not a branch. These words never fall through:
+/// - `rfid` and `hrfid`;
+/// - a trap that traps for all operand values.
+///
+/// The bound errs wide, so a word that causes an exception which a
+/// handler can emulate keeps the path. A word that the PPE does not
+/// implement is such a word.
+///
+/// An `rfid` with SRR0 at the next word falls through. The reset there
+/// is safe, because no constant is seen to cross an `rfid`.
+///
+/// [PPC-Book3 p:119 s:Appendix G] `rfid` and `hrfid` are XL-form words with primary opcode 19 and extended opcodes 18 and 274.
+/// [PPC-Book3 p:13 s:2.3] `rfid` and `hrfid` fetch the next instruction from SRR0 or HSRR0.
+/// [OFW-4.93 lv2_kernel a:0x8000000000000720-0x8000000000000744] This `rfid` returns to the next word, which r5 names, and the words after it build no constant.
+/// [CBE-Handbook p:738 s:A.2.4.1] The PPE does not implement `popcntb`.
+/// [CBE-Handbook p:739 s:A.2.4.1] An attempt to execute `popcntb`, `mcrxr` or another word that the PPE does not implement causes an illegal instruction exception.
+/// [PPC-Book3 p:92 s:8.4] An `lq` with RT = RA invokes the illegal instruction error handler.
+fn never_falls_through(decoded: &PpuInstruction) -> bool {
+    match *decoded {
+        PpuInstruction::PpePrivileged { raw } => {
+            matches!((raw >> 26, (raw >> 1) & 0x3FF), (19, 18 | 274))
+        }
+        PpuInstruction::Tw { to, ra, rb } | PpuInstruction::Td { to, ra, rb } => {
+            traps_always(to, ra == rb)
+        }
+        PpuInstruction::Twi { to, .. } | PpuInstruction::Tdi { to, .. } => traps_always(to, false),
+        _ => false,
+    }
+}
+
+/// Whether a trap with the TO field `to` traps for all operand values.
+///
+/// `same_operands` is set when the trap compares a register with itself.
+/// Two operands are equal, or else each comparison puts them in one
+/// order. So the trap traps always when TO has the equal bit and one of
+/// these is true:
+/// - the operands are the same register;
+/// - TO has both signed order bits;
+/// - TO has both unsigned order bits.
+///
+/// [PPC-Book1 p:62 s:3.3.10] TO bits 0 to 4 select signed less than, signed greater than, equal, unsigned less than and unsigned greater than.
+fn traps_always(to: u8, same_operands: bool) -> bool {
+    let equal = to & 0b00100 != 0;
+    let signed_orders = to & 0b11000 == 0b11000;
+    let unsigned_orders = to & 0b00011 == 0b00011;
+    equal && (same_operands || signed_orders || unsigned_orders)
+}
+
 #[cfg(test)]
 #[path = "tests/indirect_entry_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/indirect_entry_partial_constant_tests.rs"]
+mod partial_constant_tests;
+
+#[cfg(test)]
+#[path = "tests/indirect_entry_toc_tests.rs"]
+mod toc_tests;
+
+#[cfg(test)]
+#[path = "tests/indirect_entry_path_end_tests.rs"]
+mod path_end_tests;
