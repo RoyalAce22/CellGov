@@ -410,3 +410,7 @@ mod interrupt_facility_tests;
 #[cfg(test)]
 #[path = "tests/interrupt_trace_tests.rs"]
 mod interrupt_trace_tests;
+
+#[cfg(test)]
+#[path = "tests/interrupt_endian_tests.rs"]
+mod interrupt_endian_tests;

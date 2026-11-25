@@ -5,6 +5,7 @@ use cellgov_ps3_abi::hw::ppu::{
     VSCR_DEFINED_BITS, VSCR_SAT,
 };
 use cellgov_ps3_abi::hw::ppu_spr::PS3_PROCESS_CTRL;
+use cellgov_ps3_abi::hw::ppu_supervisor::PPE_MSR_IGNORED;
 use cellgov_sync::ReservedLine;
 
 use crate::multilinear::{
@@ -524,9 +525,14 @@ impl PpuState {
 
     /// Give the thread the supervisor registers `registers`, or remove
     /// them with `None`.
+    ///
+    /// The function clears the MSR bits [`PPE_MSR_IGNORED`].
     pub fn set_supervisor(&mut self, registers: Option<SupervisorState>) {
         let old = self.supervisor_lane();
-        self.supervisor = registers.map(Box::new);
+        self.supervisor = registers.map(|mut s| {
+            s.msr &= !PPE_MSR_IGNORED;
+            Box::new(s)
+        });
         self.acc = self
             .acc
             .wrapping_add(lane_delta(LANE_SUPERVISOR, old, self.supervisor_lane()));
@@ -534,12 +540,17 @@ impl PpuState {
 
     /// Run `f` on the supervisor registers and keep the hash current;
     /// `None` when the thread has none.
+    ///
+    /// After `f` returns, the function clears the MSR bits
+    /// [`PPE_MSR_IGNORED`].
     pub(crate) fn update_supervisor<R>(
         &mut self,
         f: impl FnOnce(&mut SupervisorState) -> R,
     ) -> Option<R> {
         let old = self.supervisor_lane();
-        let out = f(self.supervisor.as_deref_mut()?);
+        let registers = self.supervisor.as_deref_mut()?;
+        let out = f(registers);
+        registers.msr &= !PPE_MSR_IGNORED;
         self.acc = self
             .acc
             .wrapping_add(lane_delta(LANE_SUPERVISOR, old, self.supervisor_lane()));

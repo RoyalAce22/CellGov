@@ -27,6 +27,11 @@ pub const MSR_HV: u64 = doubleword_bit(3);
 /// [CBE-Handbook p:304 s:10.4.1] The PPE's MSR holds VXU at bit 38.
 pub const MSR_VXU: u64 = doubleword_bit(38);
 
+/// MSR bit 47: interrupt little-endian mode.
+///
+/// [CBE-Handbook p:304 s:10.4.1] The PPE's MSR holds ILE at bit 47 and LE at bit 63.
+pub const MSR_ILE: u64 = doubleword_bit(47);
+
 /// MSR bit 48: external and decrementer interrupts enabled.
 ///
 /// [PPC-Book3 p:10 s:2.2.3] See [`MSR_SF`].
@@ -87,6 +92,14 @@ pub const MSR_PMM: u64 = doubleword_bit(61);
 ///
 /// [PPC-Book3 p:22 s:3.4] `mtmsrd` with L = 1 writes MSR bits 48 and 62 and leaves the rest.
 pub const MSR_RI: u64 = doubleword_bit(62);
+
+/// MSR bit 63: little-endian mode. See [`MSR_ILE`].
+pub const MSR_LE: u64 = doubleword_bit(63);
+
+/// The MSR bits that a write on the PPE does not change: ILE and LE.
+///
+/// [CBE-Handbook p:739 s:A.2.5] The PPE supports only big-endian mode, and a write to MSR\[LE\] or MSR\[ILE\] has no effect.
+pub const PPE_MSR_IGNORED: u64 = MSR_ILE | MSR_LE;
 
 /// The MSR bits that every interrupt clears.
 ///
@@ -184,3 +197,7 @@ mod msr_pmm_bit_tests;
 #[cfg(test)]
 #[path = "tests/ppu_msr_vxu_bit_tests.rs"]
 mod msr_vxu_bit_tests;
+
+#[cfg(test)]
+#[path = "tests/ppu_msr_endian_bits_tests.rs"]
+mod msr_endian_bits_tests;

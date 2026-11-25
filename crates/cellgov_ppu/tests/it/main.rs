@@ -118,6 +118,7 @@ mod console_ppu_lv2_call_untimed;
 mod console_ppu_lv2_call_wait_ends;
 mod console_ppu_may_trap;
 mod console_ppu_mcrfs_ox;
+mod console_ppu_msr_le_readback;
 mod console_ppu_mulhwu_high_bit;
 mod console_ppu_ocrf_fxm;
 mod console_ppu_quadword;

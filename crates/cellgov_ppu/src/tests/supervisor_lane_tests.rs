@@ -5,7 +5,7 @@ use super::*;
 use crate::mmu::Partition;
 use crate::state::PpuState;
 use crate::supervisor::SupervisorState;
-use cellgov_ps3_abi::hw::ppu_supervisor::PPE_SLB_ENTRIES;
+use cellgov_ps3_abi::hw::ppu_supervisor::{PPE_MSR_IGNORED, PPE_SLB_ENTRIES};
 use std::collections::BTreeSet;
 
 #[test]
@@ -99,11 +99,20 @@ fn supervisor_lane_wire_format_golden() {
         0xD74A_E178_4C24_286D,
         "written by hand in the same commit as the change that moves it"
     );
+    // The counting block's MSR word 1 is MSR[LE], which the thread drops.
+    // [CBE-Handbook p:739 s:A.2.5] A write to MSR[LE] or MSR[ILE] has no effect on the PPE.
     let mut state = PpuState::new();
     state.set_supervisor(Some(counting_block()));
+    assert_eq!(state.supervisor().map(|s| s.msr), Some(0));
+    let mut big_endian = PpuState::new();
+    big_endian.set_supervisor(Some(SupervisorState {
+        msr: 0,
+        ..counting_block()
+    }));
+    assert_eq!(state.state_hash(), big_endian.state_hash());
     assert_eq!(
         state.state_hash(),
-        0xA590_6685_3822_0B2D,
+        0x398C_3214_5256_B807,
         "written by hand in the same commit as the change that moves it"
     );
 }
@@ -154,6 +163,7 @@ fn every_bit_of_every_supervisor_field_moves_the_state_hash() {
     state.set_supervisor(Some(SupervisorState::new(0)));
     let base = state.state_hash();
     let mut hashes = vec![base];
+    let mut ignored = 0usize;
     for (name, width, flip) in field_flips() {
         for bit in 0..width {
             let mut flipped = state.clone();
@@ -161,17 +171,30 @@ fn every_bit_of_every_supervisor_field_moves_the_state_hash() {
                 .update_supervisor(|s| flip(s, bit))
                 .expect("the state holds supervisor registers");
             let h = flipped.state_hash();
+            if name == "msr" && PPE_MSR_IGNORED & (1u64 << bit) != 0 {
+                // [CBE-Handbook p:739 s:A.2.5] A write to MSR[LE] or MSR[ILE] has no effect on the PPE.
+                assert_eq!(h, base, "{name} bit {bit}");
+                assert_eq!(
+                    flipped.supervisor().map(|s| s.msr),
+                    Some(0),
+                    "{name} bit {bit}"
+                );
+                assert!(flipped.hash_is_current(), "{name} bit {bit}");
+                ignored += 1;
+                continue;
+            }
             assert_ne!(h, base, "{name} bit {bit}");
             assert!(flipped.hash_is_current(), "{name} bit {bit}");
             assert_eq!(h, hash(&lanes(&flipped.fingerprint())), "{name} bit {bit}");
             hashes.push(h);
         }
     }
-    // Nine 64-bit registers, DSISR and DEC, the external exception, and
-    // two words per SLB entry.
+    assert_eq!(ignored, 2, "MSR[ILE] and MSR[LE]");
+    // Nine 64-bit registers less the MSR bits the PPE ignores, DSISR and
+    // DEC, the external exception, and two words per SLB entry.
     assert_eq!(
         hashes.len(),
-        1 + 9 * 64 + 2 * 32 + 1 + 2 * 64 * PPE_SLB_ENTRIES
+        1 + 9 * 64 - PPE_MSR_IGNORED.count_ones() as usize + 2 * 32 + 1 + 2 * 64 * PPE_SLB_ENTRIES
     );
     let n = hashes.len();
     hashes.sort_unstable();

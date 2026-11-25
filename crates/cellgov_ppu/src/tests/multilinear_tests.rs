@@ -374,7 +374,7 @@ fn lanes_place_each_field_at_its_index() {
     }
     assert_eq!(l[136], u64::from(VSCR_NJ | VSCR_SAT));
     assert_eq!(l[137], 0, "a title process carries no supervisor registers");
-    let registers = crate::supervisor::SupervisorState::new(1);
+    let registers = crate::supervisor::SupervisorState::new(2);
     s.set_supervisor(Some(registers.clone()));
     assert_eq!(lanes(&s.fingerprint())[137], registers.digest());
     assert_eq!(LANE_COUNT, 138);

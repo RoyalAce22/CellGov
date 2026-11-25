@@ -1,0 +1,22 @@
+[test]
+name = "ppu_msr_le_readback"
+
+# A hardware probe: whether the PPE keeps MSR[LE] = 1 when rfid restores an SRR1 that
+# holds it. The probe writes LE and PMM into the kernel-saved SRR1 of its own system
+# call and reads the SRR1 that the kernel saves at its next one. The console capture is
+# the answer; no emulator runs it.
+
+[observe]
+# 24 big-endian doublewords, 192 bytes: +0x00 the first failed step (0 when none),
+# +0x08 to +0x18 the three locators, +0x20 the record count, +0x28 the record index that
+# led to the probe's own frame, +0x30 the address after the peek's sc, +0x38 the frame,
+# +0x40 the saved SRR0, +0x48 S0 (SRR1 before), +0x50 the first poke's doubleword
+# (S0 | LE | PMM), +0x58 its return value, +0x60 S1 (SRR1 at the next sc), +0x68 the
+# second poke's doubleword (S1 without LE and PMM), +0x70 its return value, +0x78 S2,
+# +0x80 per record four links: record + 0x68, the thread, its stack base and size.
+memory_regions = [
+  { name = "result", addr = 0, size = 192 },
+]
+
+[expect]
+outcome = "completed"

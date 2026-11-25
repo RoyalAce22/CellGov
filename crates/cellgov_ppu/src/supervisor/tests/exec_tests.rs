@@ -6,8 +6,8 @@
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::hw::ppu_supervisor::{
-    MSR_DR, MSR_EE, MSR_HV, MSR_IR, MSR_ME, MSR_PR, MSR_RI, MSR_SE, MSR_SF, SLB_VALID, SPR_DAR,
-    SPR_DEC, SPR_DSISR, SPR_SPRG0, SPR_SRR0, SPR_SRR1,
+    MSR_DR, MSR_EE, MSR_HV, MSR_ILE, MSR_IR, MSR_LE, MSR_ME, MSR_PR, MSR_RI, MSR_SE, MSR_SF,
+    SLB_VALID, SPR_DAR, SPR_DEC, SPR_DSISR, SPR_SPRG0, SPR_SRR0, SPR_SRR1,
 };
 
 use super::{moves_decrementer, SupervisorState};
@@ -174,18 +174,19 @@ fn rfid_into_32_bit_mode_takes_the_low_word_of_srr0() {
 }
 
 #[test]
-fn rfid_takes_only_the_srr1_bits_book3_lists_and_keeps_the_rest() {
+fn rfid_takes_only_the_srr1_bits_book3_lists_but_le_and_keeps_the_rest() {
     // Every SRR1 bit set from a privileged, non-hypervisor MSR: HV and ME
     // stay as they were (0), and bits 33:36 and 42:47 are not taken.
+    // [CBE-Handbook p:739 s:A.2.5] A write to MSR[LE] or MSR[ILE] has no effect on the PPE.
     let (msr, pc) = rfid_from(MSR_SF, !0, 0x0000_1234_5678_9ABF);
     assert_eq!(
         msr,
-        !(MSR_HV | MSR_ME | isa_bits(33, 36) | isa_bits(42, 47))
+        !(MSR_HV | MSR_ME | isa_bits(33, 36) | isa_bits(42, 47) | MSR_LE)
     );
     assert_eq!(pc, 0x0000_1234_5678_9ABC);
-    // Every SRR1 bit clear: the MSR keeps ME and bits 33:36 and 42:47,
+    // Every SRR1 bit clear: the MSR keeps ME and bits 33:36 and 42:46,
     // and nothing else; SF = 0 takes the low word of SRR0.
-    let kept = MSR_ME | isa_bits(33, 36) | isa_bits(42, 47);
+    let kept = MSR_ME | isa_bits(33, 36) | isa_bits(42, 46);
     let (msr, pc) = rfid_from(kept | MSR_EE | MSR_IR | MSR_DR | MSR_RI, 0, !0);
     assert_eq!(msr, kept);
     assert_eq!(pc, 0xFFFF_FFFC);
@@ -220,20 +221,27 @@ fn mtmsrd_with_l_0_and_rs_0_clears_every_bit_but_hv_and_me() {
 }
 
 #[test]
-fn mtmsr_replaces_the_low_word_but_me_and_keeps_the_high_word() {
+fn mtmsr_replaces_the_low_word_but_me_ile_and_le_and_keeps_the_high_word() {
     let mut state = kernel_state();
     // Each move keeps SE: an mtmsr that changes SE refuses.
     state.update_supervisor(|s| s.msr = MSR_SF | MSR_HV);
     state.set_gpr(3, !MSR_SE);
-    run(&mut state, word(31, 146, 3, 0, 0));
+    assert_eq!(
+        run(&mut state, word(31, 146, 3, 0, 0)),
+        ExecuteVerdict::Continue
+    );
+    // [CBE-Handbook p:739 s:A.2.5] A write to MSR[LE] or MSR[ILE] has no effect on the PPE.
     assert_eq!(
         msr(&state),
-        MSR_SF | MSR_HV | (0xFFFF_FFFF & !MSR_ME & !MSR_SE)
+        MSR_SF | MSR_HV | (0xFFFF_FFFF & !MSR_ME & !MSR_SE & !MSR_ILE & !MSR_LE)
     );
     let mut state = kernel_state();
     state.update_supervisor(|s| s.msr = !MSR_PR);
     state.set_gpr(3, MSR_SE);
-    run(&mut state, word(31, 146, 3, 0, 0));
+    assert_eq!(
+        run(&mut state, word(31, 146, 3, 0, 0)),
+        ExecuteVerdict::Continue
+    );
     assert_eq!(msr(&state), 0xFFFF_FFFF_0000_0000 | MSR_ME | MSR_SE);
 }
 

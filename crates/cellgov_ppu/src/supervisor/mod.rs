@@ -28,3 +28,7 @@ mod facility_tests;
 #[cfg(test)]
 #[path = "tests/mtmsr_trace_tests.rs"]
 mod mtmsr_trace_tests;
+
+#[cfg(test)]
+#[path = "tests/msr_endian_tests.rs"]
+mod msr_endian_tests;

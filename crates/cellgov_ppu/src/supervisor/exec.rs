@@ -106,6 +106,8 @@ fn unmodelled(mnemonic: &'static str) -> ExecuteVerdict {
 }
 
 /// [PPC-Book3 p:13 s:2.3] rfid: SF from SRR1 bits 0 and 1; HV ANDed with SRR1 bit 3; ME from SRR1 only in hypervisor state; EE, IR and DR each ORed with SRR1 bit 49; bits 1:2, 4:32, 37:41, 49:50, 52:57 and 60:63 from SRR1; the next instruction at SRR0 bits 0:61.
+///
+/// [`PpuState::update_supervisor`] keeps MSR\[LE\] at 0 whatever SRR1 holds.
 fn rfid(state: &mut PpuState) -> ExecuteVerdict {
     let Some(s) = state.supervisor() else {
         return unmodelled("rfid");
@@ -152,6 +154,8 @@ enum MtMsr {
 /// [PPC-Book3 p:91 s:8.3] mtmsr, L = 0: EE, IR and DR as mtmsrd; bits 32:47, 49:50, 52:57 and 60:63 from RS; the high 32 bits and ME unchanged. L = 1 as mtmsrd.
 ///
 /// [CBE-Handbook p:257 s:9.5.14] The PPE decides the trace after an mtmsrd from MSR\[SE\] after the move, the opposite of the architecture. The documents give no PPE rule for mtmsr, so CellGov refuses an mtmsr that changes SE.
+///
+/// [`PpuState::update_supervisor`] keeps MSR\[ILE\] and MSR\[LE\] at 0 whatever RS holds.
 fn move_to_msr(state: &mut PpuState, rs: usize, l: bool, form: MtMsr) -> ExecuteVerdict {
     let v = state.gpr[rs];
     let changes_se = state
