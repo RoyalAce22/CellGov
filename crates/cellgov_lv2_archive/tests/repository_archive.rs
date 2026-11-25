@@ -108,6 +108,17 @@ fn repository_rows_are_well_formed() {
                 );
                 assert!(!section.is_empty(), "{} names no section", node.key);
             }
+            NodeSource::ConsoleCapture { capture, .. } => {
+                assert!(
+                    archive_dir()
+                        .join("../..")
+                        .join(capture)
+                        .join("cgov_frame.bin")
+                        .is_file(),
+                    "{} cites {capture}, which holds no committed frame",
+                    node.key
+                );
+            }
         }
     }
 

@@ -8,6 +8,7 @@ fn request(number: u64, pc: u64, inputs: [u64; 8]) -> HypercallRequest {
         number,
         inputs,
         pc,
+        lr: 0,
         thread: Some(0),
         tick: GuestTicks::ZERO,
     }
@@ -31,6 +32,7 @@ fn bi(second: &[u8], index: u64) -> [u64; 8] {
 #[test]
 fn the_log_holds_each_repository_read_in_order_with_its_answer_or_refusal() {
     let mut hv = Hypervisor::new();
+    hv.set_firmware("1.50");
     hv.dispatch(&request(91, 0x10, bi(b"pun", 0)));
     hv.dispatch(&request(105, 0x14, [0; 8]));
     hv.dispatch(&request(91, 0x18, bi(b"pu", 1)));

@@ -37,7 +37,7 @@ impl Runtime {
         let Some(args) = result.syscall_args else {
             return;
         };
-        // Only `LocalDiagnostics::with_pc_lr_syscall_lev` sets a LEV, and it sets the pc too.
+        // Only `LocalDiagnostics::with_pc_lr_syscall_lev` sets a LEV, and it sets the pc and lr too.
         debug_assert!(
             result.local_diagnostics.pc.is_some(),
             "hypercall yield without a pc"
@@ -49,6 +49,7 @@ impl Runtime {
             number: args[0],
             inputs,
             pc: result.local_diagnostics.pc.unwrap_or_default(),
+            lr: result.local_diagnostics.lr.unwrap_or_default(),
             thread: self.registry.get(source).and_then(|u| u.ppe_thread()),
             tick: self.time,
         };
@@ -173,7 +174,9 @@ fn traced_disposition(disposition: &HypercallDisposition) -> TracedHypercallDisp
             TracedHypercallDisposition::Unmodelled
         }
         HypercallDisposition::Refused(
-            HypercallRefusal::UnmodelledInput { .. } | HypercallRefusal::RepositoryNode { .. },
+            HypercallRefusal::UnmodelledInput { .. }
+            | HypercallRefusal::RepositoryNode { .. }
+            | HypercallRefusal::RepositorySecondValueUnobserved { .. },
         ) => TracedHypercallDisposition::Refused,
     }
 }

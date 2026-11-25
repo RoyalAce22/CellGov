@@ -7,6 +7,7 @@
 //! and keeps every other PUP's rows. It boots only the kernel ELF that
 //! `kernel.tsv` names for that PUP.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use cellgov_boot::kernel::{run_kernel_from_entry, KernelRun, KernelRunError, KernelRunStop};
@@ -37,6 +38,8 @@ enum RepositoryCensusError {
         steps: usize,
         reads: usize,
     },
+    #[error(transparent)]
+    MixedRead(#[from] archive::MixedRepositoryRead),
     #[error("read existing {}: {source}", path.display())]
     Read {
         path: PathBuf,
@@ -82,7 +85,11 @@ pub(crate) fn run(
         args.fw,
         args.pup_sha256,
         boot.repository_reads.len(),
-        archive::repository_read_rows_of(&args.pup_sha256, &boot.repository_reads).len(),
+        boot.repository_reads
+            .iter()
+            .map(|read| read.key)
+            .collect::<BTreeSet<_>>()
+            .len(),
         boot.steps,
         stop_text(&boot.stop),
         REPOSITORY_READ.file(),
@@ -126,7 +133,7 @@ fn emit(args: &RepositoryCensusArgs, elf: &[u8]) -> Result<KernelRun, Repository
     let pups = crate::lv2_tables::committed_pup_rows()?;
     archive::select_pup(&pups, &args.pup_sha256, &args.fw)?;
     check_committed_kernel(&args.pup_sha256, elf)?;
-    let boot = run_kernel_from_entry(elf, args.max_steps)?;
+    let boot = run_kernel_from_entry(elf, &args.fw, args.max_steps)?;
     let fresh = census_rows(&args.pup_sha256, args.max_steps, &boot)?;
     let path = args.output_dir.join(REPOSITORY_READ.file());
     let mut rows = load_existing(&path)?;
@@ -158,10 +165,8 @@ fn census_rows(
             reads: boot.repository_reads.len(),
         });
     }
-    Ok(archive::repository_read_rows_of(
-        pup_sha256,
-        &boot.repository_reads,
-    ))
+    archive::repository_read_rows_of(pup_sha256, &boot.repository_reads)
+        .map_err(RepositoryCensusError::from)
 }
 
 /// The rows of the table at `path`, or none when no table is there.

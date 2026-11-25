@@ -1,0 +1,15 @@
+[test]
+name = "lv2_repository_boot_nodes"
+
+# A hardware probe: the repository values the running kernel read from lv1 at boot,
+# read back from the kernel's boot record through the CFW's lv2 peek.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# per read, the address and the doubleword there: 27 reads, 432 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 432 },
+]
+
+[expect]
+outcome = "completed"

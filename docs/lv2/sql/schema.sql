@@ -192,7 +192,7 @@ CREATE TABLE repository (
     "source" TEXT NOT NULL CHECK ("source" IN ('cellgov', 'console', 'linux', 'psdevwiki')),
     "citation" TEXT NOT NULL,
     "section" TEXT,
-    PRIMARY KEY ("lpar", "n1", "n2", "n3", "n4")
+    PRIMARY KEY ("lpar", "n1", "n2", "n3", "n4", "fw")
 ) STRICT;
 
 CREATE TABLE behavior (

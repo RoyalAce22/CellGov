@@ -224,9 +224,23 @@ served node without reading external data.
 
 `tables/repository.tsv` has {{repository_nodes}} rows, one per node that
 `cellgov_ps3_abi::lv1::repository::NODES` serves: its key, its two
-values, the firmware whose logged boot reads it and its source. A node
-no logged boot reads, or a logged read the table no longer agrees with,
-fails the generator.
+values, the firmware CellGov serves its values to and its source. The
+source can be of another firmware: the psdevwiki dump is of 3.41. A read at a
+firmware that no row of its key names is a refusal. `v2` reads
+`{{repository_unobserved}}` where the source does not observe the second
+value. The hypervisor answers such a node only at the read sites that a
+static analysis of the kernel shows discard the second value. A read
+from any other site is a refusal. These cases fail the generator:
+
+- a row that names a firmware whose logged boot does not read the node;
+- a logged read that the table no longer agrees with;
+- a logged refusal of a node that the hypervisor answers only at the
+  read sites it lists: the read's site is not one of them, or the log is
+  stale.
+
+`cellgov dev repository-census` refuses a boot that answers one key at
+one read and refuses it at another, because one row holds one state per
+key.
 
 ## Handling
 

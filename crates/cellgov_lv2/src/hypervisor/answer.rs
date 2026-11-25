@@ -92,6 +92,24 @@ pub enum HypercallRefusal {
         /// The address of its `sc`.
         pc: u64,
     },
+    /// A repository read named a node whose source does not observe the
+    /// second value, from a site that no analysis shows discards it.
+    #[error(
+        "repository read from {unit:?} at pc 0x{pc:016x}, lr 0x{lr:016x}: the source of the node \
+         lpar {} key 0x{:016x} 0x{:016x} 0x{:016x} 0x{:016x} does not observe its second value, \
+         and no analysis shows that this read site discards it",
+        key.lpar, key.n1, key.n2, key.n3, key.n4
+    )]
+    RepositorySecondValueUnobserved {
+        /// The partition and the raw key words of the read.
+        key: RepositoryKey,
+        /// The unit that made the call.
+        unit: UnitId,
+        /// The address of its `sc`.
+        pc: u64,
+        /// The link register at the `sc`.
+        lr: u64,
+    },
 }
 
 impl HypercallRefusal {
@@ -99,7 +117,9 @@ impl HypercallRefusal {
     pub fn number(&self) -> u64 {
         match self {
             Self::Unmodelled { number, .. } | Self::UnmodelledInput { number, .. } => *number,
-            Self::RepositoryNode { .. } => cellgov_ps3_abi::lv1::call::READ_REPOSITORY_NODE,
+            Self::RepositoryNode { .. } | Self::RepositorySecondValueUnobserved { .. } => {
+                cellgov_ps3_abi::lv1::call::READ_REPOSITORY_NODE
+            }
         }
     }
 }

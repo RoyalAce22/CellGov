@@ -1,8 +1,9 @@
 //! CellGov's hypervisor: the answers to the LV1 hypercalls that a thread
 //! in supervisor state makes.
 //!
-//! A handler is a pure function of the [`HypercallRequest`]. It returns
-//! a [`HypercallDisposition`]:
+//! A handler is a pure function of the [`HypercallRequest`] and the
+//! firmware version the [`Hypervisor`] answers for. It returns a
+//! [`HypercallDisposition`]:
 //! - an answer, which the runtime applies as effects: r3, the outputs
 //!   from r4, and memory writes;
 //! - a typed refusal, which stops the run.

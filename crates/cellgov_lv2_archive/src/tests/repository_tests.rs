@@ -1,7 +1,7 @@
 use cellgov_event::UnitId;
 use cellgov_lv2::hypervisor::RepositoryRead;
 use cellgov_ps3_abi::lv1::repository::{
-    field, first_field, NodeSource, RepositoryKey, RepositoryNode,
+    field, first_field, NodeSource, RepositoryKey, RepositoryNode, SecondValue,
 };
 
 use super::*;
@@ -37,10 +37,15 @@ const DUMP: NodeSource = NodeSource::PsdevwikiDump {
 };
 
 fn node(key: RepositoryKey, v1: u64) -> RepositoryNode {
+    node_at(key, v1, &["1.50"])
+}
+
+fn node_at(key: RepositoryKey, v1: u64, firmware: &'static [&'static str]) -> RepositoryNode {
     RepositoryNode {
         key,
         v1,
-        v2: 0,
+        v2: SecondValue::Given(0),
+        firmware,
         source: DUMP,
     }
 }
@@ -72,7 +77,7 @@ fn one_boot_gives_one_row_per_key_at_its_first_read() {
         read(bi(b"pun", 0), Some((1, 0))),
         read(bi(b"pu", 1), None),
     ];
-    let rows = repository_read_rows_of(&pup(1), &reads);
+    let rows = repository_read_rows_of(&pup(1), &reads).unwrap();
     assert_eq!(
         rows,
         vec![
@@ -84,26 +89,50 @@ fn one_boot_gives_one_row_per_key_at_its_first_read() {
 }
 
 #[test]
-fn a_node_row_lists_each_firmware_whose_boot_reads_it() {
+fn a_node_row_lists_the_firmware_the_node_names() {
     let pups = [pup_row(1, "1.50"), pup_row(2, "4.93")];
     let reads = [
         read_row(2, bi(b"pun", 0), 0, true),
         read_row(1, bi(b"pun", 0), 0, true),
         read_row(1, bi(b"pu", 1), 1, false),
     ];
-    let rows = repository_rows(&[node(bi(b"pun", 0), 1)], &reads, &pups).unwrap();
+    let rows = repository_rows(
+        &[node_at(bi(b"pun", 0), 1, &["1.50", "4.93"])],
+        &reads,
+        &pups,
+    )
+    .unwrap();
     assert_eq!(
         rows,
         vec![RepositoryRow {
             key: bi(b"pun", 0),
             node: "bi.pun".to_string(),
             v1: 1,
-            v2: 0,
+            v2: Some(0),
             fw: vec!["1.50".to_string(), "4.93".to_string()],
             source: "psdevwiki",
             citation: "PS3DEVWIKI-REPO",
-            section: Some("3.41_GameOS"),
+            section: Some("3.41_GameOS".to_string()),
         }]
+    );
+}
+
+#[test]
+fn two_nodes_of_one_key_give_two_rows_ascending_by_firmware() {
+    let pups = [pup_row(1, "1.50"), pup_row(2, "4.93")];
+    let reads = [
+        read_row(1, bi(b"pun", 0), 0, true),
+        read_row(2, bi(b"pun", 0), 0, true),
+    ];
+    let nodes = [
+        node_at(bi(b"pun", 0), 2, &["4.93"]),
+        node_at(bi(b"pun", 0), 1, &["1.50"]),
+    ];
+    let rows = repository_rows(&nodes, &reads, &pups).unwrap();
+    let cells: Vec<(u64, Vec<String>)> = rows.into_iter().map(|r| (r.v1, r.fw)).collect();
+    assert_eq!(
+        cells,
+        vec![(1, vec!["1.50".to_string()]), (2, vec!["4.93".to_string()])]
     );
 }
 
@@ -115,7 +144,42 @@ fn a_node_no_boot_reads_is_refused() {
     assert_eq!(
         repository_rows(&nodes, &reads, &pups),
         Err(RepositoryTableError::UnreadNode {
-            key: bi(b"spun", 0)
+            key: bi(b"spun", 0),
+            fw: "1.50".to_string(),
+        })
+    );
+}
+
+#[test]
+fn a_node_that_names_a_firmware_whose_boot_does_not_read_it_is_refused() {
+    let pups = [pup_row(1, "1.50"), pup_row(2, "4.93")];
+    let reads = [
+        read_row(1, bi(b"pun", 0), 0, true),
+        read_row(2, bi(b"pu", 0), 0, false),
+    ];
+    let nodes = [node_at(bi(b"pun", 0), 1, &["1.50", "4.93"])];
+    assert_eq!(
+        repository_rows(&nodes, &reads, &pups),
+        Err(RepositoryTableError::UnreadNode {
+            key: bi(b"pun", 0),
+            fw: "4.93".to_string(),
+        })
+    );
+}
+
+#[test]
+fn a_read_answered_at_a_firmware_the_node_does_not_name_is_stale() {
+    let pups = [pup_row(1, "1.50"), pup_row(2, "4.93")];
+    let reads = [
+        read_row(1, bi(b"pun", 0), 0, true),
+        read_row(2, bi(b"pun", 0), 0, true),
+    ];
+    assert_eq!(
+        repository_rows(&[node(bi(b"pun", 0), 1)], &reads, &pups),
+        Err(RepositoryTableError::StaleRead {
+            pup_sha256: pup(2),
+            key: bi(b"pun", 0),
+            answered: true,
         })
     );
 }

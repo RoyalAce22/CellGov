@@ -117,6 +117,13 @@ impl Runtime {
         &self.hypervisor
     }
 
+    /// Makes CellGov's hypervisor answer repository reads for the
+    /// firmware version `version`, such as `"4.93"`. Call it before the
+    /// first step.
+    pub fn set_hypervisor_firmware(&mut self, version: &str) {
+        self.hypervisor.set_firmware(version);
+    }
+
     // -- LV2 --
 
     /// Immutable view of the LV2 host state.

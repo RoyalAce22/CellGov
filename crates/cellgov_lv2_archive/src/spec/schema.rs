@@ -78,6 +78,9 @@ pub enum ColumnKind {
     Hex32,
     /// Accepts `0x` followed by exactly 16 lowercase hexadecimal digits.
     Hex64,
+    /// A [`Hex64`](ColumnKind::Hex64) word, or the one label that stands
+    /// for a value no source gives.
+    Hex64OrLabel(&'static str),
     /// One label from a fixed set.
     Enum(&'static [&'static str]),
     /// One token of ASCII letters, digits and `_ . / : @ + -`, wide
@@ -99,6 +102,7 @@ impl ColumnKind {
             | ColumnKind::Sha256
             | ColumnKind::Hex32
             | ColumnKind::Hex64
+            | ColumnKind::Hex64OrLabel(_)
             | ColumnKind::Enum(_)
             | ColumnKind::Locator => "TEXT",
         }
@@ -118,6 +122,9 @@ impl ColumnKind {
             ColumnKind::Sha256 => "64 lowercase hexadecimal digits".to_string(),
             ColumnKind::Hex32 => "0x plus 8 lowercase hexadecimal digits".to_string(),
             ColumnKind::Hex64 => "0x plus 16 lowercase hexadecimal digits".to_string(),
+            ColumnKind::Hex64OrLabel(label) => {
+                format!("0x plus 16 lowercase hexadecimal digits, or {label}")
+            }
             ColumnKind::Enum(labels) => format!("one of {}", labels.join(", ")),
             ColumnKind::Locator => "a locator of letters, digits and _ . / : @ + -".to_string(),
         }

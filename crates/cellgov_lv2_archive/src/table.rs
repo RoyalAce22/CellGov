@@ -197,6 +197,11 @@ fn is_lower_hex(cell: &str, digits: usize) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+fn is_hex64(cell: &str) -> bool {
+    cell.strip_prefix("0x")
+        .is_some_and(|digits| is_lower_hex(digits, 16))
+}
+
 fn is_locator(cell: &str) -> bool {
     !cell.is_empty()
         && cell
@@ -272,9 +277,8 @@ fn check_cell(
         ColumnKind::Hex32 => cell
             .strip_prefix("0x")
             .is_some_and(|digits| is_lower_hex(digits, 8)),
-        ColumnKind::Hex64 => cell
-            .strip_prefix("0x")
-            .is_some_and(|digits| is_lower_hex(digits, 16)),
+        ColumnKind::Hex64 => is_hex64(cell),
+        ColumnKind::Hex64OrLabel(label) => cell == label || is_hex64(cell),
         ColumnKind::Enum(labels) => labels.contains(&cell),
         ColumnKind::Locator => is_locator(cell),
     };

@@ -9,6 +9,7 @@ fn send_request(len: u64, text: &[u8; 32]) -> HypercallRequest {
         number: LOGICAL_CONSOLE_SEND,
         inputs: [1, len, word(0), word(1), word(2), word(3), 0, 0],
         pc: 0x8000_0000_0000_fcd8,
+        lr: 0,
         thread: None,
         tick: GuestTicks::ZERO,
     }

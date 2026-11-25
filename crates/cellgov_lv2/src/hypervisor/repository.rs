@@ -2,7 +2,7 @@
 //! node table.
 
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::lv1::repository::{lookup, RepositoryKey};
+use cellgov_ps3_abi::lv1::repository::{lookup, ReadSite, RepositoryKey, SecondValue};
 
 use super::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use super::request::HypercallRequest;
@@ -32,22 +32,49 @@ fn key_of(request: &HypercallRequest) -> RepositoryKey {
     }
 }
 
-/// Answers the node that r3 to r7 name, with its two values in r4 and r5.
+/// Answers the node that r3 to r7 name at the firmware version
+/// `firmware`, with its two values in r4 and r5.
 ///
-/// The key compares as raw words, the partition included. A node no
-/// source gives values for is a refusal that names the key. The read
-/// never answers `LV1_NO_ENTRY` on its own.
-pub(super) fn read_node(request: &HypercallRequest) -> HypercallDisposition {
+/// The key compares as raw words, the partition included. The read is a
+/// refusal that names the key in these cases:
+/// - no source gives the node's values for `firmware`;
+/// - `firmware` is `None`;
+/// - the source does not observe the second value, and the read site is
+///   not one that discards it.
+///
+/// At a site that discards an unobserved second value, r5 gets 0. The
+/// read never answers `LV1_NO_ENTRY` on its own.
+pub(super) fn read_node(
+    request: &HypercallRequest,
+    firmware: Option<&str>,
+) -> HypercallDisposition {
     let key = key_of(request);
-    match lookup(&key) {
-        Some(node) => {
-            HypercallDisposition::Answered(HypercallAnswer::success(vec![node.v1, node.v2]))
-        }
-        None => HypercallDisposition::Refused(HypercallRefusal::RepositoryNode {
+    let Some(node) = firmware.and_then(|firmware| lookup(&key, firmware)) else {
+        return HypercallDisposition::Refused(HypercallRefusal::RepositoryNode {
             key,
             unit: request.unit,
             pc: request.pc,
-        }),
+        });
+    };
+    let site = ReadSite {
+        sc: request.pc,
+        lr: request.lr,
+    };
+    match node.v2 {
+        SecondValue::Given(v2) => {
+            HypercallDisposition::Answered(HypercallAnswer::success(vec![node.v1, v2]))
+        }
+        SecondValue::Unobserved { discarded_by } if discarded_by.contains(&site) => {
+            HypercallDisposition::Answered(HypercallAnswer::success(vec![node.v1, 0]))
+        }
+        SecondValue::Unobserved { .. } => {
+            HypercallDisposition::Refused(HypercallRefusal::RepositorySecondValueUnobserved {
+                key,
+                unit: request.unit,
+                pc: request.pc,
+                lr: request.lr,
+            })
+        }
     }
 }
 
@@ -75,3 +102,11 @@ pub(super) fn read_record(
 #[cfg(test)]
 #[path = "tests/repository_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/repository_firmware_tests.rs"]
+mod firmware_tests;
+
+#[cfg(test)]
+#[path = "tests/repository_reader_tests.rs"]
+mod reader_tests;

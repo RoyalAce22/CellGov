@@ -6,6 +6,15 @@ use cellgov_ps3_abi::lv1::repository::{field, first_field, RepositoryKey};
 use super::map::KERNEL_SPAN_LIMIT;
 use super::{run_kernel_from_entry, KernelRunError, KernelRunStop};
 
+#[path = "from_entry_firmware_tests.rs"]
+mod firmware;
+
+#[path = "from_entry_reader_tests.rs"]
+mod reader;
+
+/// A firmware the psdevwiki dump's repository values are served to.
+const FW: &str = "1.50";
+
 const BASE: u64 = LV2_KERNEL_LINK_BASE;
 const ENTRY: u64 = BASE + 0x100;
 
@@ -69,7 +78,7 @@ const TWO_READS: &[u32] = &[
 
 #[test]
 fn a_read_of_a_node_with_no_row_stops_the_kernel_at_a_refusal_that_names_the_key() {
-    let run = run_kernel_from_entry(&kernel_elf(TWO_READS), 10_000).unwrap();
+    let run = run_kernel_from_entry(&kernel_elf(TWO_READS), FW, 10_000).unwrap();
     let bare_bi = RepositoryKey {
         lpar: 2,
         n1: first_field(b"bi", 0),
@@ -111,7 +120,7 @@ const MFSPR_R0_BP_VR: u32 = 0x7c1e_faa6;
 
 #[test]
 fn a_kernel_fault_stops_the_run_at_the_faulting_pc_and_the_sibling_runs_no_further() {
-    let run = run_kernel_from_entry(&kernel_elf(&[LI_R3_2, MFSPR_R0_BP_VR]), 10_000).unwrap();
+    let run = run_kernel_from_entry(&kernel_elf(&[LI_R3_2, MFSPR_R0_BP_VR]), FW, 10_000).unwrap();
     let KernelRunStop::Fault { pc, .. } = run.stop else {
         panic!("the run stopped at {:?}", run.stop);
     };
@@ -121,7 +130,7 @@ fn a_kernel_fault_stops_the_run_at_the_faulting_pc_and_the_sibling_runs_no_furth
 
 #[test]
 fn a_kernel_that_never_calls_out_stops_at_the_step_cap() {
-    let run = run_kernel_from_entry(&kernel_elf(&[B_SELF]), 50).unwrap();
+    let run = run_kernel_from_entry(&kernel_elf(&[B_SELF]), FW, 50).unwrap();
     assert_eq!(run.stop, KernelRunStop::StepCap);
     assert_eq!(run.steps, 50);
     assert!(run.repository_reads.is_empty());
@@ -136,7 +145,7 @@ const STW_R4_M4_R3: u32 = 0x9083_fffc;
 fn a_kernel_store_over_the_sibling_word_stops_the_run_at_a_sibling_fault() {
     // Writes 0 over real 0x3fffffc, the sibling's `b .`, then spins.
     let code = &[LI_R4_0, LIS_R3_0400, STW_R4_M4_R3, B_SELF];
-    let run = run_kernel_from_entry(&kernel_elf(code), 10_000).unwrap();
+    let run = run_kernel_from_entry(&kernel_elf(code), FW, 10_000).unwrap();
     assert!(
         matches!(run.stop, KernelRunStop::SiblingFault { .. }),
         "the run stopped at {:?}",
@@ -150,13 +159,13 @@ fn a_segment_whose_zero_fill_reaches_the_sibling_word_is_refused_and_one_word_lo
     let real = KERNEL_SPAN_LIMIT - 0x1000;
     let file_len = 0x104;
     let reaching = kernel_elf_at(BASE + real, 0x1000 - file_len, &[B_SELF]);
-    let error = run_kernel_from_entry(&reaching, 4).unwrap_err();
+    let error = run_kernel_from_entry(&reaching, FW, 4).unwrap_err();
     assert!(
         matches!(error, KernelRunError::OutsideRegion { at, len } if (at, len) == (real, 0x1000)),
         "{error}"
     );
 
     let below = kernel_elf_at(BASE + real, 0x1000 - file_len - 4, &[B_SELF]);
-    let run = run_kernel_from_entry(&below, 4).unwrap();
+    let run = run_kernel_from_entry(&below, FW, 4).unwrap();
     assert_eq!(run.stop, KernelRunStop::StepCap);
 }

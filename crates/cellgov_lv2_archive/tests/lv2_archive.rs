@@ -26,8 +26,8 @@ use cellgov_lv2_archive::{
     CENSUS_GATE, FIRMWARE, FIRMWARE_GATE, GATE, HYPERCALL, HYPERCALL_GATE, HYPERCALL_REGENERATE,
     HYPERCALL_SITE, HYPERCALL_UNRESOLVED, KERNEL, NAME, NAME_GATE, NAME_REGENERATE, PRIORITY, PUP,
     PUP_GATE, REACH, REGENERATE, REPOSITORY, REPOSITORY_GATE, REPOSITORY_LOGGED_FIRMWARE,
-    REPOSITORY_READ, REPOSITORY_REGENERATE, SCHEMA_VERSION, STUB, SUBENTRY, SUBENTRY_ATTRIBUTION,
-    TABLES,
+    REPOSITORY_READ, REPOSITORY_REGENERATE, REPOSITORY_UNOBSERVED, SCHEMA_VERSION, STUB, SUBENTRY,
+    SUBENTRY_ATTRIBUTION, TABLES,
 };
 use cellgov_ps3_abi::lv1::repository::NODES;
 use cellgov_ps3_abi::lv2::census::{lookup, PupCensusClass};
@@ -667,6 +667,7 @@ fn readme(data: ReadmeData<'_>) -> String {
             ),
             ("repository_gate", REPOSITORY_GATE.to_string()),
             ("repository_regenerate", REPOSITORY_REGENERATE.to_string()),
+            ("repository_unobserved", REPOSITORY_UNOBSERVED.to_string()),
         ],
     )
 }

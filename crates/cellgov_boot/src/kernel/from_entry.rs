@@ -101,18 +101,24 @@ pub enum KernelRunError {
     },
 }
 
-/// Runs the kernel ELF `elf` from its entry, in supervisor state with
-/// 64-bit mode on, for at most `step_cap` steps.
+/// Runs the kernel ELF `elf` of the firmware version `firmware` from its
+/// entry, in supervisor state with 64-bit mode on, for at most
+/// `step_cap` steps.
 ///
 /// Each kernel segment lies at its real address. Real mode ignores the
 /// two high effective-address bits, so the link address loses its top
-/// bit. The run stops at the first hypercall refusal, kernel fault or
-/// step refusal.
+/// bit. CellGov's hypervisor answers the kernel's repository reads with
+/// the values for `firmware`. The run stops at the first hypercall
+/// refusal, kernel fault or step refusal.
 ///
 /// # Errors
 ///
 /// Returns a [`KernelRunError`] when the ELF does not map.
-pub fn run_kernel_from_entry(elf: &[u8], step_cap: usize) -> Result<KernelRun, KernelRunError> {
+pub fn run_kernel_from_entry(
+    elf: &[u8],
+    firmware: &str,
+    step_cap: usize,
+) -> Result<KernelRun, KernelRunError> {
     let entry = map_kernel(elf)?.entry;
     let mut mem = real_mode_image(elf)?;
     // Stand-in until the runtime places the boot thread on hardware thread
@@ -125,6 +131,7 @@ pub fn run_kernel_from_entry(elf: &[u8], step_cap: usize) -> Result<KernelRun, K
     commit(&mut mem, spin, &PPC_B_OPCODE_NO_LK.to_be_bytes())?;
     let mut rt = Runtime::new(mem, Budget::new(STEP_BUDGET), step_cap);
     rt.set_mode(RuntimeMode::FaultDriven);
+    rt.set_hypervisor_firmware(firmware);
     rt.register_unit_with(|id| {
         let mut unit = PpuExecutionUnit::new(id);
         unit.state_mut().pc = spin;

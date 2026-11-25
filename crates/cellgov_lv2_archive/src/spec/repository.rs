@@ -20,6 +20,10 @@ pub const REPOSITORY_READ_STATES: &[&str] = &["answered", "refused"];
 /// cite.
 pub const REPOSITORY_SOURCES: &[&str] = &["cellgov", "console", "linux", "psdevwiki"];
 
+/// The `repository.v2` cell of a node whose source does not observe the
+/// second value.
+pub const REPOSITORY_UNOBSERVED: &str = "unobserved";
+
 const fn key_word(name: &'static str) -> Column {
     Column {
         name,
@@ -80,8 +84,7 @@ pub const REPOSITORY_READ: TableSpec = TableSpec {
 };
 
 /// Defines `repository.tsv`: one row per node CellGov's hypervisor
-/// serves, with its values, the firmware whose boot reads it and its
-/// source.
+/// serves, with its values, the firmware it serves them to and its source.
 pub const REPOSITORY: TableSpec = TableSpec {
     name: "repository",
     owner: OwnerClass::Generated,
@@ -93,7 +96,12 @@ pub const REPOSITORY: TableSpec = TableSpec {
         key_word("n4"),
         NODE,
         key_word("v1"),
-        key_word("v2"),
+        Column {
+            name: "v2",
+            kind: ColumnKind::Hex64OrLabel(REPOSITORY_UNOBSERVED),
+            nullable: false,
+            references: None,
+        },
         Column {
             name: "fw",
             kind: ColumnKind::VersionList,
@@ -119,7 +127,7 @@ pub const REPOSITORY: TableSpec = TableSpec {
             references: None,
         },
     ],
-    key: &["lpar", "n1", "n2", "n3", "n4"],
+    key: &["lpar", "n1", "n2", "n3", "n4", "fw"],
     regenerate: Some(REGENERATE),
     gate: GATE,
 };

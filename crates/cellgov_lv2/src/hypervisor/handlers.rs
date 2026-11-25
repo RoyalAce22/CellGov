@@ -25,13 +25,14 @@ pub fn answers(number: u64) -> bool {
     ANSWERED.contains(&number)
 }
 
-/// The disposition of `request`.
-pub fn answer(request: &HypercallRequest) -> HypercallDisposition {
+/// The disposition of `request` from a hypervisor that answers for the
+/// firmware version `firmware`.
+pub fn answer(request: &HypercallRequest, firmware: Option<&str>) -> HypercallDisposition {
     match request.number {
         GET_LOGICAL_PARTITION_ID => {
             HypercallDisposition::Answered(HypercallAnswer::success(vec![LPAR_ID_GAME_OS]))
         }
-        READ_REPOSITORY_NODE => repository::read_node(request),
+        READ_REPOSITORY_NODE => repository::read_node(request, firmware),
         LOGICAL_CONSOLE_CONSTRUCT => console::construct(),
         LOGICAL_CONSOLE_SEND => console::send(request),
         LOGICAL_CONSOLE_FLUSH => console::flush(),

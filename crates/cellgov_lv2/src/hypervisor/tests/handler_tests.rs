@@ -8,6 +8,7 @@ fn request(number: u64) -> HypercallRequest {
         number,
         inputs: [0; 8],
         pc: 0x8000_0000_0000_fc54,
+        lr: 0,
         thread: Some(1),
         tick: GuestTicks::new(10),
     }
@@ -30,7 +31,7 @@ fn every_number_with_no_handler_takes_the_null_backend_by_number() {
         }
         let r = request(number);
         assert_eq!(
-            answer(&r),
+            answer(&r, None),
             HypercallDisposition::Refused(HypercallRefusal::Unmodelled {
                 number,
                 unit: r.unit,
@@ -46,7 +47,7 @@ fn every_number_with_no_handler_takes_the_null_backend_by_number() {
 fn no_answered_number_takes_the_null_backend() {
     assert_eq!(ANSWERED.len(), 5);
     for &number in ANSWERED {
-        let d = answer(&request(number));
+        let d = answer(&request(number), None);
         assert!(
             !matches!(
                 d,
@@ -61,7 +62,7 @@ fn no_answered_number_takes_the_null_backend() {
 /// bit of LPAR 2 [PS3DEVWIKI-HV-RE s:Enabling_WLAN_Gelic_On_FAT].
 #[test]
 fn get_logical_partition_id_answers_lpar_2_in_r4() {
-    let d = answer(&request(74));
+    let d = answer(&request(74), None);
     assert_eq!(
         d,
         HypercallDisposition::Answered(HypercallAnswer::success(vec![2]))

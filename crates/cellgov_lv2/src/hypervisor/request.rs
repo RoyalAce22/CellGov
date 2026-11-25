@@ -14,6 +14,9 @@ pub struct HypercallRequest {
     pub inputs: [u64; 8],
     /// The address of the `sc`.
     pub pc: u64,
+    /// The link register at the `sc`. In a leaf function it is the
+    /// return address into the function's caller.
+    pub lr: u64,
     /// The PPE hardware thread the unit ran on, when the unit names one.
     pub thread: Option<u8>,
     /// The guest time of the call.

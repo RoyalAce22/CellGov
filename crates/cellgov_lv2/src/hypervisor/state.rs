@@ -20,11 +20,14 @@ pub struct HypercallWitness {
     pub first_tick: GuestTicks,
 }
 
-/// CellGov's hypervisor and its records.
+/// CellGov's hypervisor, the firmware version it answers for, and its
+/// records.
 ///
-/// No answer depends on these records, so they hold no guest state.
+/// No answer depends on the records, so they hold no guest state. The
+/// firmware version selects the repository values a read answers.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Hypervisor {
+    firmware: Option<String>,
     witnesses: BTreeMap<u64, HypercallWitness>,
     console: Vec<u8>,
     repository_reads: Vec<RepositoryRead>,
@@ -32,9 +35,21 @@ pub struct Hypervisor {
 }
 
 impl Hypervisor {
-    /// A hypervisor with empty records.
+    /// A hypervisor with empty records and no firmware version. It
+    /// refuses every repository read.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Makes the hypervisor answer repository reads for the firmware
+    /// version `version`, such as `"4.93"`.
+    pub fn set_firmware(&mut self, version: &str) {
+        self.firmware = Some(version.to_string());
+    }
+
+    /// The firmware version the hypervisor answers for.
+    pub fn firmware(&self) -> Option<&str> {
+        self.firmware.as_deref()
     }
 
     /// The disposition of `request`, after the records note it:
@@ -43,7 +58,7 @@ impl Hypervisor {
     /// - a number with no handler counts toward its witness;
     /// - the first refusal is kept.
     pub fn dispatch(&mut self, request: &HypercallRequest) -> HypercallDisposition {
-        let disposition = answer(request);
+        let disposition = answer(request, self.firmware.as_deref());
         if request.number == READ_REPOSITORY_NODE {
             self.repository_reads
                 .push(read_record(request, &disposition));

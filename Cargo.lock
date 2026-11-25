@@ -380,6 +380,7 @@ dependencies = [
  "cellgov_mem",
  "cellgov_ps3_abi",
  "cellgov_time",
+ "serde_json",
  "sha2",
  "strum",
  "thiserror",
