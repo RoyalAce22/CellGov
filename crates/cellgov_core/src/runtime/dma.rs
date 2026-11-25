@@ -280,7 +280,8 @@ impl Runtime {
             self.lv2_host.log_invariant_break(
                 "runtime.dma_get_unlanded",
                 format_args!(
-                    "{:?}: a completed MFC get of {} bytes to local store 0x{lsa:08x} did not \n                     land ({err:?}); the issuer checked the range at issue",
+                    "{:?}: a completed MFC get of {} bytes to local store 0x{lsa:08x} did not \
+                     land ({err:?}); the issuer checked the range at issue",
                     c.issuer(),
                     c.length(),
                 ),
@@ -569,3 +570,7 @@ mod dma_ordering_tests;
 #[cfg(test)]
 #[path = "tests/dma_held_list_tests.rs"]
 mod dma_held_list_tests;
+
+#[cfg(test)]
+#[path = "tests/dma_get_unlanded_tests.rs"]
+mod dma_get_unlanded_tests;

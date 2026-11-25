@@ -19,6 +19,17 @@ fn a_keyed_attach_to_a_viewless_mapping_is_refused_and_named() {
             .invariant_break_site_count("spaces.keyed_shm_mapping_viewless"),
         1
     );
+    assert_eq!(
+        rt.lv2_host()
+            .observability()
+            .first_invariant_break_line()
+            .as_deref(),
+        Some(
+            "lv2 host invariant break at spaces.keyed_shm_mapping_viewless: keyed shm \
+             0x0000000000000050: live mapping has no view to seed from; view at 0x100 in \
+             space 0 not added (the first of 1)"
+        ),
+    );
     assert_eq!(rt.sync_state_hash(), before, "the mapping gained no view");
     assert_eq!(rt.sync_state_hash(), rt.sync_state_hash_from_scratch());
 }

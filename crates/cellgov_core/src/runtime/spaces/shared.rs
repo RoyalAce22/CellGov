@@ -215,7 +215,8 @@ impl Runtime {
             self.lv2_host.log_invariant_break(
                 "spaces.keyed_shm_mapping_viewless",
                 format_args!(
-                    "keyed shm 0x{key:016x}: live mapping has no view to seed from; view at                      0x{base:x} in space {} not added",
+                    "keyed shm 0x{key:016x}: live mapping has no view to seed from; view at \
+                     0x{base:x} in space {} not added",
                     space.raw(),
                 ),
             );
