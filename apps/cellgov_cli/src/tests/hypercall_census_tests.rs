@@ -14,8 +14,9 @@ fn li_r11(value: u16) -> u32 {
     (14 << 26) | (11 << 21) | u32::from(value)
 }
 
-/// A kernel-shaped ELF with one executable segment at `KERNEL + 0x100`
-/// that holds `words`.
+/// A kernel-shaped ELF with one executable segment at `KERNEL + 0x3100`
+/// that holds `words`. The segment lies above the real pages of the
+/// interrupt vectors, where every word is an entry.
 fn kernel_elf(words: &[u32]) -> Vec<u8> {
     const PAYLOAD: usize = ELF_HEADER_SIZE + ELF_PHENTSIZE;
     let size = 4 * words.len() as u64;
@@ -37,7 +38,7 @@ fn kernel_elf(words: &[u32]) -> Vec<u8> {
     );
     put(
         ELF_HEADER_SIZE + PHDR_P_VADDR_OFFSET,
-        &(KERNEL + 0x100).to_be_bytes(),
+        &(KERNEL + 0x3100).to_be_bytes(),
     );
     put(ELF_HEADER_SIZE + PHDR_P_FILESZ_OFFSET, &size.to_be_bytes());
     put(ELF_HEADER_SIZE + PHDR_P_MEMSZ_OFFSET, &size.to_be_bytes());
@@ -214,8 +215,8 @@ fn the_emitter_replaces_its_pups_rows_and_keeps_another_pups() {
         pup_sha256: ours.pup_sha256.clone(),
         output_dir: output.as_ref().to_path_buf(),
     };
-    // The `sc` sites at 0x104 and 0x10c get 74, and the site at 0x114
-    // gets 91. The `sc` at 0x118 and 0x11c follow another `sc`, so no
+    // The `sc` sites at 0x3104 and 0x310c get 74, and the site at 0x3114
+    // gets 91. The `sc` at 0x3118 and 0x311c follow another `sc`, so no
     // load reaches them.
     let elf = kernel_elf(&[
         li_r11(74),
@@ -243,8 +244,8 @@ fn the_emitter_replaces_its_pups_rows_and_keeps_another_pups() {
         .collect();
     sites.sort();
     let mut expected = vec![
-        (ours.pup_sha256.clone(), 74, vec![0x104, 0x10c]),
-        (ours.pup_sha256.clone(), 91, vec![0x114]),
+        (ours.pup_sha256.clone(), 74, vec![0x3104, 0x310c]),
+        (ours.pup_sha256.clone(), 91, vec![0x3114]),
         (theirs.pup_sha256.clone(), 9, vec![8]),
     ];
     expected.sort();
@@ -256,7 +257,7 @@ fn the_emitter_replaces_its_pups_rows_and_keeps_another_pups() {
         .collect();
     unresolved.sort();
     let mut expected: Vec<(String, Vec<u64>)> = vec![
-        (ours.pup_sha256.clone(), vec![0x118, 0x11c]),
+        (ours.pup_sha256.clone(), vec![0x3118, 0x311c]),
         (theirs.pup_sha256.clone(), vec![]),
     ];
     expected.sort();

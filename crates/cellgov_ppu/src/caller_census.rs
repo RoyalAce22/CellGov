@@ -4,6 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::funcmap::{self, FuncMapError, FunctionName};
+use crate::hypercall_cfg::{Code, CodeSegment};
+use crate::indirect_entry::{indirect_entries, FileSegment};
 use crate::instruction::PpuInstruction;
 use crate::loader::{pt_load_segments, LoadError, LoadSegment};
 use cellgov_ps3_abi::format::elf::{ELF_E_MACHINE_OFFSET, ELF_HEADER_SIZE, EM_PPC64};
@@ -32,6 +34,21 @@ pub enum CallerScanError {
     SegmentTruncated {
         /// Program-header index of the truncated segment.
         index: usize,
+    },
+    /// A file-backed segment that is not executable leaves the input
+    /// bytes. [`scan_hypercalls`] reads every segment for code addresses.
+    #[error("caller census: data segment {index} is truncated")]
+    DataSegmentTruncated {
+        /// Program-header index of the truncated segment.
+        index: usize,
+    },
+    /// A relative jump table runs past the most entries
+    /// [`scan_hypercalls`] reads from one table, so the scan cannot bound
+    /// every target.
+    #[error("caller census: the relative jump table at 0x{start:x} runs past 0x{limit:x} entries", limit = crate::indirect_entry::JUMP_TABLE_LIMIT)]
+    JumpTableTooLong {
+        /// Address of the table's first entry.
+        start: u64,
     },
     /// An executable segment declares more file bytes than memory bytes.
     #[error(
@@ -77,21 +94,58 @@ pub fn scan_syscalls(elf: &[u8]) -> Result<Vec<CallerSite>, CallerScanError> {
 ///
 /// A word with a nonzero reserved field also decodes as `sc 1`, but
 /// such a word is data, so it is not a site. A site resolves when every
-/// path to it in the control-flow graph of its segment loads the same
-/// non-negative constant into r11 with `li r11`. A path that goes back
-/// to a word no direct branch or fall-through reaches loads nothing, and
-/// the site resolves from its other paths.
+/// path to it loads the same non-negative constant into r11 with
+/// `li r11`. The paths are those of the control-flow graph of all the
+/// executable segments: direct branches, which may cross segments, and
+/// fall-throughs.
+///
+/// A site is unresolved when control can enter a word between the load
+/// and `sc` in another way. These ways are the ELF entry, an interrupt
+/// vector, and an indirect branch to an address that the image names.
 ///
 /// The segments may lie anywhere in the 64-bit address space, as a
-/// kernel's do. The scan does not see an indirect branch or a branch
-/// from another segment.
+/// kernel's do.
 ///
 /// # Errors
 ///
-/// Returns [`CallerScanError`] if the ELF or an executable segment is
-/// malformed.
+/// Returns [`CallerScanError`] if the ELF or one of its segments is
+/// malformed, or if a relative jump table runs past the most entries
+/// the scan reads from one table.
 pub fn scan_hypercalls(elf: &[u8]) -> Result<Vec<CallerSite>, CallerScanError> {
-    scan_elf(elf, validate_segment_extent, crate::hypercall_cfg::scan)
+    let segments = pt_load_segments(elf)?;
+    let code = Code::new(executable_segments(
+        elf,
+        &segments,
+        validate_segment_extent,
+    )?);
+    let files = file_segments(elf, &segments)?;
+    let entries = indirect_entries(elf, &files, &code)?;
+    let mut sites = crate::hypercall_cfg::scan(&code, &entries);
+    sites.sort_by_key(|site| site.address);
+    Ok(sites)
+}
+
+/// The file bytes of every segment in `segments`, in program-header
+/// order.
+fn file_segments<'elf>(
+    elf: &'elf [u8],
+    segments: &[LoadSegment],
+) -> Result<Vec<FileSegment<'elf>>, CallerScanError> {
+    segments
+        .iter()
+        .map(|segment| {
+            let index = segment.index;
+            let bytes = segment_bytes(elf, segment).ok_or(if segment.executable {
+                CallerScanError::SegmentTruncated { index }
+            } else {
+                CallerScanError::DataSegmentTruncated { index }
+            })?;
+            Ok(FileSegment {
+                vaddr: segment.vaddr,
+                bytes,
+            })
+        })
+        .collect()
 }
 
 /// The sites `scan` finds in each executable segment `validate` accepts,
@@ -103,31 +157,42 @@ fn scan_elf(
 ) -> Result<Vec<CallerSite>, CallerScanError> {
     let segments = pt_load_segments(elf)?;
     let mut sites = Vec::new();
-    for segment in segments.into_iter().filter(|segment| segment.executable) {
-        validate(&segment)?;
-        let start = usize::try_from(segment.file_offset).map_err(|_| {
-            CallerScanError::SegmentTruncated {
-                index: segment.index,
-            }
-        })?;
-        let len =
-            usize::try_from(segment.filesz).map_err(|_| CallerScanError::SegmentTruncated {
-                index: segment.index,
-            })?;
-        let end = start
-            .checked_add(len)
-            .filter(|end| *end <= elf.len())
-            .ok_or(CallerScanError::SegmentTruncated {
-                index: segment.index,
-            })?;
-        let words: Vec<u32> = elf[start..end]
-            .chunks_exact(4)
-            .map(|bytes| u32::from_be_bytes(bytes.try_into().expect("four-byte chunk")))
-            .collect();
-        sites.extend(scan(segment.vaddr, &words));
+    for segment in executable_segments(elf, &segments, validate)? {
+        sites.extend(scan(segment.vaddr, &segment.words));
     }
     sites.sort_by_key(|site| site.address);
     Ok(sites)
+}
+
+/// The words of each executable segment in `segments`, in
+/// program-header order, after `validate` accepts the segment.
+fn executable_segments(
+    elf: &[u8],
+    segments: &[LoadSegment],
+    validate: fn(&LoadSegment) -> Result<(), CallerScanError>,
+) -> Result<Vec<CodeSegment>, CallerScanError> {
+    let mut code = Vec::new();
+    for segment in segments.iter().filter(|segment| segment.executable) {
+        validate(segment)?;
+        let bytes = segment_bytes(elf, segment).ok_or(CallerScanError::SegmentTruncated {
+            index: segment.index,
+        })?;
+        code.push(CodeSegment {
+            vaddr: segment.vaddr,
+            words: bytes
+                .chunks_exact(4)
+                .map(|bytes| u32::from_be_bytes(bytes.try_into().expect("four-byte chunk")))
+                .collect(),
+        });
+    }
+    Ok(code)
+}
+
+/// The file bytes of `segment`, or `None` when they leave `elf`.
+fn segment_bytes<'elf>(elf: &'elf [u8], segment: &LoadSegment) -> Option<&'elf [u8]> {
+    let start = usize::try_from(segment.file_offset).ok()?;
+    let len = usize::try_from(segment.filesz).ok()?;
+    elf.get(start..start.checked_add(len)?)
 }
 
 /// One PPU module's syscall sites, grouped for the caller tables.
@@ -307,21 +372,27 @@ fn scan_words(base: u64, words: &[u32]) -> Vec<CallerSite> {
 /// Whether the word `raw` may write r11, read from its register fields
 /// alone.
 pub(crate) fn maybe_clobbers_r11(raw: u32) -> bool {
+    maybe_writes_gpr(raw, 11)
+}
+
+/// Whether the word `raw` may write the GPR `gpr`, read from its
+/// register fields alone.
+pub(crate) fn maybe_writes_gpr(raw: u32, gpr: u32) -> bool {
     let primary = raw >> 26;
     let rt = (raw >> 21) & 0x1f;
     let ra = (raw >> 16) & 0x1f;
     match primary {
-        7 | 8 | 12..=15 | 32 | 34 | 36 | 38 | 40 | 42 | 46 => rt == 11,
-        20..=30 => ra == 11,
-        31 => rt == 11 || ra == 11,
-        33 | 35 | 37 | 39 | 41 | 43 | 45 => rt == 11 || ra == 11,
+        7 | 8 | 12..=15 | 32 | 34 | 36 | 38 | 40 | 42 | 46 => rt == gpr,
+        20..=30 => ra == gpr,
+        31 => rt == gpr || ra == gpr,
+        33 | 35 | 37 | 39 | 41 | 43 | 45 => rt == gpr || ra == gpr,
         // ldu (DS XO 1) also writes the EA into RA [PowerISA-3.1 p:I57].
-        58 => rt == 11 || (raw & 3 == 1 && ra == 11),
+        58 => rt == gpr || (raw & 3 == 1 && ra == gpr),
         // lfsu, lfdu, stfsu and stfdu write the EA into RA and target an
         // FPR [PowerISA-3.1 p:I150] [PowerISA-3.1 p:I152]
         // [PowerISA-3.1 p:I155] [PowerISA-3.1 p:I157].
-        49 | 51 | 53 | 55 => ra == 11,
-        62 => ra == 11,
+        49 | 51 | 53 | 55 => ra == gpr,
+        62 => ra == gpr,
         _ => false,
     }
 }
@@ -345,3 +416,7 @@ mod hypercall_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_shape_tests.rs"]
 mod hypercall_shape_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_entry_tests.rs"]
+mod hypercall_entry_tests;

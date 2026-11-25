@@ -58,17 +58,18 @@ pub(super) fn elf(vaddr: u64, words: &[u32], memsz: u64) -> Vec<u8> {
 
 #[test]
 fn a_kernel_hypercall_site_resolves_its_number_and_an_lv2_site_is_not_one() {
+    // The segment lies above the real pages of the interrupt vectors.
     let words = [li(11, 74), SC_1, li(11, 22), SC_0, li(3, 1), SC_1];
-    let sites = scan_hypercalls(&elf(KERNEL + 0x1000, &words, 24)).expect("the ELF scans");
+    let sites = scan_hypercalls(&elf(KERNEL + 0x1_0000, &words, 24)).expect("the ELF scans");
     assert_eq!(
         sites,
         [
             CallerSite {
-                address: KERNEL + 0x1004,
+                address: KERNEL + 0x1_0004,
                 ordinal: Some(74),
             },
             CallerSite {
-                address: KERNEL + 0x1014,
+                address: KERNEL + 0x1_0014,
                 ordinal: None,
             },
         ]

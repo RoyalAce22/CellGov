@@ -10,7 +10,11 @@ fn li_r11(value: u16) -> u32 {
 
 /// The ordinal of the one site in `words`.
 fn only_ordinal(words: &[u32]) -> Option<u16> {
-    let sites = scan(0x1_0000, words);
+    let code = Code::new(vec![CodeSegment {
+        vaddr: 0x1_0000,
+        words: words.to_vec(),
+    }]);
+    let sites = scan(&code, &BTreeSet::new());
     assert_eq!(sites.len(), 1, "{sites:?}");
     sites[0].ordinal
 }

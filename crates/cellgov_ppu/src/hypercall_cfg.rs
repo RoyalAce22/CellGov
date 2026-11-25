@@ -1,16 +1,19 @@
 //! Resolves the number of each LV1 hypercall site over the control-flow
-//! graph of its segment.
+//! graph of all the executable segments of one ELF.
 //!
 //! The walk goes backward from `sc` along every path that can reach it.
-//! Each path must end at an `li r11` that loads the same constant. Some
-//! paths end where the walk cannot see r11:
+//! A path steps back over a fall-through or over a direct branch, and a
+//! direct branch may come from another segment. Each path must end at an
+//! `li r11` that loads the same constant. Some paths end where the walk
+//! cannot see r11:
 //! - a word that may write r11;
-//! - a call, which may change r11 before it returns.
+//! - a call, which may change r11 before it returns;
+//! - a word that control can enter in another way, which
+//!   [`crate::indirect_entry`] bounds.
 //!
 //! Each of these leaves the site unresolved. A path also ends at a word
-//! that no direct branch or fall-through reaches, such as a `nop` after
-//! `blr`. That path loads no constant. The walk does not see an indirect
-//! branch or a branch from another segment.
+//! that nothing enters, such as a `nop` after `blr`. That path loads no
+//! constant.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -18,11 +21,66 @@ use cellgov_ps3_abi::hw::ppc_isa::PPC_SC_1;
 
 use crate::caller_census::{maybe_clobbers_r11, CallerSite};
 use crate::instruction::PpuInstruction;
-use crate::local_cfg::{is_unconditional, local_branch_index};
+use crate::local_cfg::is_unconditional;
 
 /// Most words the walk of one site visits before it leaves the site
 /// unresolved.
 const HYPERCALL_WALK_LIMIT: usize = 1024;
+
+/// The words of one executable segment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CodeSegment {
+    /// The address of the first word.
+    pub(crate) vaddr: u64,
+    /// The big-endian words of the segment's file bytes.
+    pub(crate) words: Vec<u32>,
+}
+
+impl CodeSegment {
+    /// Each word, with its address.
+    pub(crate) fn addressed(&self) -> impl Iterator<Item = (u64, u32)> + '_ {
+        self.words
+            .iter()
+            .enumerate()
+            .map(|(index, &raw)| (self.vaddr + (index as u64) * 4, raw))
+    }
+
+    fn word_at(&self, address: u64) -> Option<u32> {
+        let offset = address.checked_sub(self.vaddr)?;
+        if offset % 4 != 0 {
+            return None;
+        }
+        self.words.get(usize::try_from(offset / 4).ok()?).copied()
+    }
+}
+
+/// The executable segments of one ELF, in program-header order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Code {
+    segments: Vec<CodeSegment>,
+}
+
+impl Code {
+    pub(crate) fn new(segments: Vec<CodeSegment>) -> Self {
+        Self { segments }
+    }
+
+    pub(crate) fn segments(&self) -> &[CodeSegment] {
+        &self.segments
+    }
+
+    /// The word at `address` in each segment that holds one there.
+    pub(crate) fn words_at(&self, address: u64) -> impl Iterator<Item = u32> + '_ {
+        self.segments
+            .iter()
+            .filter_map(move |segment| segment.word_at(address))
+    }
+
+    /// Whether a segment holds a word at `address`.
+    pub(crate) fn holds(&self, address: u64) -> bool {
+        self.words_at(address).next().is_some()
+    }
+}
 
 /// What one word does to r11 on the path that falls through it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,77 +95,103 @@ enum Flow {
     Unknown,
 }
 
-/// The sites in `words`, which start at `base`: each word that is
-/// exactly `sc 1`, with the number every path to it loads into r11.
-pub(crate) fn scan(base: u64, words: &[u32]) -> Vec<CallerSite> {
-    let branches = branch_sources(base, words);
-    words
+/// The sites in `code`: each word that is exactly `sc 1`, with the
+/// number every path to it loads into r11.
+///
+/// `entries` holds the words that control may enter other than by a
+/// direct branch or a fall-through.
+pub(crate) fn scan(code: &Code, entries: &BTreeSet<u64>) -> Vec<CallerSite> {
+    let branches = branch_sources(code);
+    code.segments
         .iter()
-        .enumerate()
-        .filter(|&(_, &raw)| raw == PPC_SC_1)
-        .map(|(index, _)| CallerSite {
-            address: base + (index as u64) * 4,
-            ordinal: resolve(words, &branches, index),
+        .flat_map(CodeSegment::addressed)
+        .filter(|&(_, raw)| raw == PPC_SC_1)
+        .map(|(address, _)| CallerSite {
+            address,
+            ordinal: resolve(code, &branches, entries, address),
         })
         .collect()
 }
 
-/// Each word index that a direct branch of `words` reaches, with the
-/// indices of the branches that reach it. A target outside `words` is
-/// dropped.
-///
-/// [PPC-Book1 p:24 s:2.4] `b` and `bc` reach CIA + the displacement, or the displacement itself when AA = 1.
-fn branch_sources(base: u64, words: &[u32]) -> BTreeMap<usize, Vec<usize>> {
-    let mut sources: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
-    for (index, raw) in words.iter().copied().enumerate() {
+/// Each address that a direct branch of `code` reaches, with the
+/// addresses of the branches that reach it. A target that no segment
+/// holds is dropped.
+fn branch_sources(code: &Code) -> BTreeMap<u64, Vec<u64>> {
+    let mut sources: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
+    for (address, raw) in code.segments.iter().flat_map(CodeSegment::addressed) {
         let (displacement, absolute) = match crate::decode::decode(raw) {
             Ok(PpuInstruction::B { offset, aa, .. }) => (i64::from(offset), aa),
             Ok(PpuInstruction::Bc { offset, aa, .. }) => (i64::from(offset), aa),
             _ => continue,
         };
-        if let Some(target) = local_branch_index(base, index, displacement, absolute, words.len()) {
-            sources.entry(target).or_default().push(index);
+        let target = branch_target(address, displacement, absolute);
+        if code.holds(target) {
+            sources.entry(target).or_default().push(address);
         }
     }
     sources
 }
 
+/// The address that a direct branch at `address` reaches in 64-bit mode.
+///
+/// [PPC-Book1 p:24 s:2.4] `b` and `bc` reach CIA + EXTS(displacement), or EXTS(displacement) when AA = 1.
+pub(crate) fn branch_target(address: u64, displacement: i64, absolute: bool) -> u64 {
+    let base = if absolute { 0 } else { address };
+    base.wrapping_add_signed(displacement)
+}
+
 /// The constant that every path to the word at `site` loads into r11,
 /// or `None` when the walk cannot prove one or no path loads one.
-fn resolve(words: &[u32], branches: &BTreeMap<usize, Vec<usize>>, site: usize) -> Option<u16> {
+fn resolve(
+    code: &Code,
+    branches: &BTreeMap<u64, Vec<u64>>,
+    entries: &BTreeSet<u64>,
+    site: u64,
+) -> Option<u16> {
     let mut number = None;
     let mut seen = BTreeSet::from([site]);
     let mut pending = vec![site];
     let mut visited = 0;
     while let Some(at) = pending.pop() {
-        if visited == HYPERCALL_WALK_LIMIT {
+        if visited == HYPERCALL_WALK_LIMIT || entries.contains(&at) {
             return None;
         }
         visited += 1;
-        let fall = at
-            .checked_sub(1)
-            .map_or(Flow::Stops, |before| flow(words[before]));
         let mut next = branches.get(&at).cloned().unwrap_or_default();
-        match fall {
+        match flow_into(code, at) {
             Flow::Stops => {}
-            Flow::Keeps => next.push(at - 1),
-            Flow::Loads(loaded) => {
-                if number
-                    .replace(loaded)
-                    .is_some_and(|earlier| earlier != loaded)
-                {
-                    return None;
-                }
-            }
+            Flow::Keeps => next.push(at - 4),
+            Flow::Loads(loaded) if number.is_some_and(|earlier| earlier != loaded) => return None,
+            Flow::Loads(loaded) => number = Some(loaded),
             Flow::Unknown => return None,
         }
-        for index in next {
-            if seen.insert(index) {
-                pending.push(index);
+        for address in next {
+            if seen.insert(address) {
+                pending.push(address);
             }
         }
     }
     number
+}
+
+/// What the word before `at` does to r11 on the path that falls through
+/// it into `at`.
+///
+/// When two segments hold different words there, the walk cannot know
+/// which one runs, so the flow is unknown.
+fn flow_into(code: &Code, at: u64) -> Flow {
+    let Some(before) = at.checked_sub(4) else {
+        return Flow::Stops;
+    };
+    let mut flows = code.words_at(before).map(flow);
+    let Some(first) = flows.next() else {
+        return Flow::Stops;
+    };
+    if flows.all(|other| other == first) {
+        first
+    } else {
+        Flow::Unknown
+    }
 }
 
 /// What the word `raw` does to r11 on the path that falls through it.
