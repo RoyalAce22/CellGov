@@ -202,7 +202,6 @@ fn another_bus_another_device_and_an_unread_firmware_are_refusals_that_name_them
 fn the_size_and_page_shift_checks_answer_with_a_mapping_held_and_a_close_clears_the_mapping() {
     let mut state = opened(&[DEVICE_1]);
     state.apply(DeviceBusChange::MmioRegionMapped(kernel_mapping()));
-    let call = kernel_call();
     assert_eq!(state.mmio_mappings().count(), 1);
 
     for (mapped_call, r3) in [
@@ -223,6 +222,4 @@ fn the_size_and_page_shift_checks_answer_with_a_mapping_held_and_a_close_clears_
     assert_eq!(state.mmio_mapping(1, 1, 0x301_0000), Some(kernel_mapping()));
     state.apply(DeviceBusChange::Closed(DEVICE_1));
     assert_eq!(state.mmio_mappings().count(), 0);
-    state.apply(DeviceBusChange::Opened(DEVICE_1));
-    assert_eq!(map(&state, &call), kernel_answer());
 }

@@ -125,12 +125,36 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// region, that value is the firmware's boot value. The address skips
 /// each address in `held`; see [`place`].
 ///
+/// A close of the device leaves the counter as it is. So a map after a
+/// close and a new open takes the next counter value. These reads show it:
+/// - The region function increments the counter at the allocator's base
+///   plus 8 [OFW-4.93 lv1 a:0x2CED64] [OFW-4.93 lv1 a:0x2CED84-0x2CED94].
+/// - The close frees the mapping's address [OFW-4.93 lv1 a:0x229420-0x229434]
+///   through the allocator base that the map uses
+///   [OFW-4.93 lv1 a:0x229AC0-0x229AF0] [OFW-4.93 lv1 a:0x229E40-0x229E78].
+/// - The free reads the word at the base and finds the address in the set
+///   at the base plus 16. The code of the free and of the find stores only
+///   to the stack, to the lock of the region object and to links of the
+///   set's nodes [OFW-4.93 lv1 a:0x2CE5E4-0x2CE710]
+///   [OFW-4.93 lv1 a:0x2CE38C-0x2CE5E0].
+/// - The free calls the method at +16 of the region object's class
+///   [OFW-4.93 lv1 a:0x2CE6AC-0x2CE6C8] [OFW-4.93 lv1 a:0x35C6D0]
+///   [OFW-4.93 lv1 a:0x32D6D8]. That method reads the live byte at +164
+///   and stores nothing [OFW-4.93 lv1 a:0x229820-0x229828].
+///
 /// The model makes these assumptions:
 /// - The address function's checks of the partition pass, as both
 ///   captured mappings show.
 /// - lv1's allocations of its 176-byte region object and its 96-byte
 ///   mapping object succeed.
-/// - A close that frees a mapping's address leaves the counter as it is.
+/// - The functions that the free and the find call directly leave the
+///   counter as it is. One of them works on the region object
+///   [OFW-4.93 lv1 a:0x2CE674-0x2CE67C].
+/// - The release of the region object after the free leaves the counter
+///   as it is. The close calls the same function on the object
+///   [OFW-4.93 lv1 a:0x229B78-0x229B84], then calls the release
+///   [OFW-4.93 lv1 a:0x229BF0-0x229BF8] [OFW-4.93 lv1 a:0x2D07B8-0x2D07D0]
+///   [OFW-4.93 lv1 a:0x2D0810-0x2D0824].
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
@@ -234,3 +258,7 @@ mod device_2_order_tests;
 #[cfg(test)]
 #[path = "tests/mmio_map_wrap_tests.rs"]
 mod wrap_tests;
+
+#[cfg(test)]
+#[path = "tests/mmio_map_reopen_tests.rs"]
+mod reopen_tests;
