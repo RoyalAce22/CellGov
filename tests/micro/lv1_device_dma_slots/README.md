@@ -6,9 +6,12 @@ that lv1's `allocate_device_dma_region` (hypercall 174) gave the 4.93
 kernel's call for that device at
 [OFW-4.93 lv2_kernel a:0x800000000009585C].
 
-CellGov's hypervisor answers that call with this address through
-`GAME_OS_DMA_REGIONS` in `cellgov_ps3_abi::lv1::device_bus`. The test
-`device_bus_dma_slots_console_tests` holds the row to this capture.
+CellGov's hypervisor answers that call and the kernel's four later
+calls for the device with the five addresses of the device's list, in
+list order, through `GAME_OS_DMA_REGIONS` in
+`cellgov_ps3_abi::lv1::device_bus`. The tests
+`device_bus_dma_slots_console_tests` and
+`device_bus_dma_slot_rows_console_tests` hold the rows to this capture.
 
 No probe runs, so this directory has no manifest and no runner frame.
 The files under `peek/cech20-cex-493/` hold the words the reads

@@ -136,7 +136,7 @@ fn a_device_1_or_2_call_before_its_open_gets_the_not_open_status() {
 }
 
 #[test]
-fn a_second_device_1_region_is_a_refusal_and_a_network_region_is_not() {
+fn a_second_device_1_region_of_the_first_shape_is_a_refusal_and_a_network_region_is_not() {
     let network_region = DmaRegion {
         device: 0,
         ..kernel_region()
@@ -147,7 +147,7 @@ fn a_second_device_1_region_is_a_refusal_and_a_network_region_is_not() {
 
     state.apply(DeviceBusChange::DmaRegionAllocated(kernel_region()));
     let call = kernel_call();
-    assert_eq!(allocate(&state, &call), refused(&call, NEXT_REGION.what));
+    assert_eq!(allocate(&state, &call), refused(&call, OTHER_SHAPE.what));
 }
 
 #[test]

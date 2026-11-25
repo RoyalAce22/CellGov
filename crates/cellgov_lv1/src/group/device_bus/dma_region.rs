@@ -8,9 +8,9 @@
 use cellgov_mem::lanes::{LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::call::ALLOCATE_DEVICE_DMA_REGION;
 use cellgov_ps3_abi::lv1::device_bus::{
-    dma_region_handler, dma_region_shape_r3, game_os_dma_region, DMA_REGION_BUS_RANGE_R3,
+    dma_region_handler, dma_region_shape_r3, game_os_dma_regions, DMA_REGION_BUS_RANGE_R3,
     DMA_REGION_FLAGS_MAX, DMA_REGION_FLAGS_R3, DMA_REGION_FLAGS_RANGE_R3, DMA_REGION_NOT_OPEN_R3,
-    DMA_REGION_NO_BUS_R3, DMA_SLOT_DEVICES, OPEN_DEVICE_BUS_MAX,
+    DMA_REGION_NO_BUS_R3, DMA_SLOT_COUNT, DMA_SLOT_DEVICES, OPEN_DEVICE_BUS_MAX,
 };
 use cellgov_ps3_abi::lv1::network::{STATUS_INDICATOR_BUS, STATUS_INDICATOR_DEVICE};
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
@@ -81,16 +81,31 @@ const OTHER_DEVICE: UnmodelledError = UnmodelledError::new(
      lv1 path is not read",
 );
 
-/// A call after the partition holds a region of the device.
+/// A call after the partition holds each captured region of the device.
 const NEXT_REGION: UnmodelledError = UnmodelledError::new(
-    "an allocate_device_dma_region after the partition holds a region of the device, whose \
-     address depends on lv1's pool state",
+    "an allocate_device_dma_region after the partition holds each region of the device that a \
+     console capture gives, whose address depends on lv1's pool state",
 );
 
-/// A call whose size and page shift no console capture gives.
+/// A call whose size and page shift differ from those of the device's
+/// next captured region.
 const OTHER_SHAPE: UnmodelledError = UnmodelledError::new(
-    "an allocate_device_dma_region whose size and page shift no console capture gives, whose \
-     address depends on lv1's pool state",
+    "an allocate_device_dma_region whose size and page shift no console capture gives for the \
+     device's next region, whose address depends on lv1's pool state",
+);
+
+/// A call after the partition holds regions of the device other than
+/// its first captured regions.
+const OTHER_HELD: UnmodelledError = UnmodelledError::new(
+    "an allocate_device_dma_region after the partition holds regions of the device other than \
+     the first regions of the console capture in their order, whose address depends on lv1's \
+     pool state",
+);
+
+/// A call for device 1 or 2 after the partition holds all of its slots.
+const SLOTS_TAKEN: UnmodelledError = UnmodelledError::new(
+    "an allocate_device_dma_region for device 1 or 2 of bus 1 after the partition holds all six \
+     of its slots, whose answer depends on lv1's pool state",
 );
 
 /// lv1's own r3 with r4 to r10 cleared.
@@ -110,25 +125,31 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// flags 0 to 3.
 ///
 /// lv1 picks the address from a pool whose state CellGov does not model.
-/// The answer gives the captured address to the device's first region of
-/// the captured size and page shift.
+/// The pool's state depends on the regions that lv1 gave before, so the
+/// answer gives the device's captured regions in the order of the calls.
+/// A call gets the address of the device's next captured region when its
+/// size and page shift are that region's.
 ///
 /// The model makes these assumptions:
 /// - lv1's init leaves +120 of the device at a value other than -1, as
 ///   the captures show.
-/// - The partition's first region of the device gets the captured
-///   address. For device 0, lv1's own region of the device is in the
-///   pool before the kernel's call.
+/// - The partition's regions of the device get the captured addresses in
+///   the captured order. For device 0, lv1's own region of the device is
+///   in the pool before the kernel's call.
 /// - lv1's allocation of its 80-byte region object succeeds.
-/// - For device 1 or 2, one of the six slots is free for the partition's
-///   first region.
+/// - For device 1 or 2, each region of the partition holds one slot, and
+///   lv1 holds none.
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
 /// - r3 is bus 2, 3 or 4;
 /// - r4 names a device of bus 1 other than devices 0, 1 and 2;
-/// - the partition already holds a region of the device;
-/// - no console capture gives the size and the page shift.
+/// - for device 1 or 2, the partition holds all six slots;
+/// - the partition holds regions of the device other than its first
+///   captured regions;
+/// - the partition holds each captured region of the device;
+/// - no console capture gives the size and the page shift of the
+///   device's next region.
 pub(crate) fn allocate_region(
     request: &HypercallRequest,
     firmware: Option<&str>,
@@ -170,22 +191,56 @@ pub(crate) fn allocate_region(
     if let Some(r3) = dma_region_shape_r3(size, page_shift) {
         return lv1_answer(r3);
     }
-    if state.regions_of(open_device).next().is_some() {
-        return NEXT_REGION.refusal(request);
+    let held: Vec<DmaRegion> = state.regions_of(open_device).collect();
+    if slot_device && held.len() >= DMA_SLOT_COUNT {
+        return SLOTS_TAKEN.refusal(request);
     }
-    let Some(address) = game_os_dma_region(firmware, bus, device, size, page_shift) else {
+    let captured: Vec<DmaRegion> = game_os_dma_regions(firmware, bus, device)
+        .map(|row| DmaRegion {
+            bus,
+            device,
+            address: row.address,
+            size: row.size,
+            page_shift: row.page_shift,
+        })
+        .collect();
+    let region = match next_captured_region(&captured, &held) {
+        Ok(region) => region,
+        Err(error) => return error.refusal(request),
+    };
+    if (region.size, region.page_shift) != (size, page_shift) {
         return OTHER_SHAPE.refusal(request);
-    };
-    let region = DmaRegion {
-        bus,
-        device,
-        address,
-        size,
-        page_shift,
-    };
-    let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), [address]);
+    }
+    let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), [region.address]);
     answer.push_change(DeviceBusChange::DmaRegionAllocated(region));
     HypercallDisposition::Answered(answer)
+}
+
+/// The device's next captured region after the partition's regions
+/// `held`.
+///
+/// `captured` holds the device's captured regions in the order of the
+/// calls. `held` holds the partition's regions of the device in address
+/// order. The result is an error in these cases:
+/// - `held` is not the set of the first captured regions;
+/// - no captured region follows them.
+fn next_captured_region(
+    captured: &[DmaRegion],
+    held: &[DmaRegion],
+) -> Result<DmaRegion, UnmodelledError> {
+    let Some(earlier) = captured.get(..held.len()) else {
+        return Err(OTHER_HELD);
+    };
+    let mut earlier = earlier.to_vec();
+    earlier.sort_unstable();
+    if earlier != held {
+        return Err(OTHER_HELD);
+    }
+    match captured.get(held.len()) {
+        Some(&next) => Ok(next),
+        None if held.is_empty() => Err(OTHER_SHAPE),
+        None => Err(NEXT_REGION),
+    }
 }
 
 #[cfg(test)]
@@ -195,3 +250,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/dma_region_slot_tests.rs"]
 mod slot_tests;
+
+#[cfg(test)]
+#[path = "tests/dma_region_rows_tests.rs"]
+mod rows_tests;

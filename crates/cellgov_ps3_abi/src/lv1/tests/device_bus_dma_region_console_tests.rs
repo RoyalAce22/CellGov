@@ -142,8 +142,8 @@ fn the_kernel_call_gets_the_address_of_the_game_os_region_of_the_network_device(
     let row = GAME_OS_DMA_REGIONS[0];
     assert_eq!((row.firmware, row.bus, row.device), ("4.93", 1, 0));
     assert_eq!((row.size, row.page_shift), (size, page_shift));
-    assert_eq!(
-        game_os_dma_region("4.93", 1, 0, size, page_shift),
-        Some(base)
-    );
+    let rows: Vec<_> = game_os_dma_regions("4.93", 1, 0)
+        .map(|row| (row.size, row.page_shift, row.address))
+        .collect();
+    assert_eq!(rows, [(size, page_shift, base)]);
 }

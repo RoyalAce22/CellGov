@@ -56,13 +56,13 @@ fn words(capture: &str, file: &str) -> BTreeMap<u64, u64> {
     words
 }
 
-fn slots(file: &str) -> BTreeMap<u64, u64> {
+pub(super) fn slots(file: &str) -> BTreeMap<u64, u64> {
     words(DMA_SLOTS_CAPTURE, file)
 }
 
 /// The slot object of device 1: entry 0 of the table
 /// [OFW-4.93 lv1 a:0x237108-0x237120].
-fn slot_object() -> u64 {
+pub(super) fn slot_object() -> u64 {
     slots("device_table.tsv")[&SLOT_TABLE]
 }
 
@@ -74,7 +74,7 @@ fn device() -> u64 {
 
 /// The regions of the device's list from its head at +96, in list
 /// order, as (record address, partition, bus address, size, page shift).
-fn listed_regions() -> Vec<(u64, u64, u64, u64, u64)> {
+pub(super) fn listed_regions() -> Vec<(u64, u64, u64, u64, u64)> {
     let regions = slots("regions.tsv");
     let mut listed = Vec::new();
     let mut previous = 0;
@@ -96,12 +96,8 @@ fn listed_regions() -> Vec<(u64, u64, u64, u64, u64)> {
 }
 
 fn device_1_row() -> GameOsDmaRegion {
-    let rows: Vec<_> = GAME_OS_DMA_REGIONS
-        .iter()
-        .filter(|row| row.firmware == "4.93" && row.bus == 1 && row.device == 1)
-        .collect();
-    assert_eq!(rows.len(), 1);
-    *rows[0]
+    let first = game_os_dma_regions("4.93", 1, 1).next();
+    first.expect("a device 1 row")
 }
 
 /// The lookup gives device 1 the code 3 [OFW-4.93 lv1 a:0x235DA4-0x235DAC],
@@ -148,10 +144,7 @@ fn the_device_1_row_heads_the_devices_list_and_holds_its_first_slot() {
     assert_eq!(slots("slot_valid.tsv")[&(object + 104)], 1);
     assert_eq!(slots("slot_address.tsv")[&(object + 108)], row.address);
     assert_eq!(slots("wrapper.tsv")[&(object + 112)], LPAR_ID_GAME_OS);
-    assert_eq!(
-        game_os_dma_region("4.93", 1, 1, row.size, row.page_shift),
-        Some(0xC000_0000)
-    );
+    assert_eq!(row.address, 0xC000_0000);
 }
 
 /// The slot function takes the first free slot

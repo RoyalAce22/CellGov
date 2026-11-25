@@ -610,8 +610,36 @@
 //! - The device's +120 holds 5, so the device accepts a region.
 //! - The pool index at +128 is 3, so the pool differs from device 0's.
 //!
-//! [`GAME_OS_DMA_REGIONS`] gives the address that the console's lv1 gave
-//! the 4.93 kernel's call for device 1.
+//! [`GAME_OS_DMA_REGIONS`] gives the addresses that the console's lv1 gave
+//! the 4.93 kernel's five calls for device 1, in the order of the calls.
+//!
+//! ## The order of the regions
+//!
+//! The pool search walks lists that lv1's own allocations change
+//! [OFW-4.93 lv1 a:0x22D434-0x22D440] [OFW-4.93 lv1 a:0x22CEF8]. So the
+//! address of a region depends on the regions that lv1 gave before it,
+//! and a captured address holds only for a call that comes in the
+//! captured order. The capture [`DMA_SLOTS_CAPTURE`] gives that order:
+//! - The device's list holds the five regions with region 1 at its head,
+//!   and each region links to the region before it. The link step adds
+//!   each new region at the tail [OFW-4.93 lv1 a:0x226CA4-0x226CDC]
+//!   [OFW-4.93 lv1 a:0x226D6C-0x226D78], because the method of the region
+//!   class 0x35C560 that it calls for each region returns 0
+//!   [OFW-4.93 lv1 a:0x35C570-0x35C574] [OFW-4.93 lv1 a:0x32CFA0-0x32CFA4]
+//!   [OFW-4.93 lv1 a:0x2258F8-0x2258FC].
+//!   So the list is in the order of the calls.
+//! - Slots 0 to 4 hold the regions in the order of the list, and slot 5
+//!   is free. The slot function takes the first free slot, so the slots
+//!   are in the order of the calls.
+//!
+//! A model that matched a call to a row by its size and page shift alone
+//! would give a row's address to a call that comes out of that order.
+//!
+//! When all [`DMA_SLOT_COUNT`] slots are taken, the slot function gives
+//! the region back and returns `LV1_RESOURCE_SHORTAGE` (-2)
+//! [OFW-4.93 lv1 a:0x23D57C-0x23D590]. It searches the slots only after
+//! the pool gave a region [OFW-4.93 lv1 a:0x23D544-0x23D548], so the pool's
+//! own failure comes first.
 //!
 //! # The 4.93 kernel's call of `allocate_device_dma_region`
 //!
@@ -1236,15 +1264,16 @@ pub struct GameOsDmaRegion {
     pub address: u64,
 }
 
-/// Each region of a kernel's boot call, by firmware.
+/// Each region of a kernel's boot calls, by firmware.
 ///
-/// The rows are these:
+/// The rows of one device are in the order of the device's calls. The
+/// rows are these:
 /// - The network device's 1 MB region of 1 MB pages. The capture
 ///   [`DMA_REGION_CAPTURE`] finds it in the device's list, with the game
 ///   OS partition at +8 and the address at +48.
-/// - Device 1's 256 KB region of 64 KB pages. The capture
-///   [`DMA_SLOTS_CAPTURE`] finds it at the head of the device's list,
-///   and in the first of the device's slots.
+/// - Device 1's five regions. The capture [`DMA_SLOTS_CAPTURE`] finds
+///   them in the device's list and in the device's slots 0 to 4, in this
+///   order.
 pub const GAME_OS_DMA_REGIONS: &[GameOsDmaRegion] = &[
     GameOsDmaRegion {
         firmware: "4.93",
@@ -1262,32 +1291,58 @@ pub const GAME_OS_DMA_REGIONS: &[GameOsDmaRegion] = &[
         page_shift: 16,
         address: 0xC000_0000,
     },
+    GameOsDmaRegion {
+        firmware: "4.93",
+        bus: 1,
+        device: 1,
+        size: 0x8_0000,
+        page_shift: 16,
+        address: 0xC008_0000,
+    },
+    GameOsDmaRegion {
+        firmware: "4.93",
+        bus: 1,
+        device: 1,
+        size: 0x80_0000,
+        page_shift: 16,
+        address: 0xC080_0000,
+    },
+    GameOsDmaRegion {
+        firmware: "4.93",
+        bus: 1,
+        device: 1,
+        size: 0x80_0000,
+        page_shift: 20,
+        address: 0xD000_0000,
+    },
+    GameOsDmaRegion {
+        firmware: "4.93",
+        bus: 1,
+        device: 1,
+        size: 0x1_0000,
+        page_shift: 12,
+        address: 0xE000_0000,
+    },
 ];
 
 /// The devices of bus 1 whose regions lv1 also keeps in a slot object:
 /// devices 1 and 2 [OFW-4.93 lv1 a:0x237108-0x23711C].
 pub const DMA_SLOT_DEVICES: [u64; 2] = [1, 2];
 
-/// The bus address that lv1 gave the kernel's boot call for device
-/// `device` of bus `bus` with `size` and `page_shift`, or `None` when no
-/// capture gives that call.
-pub fn game_os_dma_region(
+/// The number of slots in the slot object of device 1 or 2
+/// [OFW-4.93 lv1 a:0x23D54C-0x23D578].
+pub const DMA_SLOT_COUNT: usize = 6;
+
+/// The regions that lv1 gave the kernel's boot calls for device `device`
+/// of bus `bus`, in the order of the calls.
+pub fn game_os_dma_regions(
     firmware: &str,
     bus: u64,
     device: u64,
-    size: u64,
-    page_shift: u64,
-) -> Option<u64> {
-    GAME_OS_DMA_REGIONS
-        .iter()
-        .find(|region| {
-            region.firmware == firmware
-                && region.bus == bus
-                && region.device == device
-                && region.size == size
-                && region.page_shift == page_shift
-        })
-        .map(|region| region.address)
+) -> impl Iterator<Item = GameOsDmaRegion> + '_ {
+    GAME_OS_DMA_REGIONS.iter().copied().filter(move |region| {
+        region.firmware == firmware && region.bus == bus && region.device == device
+    })
 }
 
 /// The console capture of the DMA regions that lv1 holds for the network
@@ -1860,6 +1915,10 @@ mod dma_region_console_tests;
 #[cfg(test)]
 #[path = "tests/device_bus_dma_slots_console_tests.rs"]
 mod dma_slots_console_tests;
+
+#[cfg(test)]
+#[path = "tests/device_bus_dma_slot_rows_console_tests.rs"]
+mod dma_slot_rows_console_tests;
 
 #[cfg(test)]
 #[path = "tests/device_bus_dma_map_tests.rs"]

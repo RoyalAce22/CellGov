@@ -132,25 +132,20 @@ fn the_shape_checks_run_in_lv1_order_and_pass_the_kernel_call() {
 }
 
 #[test]
-fn only_the_captured_calls_have_a_game_os_dma_region() {
-    assert_eq!(GAME_OS_DMA_REGIONS.len(), 2);
-    assert_eq!(
-        game_os_dma_region("4.93", 1, 0, 0x10_0000, 20),
-        Some(0xC000_0000)
-    );
-    let others = [
-        ("4.92", 1, 0, 0x10_0000, 20),
-        ("4.93", 2, 0, 0x10_0000, 20),
-        ("4.93", 1, 1, 0x10_0000, 20),
-        ("4.93", 1, 0, 0x20_0000, 20),
-        ("4.93", 1, 0, 0x10_0000, 16),
-    ];
-    assert_eq!(others.len(), 5);
-    for (firmware, bus, device, size, page_shift) in others {
+fn only_the_captured_devices_have_game_os_dma_regions() {
+    assert_eq!(GAME_OS_DMA_REGIONS.len(), 6);
+    let network: Vec<_> = game_os_dma_regions("4.93", 1, 0)
+        .map(|row| (row.size, row.page_shift, row.address))
+        .collect();
+    assert_eq!(network, [(0x10_0000, 20, 0xC000_0000)]);
+    assert_eq!(game_os_dma_regions("4.93", 1, 1).count(), 5);
+    let others = [("4.92", 1, 0), ("4.93", 2, 0), ("4.93", 1, 2)];
+    assert_eq!(others.len(), 3);
+    for (firmware, bus, device) in others {
         assert_eq!(
-            game_os_dma_region(firmware, bus, device, size, page_shift),
-            None,
-            "{firmware} {bus} {device} 0x{size:X} {page_shift}"
+            game_os_dma_regions(firmware, bus, device).count(),
+            0,
+            "{firmware} {bus} {device}"
         );
     }
 }
