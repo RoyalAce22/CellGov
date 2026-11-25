@@ -63,3 +63,7 @@ crates/cellgov_ppu/src/unit/tests/ppu_tests.rs -linguist-generated
 # directory is otherwise gitignored.
 tests/ps3autotests/**/*.expected -text
 tests/ps3autotests/**/*.elf -text
+
+# Console capture frames are byte-exact binary; tests check their whole
+# length, so no line-ending rule may apply to them.
+tests/micro/*/ps3/**/*.bin -text

@@ -22,12 +22,12 @@ pub(crate) const GROUP: Group = Group {
         HashedSurface {
             name: "the logical SPEs",
             source: Some(LOGICAL_SPE_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(27),
         },
         HashedSurface {
             name: "the transition notifier of each logical SPE",
             source: Some(LOGICAL_SPE_NOTIFIER_SOURCE),
-            stamp: Stamp::Pending,
+            stamp: Stamp::Version(27),
         },
     ],
 };
