@@ -353,8 +353,9 @@ fn a_blr_that_as_many_lr_writers_reach_as_the_join_limit_keeps_the_sites_resolve
 }
 
 /// Fifteen LR writers reach the `blr`, and one of them, the `mtlr r4`,
-/// brings one constant and then a second. Branches from the path of the
-/// writers reach both builds of r4. With the second constant LR
+/// brings one constant and then a second. A branch from the path of the
+/// writers reaches the first build of r4, and the fall-through of the
+/// `blt` after the `mtlr` reaches the second. With the second constant LR
 /// holds 16 constants, as many as the join limit, so the join takes it.
 ///
 /// [PPC-Book1 p:24 s:2.4] `b` and `bc` reach CIA + EXTS(displacement), or EXTS(displacement) when AA = 1.

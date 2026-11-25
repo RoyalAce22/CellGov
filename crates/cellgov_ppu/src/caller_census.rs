@@ -1151,5 +1151,17 @@ mod hypercall_closed_alias_tests;
 mod hypercall_real_return_tests;
 
 #[cfg(test)]
+#[path = "tests/caller_census_hypercall_translation_on_tests.rs"]
+mod hypercall_translation_on_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_context_restore_tests.rs"]
+mod hypercall_context_restore_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_saved_srr_tests.rs"]
+mod hypercall_saved_srr_tests;
+
+#[cfg(test)]
 #[path = "tests/caller_census_hypercall_closed_writer_tests.rs"]
 mod hypercall_closed_writer_tests;

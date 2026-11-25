@@ -1,6 +1,6 @@
 use super::hypercall_ctr_decrement_tests::{window as plain_window, VECTOR};
 use super::hypercall_entry_tests::{code, data_bytes, ordinals, pointers, word, Segment};
-use super::hypercall_real_mode_switch_tests::{mtspr, window, OUTSIDE, PAST, RFID, SC};
+use super::hypercall_real_mode_switch_tests::{flip_ir, mtspr, window, OUTSIDE, PAST, RFID, SC};
 use super::hypercall_tests::KERNEL;
 use super::*;
 use cellgov_ps3_abi::hw::ppu_supervisor::{SPR_SRR0, SPR_SRR1};
@@ -40,14 +40,19 @@ fn loaded_bctr(at: u64) -> Segment {
     )
 }
 
-/// `ld r3,0(r1); ld r4,0(r1)`, then r3 into SRR0 and r4 into SRR1, then
-/// `rfid`: a switch to an address and a mode that the scan does not know.
+/// `ld r3,0(r1); ld r4,0(r1); xori r4,r4,MSR_IR`, then r3 into SRR0 and
+/// r4 into SRR1, then `rfid`: a switch to an address and a mode that the
+/// scan does not know.
+///
+/// The `xori` gives SRR1 an IR that the census does not take from
+/// storage, so the `rfid` is no context restore.
 fn unbounded_rfid() -> Segment {
     code(
         OUTSIDE,
         &[
             ld(3, 1),
             ld(4, 1),
+            flip_ir(4),
             mtspr(SPR_SRR0, 3),
             mtspr(SPR_SRR1, 4),
             RFID,

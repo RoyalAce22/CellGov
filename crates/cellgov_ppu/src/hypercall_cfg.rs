@@ -496,7 +496,9 @@ fn direct_targets(code: &Code, address: u64, raw: u32, real_mode: bool) -> BTree
 ///
 /// An `rfid` or an `hrfid` does not fall through. Its next word runs in
 /// real mode only as the target of a real-mode switch, which `starts`
-/// holds.
+/// holds. The walk does not fall through a word of
+/// [`IndirectBound::translation_on`] either, because the next word runs
+/// with MSR\[IR\] at 1.
 ///
 /// The walk also follows LR. After a real-mode branch that links, LR
 /// holds a return point: the word after a branch that links. The walk
@@ -519,6 +521,7 @@ fn direct_targets(code: &Code, address: u64, raw: u32, real_mode: bool) -> BTree
 /// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.
 /// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00.
 /// [PPC-Book1 p:81 s:3.3.13] `mtlr` copies RS into LR.
+/// [PPC-Book3 p:4 s:1.6.1] `mtmsr` and `mtmsrd` with L = 0 are context synchronizing, so the words that follow them are fetched and run in the context that they establish.
 fn real_mode_words(code: &Code, starts: &BTreeSet<u64>, bound: &IndirectBound) -> RealMode {
     let mut reached = BTreeSet::new();
     let mut any_lr = BTreeSet::new();
@@ -548,7 +551,8 @@ fn real_mode_words(code: &Code, starts: &BTreeSet<u64>, bound: &IndirectBound) -
         };
         for raw in code.words_at(at) {
             let after = lr.after(raw);
-            if flow(raw) != Flow::Stops && !returns_from_interrupt(raw) {
+            let ends_real_mode = returns_from_interrupt(raw) || bound.translation_on.contains(&at);
+            if flow(raw) != Flow::Stops && !ends_real_mode {
                 pending.extend(at.checked_add(4).map(|next| (next, after)));
             }
             pending.extend(

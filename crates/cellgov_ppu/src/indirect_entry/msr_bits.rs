@@ -203,7 +203,7 @@ impl MsrValues {
 
 /// Whether `decoded` is a call or an `sc`, after which a GPR, SRR1 or MSR
 /// can hold a value that the path does not give.
-fn changes_every_register(decoded: &PpuInstruction) -> bool {
+pub(super) fn changes_every_register(decoded: &PpuInstruction) -> bool {
     matches!(
         *decoded,
         PpuInstruction::Sc { .. }

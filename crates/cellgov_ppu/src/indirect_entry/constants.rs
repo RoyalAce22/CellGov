@@ -11,6 +11,7 @@ use super::cells::{cell_writes, computed_cells, read_cells, CellMarks, CellWrite
 use super::lost::{join_origins, LostGprs, Origins};
 use super::msr_bits::{MsrBits, MsrValues};
 use super::real_mode::{fetch_address, MsrWord, Switch};
+use super::srr_restore::SrrRestore;
 use super::toc::FunctionToc;
 use crate::caller_census::{surely_written_gprs, written_gprs};
 use crate::instruction::{spr_number, PpuInstruction};
@@ -168,6 +169,9 @@ pub(super) struct Constants {
     /// The MSR bits that the scan knows in each GPR and in SRR1 on this
     /// path.
     pub(super) msr: MsrValues,
+    /// The bits of each GPR, SRR0 and SRR1 that hold the interrupted
+    /// context on this path.
+    srr_restore: SrrRestore,
 }
 
 impl Constants {
@@ -181,7 +185,9 @@ impl Constants {
     /// from the GPRs and the cells before the word.
     pub(super) fn step(&mut self, address: u64, raw: u32) -> Option<Value> {
         let Ok(decoded) = crate::decode::decode(raw) else {
+            // The interrupt that the word causes sets SRR0 and SRR1.
             *self = Self::default();
+            self.srr_restore = SrrRestore::forgotten();
             return None;
         };
         let lr_copy = self.lr_copy_write(&decoded);
@@ -191,6 +197,8 @@ impl Constants {
             _ => None,
         };
         self.msr
+            .step(raw, &decoded, constant, written_gprs(&decoded));
+        self.srr_restore
             .step(raw, &decoded, constant, written_gprs(&decoded));
         let written = cell_writes(&decoded, spr_move(&decoded)).map(|write| {
             let origins = self.cell_write_lost(&write);
@@ -406,6 +414,10 @@ impl Constants {
     /// - for an `mtmsr` or `mtmsrd`, a value that holds MSR\[IR\] and
     ///   MSR\[PR\] of the word, which leaves the mode as it was.
     ///
+    /// The census takes an `rfid` whose SRR0 and SRR1 hold the interrupted
+    /// context to resume an interrupted word in the mode of that word, as
+    /// [`SrrRestore`] states. So such an `rfid` gives no address.
+    ///
     /// [PPC-Book3 p:13 s:2.3] `rfid` sets MSR\[IR\] to SRR1\[IR\] | SRR1\[PR\] and fetches the next instruction from SRR0 under the new MSR.
     /// [PPC-Book3 p:22 s:3.4] `mtmsrd` with L = 0 sets MSR\[IR\] to RS\[IR\] | RS\[PR\] and MSR\[SF\] to RS bit 0 | RS bit 1.
     /// [PPC-Book3 p:91 s:8.3] `mtmsr` with L = 0 sets MSR\[IR\] to RS\[IR\] | RS\[PR\] and leaves MSR bits 0:31 unchanged.
@@ -413,6 +425,9 @@ impl Constants {
         let Some((msr, next, sets_sf, bits)) = self.msr_write(address, raw) else {
             return Switch::None;
         };
+        if MsrWord::of(raw) == Some(MsrWord::Rfid) && self.srr_restore.restores_context() {
+            return Switch::None;
+        }
         if msr.is_none() && !sets_srr_target(raw) && bits.keeps_ir() {
             return Switch::None;
         }
@@ -437,6 +452,30 @@ impl Constants {
                 })
                 .collect(),
         )
+    }
+
+    /// Whether the word `raw` is an `mtmsr` or an `mtmsrd` with L = 0 that
+    /// sets MSR\[IR\] to 1 on each path to it.
+    ///
+    /// The word sets MSR\[IR\] to 1 in one of these cases:
+    /// - the known bits of its value set MSR\[IR\] or MSR\[PR\] to 1;
+    /// - each constant of the GPR has MSR\[IR\] or MSR\[PR\] at 1.
+    ///
+    /// The switch scan that asks this enters each join with no constant,
+    /// and the word after a call is a join. So a GPR with a constant holds
+    /// no other value there, as for [`Self::real_mode_switch`].
+    ///
+    /// [PPC-Book3 p:22 s:3.4] `mtmsrd` with L = 0 sets MSR\[IR\] to RS\[IR\] | RS\[PR\] and MSR\[SF\] to RS bit 0 | RS bit 1.
+    /// [PPC-Book3 p:91 s:8.3] `mtmsr` with L = 0 sets MSR\[IR\] to RS\[IR\] | RS\[PR\] and leaves MSR bits 0:31 unchanged.
+    pub(super) fn sets_translation(&self, raw: u32) -> bool {
+        let Some(MsrWord::Mtmsrd { rs } | MsrWord::Mtmsr { rs }) = MsrWord::of(raw) else {
+            return false;
+        };
+        self.msr.gpr(rs).sets_ir()
+            || self.gpr(rs).is_some_and(|value| {
+                let constants = value.constants();
+                !constants.is_empty() && constants.iter().all(|&msr| msr & (MSR_IR | MSR_PR) != 0)
+            })
     }
 
     /// The words that the word `raw` can enter with MSR\[IR\] at 1, when it
@@ -641,6 +680,17 @@ impl Constants {
             .fold(0, |mask, gpr| mask | gpr_bit(gpr))
     }
 
+    /// Forgets each constant, mark and known MSR bit at a join that the
+    /// path reaches by a fall-through.
+    ///
+    /// The SRR bits that hold the interrupted context stay as
+    /// [`SrrRestore::at_join`] gives them.
+    pub(super) fn enter_join(&mut self) {
+        let srr_restore = self.srr_restore.at_join();
+        *self = Self::default();
+        self.srr_restore = srr_restore;
+    }
+
     /// Takes each GPR and LR to hold also a value for which the scan
     /// keeps no constant and no lost mark, as at a word that an indirect
     /// branch can enter from a path that the scan does not follow.
@@ -648,6 +698,7 @@ impl Constants {
         self.unheld = u32::MAX;
         self.lr_unheld = true;
         self.msr = MsrValues::default();
+        self.srr_restore = SrrRestore::forgotten();
     }
 
     /// The GPR that `decoded` writes and the constant it writes there,

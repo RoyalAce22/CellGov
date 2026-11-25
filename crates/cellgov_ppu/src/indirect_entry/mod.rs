@@ -207,6 +207,7 @@ mod progression;
 mod reach;
 mod real_mode;
 mod slot_set;
+mod srr_restore;
 mod toc;
 
 pub(crate) use bound::{

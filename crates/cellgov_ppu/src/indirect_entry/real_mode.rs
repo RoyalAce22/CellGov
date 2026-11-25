@@ -34,6 +34,10 @@ pub(super) struct Switches {
     ///
     /// [`IndirectBound::unbounded_mode32_switches`]: super::IndirectBound::unbounded_mode32_switches
     pub(super) unbounded_mode32: BTreeSet<u64>,
+    /// The [`IndirectBound::translation_on`].
+    ///
+    /// [`IndirectBound::translation_on`]: super::IndirectBound::translation_on
+    pub(super) translation_on: BTreeSet<u64>,
 }
 
 impl Switches {
@@ -76,6 +80,9 @@ impl Switches {
     /// control enters each word of `joins` with no constant that the scan
     /// knows.
     ///
+    /// A join keeps only the SRR bits that hold the interrupted context,
+    /// as [`Constants::enter_join`] gives them.
+    ///
     /// A word that `reach` does not hold switches nothing, and the next
     /// word starts with no constant.
     fn scan(
@@ -95,7 +102,7 @@ impl Switches {
                     continue;
                 }
                 if joins.contains(&address) {
-                    constants = Constants::default();
+                    constants.enter_join();
                 }
                 constants.gprs[2] = toc.in_r2(constants.gprs[2].take(), every);
                 constants.msr.forget_gpr(2);
@@ -106,10 +113,22 @@ impl Switches {
                         switches.unbounded.insert(address);
                     }
                 }
+                if constants.sets_translation(raw) {
+                    switches.translation_on.insert(address);
+                }
                 switches.add_mode32(code, address, &constants, raw);
                 constants.step(address, raw);
             }
         }
+        // The scan steps each segment apart. Where two segments hold a
+        // word or the word before it, a fall-through can bring the
+        // registers of a segment that the scan did not step there.
+        switches.translation_on.retain(|&address| {
+            code.words_at(address).count() == 1
+                && address
+                    .checked_sub(4)
+                    .is_none_or(|before| code.words_at(before).count() <= 1)
+        });
         switches
     }
 

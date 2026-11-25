@@ -57,3 +57,20 @@ fn a_fall_through_in_place_of_the_return_puts_the_later_words_in_real_mode() {
     assert_eq!(site(76, NOP), [(SC, None)]);
     assert_eq!(site(75, NOP), [(SC, Some(75))]);
 }
+
+/// `ori r0,r0,0x24` holds 18, the extended opcode of `rfid`, in bits
+/// 21:30, under primary opcode 24. It falls through like the `nop`.
+///
+/// [PPC-Book3 p:119 s:Appendix G] `rfid` is primary opcode 19 with extended opcode 18.
+/// [PPC-Book1 p:66 s:3.3.11] `ori` ORs RS with UI and places the result into RA.
+#[test]
+fn a_word_with_the_extended_opcode_of_rfid_under_another_primary_opcode_falls_through() {
+    let ori = word(PpuInstruction::Ori {
+        ra: 0,
+        rs: 0,
+        imm: 0x24,
+    });
+    assert_eq!((ori >> 26, (ori >> 1) & 0x3FF), (24, 18));
+    assert_eq!(site(76, ori), [(SC, None)]);
+    assert_eq!(site(75, ori), [(SC, Some(75))]);
+}

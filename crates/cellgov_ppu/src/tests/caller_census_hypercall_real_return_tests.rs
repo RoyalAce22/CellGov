@@ -147,6 +147,20 @@ fn a_real_mode_return_enters_the_word_at_the_real_address_of_its_return_point() 
     assert_eq!(aliased_sites(low, Vec::new()), [(0x108, None)]);
 }
 
+/// A `nop` in place of the call writes no LR, so no real-mode return
+/// comes back to the vector's second word, and nothing enters the
+/// second word of `low` at real address 0x104.
+///
+/// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
+#[test]
+fn a_real_mode_word_that_does_not_link_enters_no_word_at_the_real_address_after_it() {
+    let low = code(0x100, &[li(11, 78), NOP, PPC_SC_1]);
+    let vector = code(VECTOR, &[NOP, trap(), PPC_BLR]);
+    let mut sites = ordinals(0, &[vector, low]);
+    sites.sort_unstable();
+    assert_eq!(sites, [(0x108, Some(78))]);
+}
+
 /// Entered at 0x100, the low code builds r3 itself, so its `blr`
 /// reaches only [`NOWHERE`]. Entered at 0x104 by the vector's return,
 /// r3 holds what the interrupt left, so the `blr` can reach any named
@@ -178,6 +192,18 @@ fn a_real_mode_blr_after_a_popcntb_can_enter_a_named_real_address() {
     let [bl, stay] = call();
     let popcntb = word(PpuInstruction::Popcntb { ra: 3, rs: 4 });
     assert_eq!(sites(&[bl, stay, popcntb, PPC_BLR]), UNRESOLVED);
+}
+
+/// [CBE-Handbook p:739 s:A.2.4.1] An attempt to execute `popcntb`, `mcrxr` or another word that the PPE does not implement causes an illegal instruction exception.
+#[test]
+fn a_real_mode_blr_after_an_mcrxr_can_enter_a_named_real_address() {
+    let mcrxr = word(PpuInstruction::Mcrxr { bf: 0 });
+    assert!(matches!(
+        crate::decode::decode(mcrxr),
+        Ok(PpuInstruction::Mcrxr { .. })
+    ));
+    let [bl, stay] = call();
+    assert_eq!(sites(&[bl, stay, mcrxr, PPC_BLR]), UNRESOLVED);
 }
 
 /// `mfsr r3,0`: primary opcode 31 with extended opcode 595.

@@ -70,6 +70,28 @@ census does not state that a resolved site is reachable, or anything
 about code outside the scanned segments. What a kernel run observes
 never resolves a site.
 
+The census takes an interrupt and its return to leave MSR and the
+registers as they were, so an interrupt adds no path. It applies the
+same premise to an `rfid` whose SRR0, and MSR[IR] and MSR[PR] of whose
+SRR1, hold the interrupted context. Each of these bits holds it in one
+of two cases:
+
+- a load from storage gave it, as in a context restore from a frame;
+- no word wrote it on the path since the handler was entered, so it
+  still holds what the interrupt saved.
+
+A handler can change the other bits of SRR1, such as the
+floating-point and vector enables. A read of SRR1, an `ori`, `oris`,
+`rlwimi` or `andc` that leaves MSR[IR] and MSR[PR] alone, and a write
+back count as no write of those bits. Such an `rfid` resumes
+an interrupted word in the mode of that word, so it puts no word in
+real mode. The census takes each path that enters a join by a branch
+to leave SRR0 and SRR1 as the interrupt saved them. The premise fails
+for code that writes SRR1 with MSR[IR] at 0 where the census does not
+see the write: a context frame that the kernel builds itself, or a
+write on a path that enters a join before the `rfid` by a branch. The
+census would then miss the real-mode entries of that `rfid`'s SRR0.
+
 `cellgov dev hypercall-census` writes one kernel's rows of both tables.
 `{{hypercall_regenerate}}` runs it over every `kernel.tsv` kernel in the
 installed firmware and rewrites both; without that flag the same test

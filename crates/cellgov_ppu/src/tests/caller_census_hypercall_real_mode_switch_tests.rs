@@ -68,6 +68,17 @@ pub(super) fn ori(rt: u8, bits: u64) -> u32 {
     })
 }
 
+/// `xori rt,rt,MSR_IR`, which flips MSR\[IR\] of rt.
+///
+/// [PPC-Book1 p:66 s:3.3.11] `xori` XORs RS with UI and places the result into RA.
+pub(super) fn flip_ir(rt: u8) -> u32 {
+    word(PpuInstruction::Xori {
+        ra: rt,
+        rs: rt,
+        imm: u16::try_from(MSR_IR).expect("a low MSR bit"),
+    })
+}
+
 /// `mtspr spr,rs`.
 ///
 /// [PPC-Book3 p:19 s:3.4] `mtspr` is primary opcode 31 with extended opcode 467, RS in bits 6:10 and the SPR number in bits 11:20 with its halves swapped.

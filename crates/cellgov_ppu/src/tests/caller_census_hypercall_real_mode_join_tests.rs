@@ -1,7 +1,7 @@
 use super::hypercall_entry_tests::{code, data_bytes, ordinals, pointers, word, Segment};
 use super::hypercall_real_mode_switch_tests::{
-    build, lis_sf, msr_stub, mtmsr, mtmsrd, mtspr, ori, shift_left, site, window, OUTSIDE, PAST,
-    RFID, SC,
+    build, flip_ir, lis_sf, msr_stub, mtmsr, mtmsrd, mtspr, ori, shift_left, site, window, OUTSIDE,
+    PAST, RFID, SC,
 };
 use super::hypercall_tests::{li, KERNEL, NOP};
 use super::*;
@@ -59,9 +59,13 @@ fn late_srr0(after: &[u32]) -> Segment {
     code(OUTSIDE, &words)
 }
 
+/// The census takes a path that enters a join by a branch to leave SRR0
+/// and SRR1 as the interrupt saved them. So it misses the SRR writes
+/// before the branch, and the `rfid` resumes in its own mode.
+///
 /// [PPC-Book3 p:13 s:2.3] `rfid` sets MSR\[IR\] to SRR1\[IR\] | SRR1\[PR\] and fetches the next instruction from SRR0.
 #[test]
-fn an_rfid_that_a_branch_reaches_after_the_srr_writes_can_put_the_window_in_real_mode() {
+fn an_rfid_that_a_branch_reaches_after_the_srr_writes_puts_no_word_in_real_mode() {
     let stub = || {
         let mut words = build(3, PAST).to_vec();
         words.extend([lis_sf(4), mtspr(SPR_SRR0, 3), mtspr(SPR_SRR1, 4)]);
@@ -69,8 +73,7 @@ fn an_rfid_that_a_branch_reaches_after_the_srr_writes_can_put_the_window_in_real
         words.push(RFID);
         code(OUTSIDE, &words)
     };
-    assert_eq!(site(76, stub()), [(SC, None)]);
-    assert_eq!(site(75, stub()), [(SC, Some(75))]);
+    assert_eq!(site(76, stub()), [(SC, Some(75))]);
 }
 
 /// [PPC-Book3 p:13 s:2.3] `rfid` sets MSR\[IR\] to SRR1\[IR\] | SRR1\[PR\] and fetches the next instruction from SRR0.
@@ -79,14 +82,6 @@ fn an_rfid_with_a_loaded_srr1_puts_only_its_built_srr0_in_real_mode() {
     let to = |srr0: u16| rfid_after(&[build(3, srr0)[0], build(3, srr0)[1], ld(4)]);
     assert_eq!(site(76, to(PAST)), [(SC, None)]);
     assert_eq!(site(76, to(0x6000)), [(SC, Some(75))]);
-}
-
-/// [PPC-Book3 p:13 s:2.3] `rfid` sets MSR\[IR\] to SRR1\[IR\] | SRR1\[PR\] and fetches the next instruction from SRR0.
-#[test]
-fn an_rfid_with_a_loaded_srr0_and_srr1_can_put_the_window_in_real_mode() {
-    let stub = || rfid_after(&[ld(3), ld(4)]);
-    assert_eq!(site(76, stub()), [(SC, None)]);
-    assert_eq!(site(75, stub()), [(SC, Some(75))]);
 }
 
 /// [PPC-Book3 p:13 s:2.3] `rfid` sets MSR\[IR\] to SRR1\[IR\] | SRR1\[PR\].
@@ -233,7 +228,8 @@ fn a_switch_target_forgets_the_srr1_that_the_path_before_it_builds() {
 /// A word of another segment shares the real address of the window's
 /// middle word, and the image names that word. Neither 32-bit half of
 /// that doubleword names a word of the code. A code pointer names the
-/// `rfid` stub.
+/// `rfid` stub. The `xori` after the SRR1 load gives SRR1 an IR that the
+/// census does not take from storage.
 ///
 /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
 #[test]
@@ -257,5 +253,5 @@ fn an_unbounded_rfid_enters_the_real_address_of_each_named_word() {
         )
     };
     assert_eq!(site(&ir_set()), [(HIGH + 8, Some(75))]);
-    assert_eq!(site(&[ld(4)]), [(HIGH + 8, None)]);
+    assert_eq!(site(&[ld(4), flip_ir(4)]), [(HIGH + 8, None)]);
 }

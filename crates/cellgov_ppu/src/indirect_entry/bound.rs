@@ -270,6 +270,13 @@ pub(crate) struct IndirectBound {
     /// The address of each `rfid`, `hrfid` or `mtmsrd` that can put
     /// control into 32-bit mode at an address that the scan does not know.
     pub(crate) unbounded_mode32_switches: BTreeSet<u64>,
+    /// The address of each `mtmsr` or `mtmsrd` that sets MSR\[IR\] to 1 on
+    /// each path to it.
+    ///
+    /// The word after such a word runs with MSR\[IR\] at 1.
+    ///
+    /// [PPC-Book3 p:4 s:1.6.1] `mtmsr` and `mtmsrd` with L = 0 are context synchronizing, so the words that follow them are fetched and run in the context that they establish.
+    pub(crate) translation_on: BTreeSet<u64>,
 }
 
 /// The joins that dropped the constants of one lost value.
@@ -672,6 +679,7 @@ impl Bound<'_> {
             indirect.unbounded_switches = switches.unbounded;
             indirect.mode32_switches = switches.mode32;
             indirect.unbounded_mode32_switches = switches.unbounded_mode32;
+            indirect.translation_on = switches.translation_on;
             return Ok(indirect);
         }
     }
