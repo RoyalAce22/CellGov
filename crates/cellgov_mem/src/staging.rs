@@ -139,9 +139,7 @@ impl StagingMemory {
     /// the drain runs -- and return on the first failure. Mutates neither
     /// the staging buffer nor `target`.
     ///
-    /// A device judges a register store against the words before the
-    /// batch. So the check cannot judge a second register store in one
-    /// batch, and refuses the batch at that store with
+    /// The check refuses the batch at its second register store with
     /// [`MemError::SecondRegisterStore`].
     fn validate_pending(&self, target: &GuestMemory) -> Result<(), MemError> {
         let mut register_store = false;

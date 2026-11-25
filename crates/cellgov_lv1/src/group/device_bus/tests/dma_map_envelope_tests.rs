@@ -106,7 +106,7 @@ fn uncaptured(request: &HypercallRequest) -> HypercallDisposition {
 /// capture `lv1_device_dma_mappings` holds the 20 mappings of devices 1
 /// and 2.
 #[test]
-fn each_captured_boot_call_of_devices_0_1_and_2_maps_in_call_order() {
+fn each_captured_mapping_of_devices_0_1_and_2_maps_in_the_order_of_the_rows() {
     let rows: Vec<_> = GAME_OS_DMA_MAPPINGS
         .iter()
         .filter(|row| row.firmware == "4.93")

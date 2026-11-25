@@ -370,6 +370,7 @@ struct Regions<'a> {
     spes: &'a LogicalSpeState,
     allocated: &'a MemoryState,
     device_bus: &'a DeviceBusState,
+    real_mode_size: fn(&str) -> Option<u64>,
 }
 
 /// The real address of `page`, or why the entry gets none.
@@ -429,7 +430,7 @@ fn real_page(
     } else if let Some(answer) = mmio {
         return mmio_real(answer);
     } else {
-        real_mode_page(firmware, page.address, end)?
+        real_mode_page(regions.real_mode_size, firmware, page.address, end)?
     };
     if !storage.holds(real, size) || real > STORED_MEMORY_LIMIT {
         return Err(NoRealPage::Refused(
@@ -473,8 +474,13 @@ fn mmio_real(answer: MmioPage) -> Result<u64, NoRealPage> {
 
 /// The real address of a page at the logical partition address `address`
 /// that ends at `end` in the real mode region, or the refusal.
-fn real_mode_page(firmware: &str, address: u64, end: Option<u64>) -> Result<u64, NoRealPage> {
-    let Some(rm_size) = memory::real_mode_size(firmware) else {
+fn real_mode_page(
+    real_mode_size: fn(&str) -> Option<u64>,
+    firmware: &str,
+    address: u64,
+    end: Option<u64>,
+) -> Result<u64, NoRealPage> {
+    let Some(rm_size) = real_mode_size(firmware) else {
         return Err(NoRealPage::Refused(
             "a valid entry at a firmware whose real mode size no source gives",
         ));
@@ -525,7 +531,25 @@ pub(crate) fn write_entry(
     device_bus: &DeviceBusState,
     storage: &GuestMemory,
 ) -> HypercallDisposition {
-    let space = match named_space(request, firmware, spaces) {
+    let regions = Regions {
+        spaces,
+        spes,
+        allocated,
+        device_bus,
+        real_mode_size: memory::real_mode_size,
+    };
+    write_entry_with(request, firmware, regions, storage)
+}
+
+/// The answer of [`write_entry`], with the partition's regions and the source of the real mode
+/// size in `regions`.
+fn write_entry_with(
+    request: &HypercallRequest,
+    firmware: Option<&str>,
+    regions: Regions<'_>,
+    storage: &GuestMemory,
+) -> HypercallDisposition {
+    let space = match named_space(request, firmware, regions.spaces) {
         Ok(space) => space,
         Err(missing) => return missing.disposition(request),
     };
@@ -544,12 +568,6 @@ pub(crate) fn write_entry(
     if valid(doubleword0) {
         // named_space refuses a call with no firmware version.
         let firmware = firmware.unwrap_or_default();
-        let regions = Regions {
-            spaces,
-            spes,
-            allocated,
-            device_bus,
-        };
         // lv1 searches the group before it translates the page
         // [OFW-4.93 lv1 a:0x2D2F20-0x2D3038], so a duplicate answers before
         // any translation result, a CellGov refusal included.
@@ -676,3 +694,7 @@ mod mmio_shift_tests;
 #[cfg(test)]
 #[path = "tests/page_table_mmio_bounds_tests.rs"]
 mod mmio_bounds_tests;
+
+#[cfg(test)]
+#[path = "tests/page_table_real_mode_size_tests.rs"]
+mod real_mode_size_tests;

@@ -7,7 +7,7 @@
 
 use cellgov_ps3_abi::lv1::interrupt::region_lookup_base;
 
-use crate::group::memory::region::{self as memory, MemoryRegion, MemoryState};
+use crate::group::memory::region::{MemoryRegion, MemoryState};
 
 /// The memory region that holds a buffer that passes the checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,10 +49,11 @@ pub(super) fn check(
     regions: &[MemoryRegion],
     address: u64,
     size: u64,
+    real_mode_size: fn(&str) -> Option<u64>,
 ) -> BufferCheck {
     let base = region_lookup_base(address);
     let (region, region_size) = if base == 0 {
-        let Some(rm_size) = memory::real_mode_size(firmware) else {
+        let Some(rm_size) = real_mode_size(firmware) else {
             return BufferCheck::RealModeSizeUnknown;
         };
         (BufferRegion::RealMode, rm_size)

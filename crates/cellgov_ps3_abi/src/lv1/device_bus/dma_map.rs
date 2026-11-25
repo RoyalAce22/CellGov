@@ -525,8 +525,8 @@ const fn kernel_page(device: u64, bus_address: u64, lpar_address: u64) -> GameOs
 /// [OFW-4.93 lv2_kernel a:0x80000000000954d0-0x80000000000954d4]
 /// [OFW-4.93 lv2_kernel a:0x80000000000aa4c8-0x80000000000aa4cc]. So the
 /// 4.93 kernel sends each of its calls with these flags. CellGov's boot
-/// of the 4.93 kernel sends each row's call with them, up to the two
-/// last rows, which the boot does not reach.
+/// of the 4.93 kernel sends each row's call with them, except the last
+/// two rows. The boot stops before it reaches those two calls.
 pub const GAME_OS_DMA_MAP_FLAGS: u64 = 0xE000_0000_0000_0000;
 
 /// Whether the call at `firmware` with these inputs is a row of

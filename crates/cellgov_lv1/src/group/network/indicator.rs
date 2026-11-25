@@ -95,6 +95,18 @@ pub(crate) fn set_status_indicator(
     devices: &DeviceBusState,
     network: &NetworkState,
 ) -> HypercallDisposition {
+    set_status_indicator_with(request, firmware, devices, network, real_mode_size)
+}
+
+/// The answer of [`set_status_indicator`], with `real_mode_size` as the source of the real mode
+/// size.
+fn set_status_indicator_with(
+    request: &HypercallRequest,
+    firmware: Option<&str>,
+    devices: &DeviceBusState,
+    network: &NetworkState,
+    real_mode_size: fn(&str) -> Option<u64>,
+) -> HypercallDisposition {
     let Some(firmware) = firmware.filter(|fw| status_indicator_handler(fw).is_some()) else {
         return UNREAD_FIRMWARE.refusal(request);
     };
@@ -133,3 +145,7 @@ pub(crate) fn set_status_indicator(
 #[cfg(test)]
 #[path = "tests/status_indicator_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/status_indicator_real_mode_size_tests.rs"]
+mod real_mode_size_tests;

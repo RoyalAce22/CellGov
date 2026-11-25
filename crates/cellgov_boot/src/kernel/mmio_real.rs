@@ -3,7 +3,7 @@
 //! holds.
 //!
 //! Each real address comes from
-//! [`cellgov_ps3_abi::lv1::device_bus::mmio_real_address`] over the rows
+//! [`cellgov_ps3_abi::lv1::device_bus::real_address_in`] over the rows
 //! of [`MmioTables`]. When one region has no real address, the run
 //! declares none of the device MMIO.
 

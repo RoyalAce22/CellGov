@@ -82,9 +82,12 @@ pub(super) fn controllers_of(
         .collect()
 }
 
-/// Declares the registers of each controller of `controllers`, given by
-/// the real address of its operational registers and its rule, as a
-/// register file of `mem`. It also declares these:
+/// Declares the registers of each controller of `controllers` as a
+/// register file of `mem`.
+///
+/// Each entry of `controllers` holds the real address of one controller's
+/// operational registers and the rule of that controller. The function
+/// also declares these:
 /// - the readers of [`EHCI_RESET_READERS`];
 /// - the store instruction of each row of [`EHCI_SETUP_STORES`] at
 ///   `firmware`, as a writer of its setup register.

@@ -125,6 +125,16 @@ pub(crate) fn configure_irq(
     firmware: Option<&str>,
     state: &IrqState<'_>,
 ) -> HypercallDisposition {
+    configure_irq_with(request, firmware, state, memory::real_mode_size)
+}
+
+/// The answer of [`configure_irq`], with `real_mode_size` as the source of the real mode size.
+fn configure_irq_with(
+    request: &HypercallRequest,
+    firmware: Option<&str>,
+    state: &IrqState<'_>,
+    real_mode_size: fn(&str) -> Option<u64>,
+) -> HypercallDisposition {
     let Some(firmware) = firmware.filter(|fw| virtual_uart_irq_handler(fw).is_some()) else {
         return refuse(
             request,
@@ -141,7 +151,7 @@ pub(crate) fn configure_irq(
             "a virtual UART bitmap outside the partition's real mode region",
         );
     }
-    let Some(rm_size) = memory::real_mode_size(firmware) else {
+    let Some(rm_size) = real_mode_size(firmware) else {
         return refuse(
             request,
             "a virtual UART bitmap at a firmware whose real mode size no source gives",
@@ -218,3 +228,7 @@ mod hash_tests;
 #[cfg(test)]
 #[path = "tests/irq_shadow_tests.rs"]
 mod shadow_tests;
+
+#[cfg(test)]
+#[path = "tests/irq_real_mode_size_tests.rs"]
+mod real_mode_size_tests;

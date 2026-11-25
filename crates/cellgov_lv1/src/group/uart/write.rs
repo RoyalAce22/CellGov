@@ -40,7 +40,7 @@ use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal, Unm
 use crate::group::hypercall::Hypercall;
 use crate::group::interrupt::raise::RaiseState;
 use crate::group::interrupt::InterruptGroupState;
-use crate::group::memory::region::MemoryState;
+use crate::group::memory::region::{self as memory, MemoryState};
 use crate::request::HypercallRequest;
 
 /// The hypercalls this module answers.
@@ -142,6 +142,15 @@ pub(super) fn written_answer(written: u64) -> HypercallAnswer {
 /// - the call passes the checks for a port that is not a service port,
 ///   because no source gives the port's peer.
 pub(crate) fn write(request: &HypercallRequest, input: &WriteInput<'_>) -> HypercallDisposition {
+    write_with(request, input, memory::real_mode_size)
+}
+
+/// The answer of [`write()`], with `real_mode_size` as the source of the real mode size.
+fn write_with(
+    request: &HypercallRequest,
+    input: &WriteInput<'_>,
+    real_mode_size: fn(&str) -> Option<u64>,
+) -> HypercallDisposition {
     let Some(firmware) = input
         .firmware
         .filter(|fw| virtual_uart_write_handler(fw).is_some())
@@ -164,7 +173,13 @@ pub(crate) fn write(request: &HypercallRequest, input: &WriteInput<'_>) -> Hyper
             "a virtual UART port that no source shows lv1 holds or lacks",
         );
     };
-    let region = match buffer::check(firmware, input.memory.regions(), address, size) {
+    let region = match buffer::check(
+        firmware,
+        input.memory.regions(),
+        address,
+        size,
+        real_mode_size,
+    ) {
         BufferCheck::Held(region) => region,
         BufferCheck::NoRegion => return lv1_answer(WRITE_VIRTUAL_UART_NO_REGION_R3),
         BufferCheck::TooFewBytes => return lv1_answer(WRITE_VIRTUAL_UART_REGION_R3),
@@ -390,3 +405,7 @@ mod dispatcher_tests;
 #[cfg(test)]
 #[path = "tests/write_reply_tests.rs"]
 mod reply_tests;
+
+#[cfg(test)]
+#[path = "tests/write_real_mode_size_tests.rs"]
+mod real_mode_size_tests;

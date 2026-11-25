@@ -61,7 +61,7 @@ fn call(m: DmaMapping) -> HypercallRequest {
     }
 }
 
-/// The kernel's pages of devices 1 and 2, in the order of the calls.
+/// The captured mappings of devices 1 and 2, in the order of the rows.
 fn slot_device_pages() -> Vec<DmaMapping> {
     GAME_OS_DMA_MAPPINGS
         .iter()
@@ -108,7 +108,7 @@ fn mapped_answer(mapping: DmaMapping) -> HypercallDisposition {
 }
 
 #[test]
-fn each_kernel_page_of_devices_1_and_2_maps_in_the_order_of_the_calls() {
+fn each_captured_mapping_of_devices_1_and_2_maps_in_the_order_of_the_rows() {
     let pages = slot_device_pages();
     assert_eq!(pages.len(), 20);
     let mut state = slot_devices_allocated();

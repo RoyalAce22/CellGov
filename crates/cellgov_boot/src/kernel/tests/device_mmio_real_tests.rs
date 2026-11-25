@@ -1,6 +1,6 @@
 //! The real address of each piece of device MMIO that a kernel run
-//! declares, and the refusal of a region that lv1's address function
-//! gives no address CellGov holds.
+//! declares, and the refusal of a region for which lv1's address function
+//! gives no address that CellGov holds.
 
 use cellgov_mem::{GuestMemory, RegisterWord};
 use cellgov_ps3_abi::hw::ehci::{USBCMD, USBINTR, USBSTS};
@@ -27,7 +27,7 @@ fn declared() -> GuestMemory {
 }
 
 /// The 4.93 index row of device `device` of bus 1, with the index
-/// `index`. No shipped table holds a row that this function changes.
+/// `index`.
 fn index_row(device: u64, index: u32) -> MmioDeviceIndex {
     let shipped = MMIO_DEVICE_INDEXES
         .iter()
@@ -46,13 +46,25 @@ fn first_region(device: u64) -> &'static MmioRegion {
 }
 
 /// Asserts that `mem` holds none of the 4.93 device MMIO.
-fn assert_declares_nothing(mem: &GuestMemory) {
+pub(super) fn assert_declares_nothing(mem: &GuestMemory) {
     assert_eq!(mem.unmodelled_spans(), &[] as &[(u64, u64)]);
-    for read in SHIPPED.reads {
+    let reads: Vec<_> = SHIPPED
+        .reads
+        .iter()
+        .filter(|r| r.firmware == "4.93")
+        .collect();
+    assert_eq!(reads.len(), 2);
+    for read in reads {
         let real = abi_real(read.bus, read.device, read.region) + read.offset;
         assert_eq!(mem.sourced_word(real, read.reader), None, "{read:?}");
     }
-    for c in SHIPPED.controllers {
+    let controllers: Vec<_> = SHIPPED
+        .controllers
+        .iter()
+        .filter(|c| c.firmware == "4.93")
+        .collect();
+    assert_eq!(controllers.len(), 1);
+    for c in controllers {
         let base = abi_real(c.bus, c.device, c.region) + c.operational;
         for offset in [USBCMD, USBSTS, USBINTR] {
             assert_eq!(mem.register_word(base + offset), None, "{c:?}");
@@ -60,7 +72,7 @@ fn assert_declares_nothing(mem: &GuestMemory) {
     }
 }
 
-/// lv1's init gives devices 1 and 2 index 3 and index 4
+/// lv1's init gives device 1 index 3 and device 2 index 4
 /// [OFW-4.93 lv1 a:0x3A9A4C-0x3A9A5C] [OFW-4.93 lv1 a:0x3A9AA0-0x3A9AB0].
 /// For those indexes lv1's address function adds only [`MMIO_REAL_BASE`]
 /// [OFW-4.93 lv1 a:0x22BE1C-0x22BE44].

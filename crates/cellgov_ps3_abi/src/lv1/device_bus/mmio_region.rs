@@ -208,11 +208,6 @@ pub fn mmio_real_address(
 
 /// The answer of [`mmio_real_address`] over the tables `regions` and
 /// `indexes`.
-///
-/// A caller that takes its rows from [`MMIO_REGIONS`] and
-/// [`MMIO_DEVICE_INDEXES`] gets the answer of [`mmio_real_address`].
-/// Other tables let a test give a device an index that no shipped row
-/// holds.
 pub fn real_address_in(
     regions: &[MmioRegion],
     indexes: &[MmioDeviceIndex],

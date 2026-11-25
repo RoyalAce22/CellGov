@@ -30,7 +30,7 @@ use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::group::interrupt::raise::RaiseState;
 use crate::group::interrupt::InterruptGroupState;
-use crate::group::memory::region::{MemoryRegion, MemoryState};
+use crate::group::memory::region::{self as memory, MemoryRegion, MemoryState};
 use crate::request::HypercallRequest;
 
 /// The hypercalls this module answers.
@@ -134,29 +134,49 @@ struct Checked<'a> {
 /// r4 = 0. lv1's read function reads 0 bytes from an empty buffer with a
 /// live peer [OFW-4.93 lv1 a:0x2F09F8-0x2F0A64]. The handler stores the
 /// sum, 0, in r4 [OFW-4.93 lv1 a:0x2F452C-0x2F4538].
-pub(crate) fn read(
+fn read_with(
     request: &HypercallRequest,
     firmware: Option<&str>,
     regions: &[MemoryRegion],
+    real_mode_size: fn(&str) -> Option<u64>,
 ) -> HypercallDisposition {
-    match check(request, firmware, regions) {
+    match check(request, firmware, regions, real_mode_size) {
         Ok(checked) => empty_read(request, &checked),
         Err(failed) => failed.answer(request),
     }
 }
 
+/// The answer of [`read_with`], with the repository source of the real mode size.
+#[cfg(test)]
+pub(crate) fn read(
+    request: &HypercallRequest,
+    firmware: Option<&str>,
+    regions: &[MemoryRegion],
+) -> HypercallDisposition {
+    read_with(request, firmware, regions, memory::real_mode_size)
+}
+
 /// Hypercall 162 for the receive buffers that `input.uart` holds.
 ///
 /// A call whose port's receive buffer holds no byte gets the answer of
-/// [`read`]. A call that passes the checks for a service port whose
+/// [`read_with`]. A call that passes the checks for a service port whose
 /// buffer holds bytes gets the answer of [`received_read`].
 pub(crate) fn read_port(request: &HypercallRequest, input: &ReadInput<'_>) -> HypercallDisposition {
+    read_port_with(request, input, memory::real_mode_size)
+}
+
+/// The answer of [`read_port`], with `real_mode_size` as the source of the real mode size.
+fn read_port_with(
+    request: &HypercallRequest,
+    input: &ReadInput<'_>,
+    real_mode_size: fn(&str) -> Option<u64>,
+) -> HypercallDisposition {
     let regions = input.memory.regions();
     let held = input.uart.received(request.r(3));
     if held.is_empty() {
-        return read(request, input.firmware, regions);
+        return read_with(request, input.firmware, regions, real_mode_size);
     }
-    match check(request, input.firmware, regions) {
+    match check(request, input.firmware, regions, real_mode_size) {
         Ok(checked) => received_read(request, input, &checked, held),
         Err(failed) => failed.answer(request),
     }
@@ -185,6 +205,7 @@ fn check<'a>(
     request: &HypercallRequest,
     firmware: Option<&'a str>,
     regions: &[MemoryRegion],
+    real_mode_size: fn(&str) -> Option<u64>,
 ) -> Result<Checked<'a>, Failed> {
     let Some(firmware) = firmware.filter(|fw| virtual_uart_read_handler(fw).is_some()) else {
         return Err(Failed::Refused(
@@ -203,7 +224,7 @@ fn check<'a>(
             "a virtual UART port that no source shows lv1 holds or lacks",
         ));
     }
-    let region = match buffer::check(firmware, regions, address, size) {
+    let region = match buffer::check(firmware, regions, address, size, real_mode_size) {
         BufferCheck::Held(region) => region,
         BufferCheck::NoRegion => return Err(Failed::Lv1(READ_VIRTUAL_UART_NO_REGION_R3)),
         BufferCheck::TooFewBytes => return Err(Failed::Lv1(READ_VIRTUAL_UART_REGION_R3)),
@@ -323,3 +344,7 @@ mod service_port_tests;
 #[cfg(test)]
 #[path = "tests/read_reply_tests.rs"]
 mod reply_tests;
+
+#[cfg(test)]
+#[path = "tests/read_real_mode_size_tests.rs"]
+mod real_mode_size_tests;

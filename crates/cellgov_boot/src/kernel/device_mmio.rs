@@ -33,6 +33,10 @@ mod register_tests;
 #[path = "tests/device_mmio_real_tests.rs"]
 mod real_tests;
 
+#[cfg(test)]
+#[path = "tests/device_mmio_no_region_tests.rs"]
+mod no_region_tests;
+
 #[path = "ehci.rs"]
 mod ehci;
 

@@ -638,9 +638,10 @@ pub enum MemError {
         /// The real address of the word.
         real: u64,
     },
-    /// A store to a register word in a batch that holds an earlier store
-    /// to a register word. The commit judges each register store against
-    /// the words before the batch, so it cannot judge the second one.
+    /// The second register store of one batch.
+    ///
+    /// The commit judges each register store against the words before the
+    /// batch, so it cannot judge the second one.
     #[error(
         "the store to the register word at real 0x{real:016x} is the second \
          register store of its batch"
