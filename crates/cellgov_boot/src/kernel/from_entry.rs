@@ -27,7 +27,7 @@ use cellgov_ps3_abi::hw::ppu_spr::{
 use cellgov_ps3_abi::hw::ppu_supervisor::MSR_SF;
 use cellgov_time::Budget;
 
-use super::map::{map_kernel, KernelMapError, KERNEL_SPAN_LIMIT};
+use super::map::{map_kernel, KernelMapError};
 use crate::diag::is_hypercall;
 
 /// The budget of one step of either unit.
@@ -230,13 +230,16 @@ pub enum KernelRunError {
     /// A segment, its zero fill included, reaches past the region.
     #[error(
         "kernel segment at real address 0x{at:016x} with 0x{len:x} bytes reaches past \
-         real address 0x{KERNEL_SPAN_LIMIT:x}, where the real-mode kernel region ends"
+         real address 0x{end:x}, where the real-mode kernel region ends"
     )]
     OutsideRegion {
         /// The segment's real address.
         at: u64,
         /// Its memory size.
         len: u64,
+        /// The real address where the region ends: the partition's real
+        /// mode size.
+        end: u64,
     },
     /// No repository row gives the partition's real mode size at the
     /// firmware.
@@ -281,7 +284,8 @@ pub enum KernelRunError {
 ///
 /// Both threads hold the partition that [`kernel_partition`] gives for
 /// `firmware`. So a real-mode access at or past the partition's real
-/// mode size takes the storage interrupt.
+/// mode size takes the storage interrupt. The region at real address 0
+/// ends at that size, so a real-mode access below it reads memory.
 ///
 /// Each thread reads its own thread in CTRL CT, and both enabled threads
 /// in TE. While lv1 holds the other thread paused, TE holds only the
@@ -299,7 +303,7 @@ pub fn run_kernel_from_entry(
 ) -> Result<KernelRun, KernelRunError> {
     let entry = map_kernel(elf)?.entry;
     let partition = kernel_partition(firmware)?;
-    let mem = real_mode_image(elf)?;
+    let mem = real_mode_image(elf, partition.rm_limit())?;
     let mut rt = Runtime::new(mem, Budget::new(STEP_BUDGET), step_cap);
     rt.set_mode(RuntimeMode::FaultDriven);
     rt.set_hypervisor_firmware(firmware);
@@ -481,23 +485,27 @@ fn hypercall_of(result: &ExecutionStepResult, step: usize) -> Option<KernelHyper
 }
 
 /// The real address space of a kernel run:
-/// - one region at real address 0, [`KERNEL_SPAN_LIMIT`] bytes long,
-///   that holds each segment of the kernel ELF `elf` at its real
-///   address;
+/// - one region at real address 0, `rm_size` bytes long, that holds each
+///   segment of the kernel ELF `elf` at its real address;
 /// - the storage of CellGov's hypervisor for its page table;
 /// - the storage of CellGov's hypervisor for the shadow pages of the
 ///   logical SPEs;
 /// - the storage of CellGov's hypervisor for the pages of the regions
 ///   that `allocate_memory` creates.
 ///
+/// `rm_size` is the partition's real mode size. The region ends at the
+/// partition's real mode limit, so each real-mode access that the limit
+/// admits finds memory.
+///
 /// The caller has mapped `elf` with `map_kernel`, which checks the
-/// segments and bounds their span by [`KERNEL_SPAN_LIMIT`]. That span
+/// segments and bounds their span by
+/// [`KERNEL_SPAN_LIMIT`](super::map::KERNEL_SPAN_LIMIT). That span
 /// starts at the lowest segment, so this function checks that each
 /// segment ends inside the region.
-fn real_mode_image(elf: &[u8]) -> Result<GuestMemory, KernelRunError> {
+fn real_mode_image(elf: &[u8], rm_size: u64) -> Result<GuestMemory, KernelRunError> {
     let segments = checked_pt_loads(elf).map_err(|source| KernelMapError::Elf { source })?;
     let mut mem = GuestMemory::from_regions(vec![
-        Region::new(0, KERNEL_SPAN_LIMIT as usize, "lv2 real", PageSize::Page64K),
+        Region::new(0, rm_size as usize, "lv2 real", PageSize::Page64K),
         page_table_storage(),
         shadow_storage(),
         allocated_storage(),
@@ -507,13 +515,11 @@ fn real_mode_image(elf: &[u8]) -> Result<GuestMemory, KernelRunError> {
         // [PPC-Book3 p:29 s:4.2.6] Real addressing ignores EA bit 1, and EA bit 0 picks the mechanism that forms the real address.
         let real = s.vaddr & !REAL_MODE_IGNORED_EA;
         // A segment past the region would lose its zero fill unreported.
-        if real
-            .checked_add(s.memsz)
-            .is_none_or(|end| end > KERNEL_SPAN_LIMIT)
-        {
+        if real.checked_add(s.memsz).is_none_or(|end| end > rm_size) {
             return Err(KernelRunError::OutsideRegion {
                 at: real,
                 len: s.memsz,
+                end: rm_size,
             });
         }
         if s.filesz > 0 {

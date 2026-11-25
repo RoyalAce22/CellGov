@@ -31,6 +31,9 @@ mod start_msr;
 #[path = "from_entry_partition_tests.rs"]
 mod partition;
 
+#[path = "from_entry_real_mode_tests.rs"]
+mod real_mode;
+
 #[path = "from_entry_external_tests.rs"]
 mod external;
 
@@ -203,17 +206,19 @@ fn a_kernel_that_never_calls_out_stops_at_the_step_cap() {
 
 #[test]
 fn a_segment_whose_zero_fill_passes_the_region_end_is_refused_and_one_ending_there_maps() {
-    // The real mode size at 4.93 is past the region end. The floors' size
-    // is not, so a fetch there takes the instruction storage interrupt.
+    // The region ends at the real mode size, 4.93's `bi.pu.1.rm_size`
+    // from the repository capture.
     let fw = "4.93";
-    let real = KERNEL_SPAN_LIMIT - 0x1000;
+    let rm_size = cellgov_lv1::real_mode_size(fw).expect("the 4.93 real mode size");
+    let real = rm_size - 0x1000;
     // The file holds 0x100 bytes of padding, thread 1's `b .` and one
     // `b .` of code.
     let file_len = 0x108;
     let past = kernel_elf_at(BASE + real, 0x1000 - file_len + 4, &[B_SELF]);
     let error = run_kernel_from_entry(&past, fw, 4).unwrap_err();
     assert!(
-        matches!(error, KernelRunError::OutsideRegion { at, len } if (at, len) == (real, 0x1004)),
+        matches!(error, KernelRunError::OutsideRegion { at, len, end }
+            if (at, len, end) == (real, 0x1004, rm_size)),
         "{error}"
     );
 

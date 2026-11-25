@@ -13,8 +13,19 @@ search. It returns the region entirely containing the range, or
 `None` if the access straddles a boundary, falls in an unmapped
 gap, or starts below the floor `unmap_below` sets.
 
-The `boot run` driver builds these regions, matching the canonical
-PS3 LV2 virtual-address layout. High addresses are at the top.
+Each boot builds its regions in its own layout:
+
+- the title boot, where CellGov serves LV2's system calls itself,
+  keys its regions by LV2 virtual address ([Title boot
+  layout](#title-boot-layout));
+- the kernel boot, where the real LV2 kernel runs under CellGov's
+  hypervisor, keys its regions by real address ([Kernel boot
+  layout](#kernel-boot-layout)).
+
+## Title boot layout
+
+For a title, the `boot run` driver builds these regions, matching the
+canonical PS3 LV2 virtual-address layout. High addresses are at the top.
 Green regions are `ReadWrite`, grey regions are
 `ReservedZeroReadable` (the default), and the dashed box is a range the
 boot leaves without a region.
@@ -68,6 +79,87 @@ region stays flat. Within it:
 shares `0x00010000-0x0FFFFFFF` between the loaded binary and the
 allocator pool. Matching that layout lines guest pointer values up
 across runners.
+
+## Kernel boot layout
+
+In the kernel boot, CellGov builds no LV2 virtual layout. The kernel
+builds it with `write_htab_entry`, and the PPU reaches it through
+translation: the case of a thread with supervisor registers in
+[PPU access routing](#ppu-access-routing). `run_kernel_from_entry` in
+`cellgov_boot` builds these regions, keyed by real address. High
+addresses are at the top, every region is `ReadWrite`, and the dashed
+boxes are ranges the boot leaves without a region.
+
+```mermaid
+block-beta
+  columns 1
+  alloc["<b>lv1 allocated memory</b><br/>0x12000000 - 0x12FFFFFF<br/>16 MB"]
+  gap3["no region<br/>0x11010000 - 0x11FFFFFF"]
+  shadow["<b>lv1 shadow pages</b><br/>0x11000000 - 0x1100FFFF<br/>16 pages of 4 KB"]
+  gap2["no region<br/>0x10100000 - 0x10FFFFFF"]
+  htab["<b>lv1 page table</b><br/>0x10000000 - 0x100FFFFF<br/>1 MB"]
+  gap1["no region<br/>from the real mode size to 0x0FFFFFFF"]
+  real["<b>lv2 real</b><br/>0x00000000 - the real mode size<br/>128 MB at 4.93, 16 MB at 1.50, 1.94 and 3.70"]
+
+  classDef rw fill:#b7e4c7,stroke:#2d6a4f,color:#000
+  classDef gap fill:none,stroke:#888,stroke-dasharray:5 5,color:#888
+  class alloc,shadow,htab,real rw
+  class gap1,gap2,gap3 gap
+```
+
+| Label                  | Real address  | Holds                                                                                                                   |
+| ---------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `lv2 real`             | `0x0000_0000` | The partition's real mode region. Each kernel segment lies at its real address: its link address with EA bits 0 and 1 cleared. |
+| `lv1 page table`       | `0x1000_0000` | The partition's hashed page table, which the PPU's table search reads. It holds the largest table that the hypervisor constructs. |
+| `lv1 shadow pages`     | `0x1100_0000` | The shadow pages of the logical SPEs.                                                                                   |
+| `lv1 allocated memory` | `0x1200_0000` | The pages of the regions that `allocate_memory` creates.                                                               |
+
+### The real mode region
+
+`lv2 real` is as long as the partition's real mode size, the
+repository node `bi.pu.1.rm_size` of the firmware:
+
+- 128 MB at 4.93, from a console capture of the repository;
+- 16 MB at 1.50, 1.94 and 3.70, from the repository dump.
+
+Both hardware threads hold a partition whose real mode limit is that
+size. A real-mode access at or past the limit takes the storage
+interrupt before CellGov looks for a region. Every real-mode access
+below the limit reads `lv2 real`. A kernel segment that reaches past
+the real mode size stops the boot before the first step.
+
+### The hypervisor's storage
+
+The partition only ever sees logical partition addresses, so CellGov
+chooses the three storage bases. Each base meets two conditions:
+
+- It lies above the real mode region of every firmware that CellGov
+  serves. A real mode size that reached the page table storage would
+  make two regions overlap, and the boot would not start.
+- Each byte of its storage is at or below `STORED_MEMORY_LIMIT`, so an
+  entry that maps one of its pages stores the WIMG of memory.
+
+CellGov's [hypervisor](hypervisor.md) fills the storage when it answers
+these hypercalls:
+
+- `construct_virtual_address_space` gives the address space whose page
+  table the page table storage holds. `write_htab_entry` writes the
+  table's entries, and `select_virtual_address_space` loads SDR1 with
+  the storage's address.
+- `construct_logical_spe` gives each logical SPE the next shadow page
+  of the shadow storage ([the shadow page](hypervisor.md#the-shadow-page)).
+- `allocate_memory` places the pages of each region it creates in the
+  allocated storage, at the first multiple of the region's page size
+  past the regions before it ([the regions](hypervisor.md#the-regions)).
+
+### Device mappings
+
+The device bus adds no region. `map_device_dma_region` maps memory
+that the partition holds at a range of bus addresses in a device's DMA
+region. `map_device_mmio_region` maps a device's MMIO region at a
+logical partition address. The hypervisor keeps each mapping as a
+record in its device bus state: the bus, the device, the bus address,
+the logical partition address and the length.
 
 ## Region access modes
 
