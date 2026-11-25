@@ -1,0 +1,16 @@
+page	reads	agree	holds	stock
+0x0000000000000c00	2	yes	sc vector entry	identical
+0x0000000000000e00	2	yes	sc vector dispatch	identical
+0x0000000000001000	2	yes	sc vector return	one word differs at 0x1028
+0x00000000002c8800	2	yes	set_lv1_hvcall_table and the memory call thunk	identical
+0x00000000002c8a00	2	yes	the Invalid HV Call function	identical
+0x0000000000357a00	2	yes	TOC slots	identical
+0x0000000000372c00	2	yes	hypercall table entries 0 to 30	zero fill
+0x0000000000372e00	2	yes	hypercall table entries 31 to 94	zero fill
+0x0000000000373000	2	yes	hypercall table entries 95 to 158	zero fill
+0x0000000000373200	2	yes	hypercall table entries 159 to 222	zero fill
+0x0000000000373400	2	yes	hypercall table entries 223 to 255 and memory call entries 0 to 30	zero fill
+0x0000000000373600	2	yes	memory call entries 31 to 94	zero fill
+0x0000000000373800	2	yes	memory call entries 95 to 158	zero fill
+0x0000000000373a00	2	yes	memory call entries 159 to 222	zero fill
+0x0000000000373c00	2	yes	memory call entries 223 to 255	zero fill

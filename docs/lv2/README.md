@@ -21,7 +21,7 @@ code does not consult them.
 
 Run the SQLite build command from this directory so its relative paths resolve.
 
-Archive schema version: **9**. `sql/schema.sql` records the
+Archive schema version: **10**. `sql/schema.sql` records the
 same value in SQLite's `user_version`, so a column change cannot pass as
 an unchanged archive.
 
@@ -326,9 +326,16 @@ scanned kernel calls or CellGov's hypervisor answers. Each row joins the
 call table in `cellgov_ps3_abi::lv1::call` (the name and the input and
 output register counts), CellGov's family for the call and the work item
 that answers that family, the firmware versions whose kernel calls the
-number with its site count in the newest of them, and the state:
-`answered` (6 numbers) or `null_backend`, where the
-call stops the run.
+number with its site count in the newest of them, its entry in lv1's
+live 4.93 hypercall table, and the state.
+
+`lv1_493` is `handler`, `invalid` or `past_table`. It comes from
+`cellgov_ps3_abi::lv1::table`, which holds the console capture
+`tests/micro/lv1_hypercall_table`. The state is `answered`
+(6 numbers) or `null_backend`: no handler answers
+the number. At 4.93 the null backend answers lv1's invalid-entry status
+for an `invalid` number (16 numbers) and stops the run
+for a `handler` number. At every other firmware it stops the run.
 
 ## Hypervisor repository
 

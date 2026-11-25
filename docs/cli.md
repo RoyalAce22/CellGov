@@ -470,7 +470,7 @@ Usage: cellgov firmware install [OPTIONS] <PATH>
 | Option | Value | Description |
 | --- | --- | --- |
 | `--force` | -- | Replace the version that is already installed. |
-| `--kernel-only` | -- | Add only the LV2 kernel to the entry this PUP already installed; its dev_flash tree stays as it is. |
+| `--kernel-only` | -- | Add only the LV2 kernel and lv1.self to the entry this PUP already installed; its dev_flash tree stays as it is. |
 | `--output` | `DIR` | Store root (default: the directory enclosing the PS3 VFS root). |
 
 #### `cellgov firmware list`

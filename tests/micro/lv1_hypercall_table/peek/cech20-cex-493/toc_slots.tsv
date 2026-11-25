@@ -1,0 +1,5 @@
+address	value	role
+0x0000000000357a90	0x0000000000345390	descriptor of the Invalid HV Call function
+0x0000000000357a98	0x0000000000345378	descriptor that set_lv1_hvcall_table loads; role not read
+0x0000000000357aa0	0x0000000000372d08	hypercall table base
+0x0000000000357aa8	0x0000000000373508	memory call table base
