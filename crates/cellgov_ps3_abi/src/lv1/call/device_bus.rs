@@ -21,3 +21,15 @@ pub const OPEN_DEVICE: u64 = 170;
 /// The lv1 handler [OFW-4.93 lv1 a:0x306A6C] reads the inputs in this
 /// form; see [`crate::lv1::device_bus`].
 pub const ALLOCATE_DEVICE_DMA_REGION: u64 = 174;
+
+/// `map_device_dma_region`: six inputs and no output.
+/// - r3 is the id of a bus.
+/// - r4 is the id of a device on that bus.
+/// - r5 is the logical partition address of the memory.
+/// - r6 is the bus address in a DMA region of the device.
+/// - r7 is the length in bytes.
+/// - r8 is the IOPTE flags.
+///
+/// The lv1 handler [OFW-4.93 lv1 a:0x306770] reads the inputs in this
+/// form; see [`crate::lv1::device_bus`].
+pub const MAP_DEVICE_DMA_REGION: u64 = 176;
