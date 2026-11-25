@@ -4,6 +4,7 @@
 use cellgov_mem::scheme::{HashedSurface, Stamp};
 
 use super::construct::{self, LogicalSpe, LogicalSpeState};
+use super::interrupt_mask::{self, InterruptMask, InterruptMaskState};
 use super::irq_outlet;
 use super::run_timeout::{self, RunTimeout, RunTimeoutState};
 use super::transition_notifier::{self, TransitionNotifier, TransitionNotifierState};
@@ -18,6 +19,7 @@ pub(crate) const GROUP: Group = Group {
         irq_outlet::HYPERCALLS,
         transition_notifier::HYPERCALLS,
         run_timeout::HYPERCALLS,
+        interrupt_mask::HYPERCALLS,
     ],
     lanes: &[192..=207],
     hashed_surfaces: &[
@@ -36,6 +38,11 @@ pub(crate) const GROUP: Group = Group {
             source: Some(LOGICAL_SPE_RUN_TIMEOUT_SOURCE),
             stamp: Stamp::Pending,
         },
+        HashedSurface {
+            name: "the interrupt mask of each class of each logical SPE",
+            source: Some(LOGICAL_SPE_INTERRUPT_MASK_SOURCE),
+            stamp: Stamp::Pending,
+        },
     ],
 };
 
@@ -51,13 +58,18 @@ pub(crate) const LOGICAL_SPE_NOTIFIER_SOURCE: u8 = 193;
 /// per limit that is not 0, in spe id order.
 pub(crate) const LOGICAL_SPE_RUN_TIMEOUT_SOURCE: u8 = 194;
 
+/// The lane source of the interrupt masks of the logical SPEs, one object
+/// per mask that is not 0, in spe id and class order.
+pub(crate) const LOGICAL_SPE_INTERRUPT_MASK_SOURCE: u8 = 195;
+
 /// The logical SPE group's state: the partition's logical SPEs, their
-/// transition notifiers and their run time limits.
+/// transition notifiers, their run time limits and their interrupt masks.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SpeState {
     spes: LogicalSpeState,
     notifiers: TransitionNotifierState,
     timeouts: RunTimeoutState,
+    masks: InterruptMaskState,
 }
 
 impl SpeState {
@@ -76,6 +88,11 @@ impl SpeState {
         &self.timeouts
     }
 
+    /// The interrupt mask of each class of each logical SPE.
+    pub fn masks(&self) -> &InterruptMaskState {
+        &self.masks
+    }
+
     /// Applies `change` to the state.
     pub(crate) fn apply(&mut self, change: SpeChange) {
         match change {
@@ -83,16 +100,18 @@ impl SpeState {
             SpeChange::NotifierSet(notifier) => self.notifiers.set(notifier),
             SpeChange::NotifierCleared(spe) => self.notifiers.clear(spe),
             SpeChange::RunTimeoutSet(timeout) => self.timeouts.set(timeout),
+            SpeChange::InterruptMaskSet(mask) => self.masks.set(mask),
         }
     }
 
-    /// The sync-state terms of the logical SPEs, their notifiers and their
-    /// run time limits.
+    /// The sync-state terms of the logical SPEs, their notifiers, their
+    /// run time limits and their interrupt masks.
     pub fn sync_term(&self) -> u128 {
         self.spes
             .sync_term()
             .wrapping_add(self.notifiers.sync_term())
             .wrapping_add(self.timeouts.sync_term())
+            .wrapping_add(self.masks.sync_term())
     }
 }
 
@@ -108,6 +127,8 @@ pub enum SpeChange {
     NotifierCleared(u64),
     /// The call gave an SPE this run time limit.
     RunTimeoutSet(RunTimeout),
+    /// The call gave a class of an SPE this interrupt mask.
+    InterruptMaskSet(InterruptMask),
 }
 
 impl From<SpeChange> for StateChange {

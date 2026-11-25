@@ -9,6 +9,8 @@
 //!   checks;
 //! - the handler of `logical_spu_set_run_timeout` (hypercall 138) and its
 //!   checks;
+//! - the handler of `set_spe_interrupt_mask` (hypercall 61), its checks
+//!   and the interrupt object of each outlet;
 //! - the spe id and the outlet ids of each call of the GameOS kernel's
 //!   boot.
 //!
@@ -337,6 +339,77 @@
 //! not 0, the step adds it to the timebase, and arms a timer for that
 //! deadline [OFW-4.93 lv1 a:0x3165C4-0x316604]. So r4 is the SPE's run
 //! time limit in timebase ticks, and 0 is no limit.
+//!
+//! The handler of `set_spe_interrupt_mask` [OFW-4.93 lv1 a:0x2FE570]
+//! gives r3, r4 and r5 to the worker [OFW-4.93 lv1 a:0x2FE600-0x2FE60C].
+//! It returns the worker's r3 [OFW-4.93 lv1 a:0x2FE614]
+//! [OFW-4.93 lv1 a:0x2FE678], and writes no return slot. The vector's
+//! entry zeroes the slots [OFW-4.93 lv1 a:0x0C08]. So r4 to r10 return 0
+//! on each path.
+//!
+//! The worker [OFW-4.93 lv1 a:0x2FE340] does these steps in this order:
+//! 1. A class above 2 returns [`SET_SPE_INTERRUPT_MASK_CLASS_R3`]. The
+//!    worker does not read r3 or r5 on this path.
+//! 2. It looks up r3 in the partition's object table, and checks that
+//!    the object's class word at +48 is the SPE class in the TOC slot at
+//!    r2 - 4704 [OFW-4.93 lv1 a:0x2FE370-0x2FE494]. A failed check
+//!    returns `LV1_NO_ENTRY` (-6), marked with bit 0 for r3
+//!    [OFW-4.93 lv1 a:0x2FE498-0x2FE4A4].
+//! 3. It gives r4 and r5 to the method in the TOC slot at r2 - 4616,
+//!    through the call function of `get_spe_irq_outlet`, and returns the
+//!    method's r3 [OFW-4.93 lv1 a:0x2FE530-0x2FE56C]. That slot holds the
+//!    function descriptor [OFW-4.93 lv1 a:0x34AA78] of the method
+//!    [OFW-4.93 lv1 a:0x2FA23C]. The call function gives the method the
+//!    SPE, r4 and r5 [OFW-4.93 lv1 a:0x2F9AAC-0x2F9AE8]. A new SPE passes
+//!    its check on the doubleword at +184.
+//!
+//! The method [OFW-4.93 lv1 a:0x2FA23C] does these steps in this order:
+//! 1. It takes the outlet of the class from +120 + 8 * class of the SPE
+//!    [OFW-4.93 lv1 a:0x2FA23C-0x2FA254].
+//! 2. It ANDs r5 with the entry of the class in
+//!    [`SPE_INTERRUPT_CLASS_MASKS`] [OFW-4.93 lv1 a:0x2FA24C-0x2FA25C].
+//! 3. It gives the result to the method at +48 of the class of the
+//!    outlet's interrupt object at +152 [OFW-4.93 lv1 a:0x2FA260-0x2FA27C].
+//! 4. A nonzero return gives `LV1_WRONG_STATE` (-11), marked with bit 0
+//!    for r3. Otherwise it returns 0 [OFW-4.93 lv1 a:0x2FA280-0x2FA2AC].
+//!
+//! The type 1 worker makes a 152-byte interrupt object before each outlet
+//! [OFW-4.93 lv1 a:0x315A40-0x315A70]. It gives the object to the outlet
+//! constructor [OFW-4.93 lv1 a:0x315AA4-0x315AAC], which stores it at
+//! +152 of the outlet [OFW-4.93 lv1 a:0x2FF968]. The object's constructor
+//! [OFW-4.93 lv1 a:0x3192C0] does these steps:
+//! - Its base constructor [OFW-4.93 lv1 a:0x2FC370] stores the address of
+//!   the SPE's record at +224 at +88, the class at +96 and 0 at +112
+//!   [OFW-4.93 lv1 a:0x2FC3A8-0x2FC3B8]. The type 1 worker keeps that
+//!   address at +112 of the SPE [OFW-4.93 lv1 a:0x315A18]
+//!   [OFW-4.93 lv1 a:0x315A34], and gives it as r4
+//!   [OFW-4.93 lv1 a:0x315A5C].
+//! - It stores the class in the TOC slot at r2 - 344 at +0
+//!   [OFW-4.93 lv1 a:0x3192F0-0x3192F8]. That slot holds the class
+//!   [OFW-4.93 lv1 a:0x359EE0]. The class's entry at +48
+//!   [OFW-4.93 lv1 a:0x363D28] holds the function descriptor
+//!   [OFW-4.93 lv1 a:0x3519D8] of the mask method
+//!   [OFW-4.93 lv1 a:0x3198F4].
+//!
+//! The mask method takes the lock at +48 of the object
+//! [OFW-4.93 lv1 a:0x3198FC-0x319948]. It then reads the doubleword at +0
+//! of the SPE's record at +224 [OFW-4.93 lv1 a:0x31994C-0x319958]:
+//! - 0: it stores the mask at +112 of the object, and returns 0
+//!   [OFW-4.93 lv1 a:0x3199F4-0x3199F8].
+//! - Not 0: the doubleword is a physical SPU's record. A check of that
+//!   record that fails returns 1 [OFW-4.93 lv1 a:0x31995C-0x319974].
+//!   Otherwise the method stores the mask at +112 of the object and at
+//!   +0x100 + 8 * class of the address at +16 of the record, and returns
+//!   0 [OFW-4.93 lv1 a:0x319978-0x319990]. +0x100 + 8 * class is the
+//!   offset of the class's interrupt mask register in an SPE's privilege
+//!   1 area: 0x100, 0x108 and 0x110 for classes 0 to 2
+//!   [CBEA p:270] [CBEA p:271] [CBEA p:272].
+//!
+//! The type 1 worker gives the SPE's record at +224 to the function
+//! [OFW-4.93 lv1 a:0x2FC250] [OFW-4.93 lv1 a:0x315A18-0x315A2C], through
+//! the branch at [OFW-4.93 lv1 a:0x319BD8] that its call targets, which
+//! stores 0 at +0 of the record [OFW-4.93 lv1 a:0x2FC284]. So a new SPE
+//! takes the first path, and the mask of each class starts at 0.
 
 use crate::lv1::status::{zero_extended, LV1_ACCESS_VIOLATION};
 
@@ -504,6 +577,50 @@ pub const LOGICAL_SPE_TYPE_1_TRANSITION_MASK: u64 = 0b111;
 /// marked [OFW-4.93 lv1 a:0x2FA4FC-0x2FA52C].
 pub const SET_SPE_TRANSITION_NOTIFIER_MASK_R3: u64 = 0x0000_0002_FFFF_FFEF;
 
+/// The handler of hypercall 61 in one firmware's lv1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpeInterruptMaskHandler {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The address of the `set_spe_interrupt_mask` handler.
+    pub handler: u32,
+}
+
+/// Each firmware whose lv1 image shows the handler, ascending.
+///
+/// The address is the entry of hypercall 61 in the live 4.93 hypercall
+/// table ([`super::table::LIVE_TABLE_HANDLERS`]).
+pub const SPE_INTERRUPT_MASK_HANDLERS: &[SpeInterruptMaskHandler] = &[SpeInterruptMaskHandler {
+    firmware: "4.93",
+    handler: 0x2FE570,
+}];
+
+/// The handler of the firmware version `firmware`, or `None` when no lv1
+/// image read shows it.
+pub fn spe_interrupt_mask_handler(firmware: &str) -> Option<&'static SpeInterruptMaskHandler> {
+    SPE_INTERRUPT_MASK_HANDLERS
+        .iter()
+        .find(|handler| handler.firmware == firmware)
+}
+
+/// The mask bits that `set_spe_interrupt_mask` keeps for each interrupt
+/// class, by class.
+///
+/// The method of the call ANDs the mask with the class's entry of the
+/// table [OFW-4.93 lv1 a:0x329A98-0x329AAC] in the TOC slot at r2 - 5016
+/// [OFW-4.93 lv1 a:0x358CA0]. So lv1 clears bits 0x0000000100000000 and
+/// 0x8 of a class 0 mask, and keeps each bit of a class 1 or 2 mask. The
+/// capture `lv1_spe_interrupt_mask_table` reads the same table and slot in
+/// the reference console's lv1.
+pub const SPE_INTERRUPT_CLASS_MASKS: [u64; SPE_IRQ_CLASSES] =
+    [0xFFFF_FFFE_FFFF_FFF7, u64::MAX, u64::MAX];
+
+/// The r3 of `set_spe_interrupt_mask` for a class above 2:
+/// `LV1_ILLEGAL_PARAMETER_VALUE` (-17), with r4 marked
+/// [OFW-4.93 lv1 a:0x2FE340] [OFW-4.93 lv1 a:0x2FE36C]
+/// [OFW-4.93 lv1 a:0x2FE500-0x2FE510].
+pub const SET_SPE_INTERRUPT_MASK_CLASS_R3: u64 = 0x0000_0002_FFFF_FFEF;
+
 /// One `construct_logical_spe` call of the GameOS kernel, with the spe id
 /// and the outlet ids that lv1 gave its SPE on the console.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -591,3 +708,11 @@ mod transition_notifier_tests;
 #[cfg(test)]
 #[path = "tests/spe_run_timeout_tests.rs"]
 mod run_timeout_tests;
+
+#[cfg(test)]
+#[path = "tests/spe_interrupt_mask_tests.rs"]
+mod interrupt_mask_tests;
+
+#[cfg(test)]
+#[path = "tests/spe_interrupt_mask_console_tests.rs"]
+mod interrupt_mask_console_tests;

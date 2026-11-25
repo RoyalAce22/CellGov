@@ -55,3 +55,15 @@ pub const SET_SPE_TRANSITION_NOTIFIER: u64 = 64;
 /// [OFW-4.93 lv1 a:0x31BD54] reads the inputs in this form; see
 /// [`crate::lv1::spe`].
 pub const LOGICAL_SPU_SET_RUN_TIMEOUT: u64 = 138;
+
+/// `set_spe_interrupt_mask`: three inputs and no output.
+///
+/// The inputs:
+/// - r3 is the spe id.
+/// - r4 is the interrupt class.
+/// - r5 is the interrupt mask of that class.
+///
+/// Linux `arch/powerpc/platforms/ps3/spu.c`, `int_mask_set`, makes the
+/// call in this form. The lv1 handler [OFW-4.93 lv1 a:0x2FE570] reads the
+/// inputs in this form; see [`crate::lv1::spe`].
+pub const SET_SPE_INTERRUPT_MASK: u64 = 61;
