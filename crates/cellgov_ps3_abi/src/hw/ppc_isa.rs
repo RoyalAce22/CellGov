@@ -24,6 +24,12 @@ pub const PPC_NOP: u32 = 0x6000_0000;
 /// Big-endian byte encoding of [`PPC_NOP`].
 pub const PPC_NOP_BYTES: [u8; 4] = [0x60, 0x00, 0x00, 0x00];
 
+/// Full encoding of `sc 1` with every reserved field zero.
+///
+/// [PPC-Book1 p:8 s:1.7.3 SC-Form] OPCD 17, LEV at bits 20:26 and a 1 at bit 30.
+/// [PPC-Book1 p:175 s:E.3] Reserved fields in instructions must contain zero.
+pub const PPC_SC_1: u32 = 0x4400_0022;
+
 /// `bl` opcode template with the link bit (LK) set but the
 /// displacement field zeroed. Patching tools OR in the signed
 /// 26-bit displacement.

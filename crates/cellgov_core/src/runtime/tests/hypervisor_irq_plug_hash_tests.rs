@@ -2,16 +2,20 @@ use cellgov_event::UnitId;
 use cellgov_lv1::{HypercallDisposition, HypercallRequest};
 use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::lv1::call::{CONNECT_IRQ_PLUG_EXT, CONSTRUCT_EVENT_RECEIVE_PORT};
+use cellgov_ps3_abi::lv1::event_port::game_os_port_id;
 use cellgov_time::{Budget, GuestTicks};
 
 use crate::runtime::state::Runtime;
 
-/// The port id of the 4.93 kernel's first port.
-const FIRST_PORT_ID: u64 = 3;
-
 /// The `sc` of the kernel's first port call
 /// [OFW-4.93 lv2_kernel a:0x8000000000007d8c].
 const RECORD_SC: u64 = 0x8000_0000_0000_7d8c;
+
+/// The port id of the 4.93 kernel's first port: the call at
+/// `RECORD_SC` on thread 0.
+fn first_port_id() -> u64 {
+    game_os_port_id("4.93", 0, RECORD_SC).expect("the 4.93 id of the first port call")
+}
 
 /// A 4.93 runtime whose hypervisor holds the kernel's first port.
 fn with_port() -> Runtime {
@@ -48,7 +52,7 @@ fn call(number: u64, args: [u64; 5]) -> HypercallRequest {
 /// and returns the disposition.
 fn connect(rt: &mut Runtime) -> HypercallDisposition {
     rt.hypervisor
-        .dispatch(&call(CONNECT_IRQ_PLUG_EXT, [1, 1, 0, FIRST_PORT_ID, 0]))
+        .dispatch(&call(CONNECT_IRQ_PLUG_EXT, [1, 1, 0, first_port_id(), 0]))
 }
 
 #[test]

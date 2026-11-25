@@ -69,11 +69,12 @@ fn a_number_row_joins_the_call_table_the_kernels_and_the_hypervisor() {
         site(2, 74, &[0x10, 0x20]),
         site(1, 5, &[0x40]),
     ];
-    let rows = hypercall_rows(&sites, &pups).expect("every site row names a PUP");
+    let answered: BTreeSet<u64> = [74, 91, 107].into_iter().collect();
+    let rows = hypercall_rows(&sites, &pups, &answered).expect("every site row names a PUP");
     let numbers: Vec<u64> = rows.iter().map(|r| r.number).collect();
     assert_eq!(
         numbers,
-        [0, 1, 2, 5, 7, 11, 12, 18, 69, 74, 91, 95, 105, 106, 107, 109, 122],
+        [5, 74, 91, 107],
         "each called number and each answered one"
     );
     let row = |number: u64| &rows[numbers.iter().position(|n| *n == number).expect("a row")];
@@ -120,7 +121,7 @@ fn a_site_row_that_names_no_pup_is_refused() {
     let pups = [pup_row(1, "4.93")];
     let sites = [site(1, 74, &[0x10]), site(2, 91, &[0x20])];
     assert_eq!(
-        hypercall_rows(&sites, &pups),
+        hypercall_rows(&sites, &pups, &BTreeSet::new()),
         Err(ExtractionError::ExistingPupReference {
             table: "hypercall_site",
             pup_sha256: pup(2),

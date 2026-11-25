@@ -28,9 +28,10 @@ mod spec;
 mod sql;
 
 pub use hypercall::{
-    hypercall_family, hypercall_rows, hypercall_site_rows, hypercall_site_tsv, hypercall_tsv,
-    hypercall_unresolved_rows, hypercall_unresolved_tsv, HypercallCensus, HypercallRow,
-    HypercallSiteRow, HypercallState, HypercallUnresolvedRow, Lv1Entry,
+    census_answered, census_contradictions, hypercall_family, hypercall_rows, hypercall_site_rows,
+    hypercall_site_tsv, hypercall_tsv, hypercall_unresolved_rows, hypercall_unresolved_tsv,
+    HypercallCensus, HypercallRow, HypercallSiteRow, HypercallState, HypercallUnresolvedRow,
+    Lv1Entry,
 };
 pub use repository::{
     replace_repository_reads, repository_read_rows, repository_read_rows_of, repository_read_tsv,

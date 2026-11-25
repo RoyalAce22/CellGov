@@ -6,7 +6,7 @@ use cellgov_ps3_abi::format::elf::{
 };
 
 /// The kernel's link address.
-const KERNEL: u64 = 0x8000_0000_0000_0000;
+pub(super) const KERNEL: u64 = 0x8000_0000_0000_0000;
 
 /// `sc` with LEV = 0.
 ///
@@ -21,13 +21,13 @@ const SC_1: u32 = 0x4400_0022;
 /// `li rt, value`.
 ///
 /// [PPC-Book1 p:162 s:B.9 Load Immediate] li Rx,value == addi Rx,0,value.
-fn li(rt: u8, value: i16) -> u32 {
+pub(super) fn li(rt: u8, value: i16) -> u32 {
     (14 << 26) | (u32::from(rt) << 21) | u32::from(value as u16)
 }
 
 /// An ELF with one executable segment at `vaddr` that holds `words`, and
 /// `memsz` memory bytes.
-fn elf(vaddr: u64, words: &[u32], memsz: u64) -> Vec<u8> {
+pub(super) fn elf(vaddr: u64, words: &[u32], memsz: u64) -> Vec<u8> {
     const PAYLOAD: usize = ELF_HEADER_SIZE + ELF_PHENTSIZE;
     let filesz = 4 * words.len() as u64;
     let mut elf = vec![0; PAYLOAD];
@@ -97,10 +97,10 @@ fn a_conditional_branch_keeps_a_hypercall_number_and_not_an_lv2_ordinal() {
     assert_eq!(lv2[0].ordinal, None, "the LV2 scan keeps its rule");
 }
 
-const NOP: u32 = 0x6000_0000;
+pub(super) const NOP: u32 = 0x6000_0000;
 
 /// `b` with a byte displacement of `offset`.
-fn b(offset: i32) -> u32 {
+pub(super) fn b(offset: i32) -> u32 {
     (18 << 26) | (offset as u32 & 0x03FF_FFFC)
 }
 

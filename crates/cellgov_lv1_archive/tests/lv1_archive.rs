@@ -161,11 +161,48 @@ fn readme(
     )
 }
 
+/// The numbers CellGov's hypervisor registers a handler for.
+fn registered_numbers() -> BTreeSet<u64> {
+    cellgov_lv1::answered_numbers().into_iter().collect()
+}
+
+/// The numbers the committed `hypercall.tsv` calls answered.
+fn committed_census_answered() -> BTreeSet<u64> {
+    let text = read(&archive_dir().join(HYPERCALL.file()));
+    let table = lv2_archive::parse(&HYPERCALL, &text).unwrap_or_else(|e| panic!("{e}"));
+    archive::census_answered(&table).unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// The answered numbers the census is rendered with.
+///
+/// A regeneration takes the registrations. The gate takes the committed
+/// census's own answered numbers, because the census may lag the
+/// registrations until the next regeneration. A committed number that no
+/// registration answers is refused.
+fn census_answered_numbers() -> BTreeSet<u64> {
+    let registered = registered_numbers();
+    if regenerate::asked() {
+        return registered;
+    }
+    let committed = committed_census_answered();
+    let contradicted = archive::census_contradictions(&committed, &registered);
+    assert!(
+        contradicted.is_empty(),
+        "hypercall.tsv calls {contradicted:?} answered, and no registration answers them; \
+         regenerate with:\n  {REGENERATE}"
+    );
+    committed
+}
+
 /// Every generated file of the archive, rendered, keyed by file name.
 fn rendered() -> BTreeMap<String, String> {
     let pups = committed_pups();
-    let hypercalls = archive::hypercall_rows(&committed_hypercall_sites(), &pups)
-        .expect("every committed hypercall site row names a committed PUP");
+    let hypercalls = archive::hypercall_rows(
+        &committed_hypercall_sites(),
+        &pups,
+        &census_answered_numbers(),
+    )
+    .expect("every committed hypercall site row names a committed PUP");
     let repository_reads = committed_repository_reads();
     let repository = archive::repository_rows(NODES, &repository_reads, &pups)
         .unwrap_or_else(|e| panic!("{e}; regenerate with:\n  {REPOSITORY_REGENERATE}"));
@@ -272,6 +309,19 @@ fn committed_archive_matches_generator() {
     );
 }
 
+#[test]
+fn the_census_states_no_answer_the_registrations_contradict() {
+    let registered = registered_numbers();
+    let census = committed_census_answered();
+    assert!(!census.is_empty(), "hypercall.tsv calls no number answered");
+    assert_eq!(
+        archive::census_contradictions(&census, &registered),
+        Vec::<u64>::new(),
+        "hypercall.tsv calls a number answered that no registration answers; \
+         regenerate with:\n  {REGENERATE}"
+    );
+}
+
 /// A database `build.sql` wrote in place, with the files SQLite keeps
 /// beside it. It is gitignored, so it is never part of the archive.
 fn is_built_database(name: &str) -> bool {
@@ -330,16 +380,6 @@ fn committed_tables_load_and_reference_each_other() {
     lv2_archive::check_references(&tables).unwrap_or_else(|e| panic!("{e}"));
 }
 
-/// Each number that CellGov's hypervisor answers and whose kernel sites
-/// the census scanner misses. The scanner walks the words linearly and
-/// stops at a `blr`, so it drops the `li r11` of an `sc` block that sits
-/// after the function's `blr`. Each entry is the number, a firmware
-/// whose kernel holds the site, and the site's real address, which
-/// `hypercall_unresolved.tsv` must list for that kernel:
-/// - 12, `connect_irq_plug_ext`
-///   [OFW-4.93 lv2_kernel a:0x80000000000087a0-0x80000000000087f8].
-const ANSWERED_WITH_MISSED_SITES: &[(u64, &str, u64)] = &[(12, "4.93", 0x87F8)];
-
 #[test]
 fn hypercall_site_rows_are_well_formed() {
     assert_eq!(HYPERCALL_SITE.gate, HYPERCALL_GATE);
@@ -385,48 +425,46 @@ fn hypercall_site_rows_are_well_formed() {
             "hypercall unresolved row sites are not ascending: {row:?}"
         );
     }
-    // A missed site stays listed as unresolved, so the census cannot
-    // give it to another number, and its number stays answered.
-    let pups = committed_pups();
-    for &(number, fw, site) in ANSWERED_WITH_MISSED_SITES {
-        assert!(
-            cellgov_lv1::ANSWERED.contains(&number),
-            "hypercall {number} is no longer answered; \
-             remove it from ANSWERED_WITH_MISSED_SITES"
-        );
-        let listed = pups.iter().filter(|pup| pup.fw == fw).any(|pup| {
-            unresolved
-                .iter()
-                .any(|row| row.pup_sha256 == pup.pup_sha256 && row.sites.contains(&site))
-        });
-        assert!(
-            listed,
-            "the {fw} kernel's unresolved sites do not list {site:#x}, \
-             the missed site of hypercall {number}"
-        );
-    }
     // Every number CellGov's hypervisor answers is one each kernel calls.
-    for &number in cellgov_lv1::ANSWERED {
+    let answered = cellgov_lv1::answered_numbers();
+    assert!(!answered.is_empty(), "cellgov_lv1 answers no hypercall");
+    for number in answered {
         let callers: BTreeSet<&str> = sites
             .iter()
             .filter(|row| row.number == number)
             .map(|row| row.pup_sha256.as_str())
             .collect();
-        if ANSWERED_WITH_MISSED_SITES
-            .iter()
-            .any(|&(missed, _, _)| missed == number)
-        {
-            assert!(
-                callers.is_empty(),
-                "the census now finds a site of answered hypercall {number}; \
-                 remove it from ANSWERED_WITH_MISSED_SITES"
-            );
-            continue;
-        }
         assert_eq!(
             callers.len(),
             scanned.len(),
             "answered hypercall {number} has no site in some scanned kernel"
         );
     }
+    // The 4.93 kernel's `sc` block of 12 sits after the function's `blr`
+    // [OFW-4.93 lv2_kernel a:0x80000000000087a0-0x80000000000087f8]. Its
+    // site resolves to 12 and is not unresolved.
+    let pup_493: Vec<String> = committed_pups()
+        .into_iter()
+        .filter(|pup| pup.fw == "4.93")
+        .map(|pup| pup.pup_sha256)
+        .collect();
+    assert_eq!(pup_493.len(), 1, "pup.tsv holds one 4.93 PUP");
+    let sites_of_12: Vec<u64> = sites
+        .iter()
+        .filter(|row| row.pup_sha256 == pup_493[0] && row.number == 12)
+        .flat_map(|row| row.sites.iter().copied())
+        .collect();
+    assert!(
+        sites_of_12.contains(&0x87F8),
+        "the 4.93 sites of hypercall 12 are {sites_of_12:x?}, not 0x87f8"
+    );
+    let unresolved_493: Vec<u64> = unresolved
+        .iter()
+        .filter(|row| row.pup_sha256 == pup_493[0])
+        .flat_map(|row| row.sites.iter().copied())
+        .collect();
+    assert!(
+        !unresolved_493.contains(&0x87F8),
+        "the 4.93 census lists the site 0x87f8 as unresolved"
+    );
 }

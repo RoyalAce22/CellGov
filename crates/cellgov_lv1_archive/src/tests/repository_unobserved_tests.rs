@@ -115,4 +115,13 @@ fn a_key_answered_at_one_site_and_refused_at_another_is_refused_and_never_logged
             refused_at: 1,
         })
     );
+    let reads = [boot_read(None), boot_read(Some((0x0f9a_0000, 0)))];
+    assert_eq!(
+        repository_read_rows_of(PUP, &reads),
+        Err(MixedRepositoryRead {
+            key: rgntotal(),
+            answered_at: 1,
+            refused_at: 0,
+        })
+    );
 }

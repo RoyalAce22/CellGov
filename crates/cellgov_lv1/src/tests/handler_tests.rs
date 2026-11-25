@@ -1,5 +1,5 @@
 use super::*;
-use crate::{AddressSpaceState, EventReceivePortState, HypercallRefusal, IrqStateBitmapState};
+use crate::{HypercallAnswer, HypercallRefusal};
 use cellgov_event::UnitId;
 use cellgov_mem::GuestMemory;
 use cellgov_time::GuestTicks;
@@ -18,22 +18,19 @@ fn request(number: u64) -> HypercallRequest {
 }
 
 fn answer(r: &HypercallRequest, firmware: Option<&str>) -> HypercallDisposition {
-    super::answer(
-        r,
-        firmware,
-        &MemoryState::default(),
-        &AddressSpaceState::default(),
-        &IrqStateBitmapState::default(),
-        &EventReceivePortState::default(),
-        &GuestMemory::new(0),
-    )
+    super::answer(r, firmware, &GroupStates::default(), &GuestMemory::new(0))
 }
 
 #[test]
-fn the_answered_numbers_ascend() {
-    assert_eq!(ANSWERED.len(), 16);
-    for pair in ANSWERED.windows(2) {
+fn the_answered_numbers_are_the_registrations_ascending() {
+    let answered = answered_numbers();
+    assert_eq!(answered.len(), table::registrations().count());
+    assert!(!answered.is_empty(), "no group registers a hypercall");
+    for pair in answered.windows(2) {
         assert!(pair[0] < pair[1], "{pair:?}");
+    }
+    for number in &answered {
+        assert!(answers(*number), "{number}");
     }
 }
 
@@ -55,13 +52,14 @@ fn every_number_with_no_handler_takes_the_null_backend_by_number() {
         );
         checked += 1;
     }
-    assert_eq!(checked, 1026 - ANSWERED.len());
+    assert_eq!(checked, 1026 - answered_numbers().len());
 }
 
 #[test]
 fn no_answered_number_takes_the_null_backend() {
-    assert_eq!(ANSWERED.len(), 16);
-    for &number in ANSWERED {
+    let answered = answered_numbers();
+    assert_eq!(answered.len(), table::registrations().count());
+    for number in answered {
         let d = answer(&request(number), None);
         assert!(
             !matches!(

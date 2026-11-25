@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use cellgov_ps3_abi::lv1::repository::{NodeSource, SecondValue, NODES};
+use cellgov_ps3_abi::lv1::repository::{NodeSource, SecondValue, DEBUG_SUPPORT_CAPTURE, NODES};
 
 fn workspace_file(relative: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -79,8 +79,13 @@ fn every_lv1_node_row_is_the_node_its_capture_read_twice_alike() {
 fn the_kernel_copy_of_debug_support_holds_the_lv1_node_values() {
     let node = NODES
         .iter()
-        .find(|node| matches!(node.source, NodeSource::Lv1NodeCapture { .. }))
-        .expect("an lv1 node row");
+        .find(|node| {
+            matches!(
+                node.source,
+                NodeSource::Lv1NodeCapture { capture, .. } if capture == DEBUG_SUPPORT_CAPTURE
+            )
+        })
+        .expect("the ss.param.debug.support lv1 node row");
     let NodeSource::Lv1NodeCapture { capture, .. } = node.source else {
         unreachable!("the find matched an lv1 node row");
     };

@@ -3,13 +3,12 @@
 //!
 //! It answers the hypercalls that a thread in supervisor state makes.
 //!
-//! A handler is a pure function of these inputs:
+//! Each hypercall group registers a handler for each number it answers,
+//! in the group's own module. A handler is a pure function of these
+//! inputs:
 //! - the [`HypercallRequest`];
 //! - the firmware version the [`Hypervisor`] answers for;
-//! - the partition's memory regions the [`Hypervisor`] holds;
-//! - the partition's virtual address spaces the [`Hypervisor`] holds;
-//! - the interrupt state bitmaps the [`Hypervisor`] holds;
-//! - the event receive ports the [`Hypervisor`] holds;
+//! - the [`GroupStates`] the [`Hypervisor`] holds;
 //! - the caller's real address space, which holds the page table.
 //!
 //! It returns a [`HypercallDisposition`]:
@@ -17,13 +16,9 @@
 //!   from r4, memory writes, and the page table registers of the caller;
 //! - a typed refusal, which stops the run.
 //!
-//! No handler writes guest state. An answer can carry one of these
-//! changes, and [`Hypervisor`] keeps it:
-//! - a new memory region;
-//! - a change to the address spaces;
-//! - a registered bitmap;
-//! - a new event receive port;
-//! - a port's plug and its connection to a plug.
+//! No handler writes guest state. An answer carries a list of
+//! [`StateChange`]s, each a change to one group's state, and
+//! [`Hypervisor`] applies them.
 //!
 //! Before a handler runs, the hypervisor gives the answers of lv1's own
 //! `sc` vector: a number past the hypercall table, and a problem-state
@@ -44,34 +39,38 @@
     )
 )]
 
-mod address_space;
 mod answer;
-mod console;
 mod cost;
-mod event_port;
+mod group;
 mod handlers;
-mod interrupt;
-mod irq_plug;
-mod memory;
-mod page_table;
-mod ppe;
-mod repository;
 mod request;
 mod state;
 mod vector;
 
-pub use address_space::{AddressSpace, AddressSpaceChange, AddressSpaceState};
 pub use answer::{
     ConsoleWrite, HypercallAnswer, HypercallDisposition, HypercallRefusal, PageTableLoad,
 };
 pub use cost::cost;
-pub use event_port::{EventReceivePort, EventReceivePortState};
-pub use handlers::{answer, answers, ANSWERED};
-pub use interrupt::{
-    InterruptChange, IrqStateBitmapKey, IrqStateBitmapRegistration, IrqStateBitmapState,
+pub use group::device_bus::{DeviceBusChange, DeviceBusState};
+pub use group::gpu::{GpuChange, GpuState};
+pub use group::interrupt::bitmap::{
+    IrqStateBitmapKey, IrqStateBitmapRegistration, IrqStateBitmapState,
 };
-pub use memory::{MemoryRegion, MemoryState};
-pub use page_table::{page_table_storage, PAGE_TABLE_STORAGE_BASE, PAGE_TABLE_STORAGE_BYTES};
-pub use repository::RepositoryRead;
+pub use group::interrupt::event_port::{EventReceivePort, EventReceivePortState};
+pub use group::interrupt::{InterruptChange, InterruptGroupState};
+pub use group::memory::address_space::{AddressSpace, AddressSpaceChange, AddressSpaceState};
+pub use group::memory::page_table::{
+    page_table_storage, PAGE_TABLE_STORAGE_BASE, PAGE_TABLE_STORAGE_BYTES,
+};
+pub use group::memory::region::{MemoryRegion, MemoryState};
+pub use group::memory::{MemoryChange, MemoryGroupState};
+pub use group::network::{NetworkChange, NetworkState};
+pub use group::partition::repository::RepositoryRead;
+pub use group::partition::{PartitionChange, PartitionState};
+pub use group::spe::{SpeChange, SpeState};
+pub use group::state::{GroupStates, StateChange};
+pub use group::storage::{StorageChange, StorageState};
+pub use group::uart::{UartChange, UartState};
+pub use handlers::{answer, answered_numbers, answers};
 pub use request::HypercallRequest;
 pub use state::{HypercallWitness, Hypervisor};

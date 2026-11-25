@@ -1,18 +1,28 @@
-//! LV1 hypervisor ABI facts:
-//! - the hypercall numbers and their register counts
-//! - the status codes, and the r3 values lv1 returns for them
-//! - the hypercall table and its live 4.93 contents
-//! - the partition ids
-//! - the repository's key encoding
-//! - the logical partition addresses of memory regions
-//! - the checks and outputs of the virtual address space calls
-//! - the checks and outputs of the page table calls
-//! - the logical PPE id and the call that returns it
-//! - the checks and effects of the interrupt state bitmap call
-//! - the event receive port and the call that constructs it
-//! - the checks and effects of the call that connects a port to a plug
-//! - the logical console's gate and the call that destructs a console
-//! - the statuses of a refused storage write
+//! LV1 hypervisor ABI facts.
+//!
+//! Every hypercall uses these modules:
+//! - [`call`]: the hypercall numbers and their register counts;
+//! - [`status`]: the status codes, and the r3 values lv1 returns for
+//!   them;
+//! - [`table`]: the hypercall table and its live 4.93 contents;
+//! - [`dispatch`]: the answers of lv1's `sc` vector.
+//!
+//! Each other module holds the facts of one hypercall group:
+//! - memory and page table: [`memory`], [`address_space`],
+//!   [`page_table`];
+//! - interrupt delivery: [`interrupt`], [`event_port`], [`irq_plug`];
+//! - partition, console and time: [`partition`], [`ppe`],
+//!   [`repository`], [`console`];
+//! - device bus: [`device_bus`];
+//! - logical SPE: [`spe`];
+//! - storage: [`storage`];
+//! - GPU: [`gpu`];
+//! - network device: [`network`];
+//! - virtual UART: [`uart`].
+//!
+//! A new fact goes in a module of its group. A group that needs a new
+//! module adds it as a child of one of its own modules, so two groups
+//! never edit this file.
 //!
 //! A hypercall is `sc` with LEV = 1 from supervisor state. r11 holds
 //! the number, and r3 onward hold the inputs. On return, r3 holds the
@@ -21,18 +31,23 @@
 pub mod address_space;
 pub mod call;
 pub mod console;
+pub mod device_bus;
 pub mod dispatch;
 pub mod event_port;
+pub mod gpu;
 pub mod interrupt;
 pub mod irq_plug;
 pub mod memory;
+pub mod network;
 pub mod page_table;
 pub mod partition;
 pub mod ppe;
 pub mod repository;
+pub mod spe;
 pub mod status;
 pub mod storage;
 pub mod table;
+pub mod uart;
 
 #[cfg(test)]
 #[path = "tests/boot_record_capture.rs"]

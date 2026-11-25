@@ -6,9 +6,23 @@ fn all_specs() -> Vec<&'static TableSpec> {
     SHARED_TABLES.iter().chain(TABLES).collect()
 }
 
+/// pup.fw, and the pup_sha256 of hypercall_site, hypercall_unresolved and
+/// repository_read.
+const REFERENCE_COUNT: usize = 4;
+
+/// The number of columns of `tables` that reference a table.
+fn reference_count(tables: &[&TableSpec]) -> usize {
+    tables
+        .iter()
+        .flat_map(|t| t.columns)
+        .filter(|c| c.references.is_some())
+        .count()
+}
+
 #[test]
 fn a_referenced_table_precedes_every_table_that_references_it() {
     let tables = all_specs();
+    assert_eq!(reference_count(&tables), REFERENCE_COUNT);
     for (index, table) in tables.iter().enumerate() {
         for column in table.columns {
             let Some((target, _)) = column.references else {
@@ -28,6 +42,7 @@ fn a_referenced_table_precedes_every_table_that_references_it() {
 #[test]
 fn every_key_and_reference_names_a_column() {
     let tables = all_specs();
+    assert_eq!(reference_count(&tables), REFERENCE_COUNT);
     for table in &tables {
         assert_eq!(
             table.key_indexes().len(),

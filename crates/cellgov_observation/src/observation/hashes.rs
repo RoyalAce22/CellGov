@@ -43,11 +43,11 @@ pub struct ObservedHashes {
 /// The id covers the three hashes above and the runnable-queue hash,
 /// which only a trace's `StateHashCheckpoint` records carry. The PPU
 /// per-step hash is not one of these, so a change to the PPU scheme
-/// leaves this id as it is. When a change to one of these producers
-/// changes a hash value, increase the tag's version suffix.
+/// leaves this id as it is. The tag, and the rule for when its version
+/// moves, are in [`cellgov_mem::scheme`].
 pub const CHECKPOINT_HASH_SCHEME: u64 = {
     let mut h = cellgov_mem::Fnv1aHasher::new();
-    h.write(b"cellgov-checkpoint-fnv1a/v26");
+    h.write(cellgov_mem::scheme::CHECKPOINT_TAG);
     h.finish()
 };
 

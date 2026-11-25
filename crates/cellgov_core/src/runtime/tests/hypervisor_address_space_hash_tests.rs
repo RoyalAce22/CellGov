@@ -1,13 +1,16 @@
 use cellgov_event::UnitId;
 use cellgov_lv1::{page_table_storage, HypercallDisposition, HypercallRequest};
 use cellgov_mem::GuestMemory;
+use cellgov_ps3_abi::lv1::address_space::game_os_boot_vas_id;
 use cellgov_ps3_abi::lv1::call::{CONSTRUCT_VIRTUAL_ADDRESS_SPACE, SELECT_VIRTUAL_ADDRESS_SPACE};
 use cellgov_time::{Budget, GuestTicks};
 
 use crate::runtime::state::Runtime;
 
 /// The vas id that the 4.93 hypervisor gives the kernel's address space.
-const VAS_ID: u64 = 2;
+fn vas_id() -> u64 {
+    game_os_boot_vas_id("4.93").expect("a 4.93 boot vas id")
+}
 
 fn fresh() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(16), Budget::new(4), 100);
@@ -57,7 +60,11 @@ fn a_constructed_and_a_selected_address_space_each_move_the_sync_state_hash() {
     construct(&mut constructed);
     let mut selected = fresh();
     construct(&mut selected);
-    call(&mut selected, SELECT_VIRTUAL_ADDRESS_SPACE, [VAS_ID, 0, 0]);
+    call(
+        &mut selected,
+        SELECT_VIRTUAL_ADDRESS_SPACE,
+        [vas_id(), 0, 0],
+    );
     assert_ne!(constructed.sync_state_hash(), empty.sync_state_hash());
     assert_ne!(selected.sync_state_hash(), constructed.sync_state_hash());
     for rt in [&empty, &constructed, &selected] {

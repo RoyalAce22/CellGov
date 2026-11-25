@@ -221,22 +221,11 @@ pub mod source {
     pub const PPE_PLACEMENT: u8 = 75;
     /// The PPE run-queue sequence counter.
     pub const PPE_QUEUE_SEQ: u8 = 76;
-    /// The memory regions the hypervisor created, one object per region
-    /// in the order of creation.
-    pub const HYPERVISOR_REGION: u8 = 77;
-    /// The hypervisor's region counter for the partition.
-    pub const HYPERVISOR_REGION_COUNTER: u8 = 78;
-    /// The virtual address spaces the hypervisor constructed, one object
-    /// per address space in the order of construction.
-    pub const HYPERVISOR_ADDRESS_SPACE: u8 = 79;
-    /// The vas id that the partition's PPE selected.
-    pub const HYPERVISOR_SELECTED_ADDRESS_SPACE: u8 = 80;
-    /// The interrupt state bitmaps registered with the hypervisor, one
-    /// object per logical PPE thread in key order.
-    pub const HYPERVISOR_IRQ_STATE_BITMAP: u8 = 81;
-    /// The event receive ports the hypervisor constructed, one object
-    /// per port in id order.
-    pub const HYPERVISOR_EVENT_RECEIVE_PORT: u8 = 82;
+    /// The tags of the hypervisor's hypercall groups. `cellgov_lv1`
+    /// gives each group its own range inside these, and each group
+    /// declares its tags in its own module. No other source takes one of
+    /// these tags.
+    pub const HYPERVISOR: [core::ops::RangeInclusive<u8>; 2] = [77..=82, 128..=255];
 }
 
 const OBJECT_BITS: u32 = 32;
@@ -789,3 +778,7 @@ impl<K: Clone, V: LaneValue> Drop for LaneEntryMut<'_, K, V> {
 #[cfg(test)]
 #[path = "tests/lanes_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/source_range_tests.rs"]
+mod source_range_tests;

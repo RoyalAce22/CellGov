@@ -22,6 +22,7 @@ pub mod guest;
 pub mod hash;
 pub mod lanes;
 pub mod range;
+pub mod scheme;
 pub mod staging;
 
 pub use addr::GuestAddr;

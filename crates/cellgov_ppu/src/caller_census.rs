@@ -4,10 +4,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::funcmap::{self, FuncMapError, FunctionName};
-use crate::instruction::{branch_target, PpuInstruction};
+use crate::instruction::PpuInstruction;
 use crate::loader::{pt_load_segments, LoadError, LoadSegment};
 use cellgov_ps3_abi::format::elf::{ELF_E_MACHINE_OFFSET, ELF_HEADER_SIZE, EM_PPC64};
-use cellgov_ps3_abi::hw::ppc_isa::PPC_BO_ALWAYS;
 use cellgov_ps3_abi::lv2::syscall::SYSCALL_TABLE_SLOTS;
 
 /// Maximum instructions between a constant load into `r11` and `sc`.
@@ -71,18 +70,17 @@ pub fn scan_syscalls(elf: &[u8]) -> Result<Vec<CallerSite>, CallerScanError> {
     scan_elf(elf, validate_segment, scan_words)
 }
 
-/// Find every LV1 hypercall site, an `sc` with LEV = 1, in executable,
-/// file-backed segments. A site's `ordinal` is the hypercall number.
+/// Find every LV1 hypercall site in executable, file-backed segments.
+/// A site is a word that is exactly `sc 1`
+/// ([`PPC_SC_1`](cellgov_ps3_abi::hw::ppc_isa::PPC_SC_1)), and its
+/// `ordinal` is the hypercall number.
 ///
-/// Resolution is the one [`scan_syscalls`] uses, with three differences:
-/// - any non-negative constant resolves;
-/// - a conditional branch without link keeps the constant, because the
-///   path that falls through it to `sc` does not write r11. The kernel's
-///   wrappers test a flag between `li r11` and `sc`;
-/// - a direct branch of the segment from outside the window that
-///   enters it after `li r11` leaves the site unresolved: that path
-///   reaches `sc` with another r11. The window runs from `li r11` to
-///   `sc`.
+/// A word with a nonzero reserved field also decodes as `sc 1`, but
+/// such a word is data, so it is not a site. A site resolves when every
+/// path to it in the control-flow graph of its segment loads the same
+/// non-negative constant into r11 with `li r11`. A path that goes back
+/// to a word no direct branch or fall-through reaches loads nothing, and
+/// the site resolves from its other paths.
 ///
 /// The segments may lie anywhere in the 64-bit address space, as a
 /// kernel's do. The scan does not see an indirect branch or a branch
@@ -93,67 +91,7 @@ pub fn scan_syscalls(elf: &[u8]) -> Result<Vec<CallerSite>, CallerScanError> {
 /// Returns [`CallerScanError`] if the ELF or an executable segment is
 /// malformed.
 pub fn scan_hypercalls(elf: &[u8]) -> Result<Vec<CallerSite>, CallerScanError> {
-    scan_elf(elf, validate_segment_extent, |base, words| {
-        scan_sc_sites(
-            base,
-            words,
-            ScanRule {
-                lev: 1,
-                limit: u64::from(u16::MAX) + 1,
-                through_conditional: true,
-                entries: true,
-            },
-        )
-    })
-}
-
-/// Which `sc` sites a scan finds and how it resolves them.
-#[derive(Debug, Clone, Copy)]
-struct ScanRule {
-    lev: u8,
-    /// A site resolves to an r11 constant below this.
-    limit: u64,
-    /// Whether the constant survives a conditional branch without link.
-    through_conditional: bool,
-    /// Whether a direct branch into the window leaves the site unresolved.
-    entries: bool,
-}
-
-/// Each direct branch target in `words`, which start at `base`, with
-/// the addresses of the branches that reach it.
-///
-/// [PPC-Book1 p:24 s:2.4] `b` and `bc` reach CIA + the displacement, or the displacement itself when AA = 1.
-fn direct_branch_entries(base: u64, words: &[u32]) -> BTreeMap<u64, Vec<u64>> {
-    let mut entries: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
-    for (index, raw) in words.iter().copied().enumerate() {
-        let source = base + (index as u64) * 4;
-        let target = match crate::decode::decode(raw) {
-            Ok(PpuInstruction::B { offset, aa, .. }) => branch_target(source, offset, aa),
-            Ok(PpuInstruction::Bc { offset, aa, .. }) => {
-                branch_target(source, i32::from(offset), aa)
-            }
-            _ => continue,
-        };
-        entries.entry(target).or_default().push(source);
-    }
-    entries
-}
-
-/// Whether a branch from outside `[load, site]` reaches an address in
-/// `(load, site]`, so a path skips the load of r11 at `load`.
-fn entered_after_load(entries: &BTreeMap<u64, Vec<u64>>, load: u64, site: u64) -> bool {
-    entries
-        .range(load + 4..=site)
-        .flat_map(|(_, sources)| sources)
-        .any(|&source| source < load || source > site)
-}
-
-/// Whether `decoded` is a branch that can fall through without writing
-/// LR: a conditional `bc` that does not link.
-///
-/// [PPC-Book1 p:20 s:2.4.1] `BO` encoding `1z1zz`: branch always.
-fn falls_through(decoded: Option<&PpuInstruction>) -> bool {
-    matches!(decoded, Some(PpuInstruction::Bc { bo, link: false, .. }) if bo & PPC_BO_ALWAYS != PPC_BO_ALWAYS)
+    scan_elf(elf, validate_segment_extent, crate::hypercall_cfg::scan)
 }
 
 /// The sites `scan` finds in each executable segment `validate` accepts,
@@ -300,46 +238,17 @@ fn validate_segment_extent_end(segment: &LoadSegment) -> Result<u64, CallerScanE
         })
 }
 
+/// The LV2 `sc` sites in `words`, which start at `base`.
 fn scan_words(base: u64, words: &[u32]) -> Vec<CallerSite> {
-    scan_sc_sites(
-        base,
-        words,
-        ScanRule {
-            lev: 0,
-            limit: SYSCALL_TABLE_SLOTS,
-            through_conditional: false,
-            entries: false,
-        },
-    )
-}
-
-/// The `sc` sites `rule` names in `words`, which start at `base`.
-fn scan_sc_sites(base: u64, words: &[u32], rule: ScanRule) -> Vec<CallerSite> {
-    let ScanRule {
-        lev,
-        limit,
-        through_conditional,
-        entries,
-    } = rule;
-    let entries = if entries {
-        direct_branch_entries(base, words)
-    } else {
-        BTreeMap::new()
-    };
     let mut sites = Vec::new();
     // The constant, and the count of words between its load and here.
     let mut candidate: Option<(u16, u8)> = None;
     for (index, raw) in words.iter().copied().enumerate() {
         let address = base + (index as u64) * 4;
         let decoded = crate::decode::decode(raw);
-        if let Ok(PpuInstruction::Sc { lev: site_lev }) = decoded {
-            if site_lev == lev {
-                let ordinal = candidate
-                    .filter(|&(_, age)| {
-                        let load = address - 4 * (u64::from(age) + 1);
-                        !entered_after_load(&entries, load, address)
-                    })
-                    .map(|(ordinal, _)| ordinal);
+        if let Ok(PpuInstruction::Sc { lev }) = decoded {
+            if lev == 0 {
+                let ordinal = candidate.map(|(ordinal, _)| ordinal);
                 sites.push(CallerSite { address, ordinal });
             }
             candidate = None;
@@ -348,7 +257,7 @@ fn scan_sc_sites(base: u64, words: &[u32], rule: ScanRule) -> Vec<CallerSite> {
         if let Ok(PpuInstruction::Addi { rt: 11, ra: 0, imm }) = decoded {
             candidate = u16::try_from(imm)
                 .ok()
-                .filter(|ordinal| u64::from(*ordinal) < limit)
+                .filter(|ordinal| u64::from(*ordinal) < SYSCALL_TABLE_SLOTS)
                 .map(|ordinal| (ordinal, 0));
             continue;
         }
@@ -361,15 +270,13 @@ fn scan_sc_sites(base: u64, words: &[u32], rule: ScanRule) -> Vec<CallerSite> {
             candidate = None;
             continue;
         }
-        if !(through_conditional && falls_through(decoded.as_ref().ok()))
-            && matches!(
-                decoded,
-                Ok(PpuInstruction::B { .. }
-                    | PpuInstruction::Bc { .. }
-                    | PpuInstruction::Bclr { .. }
-                    | PpuInstruction::Bcctr { .. })
-            )
-        {
+        if matches!(
+            decoded,
+            Ok(PpuInstruction::B { .. }
+                | PpuInstruction::Bc { .. }
+                | PpuInstruction::Bclr { .. }
+                | PpuInstruction::Bcctr { .. })
+        ) {
             candidate = None;
             continue;
         }
@@ -397,7 +304,9 @@ fn scan_sc_sites(base: u64, words: &[u32], rule: ScanRule) -> Vec<CallerSite> {
     sites
 }
 
-fn maybe_clobbers_r11(raw: u32) -> bool {
+/// Whether the word `raw` may write r11, read from its register fields
+/// alone.
+pub(crate) fn maybe_clobbers_r11(raw: u32) -> bool {
     let primary = raw >> 26;
     let rt = (raw >> 21) & 0x1f;
     let ra = (raw >> 16) & 0x1f;
@@ -432,3 +341,7 @@ mod update_form_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_tests.rs"]
 mod hypercall_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_shape_tests.rs"]
+mod hypercall_shape_tests;

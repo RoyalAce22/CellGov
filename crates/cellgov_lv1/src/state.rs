@@ -1,8 +1,6 @@
-//! The hypervisor's state: the partition's memory regions, virtual
-//! address spaces, interrupt state bitmaps and event receive ports, and
-//! its own records of the witnesses of numbers with no handler, the
-//! guest TTY sink, the repository reads and the refusal that stopped
-//! the run.
+//! The hypervisor's state: the state of each hypercall group, and its
+//! own records of the witnesses of numbers with no handler, the guest
+//! TTY sink, the repository reads and the refusal that stopped the run.
 
 use std::collections::BTreeMap;
 
@@ -10,15 +8,16 @@ use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::lv1::call::READ_REPOSITORY_NODE;
 use cellgov_time::GuestTicks;
 
-use super::address_space::{AddressSpaceChange, AddressSpaceState};
 use super::answer::{HypercallDisposition, HypercallRefusal};
-use super::event_port::EventReceivePortState;
 use super::handlers::{answer, answers};
-use super::interrupt::{InterruptChange, IrqStateBitmapState};
-use super::memory::MemoryState;
-use super::repository::{read_record, RepositoryRead};
 use super::request::HypercallRequest;
 use super::vector;
+use crate::group::interrupt::bitmap::IrqStateBitmapState;
+use crate::group::interrupt::event_port::EventReceivePortState;
+use crate::group::memory::address_space::AddressSpaceState;
+use crate::group::memory::region::MemoryState;
+use crate::group::partition::repository::{read_record, RepositoryRead};
+use crate::group::state::GroupStates;
 
 /// How often the hypervisor saw one hypercall number that no handler
 /// answers.
@@ -30,22 +29,17 @@ pub struct HypercallWitness {
     pub first_tick: GuestTicks,
 }
 
-/// CellGov's hypervisor, the firmware version it answers for, the
-/// partition's memory regions, virtual address spaces, interrupt state
-/// bitmaps and event receive ports, and its records.
+/// CellGov's hypervisor, the firmware version it answers for, the state
+/// of each hypercall group, and its records.
 ///
 /// The firmware version selects the values that the repository reads,
 /// the allocations and the address space calls answer. The answers
-/// depend on the memory regions, the address spaces, the bitmaps and the
-/// ports, so they are guest state, and [`Self::sync_term`] hashes them.
-/// No answer depends on the records.
+/// depend on the group states, so they are guest state, and
+/// [`Self::sync_term`] hashes them. No answer depends on the records.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Hypervisor {
     firmware: Option<String>,
-    memory: MemoryState,
-    address_spaces: AddressSpaceState,
-    irq_state_bitmaps: IrqStateBitmapState,
-    event_receive_ports: EventReceivePortState,
+    groups: GroupStates,
     witnesses: BTreeMap<u64, HypercallWitness>,
     console: Vec<u8>,
     repository_reads: Vec<RepositoryRead>,
@@ -78,12 +72,8 @@ impl Hypervisor {
 
     /// The disposition of `request` from a caller whose real address
     /// space is `storage`, after the state and the records note it:
-    /// - a created memory region joins the partition's regions;
-    /// - a change to the address spaces applies, and a page table
-    ///   mapping moves the region counter past the value it took;
-    /// - a registered interrupt state bitmap joins the bitmaps;
-    /// - a constructed event receive port joins the ports;
-    /// - a connect step changes its port;
+    /// - each change the answer carries applies to its group's state, in
+    ///   order;
     /// - a console write appends its bytes to the TTY sink;
     /// - a repository read that reaches its handler appends its record,
     ///   answered or refused;
@@ -95,15 +85,7 @@ impl Hypervisor {
         request: &HypercallRequest,
         storage: &GuestMemory,
     ) -> HypercallDisposition {
-        let disposition = answer(
-            request,
-            self.firmware.as_deref(),
-            &self.memory,
-            &self.address_spaces,
-            &self.irq_state_bitmaps,
-            &self.event_receive_ports,
-            storage,
-        );
+        let disposition = answer(request, self.firmware.as_deref(), &self.groups, storage);
         // A read that lv1's vector answers or refuses never reaches the
         // node table, so it is no repository read.
         if request.number == READ_REPOSITORY_NODE
@@ -123,26 +105,8 @@ impl Hypervisor {
         }
         match &disposition {
             HypercallDisposition::Answered(answer) => {
-                if let Some(region) = answer.region {
-                    self.memory.create(region);
-                }
-                if let Some(change) = answer.address_space {
-                    if let AddressSpaceChange::Mapped { counter, .. } = change {
-                        self.memory.take_counter(counter);
-                    }
-                    self.address_spaces.apply(change);
-                }
-                match answer.interrupt.as_deref().copied() {
-                    Some(InterruptChange::BitmapRegistered(registration)) => {
-                        self.irq_state_bitmaps.register(registration);
-                    }
-                    Some(InterruptChange::PortConstructed(port)) => {
-                        self.event_receive_ports.construct(port);
-                    }
-                    Some(InterruptChange::PlugConnect(port)) => {
-                        self.event_receive_ports.connect(port);
-                    }
-                    None => {}
+                for change in &answer.changes {
+                    self.groups.apply(change.clone());
                 }
                 if let Some(write) = &answer.console {
                     self.console.extend_from_slice(write.bytes());
@@ -155,36 +119,36 @@ impl Hypervisor {
         disposition
     }
 
+    /// The state of each hypercall group.
+    pub fn groups(&self) -> &GroupStates {
+        &self.groups
+    }
+
     /// The partition's memory regions and its region counter.
     pub fn memory(&self) -> &MemoryState {
-        &self.memory
+        self.groups.memory().regions()
     }
 
     /// The partition's virtual address spaces and the selected one.
     pub fn address_spaces(&self) -> &AddressSpaceState {
-        &self.address_spaces
+        self.groups.memory().spaces()
     }
 
     /// The interrupt state bitmap that each logical PPE thread
     /// registered.
     pub fn irq_state_bitmaps(&self) -> &IrqStateBitmapState {
-        &self.irq_state_bitmaps
+        self.groups.interrupt().bitmaps()
     }
 
     /// The partition's event receive ports.
     pub fn event_receive_ports(&self) -> &EventReceivePortState {
-        &self.event_receive_ports
+        self.groups.interrupt().ports()
     }
 
-    /// The sync-state terms of the hypervisor's guest state: its memory
-    /// regions, its address spaces, its interrupt state bitmaps and its
-    /// event receive ports. The records add no term.
+    /// The sync-state terms of the hypervisor's guest state: the state of
+    /// each hypercall group. The records add no term.
     pub fn sync_term(&self) -> u128 {
-        self.memory
-            .sync_term()
-            .wrapping_add(self.address_spaces.sync_term())
-            .wrapping_add(self.irq_state_bitmaps.sync_term())
-            .wrapping_add(self.event_receive_ports.sync_term())
+        self.groups.sync_term()
     }
 
     /// Each number with no handler that the hypervisor saw, ascending.

@@ -10,7 +10,9 @@ use cellgov_ps3_abi::lv1::call::{
 };
 use cellgov_ps3_abi::lv1::table::{self as lv1_table, TableEntry};
 
-use cellgov_lv2_archive::{self as archive, ArchiveError, ExtractionError, PupRow, Table, NONE};
+use cellgov_lv2_archive::{
+    self as archive, ArchiveError, ColumnKind, ExtractionError, PupRow, Table, TableSpec, NONE,
+};
 
 use super::spec::{HYPERCALL, HYPERCALL_SITE, HYPERCALL_UNRESOLVED};
 
@@ -198,8 +200,13 @@ pub fn hypercall_family(number: u64) -> (&'static str, &'static str) {
     }
 }
 
-/// One row per number that a scanned kernel calls or CellGov's
-/// hypervisor answers, ascending by number.
+/// One row per number that a scanned kernel calls or that `answered`
+/// holds, ascending by number. A number in `answered` has the state
+/// [`HypercallState::Answered`].
+///
+/// `answered` is the hypervisor's answered numbers,
+/// [`cellgov_lv1::answered_numbers`], or the census's own when it lags
+/// them ([`census_answered`]).
 ///
 /// # Errors
 ///
@@ -208,6 +215,7 @@ pub fn hypercall_family(number: u64) -> (&'static str, &'static str) {
 pub fn hypercall_rows(
     sites: &[HypercallSiteRow],
     pups: &[PupRow],
+    answered: &BTreeSet<u64>,
 ) -> Result<Vec<HypercallRow>, ExtractionError> {
     let fw_of: BTreeMap<&str, &str> = pups
         .iter()
@@ -225,11 +233,7 @@ pub fn hypercall_rows(
         let count = called.entry(row.number).or_default().entry(fw).or_default();
         *count = (*count).max(row.sites.len());
     }
-    let numbers: BTreeSet<u64> = called
-        .keys()
-        .copied()
-        .chain(cellgov_lv1::ANSWERED.iter().copied())
-        .collect();
+    let numbers: BTreeSet<u64> = called.keys().chain(answered).copied().collect();
     Ok(numbers
         .into_iter()
         .map(|number| {
@@ -250,7 +254,7 @@ pub fn hypercall_rows(
                     .and_then(|m| m.values().next_back().copied())
                     .unwrap_or(0),
                 lv1_493: Lv1Entry::of(number),
-                state: if cellgov_lv1::answers(number) {
+                state: if answered.contains(&number) {
                     HypercallState::Answered
                 } else {
                     HypercallState::NullBackend
@@ -258,6 +262,75 @@ pub fn hypercall_rows(
             }
         })
         .collect())
+}
+
+/// The numbers a parsed `hypercall.tsv` gives the state `answered`.
+///
+/// # Errors
+///
+/// - [`ArchiveError::Header`] if the columns of `table` are not those of
+///   [`HYPERCALL`].
+/// - [`ArchiveError::CellCount`] if a row has the wrong number of cells.
+/// - [`ArchiveError::BadCell`] if the number of an answered row is not a
+///   decimal integer.
+pub fn census_answered(table: &Table) -> Result<BTreeSet<u64>, ArchiveError> {
+    // `Table` has public fields, so the spec and the rows are not proof
+    // that `parse` checked them against `HYPERCALL`.
+    let names = |spec: &TableSpec| spec.columns.iter().map(|c| c.name).collect::<Vec<_>>();
+    let columns = names(&HYPERCALL);
+    let wrong_header = || ArchiveError::Header {
+        table: HYPERCALL.name,
+        expected: columns.join("\t"),
+        found: names(table.spec).join("\t"),
+    };
+    if names(table.spec) != columns {
+        return Err(wrong_header());
+    }
+    let position = |name: &str| columns.iter().position(|c| *c == name);
+    let (Some(number), Some(state)) = (position("number"), position("state")) else {
+        return Err(wrong_header());
+    };
+    let mut answered = BTreeSet::new();
+    for (index, row) in table.rows.iter().enumerate() {
+        // Line 1 is the header.
+        let line = index + 2;
+        let cells = (row.len() == columns.len())
+            .then(|| row.get(number).zip(row.get(state)))
+            .flatten();
+        let Some((number_cell, state_cell)) = cells else {
+            return Err(ArchiveError::CellCount {
+                table: HYPERCALL.name,
+                line,
+                expected: columns.len(),
+                found: row.len(),
+            });
+        };
+        if state_cell != HypercallState::Answered.label() {
+            continue;
+        }
+        let value = number_cell
+            .parse::<u64>()
+            .map_err(|_| ArchiveError::BadCell {
+                table: HYPERCALL.name,
+                line,
+                column: "number",
+                cell: number_cell.clone(),
+                expected: ColumnKind::Integer.describe(),
+            })?;
+        answered.insert(value);
+    }
+    Ok(answered)
+}
+
+/// The numbers `census` gives the state `answered` that no handler in
+/// `registered` answers, ascending.
+///
+/// The census may lag the registrations: a newly registered number
+/// keeps its old state until the census is regenerated. A number the
+/// census calls answered and no registration answers is no lag. It is a
+/// fact the registrations contradict.
+pub fn census_contradictions(census: &BTreeSet<u64>, registered: &BTreeSet<u64>) -> Vec<u64> {
+    census.difference(registered).copied().collect()
 }
 
 /// Renders `hypercall.tsv`.
@@ -402,3 +475,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/hypercall_lv1_entry_tests.rs"]
 mod lv1_entry_tests;
+
+#[cfg(test)]
+#[path = "tests/census_lag_tests.rs"]
+mod census_lag_tests;

@@ -26,6 +26,7 @@ mod fp;
 mod fp_status;
 mod fpscr;
 pub mod funcmap;
+mod hypercall_cfg;
 pub mod instruction;
 pub mod loader;
 mod local_cfg;

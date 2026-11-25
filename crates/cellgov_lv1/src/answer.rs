@@ -7,9 +7,7 @@ use cellgov_ps3_abi::lv1::call::LOGICAL_CONSOLE_SEND_MAX;
 use cellgov_ps3_abi::lv1::repository::RepositoryKey;
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
-use super::address_space::AddressSpaceChange;
-use super::interrupt::InterruptChange;
-use super::memory::MemoryRegion;
+use crate::group::state::StateChange;
 
 /// Bytes a logical console send gave the console.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,19 +41,12 @@ pub struct HypercallAnswer {
     pub effects: Vec<Effect>,
     /// Bytes for the guest TTY sink.
     pub console: Option<ConsoleWrite>,
-    /// The memory region the call created, which the hypervisor keeps.
-    pub region: Option<MemoryRegion>,
-    /// The change to the virtual address spaces, which the hypervisor
-    /// applies.
-    pub address_space: Option<AddressSpaceChange>,
     /// The page table and large page sizes that the calling thread
     /// loads, which the runtime gives the thread.
     pub page_table: Option<PageTableLoad>,
-    /// The change to the interrupt state, which the hypervisor applies.
-    ///
-    /// The box keeps [`HypercallDisposition::Answered`] within clippy's
-    /// size limit for an enum variant.
-    pub interrupt: Option<Box<InterruptChange>>,
+    /// The changes to the hypercall groups' state, which the hypervisor
+    /// applies in order.
+    pub changes: Vec<StateChange>,
 }
 
 /// The translation registers that lv1 loads on the calling thread when
@@ -82,11 +73,14 @@ impl HypercallAnswer {
             outputs,
             effects: Vec::new(),
             console: None,
-            region: None,
-            address_space: None,
             page_table: None,
-            interrupt: None,
+            changes: Vec::new(),
         }
+    }
+
+    /// Adds `change` to the changes the hypervisor applies.
+    pub fn push_change(&mut self, change: impl Into<StateChange>) {
+        self.changes.push(change.into());
     }
 }
 

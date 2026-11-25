@@ -6,8 +6,8 @@ use cellgov_time::{Budget, GuestTicks};
 
 use crate::runtime::state::Runtime;
 
-/// The bitmap of the 4.93 kernel's thread 0: +0x1C0 of its record at
-/// 0x8000000000368f80.
+/// The bitmap of the 4.93 kernel's thread 0: +0x1C0 of its record, which
+/// the capture `lv2_logical_ppe_record` places at 0x8000000000368f80.
 const THREAD_0_BITMAP: u64 = 0x0036_9140;
 
 fn fresh() -> Runtime {

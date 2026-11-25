@@ -1,0 +1,202 @@
+//! Hypercall 12, `connect_irq_plug_ext`: the call connects an event
+//! receive port to a plug of a logical PPE thread.
+//!
+//! r3 and r4 name the thread. lv1 does not compare r4 with the calling
+//! thread, so the handler does not read [`HypercallRequest::thread`].
+//! The hypervisor keeps the connection in the port; see
+//! [`EventReceivePort`].
+
+use cellgov_effects::{Effect, WritePayload};
+use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
+use cellgov_ps3_abi::lv1::call::CONNECT_IRQ_PLUG_EXT;
+use cellgov_ps3_abi::lv1::interrupt::THREADS_PER_LOGICAL_PPE;
+use cellgov_ps3_abi::lv1::irq_plug::{
+    irq_plug_handler, plug_status_bit, IRQ_PLUGS_PER_THREAD, IRQ_PLUG_IN_USE_R3, IRQ_PLUG_PLUG_R3,
+    IRQ_PLUG_PORT_CONNECTED_R3, IRQ_PLUG_PORT_R3, IRQ_PLUG_PPE_ID_R3, IRQ_PLUG_R7_R3,
+    IRQ_PLUG_THREAD_R3,
+};
+use cellgov_ps3_abi::lv1::ppe::game_os_logical_ppe_id;
+use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
+
+use super::bitmap::{IrqStateBitmapKey, IrqStateBitmapState};
+use super::event_port::{EventReceivePort, EventReceivePortState};
+use super::InterruptChange;
+use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
+use crate::group::hypercall::Hypercall;
+use crate::group::memory::address_space::AddressSpaceState;
+use crate::request::HypercallRequest;
+use crate::vector;
+
+/// The hypercalls this module answers.
+pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
+    number: CONNECT_IRQ_PLUG_EXT,
+    name: "connect_irq_plug_ext",
+    cost: None,
+    handler: |request, input| {
+        let interrupt = input.groups.interrupt();
+        connect_plug(
+            request,
+            input.firmware,
+            &PlugState {
+                spaces: input.groups.memory().spaces(),
+                bitmaps: interrupt.bitmaps(),
+                ports: interrupt.ports(),
+                storage: input.storage,
+            },
+        )
+    },
+}];
+
+/// The bytes of the status doubleword that a connect step writes.
+const STATUS_DOUBLEWORD_BYTES: u64 = std::mem::size_of::<u64>() as u64;
+
+fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDisposition {
+    HypercallDisposition::Refused(HypercallRefusal::UnmodelledInput {
+        number: request.number,
+        unit: request.unit,
+        pc: request.pc,
+        what,
+    })
+}
+
+/// lv1's own r3 with r4 to r10 cleared.
+fn lv1_answer(r3: u64) -> HypercallDisposition {
+    HypercallDisposition::Answered(HypercallAnswer::lv1_status(r3, vector::cleared_outputs()))
+}
+
+/// The state that the hypervisor holds for a connect step.
+pub(crate) struct PlugState<'a> {
+    /// The virtual address spaces, whose ids name objects of another
+    /// class.
+    pub spaces: &'a AddressSpaceState,
+    /// The interrupt state bitmaps.
+    pub bitmaps: &'a IrqStateBitmapState,
+    /// The event receive ports.
+    pub ports: &'a EventReceivePortState,
+    /// The caller's real address space, which holds the bitmaps.
+    pub storage: &'a GuestMemory,
+}
+
+/// Hypercall 12: connects the port r6 to plug r5 of thread r4 of the
+/// logical PPE that r3 names, with r4 to r10 cleared.
+///
+/// The answer carries the port with its connection and its plug, and the
+/// hypervisor keeps it. For a thread with a registered bitmap, the answer
+/// writes 0 to the status doubleword that holds the plug's bit:
+/// - lv1 clears the bit in the thread's status shadow and stores the
+///   shadow doubleword there.
+/// - The shadow is 0, because no call that CellGov answers raises a
+///   plug's bit.
+/// - A port's pending byte is 0 for the same reason, so lv1 takes the
+///   clear path and not the raise path.
+///
+/// A call that fails one of lv1's checks gets lv1's own r3, with r4 to
+/// r10 cleared. See [`IRQ_PLUG_PPE_ID_R3`] for the checks and their
+/// order. A plug that holds another port leaves the new plug in the port
+/// without a connection, as lv1 does.
+///
+/// The call is a refusal in these cases:
+/// - no lv1 image read shows the handler for `firmware`;
+/// - no source gives the logical PPE id for `firmware`;
+/// - r6 names no object that CellGov holds;
+/// - no storage holds the status doubleword of the plug.
+pub(crate) fn connect_plug(
+    request: &HypercallRequest,
+    firmware: Option<&str>,
+    state: &PlugState<'_>,
+) -> HypercallDisposition {
+    let Some(firmware) = firmware.filter(|fw| irq_plug_handler(fw).is_some()) else {
+        return refuse(
+            request,
+            "an IRQ plug call at a firmware whose lv1 handler is not read",
+        );
+    };
+    let Some(logical_ppe_id) = game_os_logical_ppe_id(firmware) else {
+        return refuse(
+            request,
+            "an IRQ plug call at a firmware whose logical PPE id no source gives",
+        );
+    };
+    let (ppe_id, thread, plug, port_id) = (request.r(3), request.r(4), request.r(5), request.r(6));
+    if ppe_id != logical_ppe_id {
+        return lv1_answer(IRQ_PLUG_PPE_ID_R3);
+    }
+    let Some(thread) = u8::try_from(thread)
+        .ok()
+        .filter(|&t| u64::from(t) < THREADS_PER_LOGICAL_PPE)
+    else {
+        return lv1_answer(IRQ_PLUG_THREAD_R3);
+    };
+    let Some(plug) = u8::try_from(plug)
+        .ok()
+        .filter(|&p| u64::from(p) < IRQ_PLUGS_PER_THREAD)
+    else {
+        return lv1_answer(IRQ_PLUG_PLUG_R3);
+    };
+    if request.r(7) != 0 {
+        return lv1_answer(IRQ_PLUG_R7_R3);
+    }
+    let port = match state.ports.port(port_id) {
+        Some(port) => *port,
+        None if port_id == logical_ppe_id || state.spaces.space(port_id).is_some() => {
+            return lv1_answer(IRQ_PLUG_PORT_R3);
+        }
+        None => {
+            return refuse(
+                request,
+                "an IRQ plug call whose port id names no object CellGov holds",
+            );
+        }
+    };
+    if port.connection.is_some() {
+        return lv1_answer(IRQ_PLUG_PORT_CONNECTED_R3);
+    }
+    let key = IrqStateBitmapKey { ppe_id, thread };
+    if state.ports.port_on_plug(key, plug).is_some() {
+        let mut answer = HypercallAnswer::lv1_status(IRQ_PLUG_IN_USE_R3, vector::cleared_outputs());
+        answer.push_change(InterruptChange::PlugConnect(EventReceivePort {
+            plug,
+            ..port
+        }));
+        return HypercallDisposition::Answered(answer);
+    }
+    let mut answer =
+        HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), vector::cleared_outputs());
+    if let Some(bitmap) = state.bitmaps.bitmap(key) {
+        let (doubleword, _) = plug_status_bit(plug);
+        let Some(range) = bitmap
+            .checked_add(doubleword * STATUS_DOUBLEWORD_BYTES)
+            .and_then(|address| ByteRange::new(GuestAddr::new(address), STATUS_DOUBLEWORD_BYTES))
+            .filter(|range| state.storage.holds(range.start().raw(), range.length()))
+        else {
+            return refuse(
+                request,
+                "an IRQ plug whose status doubleword CellGov holds no storage for",
+            );
+        };
+        answer.effects.push(Effect::SharedWriteIntent {
+            range,
+            bytes: WritePayload::new(vec![0; STATUS_DOUBLEWORD_BYTES as usize]),
+            source: request.unit,
+            source_time: request.tick,
+        });
+    }
+    answer.push_change(InterruptChange::PlugConnect(EventReceivePort {
+        connection: Some(key),
+        plug,
+        ..port
+    }));
+    HypercallDisposition::Answered(answer)
+}
+
+#[cfg(test)]
+#[path = "tests/irq_plug_tests.rs"]
+mod tests;
+
+#[cfg(test)]
+#[path = "tests/irq_plug_state_tests.rs"]
+mod state_tests;
+
+#[cfg(test)]
+#[path = "tests/console_irq_plug_map_tests.rs"]
+mod console_tests;
