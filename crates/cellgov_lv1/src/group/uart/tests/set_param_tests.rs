@@ -109,8 +109,25 @@ fn refused(r: &HypercallRequest, what: &'static str) -> HypercallDisposition {
     })
 }
 
-const MASK_REFUSAL: &str = "a virtual UART interrupt mask other than 0, with which lv1 can raise \
-                            the port's interrupt from traffic CellGov does not hold";
+/// The refusal of a mask whose lowest bit is `bit` on port 0, whose
+/// traffic no source gives.
+fn mask_refusal(bit: u64) -> &'static str {
+    match bit {
+        1 => {
+            "the transmit bit 1 of a virtual UART interrupt mask on a port whose peer and \
+             traffic no source gives"
+        }
+        2 => {
+            "the receive bit 2 of a virtual UART interrupt mask on a port whose peer and traffic \
+             no source gives"
+        }
+        4 => {
+            "the disconnect bit 4 of a virtual UART interrupt mask on a port whose peer and \
+             traffic no source gives"
+        }
+        _ => panic!("bit {bit}"),
+    }
+}
 
 fn params(port: u64, tx: u64, rx: u64, mask: u64) -> VirtualUartPortParams {
     VirtualUartPortParams {
@@ -210,25 +227,29 @@ fn a_mask_above_7_gets_lv1_s_mask_r3() {
 /// The kernel sets the mask 2 on each port after the open; see the
 /// capture `lv2_vuart_port_mask`.
 #[test]
-fn a_mask_other_than_0_is_a_refusal() {
+fn a_mask_other_than_0_on_port_0_is_a_refusal_that_names_its_lowest_bit() {
     let uart = UartState::default();
-    for mask in 1..=7 {
+    for (mask, bit) in [(1, 1), (2, 2), (3, 1), (4, 4), (5, 1), (6, 2), (7, 1)] {
         let r = request(0, 2, mask);
-        assert_eq!(at_4_93(&r, &uart), refused(&r, MASK_REFUSAL), "mask {mask}");
+        assert_eq!(
+            at_4_93(&r, &uart),
+            refused(&r, mask_refusal(bit)),
+            "mask {mask}"
+        );
     }
 }
 
 /// lv1 computes the status after a trigger call too
 /// [OFW-4.93 lv1 a:0x2F3D70-0x2F3DC4].
 #[test]
-fn a_trigger_call_on_a_port_whose_mask_is_not_0_is_a_refusal() {
+fn a_trigger_call_on_port_0_whose_mask_is_not_0_is_a_refusal() {
     let mut uart = UartState::default();
     uart.apply(UartChange::PortParamsSet(params(0, 0, 0, 2)));
     for param in [0, 1] {
         let r = request(0, param, 0x7ff);
         assert_eq!(
             at_4_93(&r, &uart),
-            refused(&r, MASK_REFUSAL),
+            refused(&r, mask_refusal(2)),
             "param {param}"
         );
     }

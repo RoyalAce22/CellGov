@@ -6,11 +6,12 @@ the three virtual UART ports that it opens. The kernel stores the mask
 at +400 of the port record, and then sends it to lv1 with
 `set_virtual_uart_param` (hypercall 164), parameter 2.
 
-CellGov's hypervisor answers a 164 call only when the call leaves the
-port's mask at 0, because lv1 can raise the port's interrupt for a mask
-other than 0 (`cellgov_ps3_abi::lv1::uart`). This capture shows that
-the kernel sets such a mask on each port. The test
-`uart_set_param_console_tests` holds that to this capture.
+lv1 can raise the port's interrupt for a mask other than 0
+(`cellgov_ps3_abi::lv1::uart`). CellGov's hypervisor answers a 164 call
+with such a mask only on a service port whose status shares no bit with
+the mask. This capture shows that the kernel sets the mask 2 on each
+port. The test `uart_set_param_console_tests` holds that to this
+capture.
 
 No probe runs, so this directory has no manifest and no runner frame.
 The file under `peek/cech20-cex-493/` holds the words the reads returned.

@@ -3,10 +3,10 @@
 //! partition's virtual UART.
 //!
 //! lv1 keeps the three values in the port's endpoint. After each call it
-//! computes the port's interrupt status, and it raises the port's
-//! interrupt only through a mask other than 0; see
-//! [`cellgov_ps3_abi::lv1::uart`]. So CellGov answers a call that leaves
-//! the port's mask at 0, and keeps and hashes the values of each port.
+//! computes the port's interrupt status, and raises the port's interrupt
+//! when the status and the mask share a bit; see
+//! [`cellgov_ps3_abi::lv1::uart`]. CellGov answers a call that raises no
+//! interrupt, and keeps and hashes the values of each port.
 
 use cellgov_mem::lanes::{LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::call::SET_VIRTUAL_UART_PARAM;
@@ -18,6 +18,7 @@ use cellgov_ps3_abi::lv1::uart::{
     VIRTUAL_UART_PARAM_RX_TRIGGER, VIRTUAL_UART_PARAM_TX_TRIGGER, VIRTUAL_UART_PORT_MAX,
 };
 
+use super::status;
 use super::{UartChange, UartState};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
@@ -103,9 +104,9 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
 /// - no source gives the port r3 at `firmware`;
-/// - the call leaves the port's mask at a value other than 0, because lv1
-///   then raises the port's interrupt from the port's traffic, which
-///   CellGov does not hold.
+/// - the call leaves a mask other than 0, and lv1 raises the port's
+///   interrupt, or CellGov does not hold the port's traffic. The refusal
+///   names the mask bit; see [`status::mask_refusal`].
 pub(crate) fn set_param(
     request: &HypercallRequest,
     firmware: Option<&str>,
@@ -137,12 +138,8 @@ pub(crate) fn set_param(
         VIRTUAL_UART_PARAM_INTERRUPT_MASK => params.interrupt_mask = value,
         _ => return lv1_answer(SET_VIRTUAL_UART_PARAM_NO_PARAM_R3),
     }
-    if params.interrupt_mask != 0 {
-        return refuse(
-            request,
-            "a virtual UART interrupt mask other than 0, with which lv1 can raise the port's \
-             interrupt from traffic CellGov does not hold",
-        );
+    if let Some(what) = status::mask_refusal(firmware, &params) {
+        return refuse(request, what);
     }
     let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []);
     answer.push_change(UartChange::PortParamsSet(params));

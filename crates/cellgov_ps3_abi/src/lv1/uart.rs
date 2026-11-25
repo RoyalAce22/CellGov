@@ -245,9 +245,9 @@
 //! So a call that leaves the mask at 0 sets no shadow bit, and changes no
 //! byte while the shadow is 0. A call that leaves a mask other than 0 can
 //! raise the port's interrupt. Whether it does depends on the peer and on
-//! the doublewords at +120, which change with the port's traffic. The
-//! kernel sets such a mask on each of its ports; see
-//! [`VIRTUAL_UART_PORT_MASK_CAPTURE`].
+//! the doublewords at +120, which change with the port's traffic;
+//! [`virtual_uart_status`] computes the status from them. The kernel sets
+//! such a mask on each of its ports; see [`VIRTUAL_UART_PORT_MASK_CAPTURE`].
 //!
 //! # Reading a port
 //!
@@ -796,6 +796,76 @@ pub const VIRTUAL_UART_SET_PARAM_MAX: u64 = VIRTUAL_UART_PARAM_INTERRUPT_MASK;
 /// bits that a mask can match are 1, 2 and 4; see [`crate::lv1::uart`].
 pub const VIRTUAL_UART_INTERRUPT_MASK_MAX: u64 = 7;
 
+/// The status bit of a port whose peer's receive buffer holds no more
+/// bytes than the transmit trigger: `INTERRUPT_MASK_TX` in Linux
+/// `drivers/ps3/ps3-vuart.c`.
+pub const VIRTUAL_UART_STATUS_TX: u64 = 1;
+
+/// The status bit of a port whose receive buffer has no more free bytes
+/// than the receive trigger: `INTERRUPT_MASK_RX` in Linux
+/// `drivers/ps3/ps3-vuart.c`.
+pub const VIRTUAL_UART_STATUS_RX: u64 = 2;
+
+/// The status bit of a port with no peer that has a reference:
+/// `INTERRUPT_MASK_DISCONNECT` in Linux `drivers/ps3/ps3-vuart.c`.
+pub const VIRTUAL_UART_STATUS_DISCONNECT: u64 = 4;
+
+/// The status bit of a port with a peer that has a reference. No mask
+/// that lv1 accepts holds this bit.
+pub const VIRTUAL_UART_STATUS_CONNECTED: u64 = 8;
+
+/// The fields of a port's endpoint, other than the triggers, that lv1's
+/// status function reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VirtualUartTraffic {
+    /// The size of the receive buffer, at +112 of the endpoint.
+    pub buffer_size: u64,
+    /// The bytes that the receive buffer holds, at +120 of the endpoint.
+    pub buffer_count: u64,
+    /// The bytes that the peer's receive buffer holds, at +120 of the
+    /// peer. The value is `None` when the port has no peer with a
+    /// reference.
+    pub peer_count: Option<u64>,
+}
+
+/// The interrupt status that lv1's status function computes for a port
+/// with `traffic` and the triggers `tx_trigger` and `rx_trigger`.
+///
+/// The function [OFW-4.93 lv1 a:0x2F20E4] sets these bits:
+/// - [`VIRTUAL_UART_STATUS_DISCONNECT`] when the peer at +72 is 0, or the
+///   peer's reference count is 0 [OFW-4.93 lv1 a:0x2F21B0-0x2F21E8];
+/// - [`VIRTUAL_UART_STATUS_CONNECTED`] for a peer with a reference, and
+///   [`VIRTUAL_UART_STATUS_TX`] too when the peer's count is not above
+///   the transmit trigger, unsigned [OFW-4.93 lv1 a:0x2F21F4-0x2F2204]
+///   [OFW-4.93 lv1 a:0x2F2380-0x2F2384];
+/// - [`VIRTUAL_UART_STATUS_RX`] when the buffer size less the count is not
+///   above the receive trigger, unsigned
+///   [OFW-4.93 lv1 a:0x2F2208-0x2F2210] [OFW-4.93 lv1 a:0x2F2388-0x2F238C]
+///   [OFW-4.93 lv1 a:0x2F2348].
+///
+/// The function computes the status after each call of
+/// `set_virtual_uart_param` that succeeds, the mask call included
+/// [OFW-4.93 lv1 a:0x2F3FB0-0x2F4008]. It sets the port's shadow bit only
+/// when the status and the mask share a bit
+/// [OFW-4.93 lv1 a:0x2F221C-0x2F224C]; see [`crate::lv1::uart`].
+pub const fn virtual_uart_status(
+    traffic: VirtualUartTraffic,
+    tx_trigger: u64,
+    rx_trigger: u64,
+) -> u64 {
+    let mut status = match traffic.peer_count {
+        None => VIRTUAL_UART_STATUS_DISCONNECT,
+        Some(peer_count) if peer_count <= tx_trigger => {
+            VIRTUAL_UART_STATUS_CONNECTED | VIRTUAL_UART_STATUS_TX
+        }
+        Some(_) => VIRTUAL_UART_STATUS_CONNECTED,
+    };
+    if traffic.buffer_size.wrapping_sub(traffic.buffer_count) <= rx_trigger {
+        status |= VIRTUAL_UART_STATUS_RX;
+    }
+    status
+}
+
 /// The r3 of `set_virtual_uart_param` for a port that lv1 does not hold:
 /// `LV1_NO_ENTRY` (-6), with r3 marked in the high word
 /// [OFW-4.93 lv1 a:0x2F4038-0x2F4044].
@@ -966,6 +1036,10 @@ mod set_param_tests;
 #[cfg(test)]
 #[path = "tests/uart_set_param_console_tests.rs"]
 mod set_param_console_tests;
+
+#[cfg(test)]
+#[path = "tests/uart_status_tests.rs"]
+mod status_tests;
 
 #[cfg(test)]
 #[path = "tests/uart_read_tests.rs"]

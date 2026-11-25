@@ -13,6 +13,7 @@ mod param;
 mod read;
 mod registration;
 mod set_param;
+mod status;
 
 pub use irq::VirtualUartIrq;
 pub(crate) use registration::GROUP;
