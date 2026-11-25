@@ -10,6 +10,10 @@ use cellgov_time::GuestTicks;
 /// The port id of the 4.93 kernel's first port.
 const FIRST_PORT_ID: u64 = 3;
 
+/// The `sc` of the kernel's first port call
+/// [OFW-4.93 lv2_kernel a:0x8000000000007d8c].
+const RECORD_SC: u64 = 0x8000_0000_0000_7d8c;
+
 /// The bitmap of the 4.93 kernel's thread 0: +0x1C0 of its record, which
 /// the capture `lv2_logical_ppe_record` places at 0x8000000000368f80.
 const THREAD_0_BITMAP: u64 = 0x0036_9140;
@@ -42,8 +46,12 @@ fn booted() -> Hypervisor {
         hv.dispatch_with(&bitmap, &storage()),
         HypercallDisposition::Answered(_)
     ));
+    let port = HypercallRequest {
+        pc: RECORD_SC,
+        ..call(CONSTRUCT_EVENT_RECEIVE_PORT, &[])
+    };
     assert!(matches!(
-        hv.dispatch(&call(CONSTRUCT_EVENT_RECEIVE_PORT, &[])),
+        hv.dispatch(&port),
         HypercallDisposition::Answered(_)
     ));
     hv

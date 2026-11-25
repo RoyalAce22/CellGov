@@ -2,7 +2,7 @@
 //! - the handler of `construct_event_receive_port` (hypercall 18);
 //! - the port object that lv1 constructs and the id it returns;
 //! - the port fields that later interrupt calls read;
-//! - the port id of the GameOS kernel's first call.
+//! - the port id of each call of the GameOS kernel's boot.
 //!
 //! The facts come from the 4.93 `lv1.self`, decrypted offline and read
 //! with `cellgov dev disasm`. No byte of lv1 is committed; these facts
@@ -93,25 +93,92 @@ pub fn event_receive_port_handler(firmware: &str) -> Option<&'static EventReceiv
         .find(|handler| handler.firmware == firmware)
 }
 
-/// The port id of the GameOS kernel's first `construct_event_receive_port`
-/// call, for each firmware that a source gives it for.
-///
-/// The partition's other objects decide the id, so no image read gives
-/// it. The kernel stores the r4 of the call at +0x40 of the record of
-/// its hardware thread [OFW-4.93 lv2_kernel a:0x8000000000007de8]. At
-/// 4.93 the capture [`super::ppe::LOGICAL_PPE_RECORD_CAPTURE`] reads it
-/// in the record of thread 0. The record of thread 1 holds the next id.
-/// The capture `lv2_event_port_ids` reads the ids of all eight ports
-/// that the kernel constructs, which are the eight ids from this one.
-pub const GAME_OS_FIRST_PORT_ID: &[(&str, u64)] = &[("4.93", 3)];
+/// One `construct_event_receive_port` call of the GameOS kernel, and the
+/// port id that lv1 gave it on the console.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameOsPortCall {
+    /// The hardware thread that makes the call.
+    pub thread: u8,
+    /// The address of the call's `sc`.
+    pub sc: u64,
+    /// The port id in r4 of lv1's answer.
+    pub id: u64,
+}
 
-/// The port id of the GameOS kernel's first port at the firmware version
-/// `firmware`, or `None` when no source gives it.
-pub fn game_os_first_port_id(firmware: &str) -> Option<u64> {
-    GAME_OS_FIRST_PORT_ID
+/// The `construct_event_receive_port` calls of the GameOS kernel's boot at
+/// one firmware.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameOsPortCalls {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// Each call, in the order of its port id.
+    pub calls: &'static [GameOsPortCall],
+}
+
+/// The call in the setup of a hardware thread's record
+/// [OFW-4.93 lv2_kernel a:0x8000000000007d8c].
+const RECORD_SC: u64 = 0x8000_0000_0000_7d8c;
+/// Call A of a hardware thread's start
+/// [OFW-4.93 lv2_kernel a:0x80000000002656d0].
+const START_A_SC: u64 = 0x8000_0000_0026_56d0;
+/// Call B of a hardware thread's start
+/// [OFW-4.93 lv2_kernel a:0x8000000000265784].
+const START_B_SC: u64 = 0x8000_0000_0026_5784;
+/// Call C of a hardware thread's start
+/// [OFW-4.93 lv2_kernel a:0x8000000000265840].
+const START_C_SC: u64 = 0x8000_0000_0026_5840;
+
+const fn call(thread: u8, sc: u64, id: u64) -> GameOsPortCall {
+    GameOsPortCall { thread, sc, id }
+}
+
+/// The port id of each `construct_event_receive_port` call of the GameOS
+/// kernel's boot, for each firmware that a source gives the ids for.
+///
+/// The partition's other objects decide each id, so no image read gives
+/// it. The capture `lv2_event_port_ids` reads the id of each 4.93 call;
+/// its README cites the place where the kernel stores each id. On each
+/// hardware thread the 4.93 kernel makes these calls:
+/// - one call in the setup of the thread's record;
+/// - calls A, B and C in the thread's start.
+///
+/// Thread 0 runs the kernel's subsystem init before its call A
+/// [OFW-4.93 lv2_kernel a:0x80000000002656bc]
+/// [OFW-4.93 lv2_kernel a:0x80000000002657a8-0x80000000002657ac]. In the
+/// capture, thread 1's start calls took their ids before thread 0's.
+pub const GAME_OS_PORT_CALLS: &[GameOsPortCalls] = &[GameOsPortCalls {
+    firmware: "4.93",
+    calls: &[
+        call(0, RECORD_SC, 3),
+        call(1, RECORD_SC, 4),
+        call(1, START_A_SC, 5),
+        call(1, START_B_SC, 6),
+        call(1, START_C_SC, 7),
+        call(0, START_A_SC, 8),
+        call(0, START_B_SC, 9),
+        call(0, START_C_SC, 10),
+    ],
+}];
+
+/// The kernel's calls at the firmware version `firmware`, or `None` when
+/// no source gives their ids.
+pub fn game_os_port_calls(firmware: &str) -> Option<&'static [GameOsPortCall]> {
+    GAME_OS_PORT_CALLS
         .iter()
-        .find(|(fw, _)| *fw == firmware)
-        .map(|(_, id)| *id)
+        .find(|calls| calls.firmware == firmware)
+        .map(|calls| calls.calls)
+}
+
+/// The port id that lv1 gave the GameOS kernel's call at the `sc` address
+/// `sc` on the hardware thread `thread`.
+///
+/// The value is `None` when no source gives that id at the firmware
+/// version `firmware`.
+pub fn game_os_port_id(firmware: &str, thread: u8, sc: u64) -> Option<u64> {
+    game_os_port_calls(firmware)?
+        .iter()
+        .find(|call| call.thread == thread && call.sc == sc)
+        .map(|call| call.id)
 }
 
 #[cfg(test)]

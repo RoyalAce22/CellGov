@@ -7,10 +7,10 @@
 //! it [OFW-4.93 lv2_kernel a:0x8000000000007ae0-0x8000000000007b08]. So
 //! the kernel's n calls on one thread name plugs 0 to n - 1.
 //!
-//! The hypervisor constructs one event receive port, and the kernel
-//! connects a port to each plug. So the test gives the connect step a
-//! port state that holds a port for each plug, and keeps each port that
-//! an answer carries, as the hypervisor does.
+//! The hypervisor constructs only the ports whose ids a console capture
+//! gives, and the kernel connects a port to each plug. So the test gives
+//! the connect step a port state that holds a port for each plug, and
+//! keeps each port that an answer carries, as the hypervisor does.
 
 use super::*;
 use crate::Hypervisor;

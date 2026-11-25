@@ -55,27 +55,23 @@ fn the_kernels_first_call_gets_the_first_port_id_in_r4_and_r5_to_r10_cleared() {
 }
 
 #[test]
-fn the_answer_reads_no_input_register_and_not_the_calling_thread() {
+fn the_answer_reads_no_input_register() {
     let mut r = request();
     r.inputs = [0xA5A5_A5A5_A5A5_A5A5; 8];
-    for thread in [Some(0), Some(1), None] {
-        r.thread = thread;
-        assert_eq!(
-            construct_port(&r, Some("4.93"), &EventReceivePortState::default()),
-            constructed(FIRST_PORT_ID),
-            "{thread:?}"
-        );
-    }
+    assert_eq!(
+        construct_port(&r, Some("4.93"), &EventReceivePortState::default()),
+        constructed(FIRST_PORT_ID)
+    );
 }
 
 #[test]
-fn a_second_port_is_refused() {
+fn a_second_record_call_on_one_thread_is_refused() {
     let r = request();
     assert_eq!(
         construct_port(&r, Some("4.93"), &holding(FIRST_PORT_ID)),
         refused(
             &r,
-            "a second event receive port, whose id the partition's other objects decide"
+            "an event receive port call whose port id the hypervisor already holds"
         )
     );
 }

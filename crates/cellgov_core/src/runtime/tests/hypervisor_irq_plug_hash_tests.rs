@@ -9,13 +9,21 @@ use crate::runtime::state::Runtime;
 /// The port id of the 4.93 kernel's first port.
 const FIRST_PORT_ID: u64 = 3;
 
+/// The `sc` of the kernel's first port call
+/// [OFW-4.93 lv2_kernel a:0x8000000000007d8c].
+const RECORD_SC: u64 = 0x8000_0000_0000_7d8c;
+
 /// A 4.93 runtime whose hypervisor holds the kernel's first port.
 fn with_port() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(16), Budget::new(4), 100);
     rt.set_hypervisor_firmware("4.93");
+    let port = HypercallRequest {
+        pc: RECORD_SC,
+        thread: Some(0),
+        ..call(CONSTRUCT_EVENT_RECEIVE_PORT, [0; 5])
+    };
     assert!(matches!(
-        rt.hypervisor
-            .dispatch(&call(CONSTRUCT_EVENT_RECEIVE_PORT, [0; 5])),
+        rt.hypervisor.dispatch(&port),
         HypercallDisposition::Answered(_)
     ));
     rt

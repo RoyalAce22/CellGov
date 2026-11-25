@@ -19,7 +19,8 @@ fn construct(rt: &mut Runtime) -> HypercallDisposition {
         unit: UnitId::new(0),
         number: CONSTRUCT_EVENT_RECEIVE_PORT,
         inputs: [0; 8],
-        pc: 0,
+        // The kernel's first port call [OFW-4.93 lv2_kernel a:0x8000000000007d8c].
+        pc: 0x8000_0000_0000_7d8c,
         lr: 0,
         thread: Some(0),
         problem_state: false,

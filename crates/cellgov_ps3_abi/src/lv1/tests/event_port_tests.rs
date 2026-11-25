@@ -29,14 +29,23 @@ fn the_4_93_handler_is_the_live_table_entry_of_18() {
 fn no_handler_row_or_port_id_exists_for_a_firmware_whose_lv1_is_not_read() {
     for firmware in ["3.70", "4.92", ""] {
         assert_eq!(event_receive_port_handler(firmware), None, "{firmware:?}");
-        assert_eq!(game_os_first_port_id(firmware), None, "{firmware:?}");
+        assert_eq!(game_os_port_calls(firmware), None, "{firmware:?}");
+        assert_eq!(
+            game_os_port_id(firmware, 0, RECORD_SC),
+            None,
+            "{firmware:?}"
+        );
     }
 }
 
 #[test]
-fn every_firmware_with_a_first_port_id_has_a_read_handler() {
-    assert_eq!(GAME_OS_FIRST_PORT_ID.len(), 1);
-    for (firmware, _) in GAME_OS_FIRST_PORT_ID {
-        assert!(event_receive_port_handler(firmware).is_some(), "{firmware}");
+fn every_firmware_with_port_ids_has_a_read_handler() {
+    assert_eq!(GAME_OS_PORT_CALLS.len(), 1);
+    for calls in GAME_OS_PORT_CALLS {
+        assert!(
+            event_receive_port_handler(calls.firmware).is_some(),
+            "{}",
+            calls.firmware
+        );
     }
 }

@@ -3,8 +3,8 @@
 A hardware probe. It reads back, from the running 4.93 kernel's memory,
 the port ids that lv1 `construct_event_receive_port` (hypercall 18)
 gave the kernel on each hardware thread. CellGov's hypervisor answers
-the kernel's first call with the id that the `lv2_logical_ppe_record`
-capture reads; this capture also gives the ids of the later calls.
+each of these calls in a 4.93 kernel boot with the id that this capture
+reads for the call's hardware thread and `sc` address.
 
 ## Where the values sit
 

@@ -1,6 +1,6 @@
-//! The 4.93 first port id held to the console capture of the kernel's
-//! per-thread records. The README of the capture gives the record's
-//! other fields; the port id's place is cited on [`PORT_ID`].
+//! The 4.93 port ids of the record calls held to the console capture of
+//! the kernel's per-thread records. The README of the capture gives the
+//! record's other fields; the port id's place is cited on [`PORT_ID`].
 
 use super::*;
 use crate::lv1::boot_record_capture::captured_doubleword_in;
@@ -31,14 +31,19 @@ fn record(index: u64, offset: u64) -> u64 {
 }
 
 #[test]
-fn the_4_93_first_port_id_is_the_one_the_record_of_thread_0_kept() {
+fn the_4_93_record_call_of_thread_0_gets_the_id_the_record_of_thread_0_kept() {
     assert_eq!(record(0, INDEX), 0);
-    assert_eq!(game_os_first_port_id("4.93"), Some(record(0, PORT_ID)));
+    assert_eq!(
+        game_os_port_id("4.93", 0, RECORD_SC),
+        Some(record(0, PORT_ID))
+    );
 }
 
 #[test]
-fn the_record_of_thread_1_kept_the_id_after_the_first_port() {
+fn the_4_93_record_call_of_thread_1_gets_the_id_the_record_of_thread_1_kept() {
     assert_eq!(record(1, INDEX), 1);
-    let first = game_os_first_port_id("4.93").expect("the 4.93 first port id");
-    assert_eq!(record(1, PORT_ID), first + 1);
+    assert_eq!(
+        game_os_port_id("4.93", 1, RECORD_SC),
+        Some(record(1, PORT_ID))
+    );
 }

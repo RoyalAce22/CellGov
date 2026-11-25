@@ -1,6 +1,6 @@
-//! The 4.93 first port id and the object table's first-free-id rule held
-//! to the console capture of all eight port ids the kernel keeps. The
-//! README of the capture cites each place the kernel stores an id.
+//! The 4.93 port id of each kernel call held to the console capture of
+//! all eight port ids the kernel keeps. The README of the capture cites
+//! each place the kernel stores an id.
 
 use super::*;
 use crate::lv1::boot_record_capture::captured_doubleword_in;
@@ -28,31 +28,43 @@ fn entry((table, size): (u64, u64), thread: u64, offset: u64) -> u64 {
     read(table + size * thread + offset)
 }
 
-/// The port id of each of the kernel's eight calls: per thread, the
-/// record's +0x40, call A's +8, and call B's and call C's +0.
-fn port_ids() -> Vec<u64> {
-    (0..2)
-        .flat_map(|thread| {
-            [
-                read(RECORDS + RECORD_SIZE * thread + 0x40),
-                entry(TABLE_A, thread, 8),
-                entry(TABLE_B, thread, 0),
-                entry(TABLE_C, thread, 0),
-            ]
-        })
-        .collect()
+/// The captured port id of the call at `sc` on the hardware thread
+/// `thread`: the record's +0x40, call A's +8, or call B's or call C's +0.
+fn captured_id(thread: u8, sc: u64) -> u64 {
+    let n = u64::from(thread);
+    match sc {
+        RECORD_SC => read(RECORDS + RECORD_SIZE * n + 0x40),
+        START_A_SC => entry(TABLE_A, n, 8),
+        START_B_SC => entry(TABLE_B, n, 0),
+        START_C_SC => entry(TABLE_C, n, 0),
+        _ => panic!("no captured slot for the call at {sc:#018x}"),
+    }
 }
 
 #[test]
-fn the_kernel_s_eight_ports_take_the_ids_that_run_on_from_the_first_port_id() {
+fn each_4_93_kernel_call_gets_the_port_id_the_capture_reads_for_it() {
     for thread in 0..2 {
         assert_eq!(read(RECORDS + RECORD_SIZE * thread), thread, "record");
         assert_eq!(entry(TABLE_B, thread, 32), thread, "table B +32");
         assert_eq!(entry(TABLE_C, thread, 32), thread, "table C +32");
     }
-    let first = game_os_first_port_id("4.93").expect("the 4.93 first port id");
-    assert_eq!(read(RECORDS + 0x40), first, "the record of thread 0");
-    let mut ids = port_ids();
-    ids.sort_unstable();
-    assert_eq!(ids, (first..first + 8).collect::<Vec<u64>>());
+    let calls = game_os_port_calls("4.93").expect("the 4.93 port calls");
+    assert_eq!(calls.len(), 8);
+    for call in calls {
+        assert_eq!(
+            captured_id(call.thread, call.sc),
+            call.id,
+            "thread {} at {:#018x}",
+            call.thread,
+            call.sc
+        );
+    }
+    let mut sites: Vec<(u8, u64)> = calls.iter().map(|c| (c.thread, c.sc)).collect();
+    sites.sort_unstable();
+    sites.dedup();
+    assert_eq!(sites.len(), 8, "one call for each thread and site");
+    assert!(
+        calls.windows(2).all(|pair| pair[0].id < pair[1].id),
+        "in the order of the port id"
+    );
 }
