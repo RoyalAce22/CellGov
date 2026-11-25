@@ -21,12 +21,13 @@ use cellgov_ps3_abi::lv1::irq_plug::{
 use cellgov_ps3_abi::lv1::ppe::game_os_logical_ppe_id;
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
-use super::bitmap::{IrqStateBitmapKey, IrqStateBitmapState};
+use super::bitmap::{IrqStateBitmapKey, IrqStateBitmapState, StatusShadowWrite};
 use super::event_port::{EventReceivePort, EventReceivePortState};
 use super::InterruptChange;
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::group::memory::address_space::AddressSpaceState;
+use crate::group::spe::LogicalSpeState;
 use crate::request::HypercallRequest;
 
 /// The hypercalls this module answers.
@@ -41,6 +42,7 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
             input.firmware,
             &PlugState {
                 spaces: input.groups.memory().spaces(),
+                spes: input.groups.spe().spes(),
                 bitmaps: interrupt.bitmaps(),
                 ports: interrupt.ports(),
                 storage: input.storage,
@@ -71,6 +73,8 @@ pub(crate) struct PlugState<'a> {
     /// The virtual address spaces, whose ids name objects of another
     /// class.
     pub spaces: &'a AddressSpaceState,
+    /// The logical SPEs, whose ids name objects of another class.
+    pub spes: &'a LogicalSpeState,
     /// The interrupt state bitmaps.
     pub bitmaps: &'a IrqStateBitmapState,
     /// The event receive ports and the irq outlets.
@@ -82,15 +86,13 @@ pub(crate) struct PlugState<'a> {
 /// Hypercall 12: connects the port or irq outlet r6 to plug r5 of thread r4 of the logical PPE r3.
 ///
 /// The answer clears r4 to r10. It carries the port or the outlet with
-/// its connection and its plug, and the hypervisor keeps it. For a
-/// thread with a registered bitmap, the answer writes 0 to the status
-/// doubleword that holds the plug's bit:
-/// - lv1 clears the bit in the thread's status shadow and stores the
-///   shadow doubleword there.
-/// - The shadow is 0, because no call that CellGov answers raises a
-///   plug's bit.
-/// - The pending byte of a port or an outlet is 0 for the same reason,
-///   so lv1 takes the clear path.
+/// its connection and its plug, and the hypervisor keeps it. lv1 takes
+/// the clear path for a port with no pending event:
+/// - It clears the plug's bit in the thread's status shadow. The answer
+///   carries the cleared doubleword when the bit was set.
+/// - It stores the shadow doubleword in the status doubleword that holds
+///   the plug's bit. The answer writes it there for a thread with a
+///   registered bitmap.
 ///
 /// A call that fails one of lv1's checks gets lv1's own r3, with r4 to
 /// r10 cleared. See [`IRQ_PLUG_PPE_ID_R3`] for the checks and their
@@ -101,6 +103,8 @@ pub(crate) struct PlugState<'a> {
 /// - no lv1 image read shows the handler for `firmware`;
 /// - no source gives the logical PPE id for `firmware`;
 /// - r6 names no object that CellGov holds;
+/// - the port holds a pending event, for which lv1 raises the plug's
+///   bit;
 /// - no storage holds the status doubleword of the plug.
 pub(crate) fn connect_plug(
     request: &HypercallRequest,
@@ -143,7 +147,10 @@ pub(crate) fn connect_plug(
             (*port, InterruptChange::PlugConnect)
         } else if let Some(outlet) = state.ports.outlet(port_id) {
             (*outlet, InterruptChange::OutletPlugConnect)
-        } else if port_id == logical_ppe_id || state.spaces.space(port_id).is_some() {
+        } else if port_id == logical_ppe_id
+            || state.spaces.space(port_id).is_some()
+            || state.spes.spe(port_id).is_some()
+        {
             return lv1_answer(IRQ_PLUG_PORT_R3);
         } else {
             return refuse(
@@ -160,32 +167,63 @@ pub(crate) fn connect_plug(
         answer.push_change(change(EventReceivePort { plug, ..port }));
         return HypercallDisposition::Answered(answer);
     }
-    let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []);
-    if let Some(bitmap) = state.bitmaps.bitmap(key) {
-        let (doubleword, _) = plug_status_bit(plug);
-        let Some(range) = bitmap
-            .checked_add(doubleword * STATUS_DOUBLEWORD_BYTES)
-            .and_then(|address| ByteRange::new(GuestAddr::new(address), STATUS_DOUBLEWORD_BYTES))
-            .filter(|range| state.storage.holds(range.start().raw(), range.length()))
-        else {
-            return refuse(
-                request,
-                "an IRQ plug whose status doubleword CellGov holds no storage for",
-            );
-        };
-        answer.effects.push(Effect::SharedWriteIntent {
-            range,
-            bytes: WritePayload::new(vec![0; STATUS_DOUBLEWORD_BYTES as usize]),
-            source: request.unit,
-            source_time: request.tick,
-        });
+    if state.ports.is_pending(port.id) {
+        return refuse(
+            request,
+            "an IRQ plug call for a port with a pending event, which lv1 raises on the plug",
+        );
     }
+    let Some(mut answer) = clear_path_answer(request, state.bitmaps, state.storage, key, plug)
+    else {
+        return refuse(
+            request,
+            "an IRQ plug whose status doubleword CellGov holds no storage for",
+        );
+    };
     answer.push_change(change(EventReceivePort {
         connection: Some(key),
         plug,
         ..port
     }));
     HypercallDisposition::Answered(answer)
+}
+
+/// lv1's success answer on the clear path: the cleared status doubleword
+/// write for a thread with a registered bitmap, and the shadow change when
+/// the plug's bit was set. `None` when no storage holds the status
+/// doubleword.
+fn clear_path_answer(
+    request: &HypercallRequest,
+    bitmaps: &IrqStateBitmapState,
+    storage: &GuestMemory,
+    key: IrqStateBitmapKey,
+    plug: u8,
+) -> Option<HypercallAnswer> {
+    let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []);
+    let (doubleword, bit) = plug_status_bit(plug);
+    let index = doubleword as u8;
+    let shadow = bitmaps.shadow(key)[usize::from(index)];
+    let cleared = shadow & !bit;
+    if let Some(bitmap) = bitmaps.bitmap(key) {
+        let range = bitmap
+            .checked_add(doubleword * STATUS_DOUBLEWORD_BYTES)
+            .and_then(|address| ByteRange::new(GuestAddr::new(address), STATUS_DOUBLEWORD_BYTES))
+            .filter(|range| storage.holds(range.start().raw(), range.length()))?;
+        answer.effects.push(Effect::SharedWriteIntent {
+            range,
+            bytes: WritePayload::new(cleared.to_be_bytes().to_vec()),
+            source: request.unit,
+            source_time: request.tick,
+        });
+    }
+    if cleared != shadow {
+        answer.push_change(InterruptChange::StatusShadow(StatusShadowWrite {
+            key,
+            index,
+            value: cleared,
+        }));
+    }
+    Some(answer)
 }
 
 #[cfg(test)]
@@ -207,3 +245,7 @@ mod outlet_tests;
 #[cfg(test)]
 #[path = "tests/irq_plug_boot_outlet_tests.rs"]
 mod boot_outlet_tests;
+
+#[cfg(test)]
+#[path = "tests/irq_plug_clear_path_tests.rs"]
+mod clear_path_tests;

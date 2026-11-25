@@ -191,6 +191,7 @@ fn the_kernels_connections_leave_the_maps_and_bitmaps_the_console_holds_after_bo
             next_port += 1;
             let state = PlugState {
                 spaces: &spaces,
+                spes: &LogicalSpeState::default(),
                 bitmaps: &bitmaps,
                 ports: &ports,
                 storage: &storage,

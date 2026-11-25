@@ -44,7 +44,8 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// For the calling thread, the answer is r3 = 0 with r4 to r10 cleared,
 /// and no change. lv1's return path then raises the external interrupt
 /// only for a set bit of the thread's status shadow. The shadow is 0,
-/// because no call that CellGov answers raises a plug's bit.
+/// because the hypervisor raises a plug's bit only on a paused thread,
+/// which makes no call.
 ///
 /// A call that fails one of lv1's checks gets lv1's own r3, with r4 to
 /// r10 cleared. See [`INTERRUPT_MASK_PPE_ID_R3`] for the checks and their

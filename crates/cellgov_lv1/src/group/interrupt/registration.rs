@@ -3,10 +3,10 @@
 
 use cellgov_mem::scheme::{HashedSurface, Stamp};
 
-use super::bitmap::{self, IrqStateBitmapRegistration, IrqStateBitmapState};
+use super::bitmap::{self, IrqStateBitmapRegistration, IrqStateBitmapState, StatusShadowWrite};
 use super::event_port::{self, EventReceivePort, EventReceivePortState};
 use super::pause::{self, PausedThread, PausedThreadState};
-use super::{irq_plug, mask};
+use super::{irq_plug, mask, send_event};
 use crate::group::state::StateChange;
 use crate::group::table::Group;
 
@@ -19,6 +19,7 @@ pub(crate) const GROUP: Group = Group {
         irq_plug::HYPERCALLS,
         mask::HYPERCALLS,
         pause::HYPERCALLS,
+        send_event::HYPERCALLS,
     ],
     lanes: &[81..=82, 144..=159],
     hashed_surfaces: &[
@@ -52,6 +53,21 @@ pub(crate) const GROUP: Group = Group {
             source: Some(PAUSED_THREAD_SOURCE),
             stamp: Stamp::Version(28),
         },
+        HashedSurface {
+            name: "the event receive ports with a pending event",
+            source: Some(PENDING_EVENT_SOURCE),
+            stamp: Stamp::Pending,
+        },
+        HashedSurface {
+            name: "the status shadows of the logical PPE threads",
+            source: Some(IRQ_STATUS_SHADOW_SOURCE),
+            stamp: Stamp::Pending,
+        },
+        HashedSurface {
+            name: "the paused PPE hardware threads that lv1 woke",
+            source: Some(WOKEN_THREAD_SOURCE),
+            stamp: Stamp::Pending,
+        },
     ],
 };
 
@@ -70,6 +86,18 @@ pub(crate) const IRQ_OUTLET_SOURCE: u8 = 144;
 /// The lane source of the PPE hardware threads that lv1 paused, one
 /// object per thread in thread order.
 pub(crate) const PAUSED_THREAD_SOURCE: u8 = 145;
+
+/// The lane source of the event receive ports with a pending event, one
+/// object per port in id order.
+pub(crate) const PENDING_EVENT_SOURCE: u8 = 146;
+
+/// The lane source of the status shadows with a set bit, one object per
+/// logical PPE thread in key order.
+pub(crate) const IRQ_STATUS_SHADOW_SOURCE: u8 = 147;
+
+/// The lane source of the paused threads that lv1 woke, one object per
+/// thread in thread order.
+pub(crate) const WOKEN_THREAD_SOURCE: u8 = 148;
 
 /// The interrupt group's state: the interrupt state bitmaps, the event
 /// receive ports, the irq outlets and the paused threads.
@@ -106,6 +134,9 @@ impl InterruptGroupState {
             InterruptChange::OutletConstructed(outlet) => self.ports.construct_outlet(outlet),
             InterruptChange::OutletPlugConnect(outlet) => self.ports.connect_outlet(outlet),
             InterruptChange::ThreadPaused(paused) => self.paused.pause(paused),
+            InterruptChange::EventPending(id) => self.ports.set_pending(id),
+            InterruptChange::StatusShadow(write) => self.bitmaps.write_shadow(write),
+            InterruptChange::ThreadWoken(thread) => self.paused.wake(thread),
         }
     }
 
@@ -137,6 +168,12 @@ pub enum InterruptChange {
     OutletPlugConnect(EventReceivePort),
     /// The call paused this thread.
     ThreadPaused(PausedThread),
+    /// The call set the pending byte of the port with this id.
+    EventPending(u64),
+    /// The call left this doubleword in a thread's status shadow.
+    StatusShadow(StatusShadowWrite),
+    /// lv1 cleared the pause flag of this paused hardware thread.
+    ThreadWoken(u8),
 }
 
 impl From<InterruptChange> for StateChange {

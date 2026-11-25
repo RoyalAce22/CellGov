@@ -14,12 +14,16 @@
 //! connects a port; see [`cellgov_ps3_abi::lv1::spe`]. So the state also
 //! keeps the outlets, apart from the ports, and hashes them.
 //!
+//! `send_event_locally` sets the pending byte of a port, and a later call
+//! reads it; see [`cellgov_ps3_abi::lv1::send_event`]. So the state keeps
+//! the ports with a pending event, and hashes them.
+//!
 //! Console captures give the port id of each call of the GameOS kernel's
 //! boot, by the call's hardware thread and its `sc` address. So
 //! the handler reads [`HypercallRequest::thread`] and
 //! [`HypercallRequest::pc`], although lv1 reads neither.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use cellgov_mem::lanes::{self, LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::call::CONSTRUCT_EVENT_RECEIVE_PORT;
@@ -27,7 +31,7 @@ use cellgov_ps3_abi::lv1::event_port::{event_receive_port_handler, game_os_port_
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
 use super::bitmap::IrqStateBitmapKey;
-use super::{InterruptChange, EVENT_RECEIVE_PORT_SOURCE, IRQ_OUTLET_SOURCE};
+use super::{InterruptChange, EVENT_RECEIVE_PORT_SOURCE, IRQ_OUTLET_SOURCE, PENDING_EVENT_SOURCE};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::request::HypercallRequest;
@@ -91,8 +95,17 @@ impl LaneValue for EventReceivePort {
     }
 }
 
+/// A port with a pending event. Field 1 is the port id.
+struct PendingPort(u64);
+
+impl LaneValue for PendingPort {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, self.0);
+    }
+}
+
 /// The partition's event receive ports and its irq outlets, each by its
-/// id.
+/// id, and the ports that hold a pending event.
 ///
 /// `set_spe_transition_notifier` takes a port and refuses an outlet, so
 /// the state keeps the two apart.
@@ -100,6 +113,8 @@ impl LaneValue for EventReceivePort {
 pub struct EventReceivePortState {
     ports: BTreeMap<u64, EventReceivePort>,
     outlets: BTreeMap<u64, EventReceivePort>,
+    /// The id of each port whose pending byte at +149 is set.
+    pending: BTreeSet<u64>,
 }
 
 impl EventReceivePortState {
@@ -156,12 +171,27 @@ impl EventReceivePortState {
         self.outlets.insert(outlet.id, outlet);
     }
 
-    /// The sync-state terms of the ports and the irq outlets.
+    /// Whether the port with the id `id` holds a pending event.
+    pub fn is_pending(&self, id: u64) -> bool {
+        self.pending.contains(&id)
+    }
+
+    /// Sets the pending byte of the port with the id `id`.
+    pub(crate) fn set_pending(&mut self, id: u64) {
+        self.pending.insert(id);
+    }
+
+    /// The sync-state terms of the ports, the irq outlets and the pending
+    /// events.
     ///
-    /// Each port is one object of the lane source
-    /// `EVENT_RECEIVE_PORT_SOURCE`, and each outlet is one object of the
-    /// lane source `IRQ_OUTLET_SOURCE`. Each object's key is its index in
-    /// id order. A state with no port and no outlet adds no term.
+    /// The objects are of these lane sources:
+    /// - each port is one object of `EVENT_RECEIVE_PORT_SOURCE`;
+    /// - each outlet is one object of `IRQ_OUTLET_SOURCE`;
+    /// - each port with a pending event is one object of
+    ///   `PENDING_EVENT_SOURCE`.
+    ///
+    /// Each object's key is its index in id order. A state with no port
+    /// and no outlet adds no term.
     pub fn sync_term(&self) -> u128 {
         let term = |source: u8, objects: &BTreeMap<u64, EventReceivePort>| {
             (0u64..)
@@ -170,8 +200,18 @@ impl EventReceivePortState {
                     sum.wrapping_add(lanes::value_term(source, index, object))
                 })
         };
+        let pending = (0u64..)
+            .zip(&self.pending)
+            .fold(0u128, |sum, (index, &id)| {
+                sum.wrapping_add(lanes::value_term(
+                    PENDING_EVENT_SOURCE,
+                    index,
+                    &PendingPort(id),
+                ))
+            });
         term(EVENT_RECEIVE_PORT_SOURCE, &self.ports)
             .wrapping_add(term(IRQ_OUTLET_SOURCE, &self.outlets))
+            .wrapping_add(pending)
     }
 }
 

@@ -56,7 +56,8 @@ pub use cost::cost;
 pub use group::device_bus::{DeviceBusChange, DeviceBusState};
 pub use group::gpu::{GpuChange, GpuState};
 pub use group::interrupt::bitmap::{
-    IrqStateBitmapKey, IrqStateBitmapRegistration, IrqStateBitmapState,
+    IrqStateBitmapKey, IrqStateBitmapRegistration, IrqStateBitmapState, StatusShadowWrite,
+    SHADOW_DOUBLEWORDS,
 };
 pub use group::interrupt::event_port::{EventReceivePort, EventReceivePortState};
 pub use group::interrupt::pause::{PausedThread, PausedThreadState};

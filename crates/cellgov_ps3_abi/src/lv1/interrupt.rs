@@ -88,6 +88,12 @@ pub const IRQ_STATE_BITMAP_BYTES: u64 = 64;
 /// registers the bitmap [OFW-4.93 lv1 a:0x2C413C-0x2C4160].
 pub const IRQ_STATUS_BYTES: u64 = 32;
 
+/// The offset of a bitmap's mask doublewords from the bitmap's address.
+/// The function [OFW-4.93 lv1 a:0x2C4120] adds it to the address
+/// [OFW-4.93 lv1 a:0x2C4124], and keeps the sum at +1736 of the thread's
+/// context [OFW-4.93 lv1 a:0x2C4168].
+pub const IRQ_MASK_OFFSET: u64 = 32;
+
 /// The base address of the memory region that lv1 looks up for the
 /// logical partition address `address`.
 ///

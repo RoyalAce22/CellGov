@@ -6,13 +6,18 @@
 //! [`cellgov_ps3_abi::lv1::pause`]. So the handler reads
 //! [`HypercallRequest::thread`].
 //!
-//! CellGov delivers no wake to a paused thread. An interrupt on an
-//! unmasked plug never comes, because no call that CellGov answers raises
-//! a plug's bit. CellGov does not model the decrementer wake of mode 0. A
-//! paused thread therefore stays parked, and the run that holds it says
-//! so where it stops.
+//! CellGov delivers no wake to a paused thread:
+//! - `send_event_locally` can raise an unmasked plug's bit on a paused
+//!   thread. lv1 then clears the thread's pause flag, and the hypervisor
+//!   keeps that wake; see [`PausedThreadState::is_woken`].
+//! - CellGov does not model the decrementer wake of mode 0.
+//!
+//! A paused thread therefore stays parked, and the run that holds it says
+//! so where it stops. A thread that resumes from a pause returns through
+//! lv1's vector, which checks the thread's status shadow against its mask;
+//! see [`cellgov_ps3_abi::lv1::interrupt_mask`].
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use cellgov_mem::lanes::{self, LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::call::PAUSE;
@@ -21,7 +26,7 @@ use cellgov_ps3_abi::lv1::pause::{
 };
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
-use super::{InterruptChange, PAUSED_THREAD_SOURCE};
+use super::{InterruptChange, PAUSED_THREAD_SOURCE, WOKEN_THREAD_SOURCE};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::request::HypercallRequest;
@@ -52,10 +57,21 @@ impl LaneValue for PausedThread {
     }
 }
 
-/// The threads that lv1 paused, each with its wake flag.
+/// A paused thread that lv1 woke. Field 1 is the thread.
+struct WokenThread(u8);
+
+impl LaneValue for WokenThread {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, u64::from(self.0));
+    }
+}
+
+/// The threads that lv1 paused, each with its wake flag, and the paused
+/// threads that lv1 woke.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PausedThreadState {
     paused: BTreeMap<u8, bool>,
+    woken: BTreeSet<u8>,
 }
 
 impl PausedThreadState {
@@ -85,16 +101,39 @@ impl PausedThreadState {
         self.paused.insert(paused.thread, paused.decrementer_wakes);
     }
 
-    /// The sync-state terms of the paused threads.
+    /// Whether lv1 cleared the pause flag of the paused thread `thread`.
+    ///
+    /// lv1 clears the flag for an interrupt on an unmasked plug. CellGov
+    /// delivers no wake, so the thread stays parked.
+    pub fn is_woken(&self, thread: u8) -> bool {
+        self.woken.contains(&thread)
+    }
+
+    /// Keeps the wake of the paused thread `thread`.
+    pub(crate) fn wake(&mut self, thread: u8) {
+        self.woken.insert(thread);
+    }
+
+    /// The sync-state terms of the paused threads and their wakes.
     ///
     /// Each paused thread is one object of the lane source
-    /// `PAUSED_THREAD_SOURCE`, keyed by its index in thread order. A state
-    /// with no paused thread adds no term.
+    /// `PAUSED_THREAD_SOURCE`, and each woken thread is one object of the
+    /// lane source `WOKEN_THREAD_SOURCE`. Each object's key is its index
+    /// in thread order. A state with no paused thread adds no term.
     pub fn sync_term(&self) -> u128 {
-        (0u64..)
+        let paused = (0u64..)
             .zip(self.threads())
             .fold(0u128, |sum, (index, paused)| {
                 sum.wrapping_add(lanes::value_term(PAUSED_THREAD_SOURCE, index, &paused))
+            });
+        (0u64..)
+            .zip(&self.woken)
+            .fold(paused, |sum, (index, &thread)| {
+                sum.wrapping_add(lanes::value_term(
+                    WOKEN_THREAD_SOURCE,
+                    index,
+                    &WokenThread(thread),
+                ))
             })
     }
 }
@@ -114,7 +153,8 @@ fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDispositio
 /// the caller pauses. The answer carries the paused thread and its wake
 /// flag, and the hypervisor keeps them. lv1 ends the call with no pause
 /// in two cases, and CellGov's hypervisor answers neither:
-/// - an unmasked status shadow bit, which no answered call raises;
+/// - an unmasked status shadow bit. The hypervisor raises a bit only on
+///   a paused thread, so the caller's shadow is 0;
 /// - in mode 0, a pending decrementer interrupt that lv1 keeps in the
 ///   byte at +1830. CellGov's hypervisor keeps no such byte.
 ///

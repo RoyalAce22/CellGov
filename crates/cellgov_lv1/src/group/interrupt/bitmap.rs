@@ -12,6 +12,11 @@
 //! connected to the thread; see [`cellgov_ps3_abi::lv1::interrupt`]. So
 //! a later interrupt call reads the bitmaps, and the hypervisor hashes
 //! them.
+//!
+//! lv1 keeps that bit in the status shadow of the thread's lv1 context
+//! too, and copies the shadow to each bitmap that the thread registers.
+//! So the hypervisor keeps each thread's shadow beside its bitmap, and
+//! hashes it.
 
 use std::collections::BTreeMap;
 
@@ -25,10 +30,11 @@ use cellgov_ps3_abi::lv1::interrupt::{
     IRQ_STATE_BITMAP_NO_REGION_R3, IRQ_STATE_BITMAP_PPE_ID_R3, IRQ_STATE_BITMAP_REGION_R3,
     IRQ_STATE_BITMAP_THREAD_R3, IRQ_STATUS_BYTES, THREADS_PER_LOGICAL_PPE,
 };
+use cellgov_ps3_abi::lv1::irq_plug::plug_status_bit;
 use cellgov_ps3_abi::lv1::ppe::game_os_logical_ppe_id;
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
-use super::{InterruptChange, IRQ_STATE_BITMAP_SOURCE};
+use super::{InterruptChange, IRQ_STATE_BITMAP_SOURCE, IRQ_STATUS_SHADOW_SOURCE};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::group::memory::region as memory;
@@ -76,10 +82,52 @@ impl LaneValue for IrqStateBitmapRegistration {
     }
 }
 
-/// The bitmap that each logical PPE thread registered.
+/// The doublewords of a thread's status shadow.
+pub const SHADOW_DOUBLEWORDS: usize = (IRQ_STATUS_BYTES / 8) as usize;
+
+// The status doubleword of every u8 plug indexes a shadow doubleword.
+const _: () = assert!(plug_status_bit(u8::MAX).0 < SHADOW_DOUBLEWORDS as u64);
+
+/// One doubleword of a thread's status shadow, as a call leaves it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StatusShadowWrite {
+    /// The thread that the shadow belongs to.
+    pub key: IrqStateBitmapKey,
+    /// The doubleword, below [`SHADOW_DOUBLEWORDS`].
+    pub index: u8,
+    /// The doubleword's new value.
+    pub value: u64,
+}
+
+/// One thread's status shadow.
+///
+/// These fields:
+/// - fields 1 and 2: the logical PPE id and the thread;
+/// - fields 3 to 6: the shadow doublewords, in order.
+struct StatusShadow {
+    key: IrqStateBitmapKey,
+    doublewords: [u64; SHADOW_DOUBLEWORDS],
+}
+
+impl LaneValue for StatusShadow {
+    fn lanes(&self, lanes: &mut ObjectLanes) {
+        lanes.lane(1, 0, self.key.ppe_id);
+        lanes.lane(2, 0, u64::from(self.key.thread));
+        for (field, &doubleword) in (3u8..).zip(&self.doublewords) {
+            lanes.lane(field, 0, doubleword);
+        }
+    }
+}
+
+/// The bitmap that each logical PPE thread registered, and the status
+/// shadow of each thread.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct IrqStateBitmapState {
     bitmaps: BTreeMap<IrqStateBitmapKey, u64>,
+    /// Each shadow with a set bit. A thread that is not here has a shadow
+    /// of 0, as lv1's context constructor sets it
+    /// [OFW-4.93 lv1 a:0x2C3F78-0x2C3F84].
+    shadows: BTreeMap<IrqStateBitmapKey, [u64; SHADOW_DOUBLEWORDS]>,
 }
 
 impl IrqStateBitmapState {
@@ -106,21 +154,50 @@ impl IrqStateBitmapState {
         self.bitmaps.keys().any(|key| key.ppe_id == ppe_id)
     }
 
-    /// The sync-state terms of the bitmaps.
+    /// The status shadow of the thread `key`.
+    pub fn shadow(&self, key: IrqStateBitmapKey) -> [u64; SHADOW_DOUBLEWORDS] {
+        self.shadows.get(&key).copied().unwrap_or_default()
+    }
+
+    /// Keeps `write` in its thread's shadow. A doubleword index at or past
+    /// [`SHADOW_DOUBLEWORDS`] changes nothing.
+    pub(crate) fn write_shadow(&mut self, write: StatusShadowWrite) {
+        let mut shadow = self.shadow(write.key);
+        let Some(doubleword) = shadow.get_mut(usize::from(write.index)) else {
+            return;
+        };
+        *doubleword = write.value;
+        if shadow == [0; SHADOW_DOUBLEWORDS] {
+            self.shadows.remove(&write.key);
+        } else {
+            self.shadows.insert(write.key, shadow);
+        }
+    }
+
+    /// The sync-state terms of the bitmaps and the shadows.
     ///
-    /// Each bitmap is one object of
-    /// the lane source `IRQ_STATE_BITMAP_SOURCE`, keyed by its index in key
-    /// order. A state with no bitmap adds no term.
+    /// Each bitmap is one object of the lane source
+    /// `IRQ_STATE_BITMAP_SOURCE`, and each shadow with a set bit is one
+    /// object of the lane source `IRQ_STATUS_SHADOW_SOURCE`. Each object's
+    /// key is its index in key order. A state with no bitmap and no set
+    /// shadow bit adds no term.
     pub fn sync_term(&self) -> u128 {
+        let bitmaps =
+            (0u64..)
+                .zip(&self.bitmaps)
+                .fold(0u128, |sum, (index, (&key, &lpar_address))| {
+                    let registration = IrqStateBitmapRegistration { key, lpar_address };
+                    sum.wrapping_add(lanes::value_term(
+                        IRQ_STATE_BITMAP_SOURCE,
+                        index,
+                        &registration,
+                    ))
+                });
         (0u64..)
-            .zip(&self.bitmaps)
-            .fold(0u128, |sum, (index, (&key, &lpar_address))| {
-                let registration = IrqStateBitmapRegistration { key, lpar_address };
-                sum.wrapping_add(lanes::value_term(
-                    IRQ_STATE_BITMAP_SOURCE,
-                    index,
-                    &registration,
-                ))
+            .zip(&self.shadows)
+            .fold(bitmaps, |sum, (index, (&key, &doublewords))| {
+                let shadow = StatusShadow { key, doublewords };
+                sum.wrapping_add(lanes::value_term(IRQ_STATUS_SHADOW_SOURCE, index, &shadow))
             })
     }
 }
@@ -157,11 +234,10 @@ fn real_mode_region_check(address: u64, rm_size: u64) -> Option<u64> {
 
 /// Hypercall 11: registers the bitmap at r5 for thread r4 of the logical PPE r3.
 ///
-/// The answer clears r4 to r10 and writes 0 to the bitmap's status
-/// doublewords. lv1 copies the thread's status shadow there, and the
-/// shadow is 0 because no call that CellGov answers raises a plug's bit.
-/// The answer carries the registration, and the hypervisor keeps it. A
-/// second registration for one thread replaces the first.
+/// The answer clears r4 to r10 and writes the thread's status shadow to
+/// the bitmap's status doublewords, as lv1 copies it there. The answer
+/// carries the registration, and the hypervisor keeps it. A second
+/// registration for one thread replaces the first.
 ///
 /// A call that fails one of lv1's checks gets lv1's own r3, with r4 to
 /// r10 cleared. See [`IRQ_STATE_BITMAP_PPE_ID_R3`] for the checks and
@@ -240,16 +316,22 @@ pub(crate) fn configure_bitmap(
             "an interrupt state bitmap whose status doublewords CellGov holds no storage for",
         );
     };
+    let key = IrqStateBitmapKey { ppe_id, thread };
+    let shadow: Vec<u8> = bitmaps
+        .shadow(key)
+        .iter()
+        .flat_map(|doubleword| doubleword.to_be_bytes())
+        .collect();
     let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []);
     answer.effects.push(Effect::SharedWriteIntent {
         range,
-        bytes: WritePayload::new(vec![0; IRQ_STATUS_BYTES as usize]),
+        bytes: WritePayload::new(shadow),
         source: request.unit,
         source_time: request.tick,
     });
     answer.push_change(InterruptChange::BitmapRegistered(
         IrqStateBitmapRegistration {
-            key: IrqStateBitmapKey { ppe_id, thread },
+            key,
             lpar_address: address,
         },
     ));

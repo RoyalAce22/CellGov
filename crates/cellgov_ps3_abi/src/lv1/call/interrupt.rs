@@ -41,6 +41,13 @@ pub const CONNECT_IRQ_PLUG_EXT: u64 = 12;
 /// writes the output in this form; see [`crate::lv1::event_port`].
 pub const CONSTRUCT_EVENT_RECEIVE_PORT: u64 = 18;
 
+/// `send_event_locally`: one input and no output. r3 is the id of an
+/// event receive port.
+///
+/// The lv1 handler [OFW-4.93 lv1 a:0x2EF530] reads the input in this
+/// form; see [`crate::lv1::send_event`].
+pub const SEND_EVENT_LOCALLY: u64 = 24;
+
 /// `did_update_interrupt_mask`: two inputs and no output.
 /// - r3 is the logical PPE id.
 /// - r4 is the hardware thread whose interrupt mask changed.

@@ -75,6 +75,7 @@ fn connect(
         Some("4.93"),
         &PlugState {
             spaces: &AddressSpaceState::default(),
+            spes: &LogicalSpeState::default(),
             bitmaps: &bitmaps,
             ports: &held,
             storage: &GuestMemory::new(0x0037_0000),

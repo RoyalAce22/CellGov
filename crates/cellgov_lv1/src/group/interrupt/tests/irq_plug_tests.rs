@@ -1,4 +1,5 @@
 use super::*;
+use crate::group::spe::LogicalSpe;
 use crate::IrqStateBitmapRegistration;
 use crate::{AddressSpace, AddressSpaceChange};
 use cellgov_event::UnitId;
@@ -15,6 +16,10 @@ const FIRST_PORT_ID: u64 = 3;
 /// The vas id that the 4.93 kernel's boot `construct_virtual_address_space`
 /// gets.
 const VAS_ID: u64 = 2;
+
+/// The spe id of the 4.93 kernel's boot SPE in the capture
+/// `lv2_logical_spe_object`.
+const BOOT_SPE_ID: u64 = 11;
 
 /// The bitmap of the 4.93 kernel's thread 0: +0x1C0 of its record, which
 /// the capture `lv2_logical_ppe_record` places at 0x8000000000368f80.
@@ -55,6 +60,7 @@ fn with(r: &HypercallRequest, reg: usize, value: u64) -> HypercallRequest {
 /// thread 0: the vas, the bitmap of thread 0 and the ports `ports`.
 struct Held {
     spaces: AddressSpaceState,
+    spes: LogicalSpeState,
     bitmaps: IrqStateBitmapState,
     ports: EventReceivePortState,
     storage: GuestMemory,
@@ -81,6 +87,7 @@ impl Held {
         }
         Self {
             spaces,
+            spes: LogicalSpeState::default(),
             bitmaps,
             ports: state,
             storage: GuestMemory::new(0x0037_0000),
@@ -97,6 +104,7 @@ impl Held {
             firmware,
             &PlugState {
                 spaces: &self.spaces,
+                spes: &self.spes,
                 bitmaps: &self.bitmaps,
                 ports: &self.ports,
                 storage: &self.storage,
@@ -315,6 +323,23 @@ fn a_port_id_that_names_no_held_object_is_refused() {
             "{port_id}"
         );
     }
+}
+
+/// lv1 reads the SPE class at +48 of a logical SPE, and refuses it as a
+/// port [OFW-4.93 lv1 a:0x2EA18C-0x2EA198].
+#[test]
+fn a_logical_spe_id_gets_lv1_s_port_r3_and_no_change() {
+    let r = with(&request(), 6, BOOT_SPE_ID);
+    let mut held = first_port();
+    held.spes.construct(LogicalSpe {
+        id: BOOT_SPE_ID,
+        spe_type: 1,
+        vas_id: VAS_ID,
+        area: 0x0000_4c00_0028_0000,
+        shadow: 0x0000_3000_0000_6000,
+        shadow_real: 0x1100_0000,
+    });
+    assert_eq!(held.connect(&r), lv1_r3(IRQ_PLUG_PORT_R3));
 }
 
 #[test]
