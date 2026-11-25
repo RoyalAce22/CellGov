@@ -11,7 +11,8 @@
 //! The image names an address in three ways:
 //! - a doubleword in the file bytes of a segment, such as a function
 //!   descriptor or a TOC entry;
-//! - a constant that the code builds in a GPR on a straight-line path;
+//! - a constant that the code builds in a GPR on a path of fall-throughs
+//!   and direct branches;
 //! - an entry of a relative jump table: a 32-bit offset from a named
 //!   address, or from the word after a `bcctr`.
 //!
@@ -34,15 +35,28 @@
 //! computes in another way, such as from a value it loads at run time.
 //!
 //! The scan also keeps these addresses:
-//! - the target of each `bclr` whose LR holds a constant that a
-//!   straight-line path builds;
+//! - the target of each `bclr` whose LR holds a constant that a path of
+//!   fall-throughs and direct branches builds;
 //! - the target of each `bcctr` from each constant that a path to it
 //!   leaves in CTR;
 //! - each `bcctr` that a path reaches with a CTR that the scan cannot
-//!   prove: a CTR after a call, or after a decrement of a constant that
-//!   the scan records.
+//!   prove: a CTR after a call, after a decrement of a constant that the
+//!   scan records, or from a GPR that can hold a constant the scan
+//!   dropped;
+//! - each `bclr` that a path reaches with an LR that can hold a constant
+//!   the scan dropped.
 //!
-//! [`CtrFlow`] gives the paths that bring CTR to a `bcctr`.
+//! [`CtrFlow`] gives the paths that bring CTR to a `bcctr`. [`JoinFlow`]
+//! gives the constants that the paths to a branch target bring in the
+//! GPRs and in LR. These limits apply to it:
+//! - it does not follow a call into its routine;
+//! - it keeps at most 16 constants of one register at a branch target.
+//!   When the paths bring more, it drops them and marks the register as
+//!   one that can hold a constant the scan dropped. The image does not
+//!   name a dropped constant. The mark moves only with a copy of the
+//!   register, so a dropped constant that a store and a load move, or
+//!   that a call takes into its routine, is a value that the scan does
+//!   not record.
 //!
 //! A second scan finds where an `rfid`, `mtmsr` or `mtmsrd` can put
 //! control into real mode. It forgets each constant at a word that
@@ -50,10 +64,12 @@
 //! keeps is the value on every path to the word.
 //!
 //! [`CtrFlow`]: ctr_flow::CtrFlow
+//! [`JoinFlow`]: join_flow::JoinFlow
 
 mod bound;
 mod constants;
 mod ctr_flow;
+mod join_flow;
 mod real_mode;
 mod toc;
 

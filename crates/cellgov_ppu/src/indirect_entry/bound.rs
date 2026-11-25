@@ -8,6 +8,7 @@ use cellgov_ps3_abi::format::elf::ppc64_function_descriptor as descriptor;
 
 use super::constants::{Constants, Value};
 use super::ctr_flow::CtrFlow;
+use super::join_flow::{JoinFlow, JoinWords};
 use super::real_mode::{real_mode_entries, Switches};
 use super::toc::{function_tocs, FunctionToc, FunctionWords};
 use crate::caller_census::CallerScanError;
@@ -92,14 +93,19 @@ pub(crate) struct IndirectBound {
     /// the branch. The scan takes control that reaches the word in real
     /// mode to reach the address in real mode.
     pub(crate) targets: BTreeMap<u64, BTreeSet<u64>>,
-    /// The address of each `bcctr` that can reach an address that the
-    /// scan does not know.
+    /// The address of each `bcctr` or `bclr` that can reach an address
+    /// that the scan does not know.
     ///
     /// A path reaches the `bcctr` after one of these steps, with no CTR
     /// write between:
     /// - a decrement of a constant, because a loop can run it more than
     ///   once;
-    /// - a call, because its routine can write CTR before it returns.
+    /// - a call, because its routine can write CTR before it returns;
+    /// - an `mtctr` of a GPR that can hold a constant that `JoinFlow`
+    ///   dropped.
+    ///
+    /// A path reaches the `bclr` with an LR that can hold a constant that
+    /// `JoinFlow` dropped.
     pub(crate) lost_targets: BTreeSet<u64>,
     /// Each address where an `rfid`, `mtmsr` or `mtmsrd` can put control
     /// into real mode.
@@ -145,6 +151,8 @@ pub(crate) fn indirect_entries(
         tables: BTreeSet::new(),
         targets: BTreeMap::new(),
         ctr_writes: BTreeMap::new(),
+        lost_ctr_writes: BTreeSet::new(),
+        lost_returns: BTreeSet::new(),
     };
     for file in files {
         for value in file.doublewords() {
@@ -155,23 +163,32 @@ pub(crate) fn indirect_entries(
     let functions = function_tocs(files, code);
     let every = Value::sorted(functions.values().flatten().copied().collect());
     let mut words = FunctionWords::new(code, &functions);
+    let join_words = JoinWords::new(code);
     loop {
         let before = (bound.named.len(), bound.real_named.len());
         let reached: BTreeSet<u64> = bound.named.union(&bound.real_named).copied().collect();
         words.grow(&reached);
         bound.targets.clear();
         bound.ctr_writes.clear();
+        bound.lost_ctr_writes.clear();
+        bound.lost_returns.clear();
         for (index, segment) in code.segments().iter().enumerate() {
-            bound.code_constants(index, segment, words.tocs.segment(index), &every);
+            bound.code_constants(index, segment, words.tocs.segment(index), &every, None);
+        }
+        let joins = JoinFlow::run(&join_words, &words.tocs, &every);
+        for (index, segment) in code.segments().iter().enumerate() {
+            let tocs = words.tocs.segment(index);
+            bound.code_constants(index, segment, tocs, &every, Some(&joins));
         }
         bound.jump_tables()?;
         if (bound.named.len(), bound.real_named.len()) == before {
             break;
         }
     }
-    let mut flow = CtrFlow::new(code, &bound.ctr_writes);
+    let mut flow = CtrFlow::new(code, &bound.ctr_writes, &bound.lost_ctr_writes);
     flow.run();
-    let lost_targets = flow.bcctr_targets(&mut bound.targets);
+    let mut lost_targets = flow.bcctr_targets(&mut bound.targets);
+    lost_targets.extend(&bound.lost_returns);
     let mut entries = real_mode_entries(elf, code);
     entries.extend(bound.named);
     let mut indirect = IndirectBound {
@@ -220,10 +237,17 @@ pub(super) struct Bound<'a> {
     /// The targets of the `bclr` words, from the TOCs of the latest
     /// round.
     targets: BTreeMap<u64, BTreeSet<u64>>,
-    /// The constants that each `mtctr` copies into CTR on its
-    /// straight-line path, by segment index and address, from the TOCs
-    /// of the latest round.
+    /// The constants that each `mtctr` copies into CTR on the paths to
+    /// it, by segment index and address, from the TOCs of the latest
+    /// round.
     ctr_writes: BTreeMap<(usize, u64), Value>,
+    /// Each `mtctr` that can also copy a constant that [`JoinFlow`]
+    /// dropped, by segment index and address, from the TOCs of the latest
+    /// round.
+    lost_ctr_writes: BTreeSet<(usize, u64)>,
+    /// The address of each `bclr` whose LR can hold a constant that
+    /// [`JoinFlow`] dropped, from the TOCs of the latest round.
+    lost_returns: BTreeSet<u64>,
 }
 
 impl Bound<'_> {
@@ -270,6 +294,9 @@ impl Bound<'_> {
     /// `every` holds each TOC that a descriptor gives. On each word, r2
     /// can hold the constants of the path and the TOCs of the word.
     ///
+    /// Without `joins`, the scan follows each straight-line path. With
+    /// `joins`, each join word starts with what [`JoinFlow`] gives it.
+    ///
     /// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00, and `bcctr` reaches CTR0:61 || 0b00.
     pub(super) fn code_constants(
         &mut self,
@@ -277,23 +304,36 @@ impl Bound<'_> {
         segment: &CodeSegment,
         tocs: &[FunctionToc],
         every: &Value,
+        joins: Option<&JoinFlow<'_>>,
     ) {
         let mut constants = Constants::default();
-        for ((address, raw), &toc) in segment.addressed().zip(tocs) {
-            constants.gprs[2] = toc.in_r2(constants.gprs[2].take(), every);
+        for (word, ((address, raw), &toc)) in segment.addressed().zip(tocs).enumerate() {
+            if let Some(entered) = joins.and_then(|joins| joins.entered((index, word))) {
+                constants = entered;
+            }
+            constants.enter_toc(toc, every);
             let decoded = crate::decode::decode(raw);
-            if let (Ok(PpuInstruction::Bclr { .. }), Some(lr)) = (&decoded, &constants.lr) {
-                self.targets
-                    .entry(lr.by)
-                    .or_default()
-                    .extend(lr.value.constants().iter().map(|&lr| lr & !0b11));
+            if let Ok(PpuInstruction::Bclr { .. }) = decoded {
+                for (&by, lr) in &constants.lr {
+                    self.targets
+                        .entry(by)
+                        .or_default()
+                        .extend(lr.constants().iter().map(|&lr| lr & !0b11));
+                }
+                if constants.lr_lost {
+                    self.lost_returns.insert(address);
+                }
             }
             if let Ok(PpuInstruction::Mtctr { rs }) = decoded {
-                self.ctr_writes.extend(
-                    constants
-                        .gpr(rs)
-                        .map(|value| ((index, address), value.clone())),
-                );
+                if let Some(value) = constants.gpr(rs) {
+                    self.ctr_writes
+                        .entry((index, address))
+                        .and_modify(|own| *own = own.clone().union(value))
+                        .or_insert_with(|| value.clone());
+                }
+                if constants.is_lost(rs) {
+                    self.lost_ctr_writes.insert((index, address));
+                }
             }
             for &constant in constants
                 .step(address, raw)

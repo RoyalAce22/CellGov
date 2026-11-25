@@ -21,7 +21,7 @@ use crate::local_cfg::falls_through;
 ///
 /// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.
 /// [PPC-Book1 p:24 s:2.4] A taken `bc` sets NIA to its target, and a `bc` sets LR whether or not it branches.
-fn calls(address: u64, raw: u32) -> bool {
+pub(super) fn calls(address: u64, raw: u32) -> bool {
     match crate::decode::decode(raw) {
         Ok(PpuInstruction::B { link, .. } | PpuInstruction::Bc { link, .. }) => {
             link && !links_to_next_word(address, raw)
@@ -33,7 +33,7 @@ fn calls(address: u64, raw: u32) -> bool {
 
 /// Whether the word `raw` at `address` is a `b` or a `bc` that links to
 /// the next word.
-fn links_to_next_word(address: u64, raw: u32) -> bool {
+pub(super) fn links_to_next_word(address: u64, raw: u32) -> bool {
     matches!(
         crate::decode::decode(raw),
         Ok(PpuInstruction::B { link: true, .. } | PpuInstruction::Bc { link: true, .. })
@@ -572,6 +572,9 @@ pub(super) struct CtrFlow<'a> {
     ///
     /// [`Bound::code_constants`]: super::bound::Bound::code_constants
     writes: &'a BTreeMap<(usize, u64), Value>,
+    /// Each `mtctr` that can also copy a constant that the scan dropped,
+    /// so its CTR is one the scan cannot prove.
+    lost_writes: &'a BTreeSet<(usize, u64)>,
     /// What the paths to each word bring in CTR and in its copies, in one
     /// vector for each code segment.
     at: Vec<Vec<CtrState>>,
@@ -579,10 +582,15 @@ pub(super) struct CtrFlow<'a> {
 
 impl<'a> CtrFlow<'a> {
     /// The flow before its first step, with no CTR on any word.
-    pub(super) fn new(code: &'a Code, writes: &'a BTreeMap<(usize, u64), Value>) -> Self {
+    pub(super) fn new(
+        code: &'a Code,
+        writes: &'a BTreeMap<(usize, u64), Value>,
+        lost_writes: &'a BTreeSet<(usize, u64)>,
+    ) -> Self {
         Self {
             code,
             writes,
+            lost_writes,
             at: code
                 .segments()
                 .iter()
@@ -693,8 +701,8 @@ impl<'a> CtrFlow<'a> {
     /// passes there.
     ///
     /// `position` holds the index of the segment and of the word there. A
-    /// word that does not decode passes no state, as the straight-line
-    /// scan forgets each constant there. A call passes no copy to its
+    /// word that does not decode passes no state, as the scan of the code
+    /// constants forgets each constant there. A call passes no copy to its
     /// target.
     fn steps(
         &self,
@@ -731,7 +739,7 @@ impl<'a> CtrFlow<'a> {
     /// and `state` is what the paths to it bring.
     ///
     /// An `mtctr` of a GPR that holds a copy of CTR joins the copy into
-    /// the constant that the straight-line scan gives.
+    /// the constants that `writes` holds for the `mtctr`.
     ///
     /// [PPC-Book1 p:81 s:3.3.13] `mtlr` and `mtctr`, forms of `mtspr`, copy RS into LR or CTR.
     fn ctr_steps(
@@ -750,6 +758,9 @@ impl<'a> CtrFlow<'a> {
                     written.map_or_else(Ctr::default, |value| Ctr::written(address, value));
                 if let Some(copy) = state.copies.get(&rs) {
                     ctr.join(&copy.rewritten(address));
+                }
+                if self.lost_writes.contains(&(index, address)) {
+                    ctr.join(&Ctr::lost());
                 }
                 (Some(ctr), None)
             }
@@ -913,7 +924,7 @@ impl Worklist {
 
 /// The index of the segment and of the word of each segment that holds a
 /// word at `address`.
-fn positions(code: &Code, address: u64) -> impl Iterator<Item = (usize, usize)> + '_ {
+pub(super) fn positions(code: &Code, address: u64) -> impl Iterator<Item = (usize, usize)> + '_ {
     code.segments()
         .iter()
         .enumerate()

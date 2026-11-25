@@ -1,22 +1,25 @@
 //! The constants that the code builds in its GPRs, LR, SRR0 and SRR1 on
-//! one straight-line path, and the words that end such a path.
+//! one path or on the paths that join at a word, and the words that end
+//! a path.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_BIT1, MSR_IR, MSR_PR, MSR_SF};
 
 use super::real_mode::{fetch_address, MsrWord, Switch};
+use super::toc::FunctionToc;
 use crate::caller_census::written_gprs;
 use crate::instruction::PpuInstruction;
 use crate::local_cfg::falls_through;
 
-/// The constants that a register can hold on a straight-line path.
+/// The constants that a register can hold on the paths to a word.
 ///
-/// A register holds more than one constant only when the path builds it
-/// from r2 on a word where r2 holds more than one: a word that functions
-/// with two different TOCs reach, or a word whose TOC differs from the
-/// constant that the path leaves in r2.
+/// A register holds more than one constant only in these cases:
+/// - a path builds it from r2 on a word where r2 holds more than one: a
+///   word that functions with two different TOCs reach, or a word whose
+///   TOC differs from the constant that the path leaves in r2;
+/// - paths that bring different constants join at a branch target.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Value {
     /// One constant.
@@ -81,40 +84,44 @@ impl Value {
 }
 
 /// The constants that the code builds in its GPRs, LR, SRR0 and SRR1 on
-/// one straight-line path.
+/// one path, or on the paths that join at a word.
 #[derive(Debug, Default)]
 pub(super) struct Constants {
     pub(super) gprs: [Option<Value>; 32],
-    pub(super) lr: Option<Written>,
+    /// Each GPR that can also hold a constant that the scan dropped, as
+    /// bit `n` for GPR `n`.
+    pub(super) lost_gprs: u32,
+    /// The constants in LR, by the address of the word that wrote each
+    /// one.
+    pub(super) lr: BTreeMap<u64, Value>,
+    /// Whether LR can also hold a constant that the scan dropped.
+    pub(super) lr_lost: bool,
     srr0: Option<Value>,
     srr1: Option<Value>,
-}
-
-/// A constant in LR.
-#[derive(Debug, Clone)]
-pub(super) struct Written {
-    pub(super) value: Value,
-    /// The address of the word that wrote the constant.
-    pub(super) by: u64,
 }
 
 impl Constants {
     /// Steps over the word `raw` at `address`, and returns the constants
     /// it writes into a GPR.
     ///
-    /// A word that does not fall through ends the straight-line path, so
-    /// the step forgets every constant.
+    /// A word that does not fall through ends the path, so the step
+    /// forgets every constant.
     pub(super) fn step(&mut self, address: u64, raw: u32) -> Option<Value> {
         let Ok(decoded) = crate::decode::decode(raw) else {
             *self = Self::default();
             return None;
         };
         if let Some((gpr, value)) = self.written(decoded) {
+            let lost = self.copies_lost(decoded);
+            self.set_lost(gpr, lost);
             self.gprs[usize::from(gpr)].clone_from(&value);
             return value;
         }
         match decoded {
-            PpuInstruction::Mtlr { rs } => self.lr = self.written_by(rs, address),
+            PpuInstruction::Mtlr { rs } => {
+                self.lr = self.written_by(rs, address);
+                self.lr_lost = self.is_lost(rs);
+            }
             PpuInstruction::B { link, .. } => self.after_branch(address, 0b10100, link),
             PpuInstruction::Bc { bo, link, .. }
             | PpuInstruction::Bclr { bo, link, .. }
@@ -132,6 +139,13 @@ impl Constants {
             _ => self.forget_written(&decoded),
         }
         None
+    }
+
+    /// Puts the TOCs of a word with the TOC `toc` in r2.
+    ///
+    /// `every` holds each TOC that a descriptor gives.
+    pub(super) fn enter_toc(&mut self, toc: FunctionToc, every: &Value) {
+        self.gprs[2] = toc.in_r2(self.gprs[2].take(), every);
     }
 
     /// Forgets the constants in SRR0 and SRR1.
@@ -219,11 +233,39 @@ impl Constants {
     /// Forgets the constant in each GPR that `decoded` writes.
     fn forget_written(&mut self, decoded: &PpuInstruction) {
         let written = written_gprs(decoded);
-        for (gpr, value) in self.gprs.iter_mut().enumerate() {
-            if written >> gpr & 1 == 1 {
-                *value = None;
-            }
+        let mut bits = written;
+        while bits != 0 {
+            self.gprs[bits.trailing_zeros() as usize] = None;
+            bits &= bits - 1;
         }
+        self.lost_gprs &= !written;
+    }
+
+    /// Whether `gpr` can also hold a constant that the scan dropped.
+    pub(super) fn is_lost(&self, gpr: u8) -> bool {
+        self.lost_gprs
+            .checked_shr(u32::from(gpr))
+            .is_some_and(|bits| bits & 1 == 1)
+    }
+
+    fn set_lost(&mut self, gpr: u8, lost: bool) {
+        let bit = 1u32.checked_shl(u32::from(gpr)).unwrap_or(0);
+        if lost {
+            self.lost_gprs |= bit;
+        } else {
+            self.lost_gprs &= !bit;
+        }
+    }
+
+    /// Whether the GPR that `decoded` builds can also hold a constant
+    /// that the scan dropped, because its source can.
+    fn copies_lost(&self, decoded: PpuInstruction) -> bool {
+        if let PpuInstruction::Mflr { .. } = decoded {
+            return self.lr_lost;
+        }
+        GprStep::of(decoded)
+            .and_then(|step| step.source)
+            .is_some_and(|gpr| self.is_lost(gpr))
     }
 
     /// The GPR that `decoded` writes and the constant it writes there,
@@ -232,7 +274,8 @@ impl Constants {
     /// [PPC-Book1 p:82 s:3.3.13] `mflr`, a form of `mfspr`, copies LR into RT.
     fn written(&self, decoded: PpuInstruction) -> Option<(u8, Option<Value>)> {
         if let PpuInstruction::Mflr { rt } = decoded {
-            return Some((rt, self.lr.as_ref().map(|lr| lr.value.clone())));
+            let lr = self.lr.values().cloned().reduce(|one, two| one.union(&two));
+            return Some((rt, lr));
         }
         let GprStep { rt, source, step } = GprStep::of(decoded)?;
         let value = match source {
@@ -251,11 +294,10 @@ impl Constants {
     /// The constants in `gpr`, which the word at `address` copies into LR.
     ///
     /// [PPC-Book1 p:81 s:3.3.13] `mtlr` and `mtctr`, forms of `mtspr`, copy RS into LR or CTR.
-    fn written_by(&self, gpr: u8, address: u64) -> Option<Written> {
-        self.gpr(gpr).map(|value| Written {
-            value: value.clone(),
-            by: address,
-        })
+    fn written_by(&self, gpr: u8, address: u64) -> BTreeMap<u64, Value> {
+        self.gpr(gpr)
+            .map(|value| BTreeMap::from([(address, value.clone())]))
+            .unwrap_or_default()
     }
 
     /// Steps over a branch at `address` with the BO field `bo`, which
@@ -272,11 +314,28 @@ impl Constants {
         }
         if link {
             self.forget_srrs();
-            self.lr = address.checked_add(4).map(|value| Written {
-                value: Value::One(value),
-                by: address,
-            });
+            self.lr_lost = false;
+            self.lr = address
+                .checked_add(4)
+                .map(|value| BTreeMap::from([(address, Value::One(value))]))
+                .unwrap_or_default();
         }
+    }
+}
+
+/// Whether the word `raw` ends each path through it: a word that does not
+/// decode, or a word that never falls through, as [`Constants::step`]
+/// takes them.
+pub(super) fn ends_path(raw: u32) -> bool {
+    match crate::decode::decode(raw) {
+        Err(_) => true,
+        Ok(PpuInstruction::B { link, .. }) => !falls_through(0b10100, link),
+        Ok(
+            PpuInstruction::Bc { bo, link, .. }
+            | PpuInstruction::Bclr { bo, link, .. }
+            | PpuInstruction::Bcctr { bo, link, .. },
+        ) => !falls_through(bo, link),
+        Ok(decoded) => never_falls_through(&decoded),
     }
 }
 

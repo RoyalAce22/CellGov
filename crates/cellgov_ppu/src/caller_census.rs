@@ -124,7 +124,7 @@ pub fn scan_syscalls(elf: &[u8]) -> Result<Vec<CallerSite>, CallerScanError> {
 /// - an `rfid` that can clear MSR\[IR\] at an SRR0 that the scan does not
 ///   know, to the word at the real address of each address that the
 ///   image names;
-/// - a `bcctr` that can reach an address that the scan does not know,
+/// - a `bcctr` or `bclr` that can reach an address that the scan does not know,
 ///   which can enter any word.
 ///
 /// The segments may lie anywhere in the 64-bit address space, as a
@@ -820,3 +820,7 @@ mod hypercall_real_alias_constant_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_real_alias_named_tests.rs"]
 mod hypercall_real_alias_named_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_constant_join_tests.rs"]
+mod hypercall_constant_join_tests;
