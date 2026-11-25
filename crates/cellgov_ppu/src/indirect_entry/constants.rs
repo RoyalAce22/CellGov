@@ -7,8 +7,9 @@ use std::rc::Rc;
 
 use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_BIT1, MSR_IR, MSR_PR, MSR_SF, SPR_SRR0, SPR_SRR1};
 
-use super::cells::{cell_writes, computed_cells, read_cells, CellMarks, CellWrite};
+use super::cells::{cell_writes, computed_cells, read_cells, CellMarks, CellWrite, Cells};
 use super::lost::{join_origins, LostGprs, Origins};
+use super::msr_bits::{MsrBits, MsrValues};
 use super::real_mode::{fetch_address, MsrWord, Switch};
 use super::toc::FunctionToc;
 use crate::caller_census::{surely_written_gprs, written_gprs};
@@ -164,6 +165,9 @@ pub(super) struct Constants {
     /// A move out takes the marks of the cells that it reads, and a word
     /// that adds XER\[CA\] into its result takes the mark of that cell.
     pub(super) cells: CellMarks,
+    /// The MSR bits that the scan knows in each GPR and in SRR1 on this
+    /// path.
+    pub(super) msr: MsrValues,
 }
 
 impl Constants {
@@ -181,6 +185,13 @@ impl Constants {
             return None;
         };
         let lr_copy = self.lr_copy_write(&decoded);
+        let gprs = &self.gprs;
+        let constant = |gpr: u8| match gprs.get(usize::from(gpr)) {
+            Some(Some(Value::One(one))) => Some(*one),
+            _ => None,
+        };
+        self.msr
+            .step(raw, &decoded, constant, written_gprs(&decoded));
         let written = cell_writes(&decoded, spr_move(&decoded)).map(|write| {
             let origins = self.cell_write_lost(&write);
             (write, origins)
@@ -349,6 +360,7 @@ impl Constants {
         self.gprs[2] = toc.in_r2(self.gprs[2].take(), every);
         if toc != FunctionToc::Outside {
             self.unheld &= !gpr_bit(2);
+            self.msr.forget_gpr(2);
         }
         self.forget_unheld_steps();
     }
@@ -381,24 +393,30 @@ impl Constants {
 
     /// Where the word `raw` at `address` can put control into real mode.
     ///
-    /// These words give no address:
-    /// - an `mtmsr` or `mtmsrd` with L = 1, which sets only MSR\[EE\]
-    ///   and MSR\[RI\];
-    /// - an `hrfid`, because the scan does not follow HSRR0 and HSRR1.
+    /// An `mtmsr` or `mtmsrd` with L = 1 sets only MSR\[EE\] and
+    /// MSR\[RI\], so it gives no address. The scan does not follow HSRR0
+    /// and HSRR1, so an `hrfid` can put control into real mode at an
+    /// address that the scan does not know.
     ///
     /// The address depends on the MSR value only through MSR\[SF\] and
     /// MSR bit 1, so the step uses one MSR value of each kind. An MSR
     /// value that the scan does not know can clear IR and PR with SF at 0
-    /// or at 1.
+    /// or at 1. These values cannot put control into real mode:
+    /// - a value whose known bits set MSR\[IR\] or MSR\[PR\] to 1;
+    /// - for an `mtmsr` or `mtmsrd`, a value that holds MSR\[IR\] and
+    ///   MSR\[PR\] of the word, which leaves the mode as it was.
     ///
     /// [PPC-Book3 p:13 s:2.3] `rfid` sets MSR\[IR\] to SRR1\[IR\] | SRR1\[PR\] and fetches the next instruction from SRR0 under the new MSR.
     /// [PPC-Book3 p:22 s:3.4] `mtmsrd` with L = 0 sets MSR\[IR\] to RS\[IR\] | RS\[PR\] and MSR\[SF\] to RS bit 0 | RS bit 1.
     /// [PPC-Book3 p:91 s:8.3] `mtmsr` with L = 0 sets MSR\[IR\] to RS\[IR\] | RS\[PR\] and leaves MSR bits 0:31 unchanged.
     pub(super) fn real_mode_switch(&self, address: u64, raw: u32) -> Switch {
-        let Some((msr, next, sets_sf)) = self.msr_write(address, raw) else {
+        let Some((msr, next, sets_sf, bits)) = self.msr_write(address, raw) else {
             return Switch::None;
         };
-        let kinds = fetch_kinds(msr, false);
+        if msr.is_none() && !sets_srr_target(raw) && bits.keeps_ir() {
+            return Switch::None;
+        }
+        let kinds = fetch_kinds(msr, bits, false);
         if kinds.is_empty() {
             return Switch::None;
         }
@@ -436,7 +454,7 @@ impl Constants {
         let (Some(MsrWord::Rfid), Some(srr0)) = (MsrWord::of(raw), &self.srr0) else {
             return BTreeSet::new();
         };
-        fetch_kinds(self.known_srr1(), true)
+        fetch_kinds(self.known_srr1(), self.msr.srr1(), true)
             .into_iter()
             .flat_map(|msr| {
                 srr0.constants()
@@ -456,11 +474,28 @@ impl Constants {
     /// [PPC-Book3 p:13 s:2.3] `rfid` sets MSR\[IR\] to SRR1\[IR\] | SRR1\[PR\] and fetches the next instruction from SRR0 under the new MSR.
     pub(super) fn translated_rfid_lost(&self, raw: u32) -> Option<&Origins> {
         if MsrWord::of(raw) != Some(MsrWord::Rfid)
-            || fetch_kinds(self.known_srr1(), true).is_empty()
+            || fetch_kinds(self.known_srr1(), self.msr.srr1(), true).is_empty()
         {
             return None;
         }
         self.srr0_lost.as_ref()
+    }
+
+    /// The origins of the SPR cell when the word `raw` is an `hrfid` and
+    /// the cell holds a lost mark.
+    ///
+    /// A move into HSRR0 writes the SPR cell, and the scan does not
+    /// follow HSRR0 on its own. So HSRR0 can hold a constant that the
+    /// scan dropped, and the `hrfid` can enter a word that the bound does
+    /// not hold. The scan does not follow HSRR1 either, so the new MSR
+    /// can leave MSR\[IR\] at 1.
+    ///
+    /// [PPC-Book3 p:13 s:2.3] `hrfid` sets NIA to HSRR0 0:61 || 0b00 and takes the new MSR from HSRR1.
+    pub(super) fn translated_hrfid_lost(&self, raw: u32) -> Option<Origins> {
+        if MsrWord::of(raw) != Some(MsrWord::Hrfid) {
+            return None;
+        }
+        self.cells.read(Cells::SPR)
     }
 
     /// The SRR1 constants, or `None` when SRR1 can also hold a constant
@@ -479,10 +514,13 @@ impl Constants {
     /// [PPC-Book3 p:22 s:3.4] `mtmsrd` with L = 0 sets MSR\[IR\] to RS\[IR\] | RS\[PR\] and MSR\[SF\] to RS bit 0 | RS bit 1.
     /// [PPC-Book3 p:91 s:8.3] `mtmsr` with L = 0 sets MSR\[IR\] to RS\[IR\] | RS\[PR\] and leaves MSR bits 0:31 unchanged.
     pub(super) fn mode32_switch(&self, address: u64, raw: u32, ir: bool) -> Switch {
-        let Some((msr, next, true)) = self.msr_write(address, raw) else {
+        let Some((msr, next, true, bits)) = self.msr_write(address, raw) else {
             return Switch::None;
         };
-        if !fetch_kinds(msr, ir).contains(&0) {
+        if msr.is_none() && !sets_srr_target(raw) && bits.keeps_sf() {
+            return Switch::None;
+        }
+        if !fetch_kinds(msr, bits, ir).contains(&0) {
             return Switch::None;
         }
         let Some(next) = next else {
@@ -502,20 +540,24 @@ impl Constants {
     /// it holds:
     /// - the MSR constants that the word sets MSR\[IR\] from;
     /// - the address of the next fetch;
-    /// - whether the word also sets MSR\[SF\].
+    /// - whether the word also sets MSR\[SF\];
+    /// - the bits of the MSR value that the scan knows, as
+    ///   [`MsrValues`] gives them.
     ///
     /// The MSR constants or the address are `None` when the scan does
     /// not know them.
-    fn msr_write(&self, address: u64, raw: u32) -> Option<(Option<&Value>, Option<Value>, bool)> {
+    fn msr_write(&self, address: u64, raw: u32) -> Option<MsrWrite<'_>> {
         let next = || address.checked_add(4).map(Value::One);
         Some(match MsrWord::of(raw)? {
             MsrWord::Rfid => (
                 self.known_srr1(),
                 self.srr0.as_ref().map(|srr0| srr0.map(|srr0| srr0 & !0b11)),
                 true,
+                self.msr.srr1(),
             ),
-            MsrWord::Mtmsrd { rs } => (self.gpr(rs), next(), true),
-            MsrWord::Mtmsr { rs } => (self.gpr(rs), next(), false),
+            MsrWord::Hrfid => (None, None, true, MsrBits::default()),
+            MsrWord::Mtmsrd { rs } => (self.gpr(rs), next(), true, self.msr.gpr(rs)),
+            MsrWord::Mtmsr { rs } => (self.gpr(rs), next(), false, self.msr.gpr(rs)),
             MsrWord::MtSrr0 { .. } | MsrWord::MtSrr1 { .. } => return None,
         })
     }
@@ -605,6 +647,7 @@ impl Constants {
     pub(super) fn enter_unheld(&mut self) {
         self.unheld = u32::MAX;
         self.lr_unheld = true;
+        self.msr = MsrValues::default();
     }
 
     /// The GPR that `decoded` writes and the constant it writes there,
@@ -731,14 +774,32 @@ impl Constants {
     }
 }
 
+/// What a word that writes MSR does, as [`Constants::msr_write`] gives
+/// it: the MSR constants, the next fetch address, whether the word sets
+/// MSR\[SF\], and the known bits of the MSR value.
+type MsrWrite<'c> = (Option<&'c Value>, Option<Value>, bool, MsrBits);
+
+/// Whether the word `raw` is an `rfid` or an `hrfid`, whose next fetch
+/// address is SRR0 or HSRR0 and not the next word.
+///
+/// An `rfid` with an SRR1 that holds the MSR of the word keeps the mode,
+/// but puts control at SRR0. So the scan takes it to switch as for an
+/// SRR1 that it does not know.
+fn sets_srr_target(raw: u32) -> bool {
+    matches!(MsrWord::of(raw), Some(MsrWord::Rfid | MsrWord::Hrfid))
+}
+
 /// The MSR\[SF\] and MSR bit 1 of each MSR constant of `msr` that sets
 /// MSR\[IR\] to `ir`.
 ///
 /// An MSR value that the scan does not know can set IR to 0 or to 1, with
-/// SF at 0 or at 1.
+/// SF at 0 or at 1. The bits of `bits` narrow that:
+/// - a value with MSR\[IR\] or MSR\[PR\] at 1 sets IR to 1;
+/// - a value with MSR\[SF\] or MSR bit 1 at 1 sets SF to 1.
 ///
 /// [PPC-Book3 p:13 s:2.3] `rfid` sets MSR\[IR\] to SRR1\[IR\] | SRR1\[PR\] and fetches the next instruction from SRR0 under the new MSR.
-fn fetch_kinds(msr: Option<&Value>, ir: bool) -> BTreeSet<u64> {
+/// [PPC-Book3 p:13 s:2.3] `rfid` places the OR of SRR1 bits 0 and 1 into MSR\[SF\].
+fn fetch_kinds(msr: Option<&Value>, bits: MsrBits, ir: bool) -> BTreeSet<u64> {
     match msr {
         Some(msr) => msr
             .constants()
@@ -746,6 +807,8 @@ fn fetch_kinds(msr: Option<&Value>, ir: bool) -> BTreeSet<u64> {
             .filter(|&&msr| (msr & (MSR_IR | MSR_PR) != 0) == ir)
             .map(|&msr| msr & (MSR_SF | MSR_BIT1))
             .collect(),
+        None if bits.sets_ir() && !ir => BTreeSet::new(),
+        None if bits.sets_sf() => BTreeSet::from([MSR_SF]),
         None => BTreeSet::from([0, MSR_SF]),
     }
 }

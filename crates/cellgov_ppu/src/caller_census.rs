@@ -1117,3 +1117,31 @@ mod hypercall_ctr_copy_unfollowed_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_ctr_fp_vector_copy_tests.rs"]
 mod hypercall_ctr_fp_vector_copy_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_vector_table_tests.rs"]
+mod hypercall_vector_table_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_rfid_walk_end_tests.rs"]
+mod hypercall_rfid_walk_end_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_msr_bits_tests.rs"]
+mod hypercall_msr_bits_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_closed_branch_tests.rs"]
+mod hypercall_closed_branch_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_alias_gate_tests.rs"]
+mod hypercall_alias_gate_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_hrfid_tests.rs"]
+mod hypercall_hrfid_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_closed_alias_tests.rs"]
+mod hypercall_closed_alias_tests;

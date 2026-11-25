@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 
 use cellgov_ps3_abi::format::elf::ELF64_E_ENTRY;
-use cellgov_ps3_abi::hw::ppu_interrupt::INTERRUPT_VECTOR_REAL_ADDRESSES;
+use cellgov_ps3_abi::hw::ppu_interrupt::PPE_INTERRUPT_VECTORS;
 use cellgov_ps3_abi::hw::ppu_mmu::REAL_MODE_IGNORED_EA;
 use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_BIT1, MSR_SF, SPR_SRR0, SPR_SRR1};
 
@@ -98,6 +98,7 @@ impl Switches {
                     constants = Constants::default();
                 }
                 constants.gprs[2] = toc.in_r2(constants.gprs[2].take(), every);
+                constants.msr.forget_gpr(2);
                 match constants.real_mode_switch(address, raw) {
                     Switch::None => {}
                     Switch::To(addresses) => switches.targets.extend(addresses),
@@ -177,7 +178,8 @@ fn joins(code: &Code, bound: &IndirectBound) -> BTreeSet<u64> {
         .collect()
 }
 
-/// Where one `rfid`, `mtmsr` or `mtmsrd` can put control into real mode.
+/// Where one `rfid`, `hrfid`, `mtmsr` or `mtmsrd` can put control into
+/// real mode.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Switch {
     /// The word cannot set MSR\[IR\] to 0, or it is not such a word.
@@ -193,12 +195,17 @@ pub(super) enum Switch {
 /// The words of `code` where control enters in real mode:
 /// - the ELF entry, where the kernel run starts thread 0 with MSR\[IR\]
 ///   and MSR\[DR\] at 0;
-/// - each word whose real address is in the interrupt vectors.
+/// - each word whose real address is an interrupt vector of
+///   [`PPE_INTERRUPT_VECTORS`].
+///
+/// An interrupt enters only the first word of its vector. Control gets to
+/// the other words of the vector pages by a fall-through or a branch.
 ///
 /// Real mode ignores EA bits 0 and 1, so the real address of a word is
 /// its address without them.
 ///
 /// [PPC-Book3 p:62 s:5.4] An interrupt sets MSR bits IR and DR to 0 and MSR bit SF to 1.
+/// [CBE-Handbook p:246 s:9.5.1] After a system reset interrupt, instruction fetch resumes at the vector address that Table 9-3 gives.
 pub(crate) fn real_mode_entries(elf: &[u8], code: &Code) -> BTreeSet<u64> {
     let elf_entry = elf
         .get(ELF64_E_ENTRY..ELF64_E_ENTRY + 8)
@@ -209,9 +216,7 @@ pub(crate) fn real_mode_entries(elf: &[u8], code: &Code) -> BTreeSet<u64> {
         .iter()
         .flat_map(CodeSegment::addressed)
         .map(|(address, _)| address)
-        .filter(|address| {
-            INTERRUPT_VECTOR_REAL_ADDRESSES.contains(&(address & !REAL_MODE_IGNORED_EA))
-        });
+        .filter(|address| PPE_INTERRUPT_VECTORS.contains(&(address & !REAL_MODE_IGNORED_EA)));
     elf_entry.into_iter().chain(vectors).collect()
 }
 
@@ -220,6 +225,9 @@ pub(crate) fn real_mode_entries(elf: &[u8], code: &Code) -> BTreeSet<u64> {
 pub(super) enum MsrWord {
     /// `rfid`.
     Rfid,
+    /// `hrfid`, which takes its next fetch address from HSRR0 and its
+    /// new MSR from HSRR1. The scan does not follow either register.
+    Hrfid,
     /// `mtmsrd` with L = 0.
     Mtmsrd { rs: u8 },
     /// `mtmsr` with L = 0.
@@ -233,7 +241,7 @@ pub(super) enum MsrWord {
 impl MsrWord {
     /// The word `raw` as an [`MsrWord`], or `None` for any other word.
     ///
-    /// [PPC-Book3 p:119 s:Appendix G] `rfid` is primary opcode 19 with extended opcode 18.
+    /// [PPC-Book3 p:119 s:Appendix G] `rfid` and `hrfid` are XL-form words with primary opcode 19 and extended opcodes 18 and 274.
     /// [PPC-Book3 p:22 s:3.4] `mtmsrd` is primary opcode 31 with extended opcode 178, RS in bits 6:10 and L in bit 15.
     /// [PPC-Book3 p:91 s:8.3] `mtmsr` is primary opcode 31 with extended opcode 146, RS in bits 6:10 and L in bit 15.
     /// [PPC-Book3 p:19 s:3.4] `mtspr` is primary opcode 31 with extended opcode 467 and RS in bits 6:10.
@@ -242,6 +250,7 @@ impl MsrWord {
         let l = (raw >> 16) & 1 == 1;
         Some(match (raw >> 26, (raw >> 1) & 0x3FF) {
             (19, 18) => Self::Rfid,
+            (19, 274) => Self::Hrfid,
             (31, 178) if !l => Self::Mtmsrd { rs },
             (31, 146) if !l => Self::Mtmsr { rs },
             (31, 467) if spr_number(raw) == SPR_SRR0 => Self::MtSrr0 { rs },

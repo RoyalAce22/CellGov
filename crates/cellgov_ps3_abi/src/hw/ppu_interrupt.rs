@@ -85,11 +85,58 @@ pub const VECTOR_TRACE: u64 = 0xD00;
 /// [CBE-Handbook p:258 s:9.5.15] The PPE's VXU unavailable interrupt is at 0xF20.
 pub const VECTOR_VXU_UNAVAILABLE: u64 = 0xF20;
 
-/// The real addresses that hold every architected and implementation-specific interrupt vector.
+/// Hypervisor decrementer interrupt vector.
+///
+/// [CBE-Handbook p:245 s:9.5] Table 9-3 gives the effective address of each PPE interrupt vector.
+pub const VECTOR_HYPERVISOR_DECREMENTER: u64 = 0x980;
+
+/// System error interrupt vector, which only the PPE has.
+///
+/// [CBE-Handbook p:245 s:9.5] Table 9-3.
+pub const VECTOR_SYSTEM_ERROR: u64 = 0x1200;
+
+/// Maintenance interrupt vector, which only the PPE has.
+///
+/// [CBE-Handbook p:245 s:9.5] Table 9-3.
+pub const VECTOR_MAINTENANCE: u64 = 0x1600;
+
+/// Thermal management interrupt vector, which only the PPE has.
+///
+/// [CBE-Handbook p:261 s:9.5.18] The PPE's thermal management interrupt vector is at 0x1800.
+pub const VECTOR_THERMAL_MANAGEMENT: u64 = 0x1800;
+
+/// The real address of each interrupt vector where the PPE starts an
+/// interrupt handler.
+///
+/// The list holds the system reset vector of thread 1 and each other
+/// vector that the PPE implements. The kernel run starts thread 0 at the
+/// ELF entry, so the list leaves out the selectable system reset vector
+/// of thread 0.
 ///
 /// [PPC-Book3 p:31 s:4.2.7] Real page 0 past its first 256 bytes holds the interrupt vectors, and the two real pages at 0x1000 are for implementation-specific use.
-/// [CBE-Handbook p:261 s:9.5.18] The PPE's thermal management interrupt vector is at 0x1800, in those pages.
-pub const INTERRUPT_VECTOR_REAL_ADDRESSES: core::ops::Range<u64> = 0x100..0x3000;
+/// [CBE-Handbook p:245 s:9.5] Table 9-3 lists the PPE interrupt vectors, and each vector that it does not list is reserved.
+/// [CBE-Handbook p:245 s:9.5] The PPE does not implement the performance monitor interrupt at 0xF00.
+/// [CBE-Handbook p:246 s:9.5.1] HID1 selects the system reset vector of thread 0, and the vector of thread 1 is fixed at 0x100.
+pub const PPE_INTERRUPT_VECTORS: [u64; 18] = [
+    VECTOR_SYSTEM_RESET_THREAD1,
+    VECTOR_MACHINE_CHECK,
+    VECTOR_DATA_STORAGE,
+    VECTOR_DATA_SEGMENT,
+    VECTOR_INSTRUCTION_STORAGE,
+    VECTOR_INSTRUCTION_SEGMENT,
+    VECTOR_EXTERNAL,
+    VECTOR_ALIGNMENT,
+    VECTOR_PROGRAM,
+    VECTOR_FP_UNAVAILABLE,
+    VECTOR_DECREMENTER,
+    VECTOR_HYPERVISOR_DECREMENTER,
+    VECTOR_SYSTEM_CALL,
+    VECTOR_TRACE,
+    VECTOR_VXU_UNAVAILABLE,
+    VECTOR_SYSTEM_ERROR,
+    VECTOR_MAINTENANCE,
+    VECTOR_THERMAL_MANAGEMENT,
+];
 
 /// SRR1 bits 33:36 and 42:47: the interrupt's own information. An
 /// interrupt copies the remaining SRR1 bits from the MSR.

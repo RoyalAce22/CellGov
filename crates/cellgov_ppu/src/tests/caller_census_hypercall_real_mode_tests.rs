@@ -49,12 +49,12 @@ fn elf_with_entry(vaddr: u64, words: &[u32], entry: u64) -> Vec<u8> {
 
 #[test]
 fn a_real_mode_absolute_branch_to_the_real_address_of_sc_adds_a_path_to_the_site() {
-    // The word at real 0x2FFC is in the interrupt vectors and branches to
-    // the path past the window, so that path runs in real mode.
+    // The ELF entry at real 0x2FFC runs in real mode and branches to the
+    // path past the window, so that path runs in real mode.
     let site = |other: i16| {
         let mut words = vec![b(0x14)];
         words.extend(window(other));
-        ordinals(&elf(KERNEL + 0x2FFC, &words, 4 * words.len() as u64))
+        ordinals(&elf_with_entry(KERNEL + 0x2FFC, &words, KERNEL + 0x2FFC))
     };
     assert_eq!(site(76), [(KERNEL + SC, None)]);
     assert_eq!(site(75), [(KERNEL + SC, Some(75))]);
@@ -62,13 +62,13 @@ fn a_real_mode_absolute_branch_to_the_real_address_of_sc_adds_a_path_to_the_site
 
 #[test]
 fn a_word_that_a_real_mode_branch_reaches_at_its_real_address_also_runs_in_real_mode() {
-    // The word at real 0x2FFC is in the interrupt vectors and branches to
-    // the real address of the path past the window. No segment holds a
+    // The ELF entry at real 0x2FFC runs in real mode and branches to the
+    // real address of the path past the window. No segment holds a
     // word at that address, so only the alias puts that path in real mode.
     let site = |other: i16| {
         let mut words = vec![ba(SC + 8)];
         words.extend(window(other));
-        ordinals(&elf(KERNEL + 0x2FFC, &words, 4 * words.len() as u64))
+        ordinals(&elf_with_entry(KERNEL + 0x2FFC, &words, KERNEL + 0x2FFC))
     };
     assert_eq!(site(76), [(KERNEL + SC, None)]);
     assert_eq!(site(75), [(KERNEL + SC, Some(75))]);
@@ -76,8 +76,8 @@ fn a_word_that_a_real_mode_branch_reaches_at_its_real_address_also_runs_in_real_
 
 #[test]
 fn a_real_mode_absolute_conditional_branch_to_the_real_address_of_sc_adds_a_path_to_the_site() {
-    // The word at real 0x2FFC is in the interrupt vectors and branches to
-    // the path past the window, so the `bca` there runs in real mode.
+    // The ELF entry at real 0x2FFC runs in real mode and branches to the
+    // path past the window, so the `bca` there runs in real mode.
     let site = |other: i16| {
         let words = [
             b(0x14),
@@ -88,7 +88,7 @@ fn a_real_mode_absolute_conditional_branch_to_the_real_address_of_sc_adds_a_path
             li(11, other),
             bca(SC),
         ];
-        ordinals(&elf(KERNEL + 0x2FFC, &words, 4 * words.len() as u64))
+        ordinals(&elf_with_entry(KERNEL + 0x2FFC, &words, KERNEL + 0x2FFC))
     };
     assert_eq!(site(76), [(KERNEL + SC, None)]);
     assert_eq!(site(75), [(KERNEL + SC, Some(75))]);
@@ -108,7 +108,7 @@ fn a_loop_in_real_mode_code_keeps_the_real_mode_path_to_the_site() {
             li(11, other),
             ba(SC),
         ];
-        ordinals(&elf(KERNEL + 0x2FFC, &words, 4 * words.len() as u64))
+        ordinals(&elf_with_entry(KERNEL + 0x2FFC, &words, KERNEL + 0x2FFC))
     };
     assert_eq!(site(76), [(KERNEL + SC, None)]);
     assert_eq!(site(75), [(KERNEL + SC, Some(75))]);

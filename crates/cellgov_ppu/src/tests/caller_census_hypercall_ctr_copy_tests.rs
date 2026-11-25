@@ -146,32 +146,30 @@ fn a_copy_of_ctr_that_a_branch_brings_past_a_built_address_leaves_every_site_unr
 }
 
 /// A real-mode stub writes the real address 0x5000 into CTR, then copies
-/// CTR into r4 and back. A later path writes the real address 0x3010
-/// into CTR, copies CTR into r4 and branches back to the same
-/// `mtctr r4`. The `bctr` thus reaches both addresses. 0x3010 is the
-/// path past the window's `blr`.
+/// CTR into r4 and back. A later path, at the next interrupt vector,
+/// writes the real address 0x3010 into CTR, copies CTR into r4 and
+/// branches back to the same `mtctr r4`. The `bctr` thus reaches both
+/// addresses. 0x3010 is the path past the window's `blr`.
 ///
 /// [PPC-Book1 p:82 s:3.3.13] `mfctr`, a form of `mfspr`, copies CTR into RT.
 /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
+/// [CBE-Handbook p:245 s:9.5] Table 9-3 puts the machine check vector at 0x200.
 #[test]
 fn a_bctr_after_a_copy_of_ctr_that_a_later_branch_widens_reaches_each_written_address() {
+    // From the `b` at VECTOR + 0x10C to the `mtctr r4` at VECTOR + 0xC.
     let back = word(PpuInstruction::B {
-        offset: -20,
+        offset: -0x100,
         aa: false,
         link: false,
     });
-    let words = [
-        li(3, 0x5000),
-        mtctr(3),
-        mfctr(4),
-        mtctr(4),
-        bctr(),
-        li(3, 0x3010),
-        mtctr(3),
-        mfctr(4),
-        back,
+    let words = [li(3, 0x5000), mtctr(3), mfctr(4), mtctr(4), bctr()];
+    let later = [li(3, 0x3010), mtctr(3), mfctr(4), back];
+    let segments = [
+        code(VECTOR, &words),
+        code(VECTOR + 0x100, &later),
+        window(&into_window()),
+        quiet(),
     ];
-    let segments = [code(VECTOR, &words), window(&into_window()), quiet()];
     assert_eq!(ordinals(0, &segments), [(SC, None), (QUIET_SC, Some(77))]);
 }
 

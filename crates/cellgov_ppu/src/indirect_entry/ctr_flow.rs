@@ -1422,6 +1422,42 @@ impl<'a> CtrFlow<'a> {
         )
     }
 
+    /// The address of each `bcctr` that the paths reach only with CTR
+    /// constants.
+    ///
+    /// Such a `bcctr` reaches only the targets that
+    /// [`Self::bcctr_targets`] gives. These are not in the set:
+    /// - a `bcctr` that no path reaches;
+    /// - the invalid form with BO bit 2 at 0, which the scan takes to
+    ///   decrement CTR;
+    /// - a `bcctr` that a constant of a writer in `open_writers` reaches.
+    ///
+    /// `open_writers` holds the address of each word that writes CTR from
+    /// a GPR that can also hold a value with no constant and no mark.
+    ///
+    /// [PPC-Book1 p:25 s:2.4] `bcctr` reaches CTR0:61 || 0b00.
+    pub(super) fn closed_bcctrs(&self, open_writers: &BTreeSet<u64>) -> BTreeSet<u64> {
+        let mut closed = BTreeSet::new();
+        for (index, (segment, states)) in self.code.segments().iter().zip(&self.at).enumerate() {
+            for (word, ((address, raw), state)) in segment.addressed().zip(states).enumerate() {
+                let bcctr = matches!(
+                    crate::decode::decode(raw),
+                    Ok(PpuInstruction::Bcctr { bo, .. }) if bo & PPC_BO_BIT2 != 0
+                );
+                let ctr = &state.ctr;
+                let only_known = !ctr.known.is_empty()
+                    && !ctr.lost
+                    && !ctr.ranged
+                    && !ctr.unwritten
+                    && ctr.known.keys().all(|by| !open_writers.contains(by));
+                if bcctr && only_known && self.reach.contains(index, word) {
+                    closed.insert(address);
+                }
+            }
+        }
+        closed
+    }
+
     /// Adds to `targets` the constants that `register` gives at each
     /// branch for which `branch` holds, by the word that wrote each one,
     /// and returns the address of each such branch whose value the scan

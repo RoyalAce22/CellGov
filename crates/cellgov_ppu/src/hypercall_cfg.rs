@@ -213,6 +213,25 @@ fn entered(code: &Code, bound: &IndirectBound, real_mode: &RealMode) -> BTreeSet
     entries
 }
 
+/// Whether a `bcctr` or a `bclr` of `code` may run in real mode with a
+/// target that `bound` does not hold, as [`scan`] finds it with the same
+/// `bound` and `real_mode_starts`.
+///
+/// An unbounded switch of `bound` can put control into real mode at any
+/// word, so then the result is true.
+pub(crate) fn branches_in_real_mode(
+    code: &Code,
+    bound: &IndirectBound,
+    real_mode_starts: &BTreeSet<u64>,
+) -> bool {
+    if !bound.unbounded_switches.is_empty() {
+        return true;
+    }
+    let mut starts = real_mode_starts.clone();
+    starts.extend(switched_words(code, bound));
+    real_mode_words(code, &starts, bound).branches_indirectly()
+}
+
 /// The words of the code that may run in real mode.
 #[derive(Debug)]
 enum RealMode {
@@ -312,8 +331,8 @@ pub(crate) fn low_word(address: u64) -> u64 {
 /// MSR\[SF\] and MSR bit 1 at 0.
 ///
 /// Only an `rfid`, an `hrfid` or an `mtmsrd` can clear the two bits. The
-/// scan does not follow HSRR0 and HSRR1, so it takes no `hrfid` as a
-/// switch. [`real_mode_words`] has the same limit. A branch, an `mtmsr`
+/// scan does not follow HSRR0 and HSRR1, so it takes each `hrfid` as an
+/// unbounded 32-bit switch. A branch, an `mtmsr`
 /// and the return of an `sc` keep the bits. An interrupt sets MSR\[SF\]
 /// to 1. The kernel run starts thread 0 with MSR\[SF\] at 1. So a branch
 /// may run in 32-bit mode in one of these cases:
@@ -329,7 +348,7 @@ pub(crate) fn low_word(address: u64) -> u64 {
 /// [PPC-Book3 p:13 s:2.3] `hrfid` places the OR of HSRR1 bits 0 and 1 into MSR\[SF\].
 /// [PPC-Book3 p:62 s:5.4] An interrupt sets MSR bits IR and DR to 0 and MSR bit SF to 1.
 /// [PPC-Book1 p:25 s:2.4] The registers that `bclr` and `bcctr` alter are CTR and LR, so the MSR at the target is the MSR at the branch.
-fn branches_in_mode32(code: &Code, bound: &IndirectBound) -> bool {
+pub(crate) fn branches_in_mode32(code: &Code, bound: &IndirectBound) -> bool {
     if !bound.unbounded_mode32_switches.is_empty() {
         return code
             .segments
@@ -437,15 +456,22 @@ fn direct_targets(code: &Code, address: u64, raw: u32, real_mode: bool) -> BTree
 /// - a direct branch;
 /// - from a word that writes CTR or LR, an indirect branch to each
 ///   address that `bound` gives the word as a target;
-/// - from a `bcctr` or a `bclr`, an indirect branch to each word that
-///   [`real_indirect_words`] gives.
+/// - from a `bcctr` or a `bclr` that is not one of the
+///   [`IndirectBound::closed_branches`], an indirect branch to each word
+///   that [`real_indirect_words`] gives.
+///
+/// A closed branch reaches only the targets of the words that wrote its
+/// CTR or LR constants, and the walk takes those from the writers.
 ///
 /// Real mode ignores EA bits 0 and 1, so an indirect branch reaches each
 /// word at the real address of its target. The set does not hold a word
-/// that runs in real mode only after one of these:
-/// - an `hrfid`;
-/// - an `rfid`, `mtmsr` or `mtmsrd` that is an unbounded switch, which
-///   [`scan`] handles.
+/// that runs in real mode only after an unbounded switch, which [`scan`]
+/// handles. The scan does not follow HSRR0 and HSRR1, so each `hrfid` is
+/// such a switch.
+///
+/// An `rfid` or an `hrfid` does not fall through. Its next word runs in
+/// real mode only as the target of a real-mode switch, which `starts`
+/// holds.
 ///
 /// [PPC-Book1 p:25 s:2.4] The registers that `bclr` and `bcctr` alter are CTR and LR, so the MSR at the target is the MSR at the branch.
 fn real_mode_words(code: &Code, starts: &BTreeSet<u64>, bound: &IndirectBound) -> RealMode {
@@ -457,11 +483,12 @@ fn real_mode_words(code: &Code, starts: &BTreeSet<u64>, bound: &IndirectBound) -
             continue;
         }
         for raw in code.words_at(at) {
-            if flow(raw) != Flow::Stops {
+            if flow(raw) != Flow::Stops && !returns_from_interrupt(raw) {
                 pending.extend(at.checked_add(4));
             }
             pending.extend(direct_targets(code, at, raw, true));
-            if !indirect && is_indirect_branch(raw) {
+            let open = !bound.closed_branches.contains(&at);
+            if !indirect && open && is_indirect_branch(raw) {
                 indirect = true;
                 pending.extend(real_indirect_words(code, bound));
             }
@@ -474,6 +501,15 @@ fn real_mode_words(code: &Code, starts: &BTreeSet<u64>, bound: &IndirectBound) -
         words: reached,
         indirect,
     }
+}
+
+/// Whether the word `raw` is an `rfid` or an `hrfid`, which fetch the
+/// next word from SRR0 or HSRR0.
+///
+/// [PPC-Book3 p:119 s:Appendix G] `rfid` is primary opcode 19 with extended opcode 18, and `hrfid` is primary opcode 19 with extended opcode 274.
+/// [PPC-Book3 p:13 s:2.3] `rfid` sets NIA to SRR0 0:61 || 0b00, and `hrfid` sets NIA to HSRR0 0:61 || 0b00.
+fn returns_from_interrupt(raw: u32) -> bool {
+    raw >> 26 == 19 && matches!((raw >> 1) & 0x3FF, 18 | 274)
 }
 
 /// The address that a direct branch at `address` reaches in 64-bit mode.

@@ -15,7 +15,9 @@ use super::reach::Reach;
 use super::real_mode::{real_mode_entries, Switches};
 use super::toc::{function_tocs, FunctionToc, FunctionWords};
 use crate::caller_census::{CallerScanError, JoinDrop};
-use crate::hypercall_cfg::{low_word, real_forms, Code, CodeSegment};
+use crate::hypercall_cfg::{
+    branches_in_mode32, branches_in_real_mode, low_word, real_forms, Code, CodeSegment,
+};
 use crate::instruction::PpuInstruction;
 
 /// Most entries the bound reads from one relative jump table. The scan
@@ -235,8 +237,16 @@ pub(crate) struct IndirectBound {
     ///
     /// The set also holds each `rfid` that can leave MSR\[IR\] at 1 when a
     /// path reaches it with a lost SRR0. A lost SRR0 can hold a constant
-    /// that `JoinFlow` dropped.
+    /// that `JoinFlow` dropped. It also holds each `hrfid` that a path
+    /// reaches with a lost mark in the SPR cell, which holds HSRR0.
     pub(crate) lost_targets: BTreeSet<u64>,
+    /// The address of each `bcctr` and `bclr` that the paths reach only
+    /// with constants in CTR or LR.
+    ///
+    /// Such a branch reaches only the [`Self::targets`] of the words that
+    /// wrote those constants. Each other `bcctr` and `bclr` can reach an
+    /// address that the image names.
+    pub(crate) closed_branches: BTreeSet<u64>,
     /// The joins that dropped the constants of each lost value that an
     /// `mtctr`, a `bclr` or an `rfid` takes, by the address of the word.
     ///
@@ -249,14 +259,15 @@ pub(crate) struct IndirectBound {
     /// before it, so the address runs in real mode whichever mode the
     /// word runs in.
     pub(crate) real_mode_switches: BTreeSet<u64>,
-    /// The address of each `rfid`, `mtmsr` or `mtmsrd` that can put
-    /// control into real mode at an address that the scan does not know.
+    /// The address of each `rfid`, `hrfid`, `mtmsr` or `mtmsrd` that can
+    /// put control into real mode at an address that the scan does not
+    /// know.
     pub(crate) unbounded_switches: BTreeSet<u64>,
     /// Each word where an `rfid` or `mtmsrd` can put control into 32-bit
     /// mode, with MSR\[SF\] and MSR bit 1 at 0.
     pub(crate) mode32_switches: BTreeSet<u64>,
-    /// The address of each `rfid` or `mtmsrd` that can put control into
-    /// 32-bit mode at an address that the scan does not know.
+    /// The address of each `rfid`, `hrfid` or `mtmsrd` that can put
+    /// control into 32-bit mode at an address that the scan does not know.
     pub(crate) unbounded_mode32_switches: BTreeSet<u64>,
 }
 
@@ -296,6 +307,12 @@ const REFINEMENTS: usize = 16;
 /// reach. After the rounds, the bound adds the words that the targets and
 /// the switches reach, and runs the rounds again until the set stops
 /// growing. The set only grows, so this ends.
+///
+/// The rounds start with no real-address word and no low-order word of a
+/// named address among the entry words. When the rounds end with a
+/// `bcctr` or `bclr` that can enter such words, the bound adds them and
+/// runs the rounds again. A word at a real address of a target that the
+/// bound holds is an entry word as soon as the bound finds the target.
 ///
 /// When the rounds end with a lost target, the bound tries these steps in
 /// order. The first step that changes something runs the rounds again,
@@ -338,18 +355,25 @@ pub(crate) fn indirect_entries(
         ranged_ctr_writes: BTreeSet::new(),
         lost_returns: BTreeMap::new(),
         lost_rfids: BTreeMap::new(),
+        closed_bclrs: BTreeSet::new(),
+        open_ctr_writes: BTreeSet::new(),
         progressions: false,
         deferred: false,
         residues: BTreeSet::new(),
         loaded: EntryWords::new(code),
+        loaded_real: EntryWords::new(code),
+        real_branches: false,
+        low_branches: false,
+        switched: BTreeSet::new(),
+        target_aliases: BTreeSet::new(),
     };
     // A real-mode branch to a loaded value enters the word at its real
     // address too.
-    let loads = files.iter().flat_map(FileSegment::loads);
-    bound.loaded.add(
-        code,
-        loads.flat_map(|value| code.real_aliases(value & !0b11)),
-    );
+    for value in files.iter().flat_map(FileSegment::loads) {
+        let word = value & !0b11;
+        bound.loaded.add(code, [word]);
+        bound.loaded_real.add(code, code.real_aliases(word));
+    }
     for file in files {
         for value in file.doublewords() {
             bound.name(value);
@@ -374,6 +398,9 @@ pub(crate) fn indirect_entries(
     let mut refinements = 0;
     loop {
         let mut indirect = bound.reached(&mut reach, &mut words, &join_words, &every, &bounds)?;
+        if bound.open_alias_gates(&indirect) {
+            continue;
+        }
         if indirect.lost_targets.is_empty() {
             return Ok(indirect);
         }
@@ -434,8 +461,8 @@ fn unlinked_bcctrs(code: &Code) -> impl Iterator<Item = (usize, usize, u64)> + '
 pub(super) struct Bound<'a> {
     code: &'a Code,
     files: &'a [FileSegment<'a>],
-    /// The real-mode entries: the ELF entry and the words in the
-    /// interrupt vectors.
+    /// The real-mode entries: the ELF entry and the first word of each
+    /// interrupt vector.
     real_mode: BTreeSet<u64>,
     /// The words of the code that the image names, and the targets of
     /// the relative jump tables.
@@ -484,8 +511,17 @@ pub(super) struct Bound<'a> {
     /// word of those classes.
     ranged_ctr_writes: BTreeSet<(usize, u64)>,
     /// The address of each `rfid` that [`Constants::translated_rfid_lost`]
-    /// gives, with the origins of SRR0, from the TOCs of the latest round.
+    /// gives, with the origins of SRR0, and of each `hrfid` that
+    /// [`Constants::translated_hrfid_lost`] gives, with the origins of the
+    /// SPR cell, from the TOCs of the latest round.
     lost_rfids: BTreeMap<u64, Origins>,
+    /// The address of each `bclr` that the paths reach only with LR
+    /// constants, from the [`JoinFlow`] run of the latest round.
+    closed_bclrs: BTreeSet<u64>,
+    /// The address of each `mtctr` whose GPR can also hold a value with
+    /// no constant and no mark, from the [`JoinFlow`] run of the latest
+    /// round.
+    open_ctr_writes: BTreeSet<u64>,
     /// Whether an `mtctr` or a `bclr` takes a lost value that keeps one
     /// progression as the classes of [`JoinFlow::progression`].
     ///
@@ -506,6 +542,33 @@ pub(super) struct Bound<'a> {
     /// byte-reversed load of the file bytes gives, which an indirect
     /// branch can enter.
     loaded: EntryWords,
+    /// Each word at the real address of a value of [`Self::loaded`],
+    /// which an indirect branch in real mode can enter.
+    loaded_real: EntryWords,
+    /// Whether a `bcctr` or a `bclr` can run in real mode with a target
+    /// that the bound does not hold, as [`branches_in_real_mode`] gives
+    /// it.
+    ///
+    /// While it is false, the entry words and the switch scan leave out
+    /// [`Self::real_named`] and [`Self::loaded_real`]. When the bound
+    /// sets it, the rounds run again.
+    real_branches: bool,
+    /// Whether a `bcctr` or a `bclr` can run in 32-bit mode, or an
+    /// unbounded 32-bit switch can put control at any word.
+    ///
+    /// While it is false, the entry words and the switch scan leave out
+    /// [`Self::low_named`]. When the bound sets it, the rounds run again.
+    low_branches: bool,
+    /// Each word where a real-mode switch or a 32-bit switch of a
+    /// latest scan puts control.
+    switched: BTreeSet<u64>,
+    /// Each word at a real address of a target of [`Self::targets`] of a
+    /// latest round, other than the target word itself.
+    ///
+    /// A `bcctr` or `bclr` whose targets the bound holds can run in real
+    /// mode, and then enters these words. So the entry words hold them
+    /// whatever [`Self::real_branches`] is. The set only grows.
+    target_aliases: BTreeSet<u64>,
 }
 
 /// How an `mtctr` or a `bclr` takes a lost value.
@@ -558,17 +621,31 @@ impl Bound<'_> {
             lost_targets.extend(flow.bclr_targets(&mut self.targets));
             lost_targets.extend(self.lost_returns.keys());
             lost_targets.extend(self.lost_rfids.keys());
+            let mut closed_branches = flow.closed_bcctrs(&self.open_ctr_writes);
+            closed_branches.extend(&self.closed_bclrs);
             let mut entries = self.real_mode.clone();
             entries.extend(&self.named);
+            // The switch scan takes no word of a closed gate as a join, as
+            // the entry words do.
+            let gated = |open: bool, words: &BTreeSet<u64>| {
+                if open {
+                    words.clone()
+                } else {
+                    BTreeSet::new()
+                }
+            };
             let mut indirect = IndirectBound {
                 entries,
-                real_named: self.real_named.clone(),
-                low_named: self.low_named.clone(),
+                real_named: gated(self.real_branches, &self.real_named),
+                low_named: gated(self.low_branches, &self.low_named),
                 targets: self.targets.clone(),
                 lost_targets,
+                closed_branches,
                 ..IndirectBound::default()
             };
             let switches = Switches::find(code, &words.tocs, every, &indirect, reach);
+            indirect.real_named.clone_from(&self.real_named);
+            indirect.low_named.clone_from(&self.low_named);
             let starts = indirect
                 .targets
                 .values()
@@ -576,7 +653,10 @@ impl Bound<'_> {
                 .chain(&switches.targets)
                 .chain(&switches.mode32)
                 .copied();
-            if reach.grow(starts) {
+            let grew = reach.grow(starts);
+            let switched = self.switch(&switches);
+            let aliased = self.alias_targets();
+            if grew || switched || aliased {
                 continue;
             }
             indirect.real_mode_switches = switches.targets;
@@ -634,6 +714,8 @@ impl Bound<'_> {
             self.ranged_ctr_writes.clear();
             self.lost_returns.clear();
             self.lost_rfids.clear();
+            self.closed_bclrs.clear();
+            self.open_ctr_writes.clear();
             self.deferred = false;
             // The round names no new word when it is the last one, so the
             // run that counts the drops gets the same entries.
@@ -679,25 +761,106 @@ impl Bound<'_> {
     /// does not follow.
     ///
     /// These are the words:
-    /// - each named word, in real mode and in 32-bit mode too;
+    /// - each named word;
     /// - each real-mode entry;
+    /// - each word where a switch of [`Self::switched`] puts control;
     /// - each word at address 0 or its real alias, which a `bcctr` reaches
     ///   after a `bdnz` falls through;
-    /// - each word that [`Self::loaded`] holds.
+    /// - each word that [`Self::loaded`] holds;
+    /// - when [`Self::real_branches`] is set, each word of
+    ///   [`Self::real_named`] and of [`Self::loaded_real`];
+    /// - when [`Self::low_branches`] is set, each word of
+    ///   [`Self::low_named`];
+    /// - each word of [`Self::target_aliases`].
+    ///
+    /// Only an indirect branch in real mode reaches a word at the real
+    /// address of a named address. A branch whose targets the bound holds
+    /// reaches only the real addresses of those targets, which
+    /// [`Self::target_aliases`] holds. Only an indirect branch in 32-bit
+    /// mode, or an unbounded 32-bit switch, reaches the word at the
+    /// low-order 32 bits of a named address. An interrupt and a bounded
+    /// switch enter only the words that the list names on their own.
+    ///
+    /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
+    /// [PPC-Book1 p:20 s:2.4.1] In 32-bit mode a branch sets the high-order 32 bits of its target address to 0.
     fn entry_words(&self) -> EntryWords {
         let code = self.code;
-        let mut entries = self.loaded.clone();
+        let mut entries = if self.real_branches {
+            self.loaded_real.clone()
+        } else {
+            self.loaded.clone()
+        };
+        let real = self.real_named.iter().filter(|_| self.real_branches);
+        let low = self.low_named.iter().filter(|_| self.low_branches);
         entries.add(
             code,
             self.named
                 .iter()
-                .chain(&self.real_named)
-                .chain(&self.low_named)
+                .chain(real)
+                .chain(low)
                 .chain(&self.real_mode)
+                .chain(&self.switched)
+                .chain(&self.target_aliases)
                 .copied()
                 .chain(code.real_aliases(0)),
         );
         entries
+    }
+
+    /// Adds to [`Self::switched`] each word where `switches` puts control,
+    /// and returns whether the set grew.
+    ///
+    /// A real-mode switch puts control at each word at the real address of
+    /// its target. The set only grows, so the rounds that it starts again
+    /// end.
+    fn switch(&mut self, switches: &Switches) -> bool {
+        let code = self.code;
+        let before = self.switched.len();
+        self.switched.extend(
+            switches
+                .targets
+                .iter()
+                .flat_map(|&target| code.real_aliases(target))
+                .chain(switches.mode32.iter().copied()),
+        );
+        self.switched.len() != before
+    }
+
+    /// Adds to [`Self::target_aliases`] each word at a real address of a
+    /// target of [`Self::targets`], other than the target word itself,
+    /// and returns whether the set grew.
+    ///
+    /// The bound does not know which branch reaches a target, or whether
+    /// that branch runs in real mode, so it takes each target. The set
+    /// only grows, so the rounds that it starts again end.
+    ///
+    /// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00, and `bcctr` reaches CTR0:61 || 0b00.
+    /// [PPC-Book3 p:29 s:4.2.6] Real addressing mode ignores EA bit 1, and with MSR\[HV\] = 0 and LPES1 = 1 the offset real mode mechanism controls the access.
+    fn alias_targets(&mut self) -> bool {
+        let code = self.code;
+        let before = self.target_aliases.len();
+        for &target in self.targets.values().flatten() {
+            self.target_aliases
+                .extend(code.real_aliases(target).filter(|&alias| alias != target));
+        }
+        self.target_aliases.len() != before
+    }
+
+    /// Opens each closed gate that `indirect` shows a branch for, and
+    /// returns whether a gate opened.
+    ///
+    /// The bound starts with both gates closed, so it reaches the least
+    /// set of entry words that the branches it finds need. A gate only
+    /// opens, so the bound runs again at most twice.
+    fn open_alias_gates(&mut self, indirect: &IndirectBound) -> bool {
+        let code = self.code;
+        let real = !self.real_branches && branches_in_real_mode(code, indirect, &self.real_mode);
+        let low = !self.low_branches
+            && (!indirect.unbounded_mode32_switches.is_empty()
+                || branches_in_mode32(code, indirect));
+        self.real_branches |= real;
+        self.low_branches |= low;
+        real || low
     }
 
     /// Sets [`Self::progressions`] when the latest round deferred a lost
@@ -846,7 +1009,9 @@ impl Bound<'_> {
     ///   [`Self::lost_use`] takes its mark;
     /// - enters each word that an `rfid` can enter with MSR\[IR\] at 1;
     /// - keeps each `rfid` that can enter a word with MSR\[IR\] at 1 from
-    ///   an SRR0 that can hold a constant that [`JoinFlow`] dropped.
+    ///   an SRR0 that can hold a constant that [`JoinFlow`] dropped;
+    /// - keeps each `hrfid` that a path reaches with a lost mark in the
+    ///   SPR cell, which holds HSRR0.
     ///
     /// `index` is the index of `segment` in the code. `tocs` holds the
     /// TOC of each word of `segment`, as [`FunctionWords`] gives it.
@@ -886,6 +1051,12 @@ impl Bound<'_> {
             constants.enter_toc(toc, every);
             let decoded = crate::decode::decode(raw);
             if let Ok(PpuInstruction::Bclr { .. }) = decoded {
+                let only_constants = !constants.lr.is_empty()
+                    && constants.lr_lost.is_none()
+                    && !constants.lr_is_unheld();
+                if joins.is_some() && only_constants {
+                    self.closed_bclrs.insert(address);
+                }
                 for (&by, lr) in &constants.lr {
                     self.targets
                         .entry(by)
@@ -899,6 +1070,9 @@ impl Bound<'_> {
                 }
             }
             if let Ok(PpuInstruction::Mtctr { rs }) = decoded {
+                if joins.is_some() && constants.unheld_gprs() & (1 << rs) != 0 {
+                    self.open_ctr_writes.insert(address);
+                }
                 if let Some(value) = constants.gpr(rs) {
                     self.ctr_writes
                         .entry((index, address))
@@ -914,6 +1088,9 @@ impl Bound<'_> {
             }
             if let Some(origins) = constants.translated_rfid_lost(raw) {
                 note(&mut self.lost_rfids, address, origins);
+            }
+            if let Some(origins) = constants.translated_hrfid_lost(raw) {
+                note(&mut self.lost_rfids, address, &origins);
             }
             for &constant in constants
                 .step(address, raw)

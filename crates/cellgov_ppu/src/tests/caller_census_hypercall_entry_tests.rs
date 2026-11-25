@@ -246,14 +246,16 @@ fn a_jump_table_target_after_the_load_leaves_the_site_unresolved() {
 }
 
 /// The interrupt vectors lie at real addresses 0x100 up to 0x3000
-/// [PPC-Book3 p:31 s:4.2.7]. The walk of a `window` at `base` visits the
-/// words at `base + 4` and `base + 8`.
+/// [PPC-Book3 p:31 s:4.2.7]. An interrupt enters only the first word of
+/// a vector, at the address that Table 9-3 gives
+/// [CBE-Handbook p:245 s:9.5]. The walk of a `window` at `base` visits
+/// the words at `base + 4` and `base + 8`.
 #[test]
-fn a_window_word_in_the_interrupt_vector_pages_leaves_the_site_unresolved() {
+fn a_window_word_at_the_first_word_of_an_interrupt_vector_leaves_the_site_unresolved() {
     let at = |base: u64| ordinals(0, &[code(KERNEL + base, &window())]);
     assert_eq!(at(0xF4), [(KERNEL + 0xFC, Some(74))], "0xF8 and 0xFC");
     assert_eq!(at(0xF8), [(KERNEL + 0x100, None)], "0x100");
-    assert_eq!(at(0x2FF8), [(KERNEL + 0x3000, None)], "0x2FFC");
+    assert_eq!(at(0x2FF8), [(KERNEL + 0x3000, Some(74))], "0x2FFC");
     assert_eq!(
         at(0x2FFC),
         [(KERNEL + 0x3004, Some(74))],

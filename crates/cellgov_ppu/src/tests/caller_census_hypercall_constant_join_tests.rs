@@ -353,7 +353,8 @@ fn a_blr_that_as_many_lr_writers_reach_as_the_join_limit_keeps_the_sites_resolve
 }
 
 /// Fifteen LR writers reach the `blr`, and one of them, the `mtlr r4`,
-/// brings one constant and then a second. With the second constant LR
+/// brings one constant and then a second. Branches from the path of the
+/// writers reach both builds of r4. With the second constant LR
 /// holds 16 constants, as many as the join limit, so the join takes it.
 ///
 /// [PPC-Book1 p:24 s:2.4] `b` and `bc` reach CIA + EXTS(displacement), or EXTS(displacement) when AA = 1.
@@ -364,10 +365,12 @@ fn a_join_takes_a_second_constant_of_one_lr_writer_that_fills_the_lr_to_the_join
     let first = NOWHERE + 0x10 * JOIN_LIMIT;
     let second = first + 0x10;
     let mut words = lr_writers(JOIN_LIMIT - 2);
-    words.push(PPC_BLR);
+    // The `blt` skips the `blr` into the first build.
+    words.extend([skip(1), PPC_BLR]);
     words.extend(build(4, first));
-    // Each `b` goes back four words: to the `blr`, then to the `mtlr`.
-    words.extend([mtlr(4), b(-16)]);
+    // Each branch goes back four words: the `blt` to the `blr`, then the
+    // `b` to the `mtlr`.
+    words.extend([mtlr(4), bc(0b01100, -16)]);
     words.extend(build(4, second));
     words.push(b(-16));
     assert_eq!(

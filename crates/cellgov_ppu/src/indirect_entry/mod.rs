@@ -3,8 +3,8 @@
 //!
 //! A word is in the bound when one of these can enter it:
 //! - the start of execution, at the ELF entry;
-//! - an interrupt, at a word whose real address is in the interrupt
-//!   vectors;
+//! - an interrupt, at a word whose real address is the address of an
+//!   interrupt vector;
 //! - an indirect branch (`bcctr`, `bclr`) or an `rfid`, at an address
 //!   that the image names.
 //!
@@ -50,6 +50,16 @@
 //! word also when no segment holds the address itself. For a jump table
 //! entry it keeps each word at the real address of the target, whatever
 //! mode the `bcctr` runs in.
+//!
+//! A `bcctr` or a `bclr` in real mode with a target that the scan does
+//! not hold can enter any such real-address word. So the flows take these
+//! words as entries only after the scan finds such a branch. The words at
+//! the low-order 32 bits of named addresses wait in the same way for a
+//! branch in 32-bit mode. When the scan finds one, it runs again. A
+//! branch whose targets the scan holds can also run in real mode, and
+//! then enters the word at the real address of each target. So the flows
+//! take each word at a real address of a target that the scan holds as
+//! an entry, whatever the gate.
 //!
 //! The scan cannot tell a code address from another value of the same
 //! size. So each 32-bit word names an address, also a count or a flag
@@ -137,10 +147,12 @@
 //!     - an `sc`;
 //!     - a word that the scan does not follow.
 //!
-//! A second scan finds where an `rfid`, `mtmsr` or `mtmsrd` can put
-//! control into real mode. It forgets each constant at a word that
+//! A second scan finds where an `rfid`, `hrfid`, `mtmsr` or `mtmsrd` can
+//! put control into real mode. It forgets each constant at a word that
 //! control can enter other than by a fall-through, so a constant that it
-//! keeps is the value on every path to the word.
+//! keeps is the value on every path to the word. The scan does not follow
+//! HSRR0 and HSRR1, so an `hrfid` can put control into real mode or into
+//! 32-bit mode at any word.
 //!
 //! A hypercall site resolves only on the paths that this bound lets the
 //! scan model. So the bound can hold too many words, and it must not
@@ -188,6 +200,7 @@ mod ctr_flow;
 mod fp_vector;
 mod join_flow;
 mod lost;
+mod msr_bits;
 mod progression;
 mod reach;
 mod real_mode;
