@@ -1,6 +1,5 @@
 //! Hypercall 12, `connect_irq_plug_ext`: the call connects an event
-//! receive port or an irq outlet of a logical SPE to a plug of a logical
-//! PPE thread.
+//! receive port or an irq outlet to a plug of a logical PPE thread.
 //!
 //! r3 and r4 name the thread. lv1 does not compare r4 with the calling
 //! thread, so the handler does not read [`HypercallRequest::thread`].

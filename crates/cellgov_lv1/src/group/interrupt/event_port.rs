@@ -91,8 +91,8 @@ impl LaneValue for EventReceivePort {
     }
 }
 
-/// The partition's event receive ports and the irq outlets of its logical
-/// SPEs, each by its id.
+/// The partition's event receive ports and its irq outlets, each by its
+/// id.
 ///
 /// `set_spe_transition_notifier` takes a port and refuses an outlet, so
 /// the state keeps the two apart.

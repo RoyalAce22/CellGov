@@ -43,6 +43,11 @@ pub(crate) const GROUP: Group = Group {
             stamp: Stamp::Version(28),
         },
         HashedSurface {
+            name: "the irq outlet of the virtual UART and its plug connection",
+            source: Some(IRQ_OUTLET_SOURCE),
+            stamp: Stamp::Pending,
+        },
+        HashedSurface {
             name: "the paused PPE hardware threads and their decrementer wake flags",
             source: Some(PAUSED_THREAD_SOURCE),
             stamp: Stamp::Version(28),
@@ -58,8 +63,8 @@ pub(crate) const IRQ_STATE_BITMAP_SOURCE: u8 = 81;
 /// constructed, one object per port in id order.
 pub(crate) const EVENT_RECEIVE_PORT_SOURCE: u8 = 82;
 
-/// The lane source of the irq outlets of the logical SPEs, one object per
-/// outlet in id order.
+/// The lane source of the irq outlets of the logical SPEs and the virtual
+/// UART, one object per outlet in id order.
 pub(crate) const IRQ_OUTLET_SOURCE: u8 = 144;
 
 /// The lane source of the PPE hardware threads that lv1 paused, one
@@ -82,8 +87,7 @@ impl InterruptGroupState {
         &self.bitmaps
     }
 
-    /// The partition's event receive ports and the irq outlets of its
-    /// logical SPEs.
+    /// The partition's event receive ports and its irq outlets.
     pub fn ports(&self) -> &EventReceivePortState {
         &self.ports
     }
@@ -125,7 +129,8 @@ pub enum InterruptChange {
     /// The call's connect step left the port with this id in this state:
     /// a new plug, and a connection when the plug was free.
     PlugConnect(EventReceivePort),
-    /// The call constructed this irq outlet of a logical SPE.
+    /// The call constructed this irq outlet of a logical SPE or of the
+    /// virtual UART.
     OutletConstructed(EventReceivePort),
     /// The call's connect step left the irq outlet with this id in this
     /// state, as [`Self::PlugConnect`] leaves a port.
