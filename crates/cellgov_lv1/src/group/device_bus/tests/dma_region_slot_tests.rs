@@ -151,9 +151,9 @@ fn a_second_device_1_region_of_the_first_shape_is_a_refusal_and_a_network_region
 }
 
 #[test]
-fn a_device_2_call_without_a_capture_and_a_device_3_call_are_refusals() {
+fn a_device_2_call_out_of_its_captured_order_and_a_device_3_call_are_refusals() {
     let state = opened(&[DEVICE_1, DEVICE_2]);
-    let device_2 = request(1, 2, KERNEL_SIZE, KERNEL_PAGE_SHIFT, KERNEL_FLAGS);
+    let device_2 = request(1, 2, 2 * KERNEL_SIZE, KERNEL_PAGE_SHIFT, KERNEL_FLAGS);
     assert_eq!(
         allocate(&state, &device_2),
         refused(&device_2, OTHER_SHAPE.what)

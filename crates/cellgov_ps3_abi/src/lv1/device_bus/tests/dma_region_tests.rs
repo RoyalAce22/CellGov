@@ -133,13 +133,14 @@ fn the_shape_checks_run_in_lv1_order_and_pass_the_kernel_call() {
 
 #[test]
 fn only_the_captured_devices_have_game_os_dma_regions() {
-    assert_eq!(GAME_OS_DMA_REGIONS.len(), 6);
+    assert_eq!(GAME_OS_DMA_REGIONS.len(), 11);
     let network: Vec<_> = game_os_dma_regions("4.93", 1, 0)
         .map(|row| (row.size, row.page_shift, row.address))
         .collect();
     assert_eq!(network, [(0x10_0000, 20, 0xC000_0000)]);
     assert_eq!(game_os_dma_regions("4.93", 1, 1).count(), 5);
-    let others = [("4.92", 1, 0), ("4.93", 2, 0), ("4.93", 1, 2)];
+    assert_eq!(game_os_dma_regions("4.93", 1, 2).count(), 5);
+    let others = [("4.92", 1, 0), ("4.93", 2, 0), ("4.93", 1, 3)];
     assert_eq!(others.len(), 3);
     for (firmware, bus, device) in others {
         assert_eq!(

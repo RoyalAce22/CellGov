@@ -163,7 +163,7 @@ fn the_device_map_checks_answer_in_lv1s_order_for_device_1() {
 }
 
 #[test]
-fn each_path_without_a_source_is_a_refusal_that_names_it() {
+fn another_bus_another_device_and_an_unread_firmware_are_refusals_that_name_them() {
     let open = opened(&[DEVICE_1, OpenDevice { bus: 1, device: 2 }]);
     for bus in [2, 3, OPEN_DEVICE_BUS_MAX] {
         let other_bus = request(bus, 0, 0x301_0000, 0x1_0000, 12);

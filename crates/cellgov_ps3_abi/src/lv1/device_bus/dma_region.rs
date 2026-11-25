@@ -98,8 +98,9 @@
 //!    [OFW-4.93 lv1 a:0x22D434-0x22D440] [OFW-4.93 lv1 a:0x22CEF8]. The
 //!    search walks lists that lv1's own allocations change, under a
 //!    global lock [OFW-4.93 lv1 a:0x22AC9C-0x22AD44].
-//! 5. For index 0 it subtracts the sum of the pool's words at +168 and
-//!    +176 from the found address, and adds 0x80000000
+//! 5. For an index up to 15 [OFW-4.93 lv1 a:0x22D450-0x22D458], it
+//!    subtracts the sum of the pool's words at +168 and +176 from the
+//!    found address, and adds 0x80000000
 //!    [OFW-4.93 lv1 a:0x22D584-0x22D598] [OFW-4.93 lv1 a:0x22D6B8-0x22D6F0].
 //!
 //! The bus address therefore depends on the pool's state, which
@@ -152,8 +153,34 @@
 //! - The device's +120 holds 5, so the device accepts a region.
 //! - The pool index at +128 is 3, so the pool differs from device 0's.
 //!
+//! Device 2's slot object is entry 1 of the table. The capture
+//! [`MMIO_DEVICE_2_CAPTURE`] reads these facts:
+//! - The device at +24 of the slot object is the device at +64 of the
+//!   system bus object, where lv1's init stores device 2
+//!   [OFW-4.93 lv1 a:0x3A9AC4].
+//! - The device's method table is device 0's, and its +120 holds 6.
+//! - The pool index at +128 is 4, and the backend at +136 is the system
+//!   bus object.
+//!
 //! [`GAME_OS_DMA_REGIONS`] gives the addresses that the console's lv1 gave
-//! the 4.93 kernel's five calls for device 1, in the order of the calls.
+//! the 4.93 kernel's five calls for device 1 and its five calls for
+//! device 2, in the order of each device's calls.
+//!
+//! ## The pool of each device
+//!
+//! The regions of devices 0, 1 and 2 share bus addresses, and they do
+//! not collide, because each device has a pool of its own. The
+//! pool function takes the pool at +32 + 8 x index of the backend
+//! [OFW-4.93 lv1 a:0x22D3B0-0x22D3F0]. The search and the address step
+//! take the same pool [OFW-4.93 lv1 a:0x22CF80-0x22CF88]
+//! [OFW-4.93 lv1 a:0x22D584-0x22D590]. The backend of each device is the
+//! system bus object, and the pool of each index is the device itself:
+//! - index 0 selects +32, device 0;
+//! - index 3 selects +56, device 1 [OFW-4.93 lv1 a:0x22B838-0x22B844];
+//! - index 4 selects +64, device 2 [OFW-4.93 lv1 a:0x3A9AC4].
+//!
+//! So lv1 gives each device its bus addresses from the device's own
+//! space, and an address of one device says nothing of another device.
 //!
 //! ## The order of the regions
 //!
@@ -203,6 +230,7 @@
 //! [OFW-4.93 lv2_kernel a:0x8000000000095860-0x8000000000095880].
 //!
 //! [`OPEN_DEVICE_BUS_MAX`]: super::OPEN_DEVICE_BUS_MAX
+//! [`MMIO_DEVICE_2_CAPTURE`]: super::MMIO_DEVICE_2_CAPTURE
 
 use crate::lv1::status::{zero_extended, LV1_ILLEGAL_PARAMETER_VALUE, LV1_WRONG_STATE};
 
@@ -369,6 +397,11 @@ pub struct GameOsDmaRegion {
 /// - Device 1's five regions. The capture [`DMA_SLOTS_CAPTURE`] finds
 ///   them in the device's list and in the device's slots 0 to 4, in this
 ///   order.
+/// - Device 2's five regions. The capture [`MMIO_DEVICE_2_CAPTURE`] finds
+///   them in the device's list and in the device's slots 0 to 4, in this
+///   order.
+///
+/// [`MMIO_DEVICE_2_CAPTURE`]: super::MMIO_DEVICE_2_CAPTURE
 pub const GAME_OS_DMA_REGIONS: &[GameOsDmaRegion] = &[
     GameOsDmaRegion {
         firmware: "4.93",
@@ -414,6 +447,46 @@ pub const GAME_OS_DMA_REGIONS: &[GameOsDmaRegion] = &[
         firmware: "4.93",
         bus: 1,
         device: 1,
+        size: 0x1_0000,
+        page_shift: 12,
+        address: 0xE000_0000,
+    },
+    GameOsDmaRegion {
+        firmware: "4.93",
+        bus: 1,
+        device: 2,
+        size: 0x4_0000,
+        page_shift: 16,
+        address: 0xC000_0000,
+    },
+    GameOsDmaRegion {
+        firmware: "4.93",
+        bus: 1,
+        device: 2,
+        size: 0x8_0000,
+        page_shift: 16,
+        address: 0xC008_0000,
+    },
+    GameOsDmaRegion {
+        firmware: "4.93",
+        bus: 1,
+        device: 2,
+        size: 0x80_0000,
+        page_shift: 16,
+        address: 0xC080_0000,
+    },
+    GameOsDmaRegion {
+        firmware: "4.93",
+        bus: 1,
+        device: 2,
+        size: 0x80_0000,
+        page_shift: 20,
+        address: 0xD000_0000,
+    },
+    GameOsDmaRegion {
+        firmware: "4.93",
+        bus: 1,
+        device: 2,
         size: 0x1_0000,
         page_shift: 12,
         address: 0xE000_0000,

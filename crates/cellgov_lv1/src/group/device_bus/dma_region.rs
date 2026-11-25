@@ -128,7 +128,8 @@ fn lv1_answer(r3: u64) -> HypercallDisposition {
 /// The pool's state depends on the regions that lv1 gave before, so the
 /// answer gives the device's captured regions in the order of the calls.
 /// A call gets the address of the device's next captured region when its
-/// size and page shift are that region's.
+/// size and page shift are that region's. Each device has a pool of its
+/// own, so the regions of two devices can have the same address.
 ///
 /// The model makes these assumptions:
 /// - lv1's init leaves +120 of the device at a value other than -1, as
@@ -254,3 +255,7 @@ mod slot_tests;
 #[cfg(test)]
 #[path = "tests/dma_region_rows_tests.rs"]
 mod rows_tests;
+
+#[cfg(test)]
+#[path = "tests/dma_region_device_2_tests.rs"]
+mod device_2_tests;

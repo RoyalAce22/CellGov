@@ -52,6 +52,10 @@ mod dma_slots_console_tests;
 mod dma_slot_rows_console_tests;
 
 #[cfg(test)]
+#[path = "tests/dma_device_2_console_tests.rs"]
+mod dma_device_2_console_tests;
+
+#[cfg(test)]
 #[path = "tests/dma_map_tests.rs"]
 mod dma_map_tests;
 

@@ -9,9 +9,9 @@ calls for device 2 at [OFW-4.93 lv2_kernel a:0x800000000007D8CC].
 CellGov's hypervisor answers those calls through the device bus group
 of `cellgov_lv1`. The facts are in `cellgov_ps3_abi::lv1::device_bus`,
 and the test `device_bus_mmio_device_2_console_tests` holds them to this
-capture. The DMA regions and slots are read for the kernel's later
-`allocate_device_dma_region` calls for the device; no test reads them
-yet.
+capture. The DMA regions and slots give the answers to the kernel's
+later `allocate_device_dma_region` calls for the device, and the test
+`device_bus_dma_device_2_console_tests` holds them to this capture.
 
 No probe runs, so this directory has no manifest and no runner frame.
 The files under `peek/cech20-cex-493/` hold the words the reads
