@@ -19,7 +19,7 @@ const AWAY: u64 = VECTOR + 0x6F00;
 /// `mfspr rt,spr`.
 ///
 /// [PPC-Book3 p:21 s:3.4] `mfspr` is primary opcode 31 with extended opcode 339, RT in bits 6:10 and the SPR number in bits 11:20 with its halves swapped.
-fn mfspr(rt: u8, spr: u16) -> u32 {
+pub(super) fn mfspr(rt: u8, spr: u16) -> u32 {
     let spr = u32::from(spr);
     (31 << 26) | (u32::from(rt) << 21) | ((spr & 0x1F) << 16) | ((spr >> 5) << 11) | (339 << 1)
 }
@@ -103,7 +103,7 @@ fn a_blr_of_a_lost_gpr_moved_through_ctr_leaves_every_site_unresolved() {
 /// `mfmsr rt`.
 ///
 /// [PPC-Book3 p:23 s:3.4] `mfmsr` places the MSR into RT, and its word is primary opcode 31 with extended opcode 83.
-fn mfmsr(rt: u8) -> u32 {
+pub(super) fn mfmsr(rt: u8) -> u32 {
     (31 << 26) | (u32::from(rt) << 21) | (83 << 1)
 }
 

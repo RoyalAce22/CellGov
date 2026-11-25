@@ -224,7 +224,8 @@ pub(crate) struct IndirectBound {
     ///   dropped.
     ///
     /// A path reaches the `bclr` with an LR that can hold a constant that
-    /// `JoinFlow` dropped.
+    /// `JoinFlow` dropped, or with a copy of a CTR of the steps above that
+    /// an `mtlr` put into LR.
     ///
     /// A dropped constant that is a TOC of a descriptor, and that no word
     /// stepped, does not make the `bcctr` or the `bclr` lost. The bound
@@ -554,6 +555,7 @@ impl Bound<'_> {
             let mut flow = CtrFlow::new(code, writes, reach);
             flow.run();
             let mut lost_targets = flow.bcctr_targets(&mut self.targets);
+            lost_targets.extend(flow.bclr_targets(&mut self.targets));
             lost_targets.extend(self.lost_returns.keys());
             lost_targets.extend(self.lost_rfids.keys());
             let mut entries = self.real_mode.clone();

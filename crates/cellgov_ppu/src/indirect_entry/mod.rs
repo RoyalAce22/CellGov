@@ -73,11 +73,16 @@
 //!   - a CTR after a decrement;
 //!   - a CTR from a GPR that can hold a constant that the scan dropped;
 //! - each `bclr` that a path reaches with an LR that can hold a constant
-//!   the scan dropped;
+//!   the scan dropped, or a copy of a CTR that the scan cannot prove;
 //! - each `rfid` that can leave MSR\[IR\] at 1, when a path reaches it
 //!   with an SRR0 that can hold a constant the scan dropped.
 //!
-//! [`CtrFlow`] gives the paths that bring CTR to a `bcctr`. [`JoinFlow`]
+//! [`CtrFlow`] gives the paths that bring CTR to a `bcctr`, and the paths
+//! that bring a copy of CTR in LR to a `bclr`: an `mtlr` puts a copy into
+//! LR, and an `mflr` takes it back out. The flow keeps one cell for CR
+//! and the SPRs that it does not follow on their own, and a call passes
+//! that cell into its routine. A copy that comes out of the cell is one
+//! that the scan cannot prove. [`JoinFlow`]
 //! gives the constants that the paths to a branch target bring in the
 //! GPRs and in LR. These limits apply to it:
 //! - it does not follow a call into its routine;

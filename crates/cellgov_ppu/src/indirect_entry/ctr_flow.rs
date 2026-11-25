@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use cellgov_ps3_abi::hw::ppc_isa::PPC_BO_BIT2;
 
-use super::constants::{never_falls_through, GprStep, Step, Value};
+use super::constants::{ctr_flow_spr_move, never_falls_through, GprStep, SprMove, Step, Value};
 use super::reach::Reach;
 use super::slot_set::{Slot, SlotSet};
 use super::toc::FunctionSteps;
@@ -451,8 +451,8 @@ impl SlotCopies {
 /// [PPC-Book1 p:37 s:3.3.2] `lwz` computes EA as (RA|0) + EXTS(D), with D a 16-bit field.
 const SLOT_REACH: std::ops::Range<i64> = -(1 << 15)..(1 << 15);
 
-/// What the paths to one word bring in CTR, in the GPRs that hold a copy
-/// of CTR, and in the stack slots that hold one.
+/// What the paths to one word bring in CTR and in the registers and stack
+/// slots that hold a copy of CTR.
 ///
 /// A copy that the scan cannot prove is a bit of a mask or a slot of a
 /// [`SlotSet`], with no entry of its own. So a state that holds such a
@@ -463,6 +463,17 @@ struct CtrState {
     ctr: Ctr,
     copies: GprCopies,
     slots: SlotCopies,
+    /// The copy of CTR in LR.
+    lr: Ctr,
+    /// Whether CR or an SPR of [`ctr_flow_spr_move`] can hold a part of a
+    /// copy.
+    ///
+    /// The flow keeps one cell for all of these registers, so a move out
+    /// of any of them takes it. A move can take only a part of the value,
+    /// so a move out gives a copy that the scan cannot prove. The cell
+    /// keeps no constant, so a copy with constants that the scan knows
+    /// also sets it.
+    moved: bool,
 }
 
 impl CtrState {
@@ -481,6 +492,7 @@ impl CtrState {
                 known: BTreeMap::new(),
                 lost: slots.clone(),
             },
+            ..Self::default()
         }
     }
 
@@ -488,15 +500,21 @@ impl CtrState {
     fn join(&mut self, other: &Self) -> bool {
         let ctr = self.ctr.join(&other.ctr);
         let copies = self.copies.join(&other.copies);
-        self.slots.join(&other.slots) || ctr || copies
+        let lr = self.lr.join(&other.lr);
+        let moved = other.moved && !self.moved;
+        self.moved |= other.moved;
+        self.slots.join(&other.slots) || ctr || copies || lr || moved
     }
 
-    /// The copies in GPRs and in stack slots after the word `decoded`.
+    /// The copies in the registers and in the stack slots after the word
+    /// `decoded`, with no CTR.
     ///
     /// These words copy CTR or a copy into a GPR:
     /// - `mfctr`, which copies CTR;
+    /// - `mflr`, which copies the copy in LR;
     /// - a word that the scan follows a constant through, from a GPR
     ///   that holds a copy;
+    /// - a move out of CR or an SPR, as [`Self::moved_out`] gives;
     /// - a load at a constant offset from r1, from the slots that hold a
     ///   copy there.
     ///
@@ -506,19 +524,23 @@ impl CtrState {
     /// the GPR. A store at a constant offset from r1 writes its slot, as
     /// [`SlotCopies::store`] gives. A word that moves r1 by a constant
     /// moves each slot, and each other word that surely writes r1 removes
-    /// each slot.
+    /// each slot. [`Self::lr_after`] gives LR, and [`Self::moved_after`]
+    /// gives the cell.
     ///
-    /// [PPC-Book1 p:82 s:3.3.13] `mfctr`, a form of `mfspr`, copies CTR into RT.
-    fn after(&self, decoded: &PpuInstruction) -> (GprCopies, SlotCopies) {
+    /// [PPC-Book1 p:82 s:3.3.13] `mflr` and `mfctr`, forms of `mfspr`, copy LR or CTR into RT.
+    fn after(&self, decoded: &PpuInstruction) -> Self {
         let mut copied: Vec<(u8, Ctr)> = match *decoded {
             PpuInstruction::Mfctr { rt } => vec![(rt, self.ctr.copied())],
-            _ => GprStep::of(*decoded)
-                .and_then(|step| {
-                    let copy = self.copies.get(step.source?)?;
-                    Some((step.rt, copy.stepped(step.step)))
-                })
-                .into_iter()
-                .collect(),
+            PpuInstruction::Mflr { rt } => vec![(rt, self.lr.clone())],
+            _ => match GprStep::of(*decoded) {
+                Some(step) => step
+                    .source
+                    .and_then(|source| self.copies.get(source))
+                    .map(|copy| (step.rt, copy.stepped(step.step)))
+                    .into_iter()
+                    .collect(),
+                None => self.moved_out(decoded).into_iter().collect(),
+            },
         };
         let mut slots = self.slots.clone();
         let access = StackAccess::of(decoded);
@@ -544,7 +566,65 @@ impl CtrState {
                 None => SlotCopies::default(),
             };
         }
-        (copies, slots)
+        Self {
+            ctr: Ctr::default(),
+            copies,
+            slots,
+            lr: self.lr_after(decoded),
+            moved: self.moved_after(decoded),
+        }
+    }
+
+    /// The copy that `decoded` gives a GPR when it moves the cell out of CR
+    /// or an SPR of [`ctr_flow_spr_move`], or `None` for any other word.
+    ///
+    /// The copy is one that the scan cannot prove. A word that computes a
+    /// GPR from a copy gives no copy, so it drops a copy that the scan
+    /// cannot prove. The flow keeps no such result, because the return
+    /// injection would put it after every call of the kernel.
+    fn moved_out(&self, decoded: &PpuInstruction) -> Option<(u8, Ctr)> {
+        match ctr_flow_spr_move(decoded) {
+            Some(SprMove::OutOf(rt)) if self.moved => Some((rt, Ctr::lost())),
+            _ => None,
+        }
+    }
+
+    /// The copy of CTR in LR after the word `decoded`.
+    ///
+    /// An `mtlr` puts the copy of its GPR into LR, or no copy. A branch
+    /// that links writes the address of the next word into LR, so LR then
+    /// holds no copy.
+    ///
+    /// [PPC-Book1 p:81 s:3.3.13] `mtlr` and `mtctr`, forms of `mtspr`, copy RS into LR or CTR.
+    /// [PPC-Book1 p:24 s:2.4] A branch with LK = 1 sets LR to CIA + 4.
+    fn lr_after(&self, decoded: &PpuInstruction) -> Ctr {
+        match *decoded {
+            PpuInstruction::Mtlr { rs } => self.copies.get(rs).unwrap_or_default(),
+            PpuInstruction::B { link: true, .. }
+            | PpuInstruction::Bc { link: true, .. }
+            | PpuInstruction::Bclr { link: true, .. }
+            | PpuInstruction::Bcctr { link: true, .. } => Ctr::default(),
+            _ => self.lr.clone(),
+        }
+    }
+
+    /// Whether the cell holds a copy after the word `decoded`.
+    ///
+    /// A move into CR or an SPR of [`ctr_flow_spr_move`] from a GPR that
+    /// holds a copy sets the cell. No word clears it.
+    ///
+    /// A copy with constants that the scan knows also sets the cell. The
+    /// image need not name such a constant, for example a part of CTR
+    /// that a load takes back from the stack, so the bound does not hold
+    /// it as an entry.
+    ///
+    /// [PPC-Book1 p:81 s:3.3.13] `mtspr` copies RS into the SPR that its SPR field names.
+    fn moved_after(&self, decoded: &PpuInstruction) -> bool {
+        self.moved
+            || matches!(
+                ctr_flow_spr_move(decoded),
+                Some(SprMove::Into(sources)) if self.copies.mask() & sources != 0
+            )
     }
 
     /// Writes into `slots` each slot that the store `access` writes, or
@@ -567,6 +647,51 @@ impl CtrState {
                     copied.push((gpr, part.loaded(self.slots.loaded(part.slot, load))));
                 }
             }
+        }
+    }
+}
+
+/// The registers and the stack slots that hold a copy at a return, which
+/// the flow injects into the word after each call.
+#[derive(Debug, Default)]
+struct Returned {
+    /// The GPRs that hold a copy, as a mask with bit `n` set for GPR `n`.
+    gprs: u32,
+    /// The slots that hold a copy, as [`SlotSet::widened`] gives them.
+    slots: SlotSet,
+    /// Whether LR holds a copy.
+    lr: bool,
+    /// Whether the cell of [`CtrState::moved`] holds a copy.
+    moved: bool,
+}
+
+impl Returned {
+    /// Adds the registers and the slots that hold a copy in `brought`, the
+    /// state of a return, and returns whether the set grew.
+    fn grow(&mut self, brought: &CtrState) -> bool {
+        let gprs = brought.copies.mask();
+        let slots = brought.slots.slots();
+        let lr = brought.lr != Ctr::default();
+        let grew = gprs & !self.gprs != 0
+            || !slots.is_subset(&self.slots)
+            || (lr && !self.lr)
+            || (brought.moved && !self.moved);
+        if grew {
+            self.gprs |= gprs;
+            self.slots = self.slots.widened(&slots, &SLOT_REACH);
+            self.lr |= lr;
+            self.moved |= brought.moved;
+        }
+        grew
+    }
+
+    /// A state with no CTR, and a copy that the scan cannot prove in each
+    /// register and slot of the set.
+    fn lost_copies(&self) -> CtrState {
+        CtrState {
+            lr: if self.lr { Ctr::lost() } else { Ctr::default() },
+            moved: self.moved,
+            ..CtrState::lost_copies(self.gprs, &self.slots)
         }
     }
 }
@@ -802,15 +927,19 @@ impl StackAccess {
 /// `mtctr` of a GPR that holds a copy puts the copy back into CTR, so a
 /// CTR that the scan cannot prove stays so through the copy.
 ///
-/// The flow also follows each copy through a stack slot at a constant
-/// offset from r1, as [`CtrState::after`] gives.
+/// The flow also follows each copy through these registers and slots, as
+/// [`CtrState::after`] gives:
+/// - a stack slot at a constant offset from r1;
+/// - LR, from an `mtlr` into a `bclr` or an `mflr`;
+/// - one cell for CR and the SPRs of [`ctr_flow_spr_move`], which keeps
+///   each copy as one that the scan cannot prove.
 ///
 /// The word after a call gets these copies:
-/// - each copy before the call, because its routine can return the GPR
-///   or the slot unchanged;
-/// - a copy of a CTR that the scan cannot prove, in each GPR and slot
-///   that holds a copy at a return, because its routine can make that
-///   copy. The slots can also include other slots of the same width
+/// - each copy before the call, because its routine can return the
+///   register or the slot unchanged;
+/// - a copy of a CTR that the scan cannot prove, in each register and
+///   slot that holds a copy at a return, because its routine can make
+///   that copy. The slots can also include other slots of the same width
 ///   and residue, as [`CtrFlow::run`] gives.
 ///
 /// The flow joins the CTR of each path to a word, and continues until no
@@ -885,14 +1014,16 @@ impl<'a> CtrFlow<'a> {
     /// state changes, the flow joins it into the word after each link to
     /// the next word. So each return costs one join.
     ///
-    /// The flow also keeps the GPRs and the stack slots that hold a copy
-    /// at a return. When that set grows, the flow joins
-    /// [`CtrState::lost_copies`] of it into the word after each call.
+    /// The flow also keeps the registers and the stack slots that hold a
+    /// copy at a return, as [`Returned`] gives them. When that set grows,
+    /// the flow joins [`Returned::lost_copies`] of it into the word after
+    /// each call.
     ///
     /// A move of r1 between the word after a call and a return brings the
     /// injected slots back at new offsets, one move at a time. So the flow
     /// keeps the slots as [`SlotSet::widened`] gives them. The set grows at
-    /// most 32 times for the GPRs, and at most four times for each width
+    /// most 32 times for the GPRs, once for LR, once for the cell, and at
+    /// most four times for each width
     /// and residue of a slot in [`SLOT_REACH`]. An `lmw` or an `stmw` near
     /// the top of the displacements can put a slot past the end of
     /// [`SLOT_REACH`], and each such slot can add one more growth. The
@@ -912,8 +1043,7 @@ impl<'a> CtrFlow<'a> {
         let call_returns: Vec<(usize, usize)> =
             after_calls(code).flat_map(real_positions).collect();
         let mut returned = CtrState::default();
-        let mut returned_gprs = 0;
-        let mut returned_slots = SlotSet::default();
+        let mut returned_copies = Returned::default();
         let mut injected = SlotSet::default();
         let mut work = Worklist::new(code, self.reach);
         let mut stepped = 0;
@@ -936,17 +1066,12 @@ impl<'a> CtrFlow<'a> {
             let Some(brought) = self.returned((index, word), raw) else {
                 continue;
             };
-            let gprs = brought.copies.mask();
-            let slots = brought.slots.slots();
-            let new_slot = !slots.is_subset(&returned_slots);
-            if gprs & !returned_gprs != 0 || new_slot {
-                returned_gprs |= gprs;
-                returned_slots = returned_slots.widened(&slots, &SLOT_REACH);
-                let copies = CtrState::lost_copies(returned_gprs, &returned_slots);
+            if returned_copies.grow(&brought) {
+                let copies = returned_copies.lost_copies();
                 for &position in &call_returns {
                     self.inject(position, &copies, &injected, &mut work);
                 }
-                injected = returned_slots.clone();
+                injected = returned_copies.slots.clone();
             }
             if returned.join(&brought) {
                 for &position in &returns {
@@ -980,7 +1105,11 @@ impl<'a> CtrFlow<'a> {
         let changed = if state.slots.lost.shares(injected) {
             let grew = !copies.slots.lost.shares(injected);
             state.slots.lost = copies.slots.lost.clone();
-            state.copies.join(&copies.copies) || grew
+            let gprs = state.copies.join(&copies.copies);
+            let lr = state.lr.join(&copies.lr);
+            let moved = copies.moved && !state.moved;
+            state.moved |= copies.moved;
+            gprs || lr || moved || grew
         } else {
             state.join(copies)
         };
@@ -1009,16 +1138,17 @@ impl<'a> CtrFlow<'a> {
     /// The flow cannot tell which `bcctr` holds a return point in CTR, so
     /// it takes each one that does not link as a return.
     ///
+    /// A `bclr` brings no copy in LR. Its target is the address in LR, and
+    /// that address is the word that it returns to.
+    ///
     /// [PPC-Book1 p:25 s:2.4] `bclr` branches to LR 0:61 || 0b00, and `bcctr` branches to CTR 0:61 || 0b00.
     /// [PPC-Book1 p:24 s:2.4] A `bc` with BO bit 2 at 0 decrements CTR.
     fn returned(&self, position: (usize, usize), raw: u32) -> Option<CtrState> {
-        let bo = match crate::decode::decode(raw) {
-            Ok(
-                PpuInstruction::Bclr { bo, .. }
-                | PpuInstruction::Bcctr {
-                    bo, link: false, ..
-                },
-            ) => bo,
+        let (bo, through_lr) = match crate::decode::decode(raw) {
+            Ok(PpuInstruction::Bclr { bo, .. }) => (bo, true),
+            Ok(PpuInstruction::Bcctr {
+                bo, link: false, ..
+            }) => (bo, false),
             _ => return None,
         };
         let (index, word) = position;
@@ -1032,6 +1162,12 @@ impl<'a> CtrFlow<'a> {
             ctr,
             copies: state.copies.clone(),
             slots: state.slots.clone(),
+            lr: if through_lr {
+                Ctr::default()
+            } else {
+                state.lr.clone()
+            },
+            moved: state.moved,
         })
     }
 
@@ -1042,7 +1178,9 @@ impl<'a> CtrFlow<'a> {
     /// `position` holds the index of the segment and of the word there. A
     /// word that does not decode passes no state, as the scan of the code
     /// constants forgets each constant there. A call passes to its target
-    /// a CTR that no word of the scan writes, and no copy.
+    /// a CTR that no word of the scan writes, and no copy in a GPR, a slot
+    /// or LR. It passes the cell of [`CtrState::moved`], because CR and
+    /// the SPRs keep their values across the branch.
     fn steps(
         &self,
         position: (usize, usize),
@@ -1055,16 +1193,16 @@ impl<'a> CtrFlow<'a> {
             return (None, None);
         };
         let (next, taken) = self.ctr_steps(index, address, raw, decoded, state);
-        let (copies, slots) = state.after(&decoded);
+        let after = state.after(&decoded);
         let with = |ctr| CtrState {
             ctr,
-            copies: copies.clone(),
-            slots: slots.clone(),
+            ..after.clone()
         };
         let taken = taken.map(|(target, ctr)| {
             let state = if calls(address, raw) {
                 CtrState {
                     ctr,
+                    moved: after.moved,
                     ..CtrState::default()
                 }
             } else {
@@ -1149,15 +1287,45 @@ impl<'a> CtrFlow<'a> {
         &self,
         targets: &mut BTreeMap<u64, BTreeSet<u64>>,
     ) -> BTreeSet<u64> {
+        self.register_targets(
+            targets,
+            |decoded| matches!(decoded, PpuInstruction::Bcctr { .. }),
+            |state| &state.ctr,
+        )
+    }
+
+    /// Adds the target of each `bclr` that the copy of CTR in LR gives to
+    /// `targets`, by the word that wrote each constant, and returns the
+    /// address of each `bclr` whose copy the scan cannot prove.
+    ///
+    /// [PPC-Book1 p:25 s:2.4] `bclr` reaches LR0:61 || 0b00, and `bcctr` reaches CTR0:61 || 0b00.
+    pub(super) fn bclr_targets(&self, targets: &mut BTreeMap<u64, BTreeSet<u64>>) -> BTreeSet<u64> {
+        self.register_targets(
+            targets,
+            |decoded| matches!(decoded, PpuInstruction::Bclr { .. }),
+            |state| &state.lr,
+        )
+    }
+
+    /// Adds to `targets` the constants that `register` gives at each
+    /// branch for which `branch` holds, by the word that wrote each one,
+    /// and returns the address of each such branch whose value the scan
+    /// cannot prove.
+    fn register_targets(
+        &self,
+        targets: &mut BTreeMap<u64, BTreeSet<u64>>,
+        branch: fn(&PpuInstruction) -> bool,
+        register: fn(&CtrState) -> &Ctr,
+    ) -> BTreeSet<u64> {
         let mut lost = BTreeSet::new();
         for (index, (segment, states)) in self.code.segments().iter().zip(&self.at).enumerate() {
             for (word, ((address, raw), state)) in segment.addressed().zip(states).enumerate() {
                 if !self.reach.contains(index, word)
-                    || !matches!(crate::decode::decode(raw), Ok(PpuInstruction::Bcctr { .. }))
+                    || !crate::decode::decode(raw).is_ok_and(|decoded| branch(&decoded))
                 {
                     continue;
                 }
-                let ctr = &state.ctr;
+                let ctr = register(state);
                 for (&by, value) in &ctr.known {
                     targets
                         .entry(by)

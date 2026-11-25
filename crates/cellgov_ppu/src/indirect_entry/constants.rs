@@ -841,7 +841,7 @@ fn gprs_of(mask: u32) -> impl Iterator<Item = u8> {
 /// How a word moves a value between the GPRs and CR or an SPR that the
 /// scan does not follow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SprMove {
+pub(super) enum SprMove {
     /// The word moves the GPRs of the mask, with bit `n` set for GPR `n`,
     /// into such a register.
     Into(u32),
@@ -891,13 +891,29 @@ fn spr_move(decoded: &PpuInstruction) -> Option<SprMove> {
         | I::Mfctrl { rt }
         | I::Mftb { rt }
         | I::Mftbu { rt } => SprMove::OutOf(rt),
-        I::PpePrivileged { raw } => return privileged_spr_move(raw),
+        I::PpePrivileged { raw } => return privileged_spr_move(raw, true),
         _ => return None,
     })
 }
 
-/// How the privileged word `raw` moves a value between the GPRs and an SPR
-/// that the scan does not follow, the MSR or an SLB entry.
+/// How `decoded` moves a value between the GPRs and CR or an SPR that the
+/// CTR flow does not follow, or `None` for a word that moves no such value.
+///
+/// The CTR flow follows CTR and LR on their own. It does not follow SRR0
+/// and SRR1, so their moves count here. Each other move is a move of
+/// [`spr_move`].
+pub(super) fn ctr_flow_spr_move(decoded: &PpuInstruction) -> Option<SprMove> {
+    match *decoded {
+        PpuInstruction::Mtctr { .. } | PpuInstruction::Mfctr { .. } => None,
+        PpuInstruction::PpePrivileged { raw } => privileged_spr_move(raw, false),
+        _ => spr_move(decoded),
+    }
+}
+
+/// How the privileged word `raw` moves a value between the GPRs and an SPR,
+/// the MSR or an SLB entry, or `None` for a word that moves no such value.
+///
+/// When `follows_srrs` is set, a move of SRR0 or SRR1 is not a move.
 ///
 /// [PPC-Book3 p:19 s:3.4] `mtspr` is primary opcode 31 with extended opcode 467, RS in bits 6:10 and the SPR number in bits 11:20 with its halves swapped.
 /// [PPC-Book3 p:21 s:3.4] `mfspr` is primary opcode 31 with extended opcode 339, RT in bits 6:10 and the SPR number in bits 11:20 with its halves swapped.
@@ -906,13 +922,13 @@ fn spr_move(decoded: &PpuInstruction) -> Option<SprMove> {
 /// [PPC-Book3 p:23 s:3.4] `mfmsr` places the MSR into RT.
 /// [PPC-Book3 p:51 s:4.11.3.1] `slbmte` takes the ESID from RB and the VSID and flags from RS.
 /// [PPC-Book3 p:52 s:4.11] `slbmfev` and `slbmfee` place SLB entry fields into RT.
-fn privileged_spr_move(raw: u32) -> Option<SprMove> {
+fn privileged_spr_move(raw: u32, follows_srrs: bool) -> Option<SprMove> {
     if raw >> 26 != 31 {
         return None;
     }
     let rt = ((raw >> 21) & 0x1F) as u8;
     let rb = ((raw >> 11) & 0x1F) as u8;
-    let followed = matches!(spr_number(raw), SPR_SRR0 | SPR_SRR1);
+    let followed = follows_srrs && matches!(spr_number(raw), SPR_SRR0 | SPR_SRR1);
     Some(match (raw >> 1) & 0x3FF {
         467 if !followed => SprMove::Into(gpr_bit(rt)),
         146 | 178 => SprMove::Into(gpr_bit(rt)),
