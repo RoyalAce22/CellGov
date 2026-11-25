@@ -10,7 +10,10 @@ mod from_entry;
 mod map;
 
 pub use acquire::{kernel_of_record, KernelUnavailable, LoadedKernel};
-pub use from_entry::{run_kernel_from_entry, KernelRun, KernelRunError, KernelRunStop};
+pub use from_entry::{
+    run_kernel_from_entry, KernelHypercall, KernelPosition, KernelRun, KernelRunError,
+    KernelRunStop, RECENT_PCS,
+};
 pub use map::{KernelImage, KernelMapError};
 
 #[cfg(test)]

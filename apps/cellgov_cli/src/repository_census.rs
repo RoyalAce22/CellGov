@@ -10,10 +10,13 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use cellgov_boot::kernel::{run_kernel_from_entry, KernelRun, KernelRunError, KernelRunStop};
+use cellgov_boot::kernel::{
+    run_kernel_from_entry, KernelPosition, KernelRun, KernelRunError, KernelRunStop,
+};
 use cellgov_lv1::HypercallRefusal;
 use cellgov_lv1_archive::{self as lv1_archive, RepositoryReadRow, REPOSITORY_READ};
 use cellgov_lv2_archive::{self as archive, ExtractionError};
+use cellgov_ps3_abi::lv1::call as lv1_call;
 
 use crate::cli::exit::CommandError;
 use crate::cli::parse::RepositoryCensusArgs;
@@ -32,12 +35,14 @@ enum RepositoryCensusError {
     Boot(#[from] KernelRunError),
     #[error(
         "the boot reached the step cap of {max_steps} after {steps} steps and {reads} repository \
-         reads, before CellGov's hypervisor stopped it; raise --max-steps"
+         reads, before CellGov's hypervisor stopped it; {}; raise --max-steps",
+        render_position(kernel.as_ref())
     )]
     StepCap {
         max_steps: usize,
         steps: usize,
         reads: usize,
+        kernel: Option<KernelPosition>,
     },
     #[error(transparent)]
     MixedRead(#[from] lv1_archive::MixedRepositoryRead),
@@ -128,6 +133,49 @@ fn stop_text(stop: &KernelRunStop) -> String {
     }
 }
 
+/// One clause that says where the kernel's unit is when a boot stops.
+fn render_position(kernel: Option<&KernelPosition>) -> String {
+    let Some(kernel) = kernel else {
+        return "the run gives no state for the kernel unit".to_string();
+    };
+    let status = match kernel.status {
+        Some(status) => format!("{status:?}"),
+        None => "none".to_string(),
+    };
+    let call = match kernel.last_hypercall {
+        Some(call) => format!(
+            "its last hypercall was {}{} at pc 0x{:016x} in step {}",
+            call.number,
+            lv1_call::lookup(call.number).map_or(String::new(), |row| format!(" {}", row.name)),
+            call.pc,
+            call.step
+        ),
+        None => "it made no hypercall".to_string(),
+    };
+    format!(
+        "the kernel unit is at pc 0x{:016x} with MSR 0x{:016x} and status {status}; {call}; {}",
+        kernel.pc,
+        kernel.msr,
+        recent_text(&kernel.recent_pcs)
+    )
+}
+
+/// One clause that names the step-end pcs `recent` of the kernel's unit.
+/// A cap below the kernel's first step (`--max-steps 0` or 1, where the
+/// sibling steps first) leaves `recent` empty.
+fn recent_text(recent: &[u64]) -> String {
+    let pcs = recent
+        .iter()
+        .map(|pc| format!("0x{pc:016x}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    match recent.len() {
+        0 => "it took no step".to_string(),
+        1 => format!("its last step ended at pc {pcs}"),
+        n => format!("its last {n} steps ended at pc {pcs}"),
+    }
+}
+
 /// Boots the kernel `elf` of the PUP `args` names and writes its reads
 /// over that PUP's rows in the output directory.
 fn emit(args: &RepositoryCensusArgs, elf: &[u8]) -> Result<KernelRun, RepositoryCensusError> {
@@ -166,6 +214,7 @@ fn census_rows(
             max_steps,
             steps: boot.steps,
             reads: boot.repository_reads.len(),
+            kernel: boot.kernel.clone(),
         });
     }
     lv1_archive::repository_read_rows_of(pup_sha256, &boot.repository_reads)
@@ -204,3 +253,7 @@ fn write(path: &Path, text: &str) -> Result<(), RepositoryCensusError> {
 #[cfg(test)]
 #[path = "tests/repository_census_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/repository_census_position_tests.rs"]
+mod position_tests;

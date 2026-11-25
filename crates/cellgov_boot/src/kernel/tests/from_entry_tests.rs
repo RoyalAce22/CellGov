@@ -19,6 +19,9 @@ mod page_table;
 #[path = "from_entry_allocated_tests.rs"]
 mod allocated;
 
+#[path = "from_entry_position_tests.rs"]
+mod position;
+
 /// A firmware for which CellGov serves the repository values of the
 /// psdevwiki dump.
 const FW: &str = "1.50";

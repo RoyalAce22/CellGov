@@ -105,6 +105,7 @@ fn boot_stopped_by(stop: KernelRunStop) -> KernelRun {
             pc: 0x8000_0000_0000_ce3c,
         }],
         console: Vec::new(),
+        kernel: None,
     }
 }
 
@@ -115,7 +116,8 @@ fn a_boot_cut_off_by_its_step_cap_yields_no_rows() {
         Err(RepositoryCensusError::StepCap {
             max_steps: 100,
             steps: 100,
-            reads: 1
+            reads: 1,
+            kernel: None,
         })
     ));
 }

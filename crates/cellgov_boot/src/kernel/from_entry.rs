@@ -4,9 +4,12 @@
 //! The run gives the evidence a hypervisor table is built from: the
 //! repository reads the kernel makes, in order, and where it stops.
 
+use std::collections::VecDeque;
+
 use cellgov_core::{Runtime, RuntimeMode, StepError};
 use cellgov_effects::FaultKind;
 use cellgov_event::UnitId;
+use cellgov_exec::{ExecutionStepResult, UnitStatus};
 use cellgov_lv1::{
     allocated_storage, page_table_storage, shadow_storage, HypercallRefusal, RepositoryRead,
 };
@@ -20,6 +23,7 @@ use cellgov_ps3_abi::hw::ppu_supervisor::MSR_SF;
 use cellgov_time::Budget;
 
 use super::map::{map_kernel, KernelMapError, KERNEL_SPAN_LIMIT};
+use crate::diag::is_hypercall;
 
 /// The budget of one step of either unit.
 const STEP_BUDGET: u64 = 256;
@@ -27,6 +31,9 @@ const STEP_BUDGET: u64 = 256;
 /// The real address of the placeholder sibling's `b .`: the region's
 /// last word.
 const SPIN_WORD: u64 = KERNEL_SPAN_LIMIT - 4;
+
+/// How many step-end pcs of the kernel's unit a run keeps.
+pub const RECENT_PCS: usize = 8;
 
 /// Why a kernel run from its entry stopped.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +74,63 @@ pub struct KernelRun {
     pub repository_reads: Vec<RepositoryRead>,
     /// Every byte the kernel wrote to the logical console.
     pub console: Vec<u8>,
+    /// Where the kernel's unit is when the run stops. `None` when the
+    /// runtime holds no PPU unit with supervisor registers under the
+    /// kernel's id.
+    pub kernel: Option<KernelPosition>,
+}
+
+/// The kernel's unit when a run from its entry stops.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KernelPosition {
+    /// The address of the next instruction that the unit runs, or of the
+    /// `sc` of a hypercall whose answer has not reached the unit. The PPU
+    /// keeps the `sc` as the pc until the answer moves it past
+    /// (cellgov_ppu `unit/hypercall.rs` `hypercall_yield`), so a run that
+    /// a refused hypercall stops leaves the pc on that `sc`.
+    pub pc: u64,
+    /// The unit's machine state register.
+    pub msr: u64,
+    /// The unit's scheduling status, or `None` when the runtime gives none.
+    pub status: Option<UnitStatus>,
+    /// The unit's last hypercall, or `None` when it made none.
+    pub last_hypercall: Option<KernelHypercall>,
+    /// The unit's pc at the end of each of its last committed steps that
+    /// did not fault, oldest first. The run keeps at most [`RECENT_PCS`]
+    /// of them. A step that faults is not among them: the PPU discards
+    /// its batch and the pc stays where the step began (cellgov_ppu
+    /// `unit/fault.rs` `fault_yield`). A step whose commit the runtime
+    /// refuses is not among them either.
+    pub recent_pcs: Vec<u64>,
+}
+
+/// One hypercall of the kernel's unit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KernelHypercall {
+    /// The hypercall number from r11.
+    pub number: u64,
+    /// The address of the `sc` that made the call.
+    pub pc: u64,
+    /// The runtime step that made the call, counted from 1 over both units.
+    pub step: usize,
+}
+
+/// What a run records about the kernel's unit as it steps.
+#[derive(Debug, Default)]
+struct KernelTrail {
+    last_hypercall: Option<KernelHypercall>,
+    recent_pcs: VecDeque<u64>,
+}
+
+impl KernelTrail {
+    /// Keeps `pc` as the newest step-end pc and drops the oldest one past
+    /// [`RECENT_PCS`].
+    fn push_pc(&mut self, pc: u64) {
+        if self.recent_pcs.len() == RECENT_PCS {
+            self.recent_pcs.pop_front();
+        }
+        self.recent_pcs.push_back(pc);
+    }
 }
 
 /// Why a kernel run from its entry did not start.
@@ -147,17 +211,42 @@ pub fn run_kernel_from_entry(
         unit.state_mut().pc = entry;
         unit
     });
-    let stop = drive(&mut rt, kernel);
+    let mut trail = KernelTrail::default();
+    let stop = drive(&mut rt, kernel, &mut trail);
     Ok(KernelRun {
         steps: rt.steps_taken(),
         stop,
         repository_reads: rt.hypervisor().repository_reads().to_vec(),
         console: rt.hypervisor().console_text().to_vec(),
+        kernel: position(&rt, kernel, trail),
     })
 }
 
-/// Steps `rt` until it stops, and says why.
-fn drive(rt: &mut Runtime, kernel: UnitId) -> KernelRunStop {
+/// The unit `kernel` of `rt`, with what `trail` recorded about it.
+fn position(rt: &Runtime, kernel: UnitId, trail: KernelTrail) -> Option<KernelPosition> {
+    let state = ppu_unit(rt, kernel)?.state();
+    Some(KernelPosition {
+        pc: state.pc,
+        msr: state.supervisor()?.msr,
+        status: rt.registry().effective_status(kernel),
+        last_hypercall: trail.last_hypercall,
+        recent_pcs: trail.recent_pcs.into(),
+    })
+}
+
+/// The PPU unit `id` of `rt`, or `None` when `id` is not a PPU unit.
+fn ppu_unit(rt: &Runtime, id: UnitId) -> Option<&PpuExecutionUnit> {
+    rt.registry()
+        .get(id)?
+        .as_any()
+        .downcast_ref::<PpuExecutionUnit>()
+}
+
+/// Steps `rt` until it stops, and says why. Each step of the unit
+/// `kernel` goes into `trail`.
+///
+/// The loop has no bound of its own: the runtime's step cap ends it.
+fn drive(rt: &mut Runtime, kernel: UnitId, trail: &mut KernelTrail) -> KernelRunStop {
     loop {
         let mut step = match rt.step() {
             Ok(step) => step,
@@ -170,6 +259,11 @@ fn drive(rt: &mut Runtime, kernel: UnitId) -> KernelRunStop {
             Err(StepError::MaxStepsExceeded) => return KernelRunStop::StepCap,
             Err(error) => return KernelRunStop::Step(error),
         };
+        let own = step.unit == kernel;
+        if own {
+            trail.last_hypercall =
+                hypercall_of(&step.result, rt.steps_taken()).or(trail.last_hypercall);
+        }
         // A sibling fault stops the run too: the sibling holds the kernel's
         // unit on thread 0, and a run without it goes on a broken setup.
         let pc = step.result.local_diagnostics.pc;
@@ -186,7 +280,23 @@ fn drive(rt: &mut Runtime, kernel: UnitId) -> KernelRunStop {
         if let Some(stop) = fault {
             return stop;
         }
+        if let (true, Some(unit)) = (own, ppu_unit(rt, kernel)) {
+            trail.push_pc(unit.state().pc);
+        }
     }
+}
+
+/// The hypercall that `result` yielded in the runtime step `step`, or
+/// `None` when it yielded no hypercall.
+fn hypercall_of(result: &ExecutionStepResult, step: usize) -> Option<KernelHypercall> {
+    if !is_hypercall(result) {
+        return None;
+    }
+    Some(KernelHypercall {
+        number: result.syscall_args?[0],
+        pc: result.local_diagnostics.pc?,
+        step,
+    })
 }
 
 /// The real address space of a kernel run:
