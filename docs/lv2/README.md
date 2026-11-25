@@ -332,7 +332,7 @@ live 4.93 hypercall table, and the state.
 `lv1_493` is `handler`, `invalid` or `past_table`. It comes from
 `cellgov_ps3_abi::lv1::table`, which holds the console capture
 `tests/micro/lv1_hypercall_table`. The state is `answered`
-(13 numbers) or `null_backend`: no handler answers
+(14 numbers) or `null_backend`: no handler answers
 the number. At 4.93 the null backend answers lv1's invalid-entry status
 for an `invalid` number (16 numbers) and stops the run
 for a `handler` number. At every other firmware it stops the run.
