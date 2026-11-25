@@ -23,6 +23,12 @@ pub fn execute(
     effects: &mut Vec<Effect>,
     store_buf: &mut StoreBuffer,
 ) -> ExecuteVerdict {
+    // The unavailable interrupts come before any storage access, so the
+    // instruction changes no state.
+    // [CBE-Handbook p:290 s:9.10] Table 9-39: a VXU or floating-point load or store takes the unavailable interrupt ahead of its storage interrupts.
+    if let Some(interrupt) = crate::supervisor::unavailable(insn, state) {
+        return ExecuteVerdict::Fault(super::PpuFault::Interrupt(interrupt));
+    }
     match *insn {
         PpuInstruction::Lwz { .. }
         | PpuInstruction::Lbz { .. }

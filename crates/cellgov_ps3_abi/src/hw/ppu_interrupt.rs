@@ -75,6 +75,11 @@ pub const VECTOR_DECREMENTER: u64 = 0x900;
 /// [PPC-Book3 p:65 s:5.5] Figure 36.
 pub const VECTOR_SYSTEM_CALL: u64 = 0xC00;
 
+/// Trace interrupt vector.
+///
+/// [PPC-Book3 p:65 s:5.5] Figure 36.
+pub const VECTOR_TRACE: u64 = 0xD00;
+
 /// VXU unavailable interrupt vector.
 ///
 /// [CBE-Handbook p:258 s:9.5.15] The PPE's VXU unavailable interrupt is at 0xF20.
@@ -127,6 +132,11 @@ pub const SRR1_PROGRAM_PRIVILEGED: u64 = doubleword_bit(45);
 /// [PPC-Book3 p:72 s:5.5.9] See [`SRR1_PROGRAM_FP_ENABLED`].
 pub const SRR1_PROGRAM_TRAP: u64 = doubleword_bit(46);
 
+/// SRR1 bit 43: the PPE sets it on every trace interrupt.
+///
+/// [CBE-Handbook p:257 s:9.5.14] Table 9-16: a trace interrupt sets SRR1 bit 43 and clears bits 33:36, 42 and 44:47.
+pub const SRR1_TRACE: u64 = doubleword_bit(43);
+
 /// DSISR bit 1: the access found no translation.
 ///
 /// [PPC-Book3 p:67 s:5.5.3] A data storage interrupt sets DSISR bit 1 when no translation is found, bit 4 when storage protection refuses the access, and bit 6 for a store or `dcbz`.
@@ -154,3 +164,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/ppu_interrupt_delivery_tests.rs"]
 mod delivery_tests;
+
+#[cfg(test)]
+#[path = "tests/ppu_interrupt_trace_tests.rs"]
+mod trace_tests;

@@ -2,9 +2,9 @@
 
 use cellgov_ps3_abi::hw::ppu::CELL_BP_VR;
 use cellgov_ps3_abi::hw::ppu_supervisor::{
-    MSR_BIT1, MSR_DR, MSR_EE, MSR_HV, MSR_IR, MSR_ME, MSR_PR, MSR_RI, MSR_SF, PPE_SLB_INDEX,
-    PPE_SLB_VSID_FLAGS, SLB_ESID, SLB_VALID, SPR_BP_VR, SPR_DAR, SPR_DEC, SPR_DSISR, SPR_SPRG0,
-    SPR_SRR0, SPR_SRR1,
+    MSR_BIT1, MSR_DR, MSR_EE, MSR_HV, MSR_IR, MSR_ME, MSR_PR, MSR_RI, MSR_SE, MSR_SF,
+    PPE_SLB_INDEX, PPE_SLB_VSID_FLAGS, SLB_ESID, SLB_VALID, SPR_BP_VR, SPR_DAR, SPR_DEC, SPR_DSISR,
+    SPR_SPRG0, SPR_SRR0, SPR_SRR1,
 };
 
 use super::state::SupervisorState;
@@ -133,8 +133,16 @@ enum MtMsr {
 
 /// [PPC-Book3 p:22 s:3.4] mtmsrd, L = 0: SF from RS bits 0 and 1; EE, IR and DR each ORed with RS bit 49; bits 1:2, 4:47, 49:50, 52:57 and 60:63 from RS; HV and ME unchanged. L = 1: only EE and RI.
 /// [PPC-Book3 p:91 s:8.3] mtmsr, L = 0: EE, IR and DR as mtmsrd; bits 32:47, 49:50, 52:57 and 60:63 from RS; the high 32 bits and ME unchanged. L = 1 as mtmsrd.
+///
+/// [CBE-Handbook p:257 s:9.5.14] The PPE decides the trace after an mtmsrd from MSR\[SE\] after the move, the opposite of the architecture. The documents give no PPE rule for mtmsr, so CellGov refuses an mtmsr that changes SE.
 fn move_to_msr(state: &mut PpuState, rs: usize, l: bool, form: MtMsr) -> ExecuteVerdict {
     let v = state.gpr[rs];
+    let changes_se = state
+        .supervisor()
+        .is_some_and(|s| (s.msr ^ v) & MSR_SE != 0);
+    if matches!(form, MtMsr::Word) && !l && changes_se {
+        return ExecuteVerdict::Fault(PpuFault::Unmodelled("an mtmsr that changes MSR[SE]"));
+    }
     state.update_supervisor(|s| {
         if l {
             s.msr = (s.msr & !(MSR_EE | MSR_RI)) | (v & (MSR_EE | MSR_RI));

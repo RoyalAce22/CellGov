@@ -1,0 +1,21 @@
+[test]
+name = "ppu_lazy_unit_switch"
+
+# A hardware probe of whether the kernel resumes a thread with the
+# floating-point and vector units off in its MSR: the time-base ticks of
+# a thread's first integer, floating-point and vector add after the
+# kernel switched it out, each against the same add run again at once.
+# The console capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u32 words at the offsets ppu/main.c lists: w0 and w1 the
+# failed step and its code, w2 the helper check, w3 and w4 the round
+# counts, from w8 32 rounds after a sleep and from w200 16 rounds after
+# a join on a helper that used both units, six deltas per round
+# (integer, floating-point and vector; first then warm): 1184 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 1184 },
+]
+
+[expect]
+outcome = "completed"

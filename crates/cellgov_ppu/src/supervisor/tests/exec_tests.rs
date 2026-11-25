@@ -6,8 +6,8 @@
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::hw::ppu_supervisor::{
-    MSR_DR, MSR_EE, MSR_HV, MSR_IR, MSR_ME, MSR_PR, MSR_RI, MSR_SF, SLB_VALID, SPR_DAR, SPR_DEC,
-    SPR_DSISR, SPR_SPRG0, SPR_SRR0, SPR_SRR1,
+    MSR_DR, MSR_EE, MSR_HV, MSR_IR, MSR_ME, MSR_PR, MSR_RI, MSR_SE, MSR_SF, SLB_VALID, SPR_DAR,
+    SPR_DEC, SPR_DSISR, SPR_SPRG0, SPR_SRR0, SPR_SRR1,
 };
 
 use super::{moves_decrementer, SupervisorState};
@@ -222,15 +222,19 @@ fn mtmsrd_with_l_0_and_rs_0_clears_every_bit_but_hv_and_me() {
 #[test]
 fn mtmsr_replaces_the_low_word_but_me_and_keeps_the_high_word() {
     let mut state = kernel_state();
+    // Each move keeps SE: an mtmsr that changes SE refuses.
     state.update_supervisor(|s| s.msr = MSR_SF | MSR_HV);
-    state.set_gpr(3, !0);
+    state.set_gpr(3, !MSR_SE);
     run(&mut state, word(31, 146, 3, 0, 0));
-    assert_eq!(msr(&state), MSR_SF | MSR_HV | (0xFFFF_FFFF & !MSR_ME));
+    assert_eq!(
+        msr(&state),
+        MSR_SF | MSR_HV | (0xFFFF_FFFF & !MSR_ME & !MSR_SE)
+    );
     let mut state = kernel_state();
     state.update_supervisor(|s| s.msr = !MSR_PR);
-    state.set_gpr(3, 0);
+    state.set_gpr(3, MSR_SE);
     run(&mut state, word(31, 146, 3, 0, 0));
-    assert_eq!(msr(&state), 0xFFFF_FFFF_0000_0000 | MSR_ME);
+    assert_eq!(msr(&state), 0xFFFF_FFFF_0000_0000 | MSR_ME | MSR_SE);
 }
 
 #[test]

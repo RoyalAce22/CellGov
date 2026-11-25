@@ -5,7 +5,8 @@
 //! - an interrupt its instruction causes, except a machine check and
 //!   `sc` with LEV = 1;
 //! - the system call interrupt of `sc` with any other LEV;
-//! - the external and decrementer interrupts, between two instructions.
+//! - the external and decrementer interrupts, between two instructions;
+//! - the trace interrupt, after the instruction that it traces.
 //!
 //! `sc` with LEV = 1 yields a hypercall in either processor state.
 //! Interrupt entry ends the batch. The next batch follows the new MSR,
@@ -18,9 +19,9 @@ use cellgov_exec::{
     YieldReason,
 };
 use cellgov_ps3_abi::hw::ppu_interrupt::{
-    SRR1_INTERRUPT_INFO, VECTOR_DECREMENTER, VECTOR_EXTERNAL,
+    SRR1_INTERRUPT_INFO, SRR1_TRACE, VECTOR_DECREMENTER, VECTOR_EXTERNAL, VECTOR_TRACE,
 };
-use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_EE, MSR_INTERRUPT_CLEARED, MSR_SF};
+use cellgov_ps3_abi::hw::ppu_supervisor::{MSR_BE, MSR_EE, MSR_INTERRUPT_CLEARED, MSR_SE, MSR_SF};
 
 use super::batch::BatchEntry;
 use super::ppu_unit::PpuExecutionUnit;
@@ -44,6 +45,39 @@ fn entry_msr(msr: u64) -> u64 {
 /// [PPC-Book3 p:62 s:5.4] SRR1 bits 33:36 and 42:47 hold the interrupt's information, and every other bit holds the MSR.
 pub(super) fn entry_srr1(msr: u64, cause: u64) -> u64 {
     (msr & !SRR1_INTERRUPT_INFO) | (cause & SRR1_INTERRUPT_INFO)
+}
+
+/// The SRR0 of the trace interrupt that `insn` at `pc` causes, or `None`.
+///
+/// `insn` completed with no other interrupt. `msr_before` and `msr_after`
+/// are the MSR before and after `insn`. The thread runs `next_pc` next.
+///
+/// [PPC-Book3 p:73 s:5.5.14] With MSR\[SE\] = 1 every instruction that completes successfully, except rfid and hrfid, causes a trace interrupt, and with MSR\[BE\] = 1 every completed branch; SRR0 is the next instruction.
+/// [CBE-Handbook p:257 s:9.5.14] The PPE uses MSR\[SE\] after an mtmsrd, and an mtmsrd that changes SE from 0 to 1 sets SRR0 to the mtmsrd.
+pub(super) fn trace_srr0(
+    insn: &PpuInstruction,
+    pc: u64,
+    next_pc: u64,
+    msr_before: u64,
+    msr_after: u64,
+) -> Option<u64> {
+    let (rfid_or_hrfid, mtmsrd) = match *insn {
+        PpuInstruction::PpePrivileged { raw } => {
+            let form = (raw >> 26, (raw >> 1) & 0x3FF);
+            (matches!(form, (19, 18 | 274)), form == (31, 178))
+        }
+        _ => (false, false),
+    };
+    if rfid_or_hrfid {
+        return None;
+    }
+    let single_step = msr_after & MSR_SE != 0;
+    let branch = msr_after & MSR_BE != 0 && insn.is_branch();
+    if !single_step && !branch {
+        return None;
+    }
+    let sets_se = mtmsrd && msr_before & MSR_SE == 0 && single_step;
+    Some(if sets_se { pc } else { next_pc })
 }
 
 /// An interrupt that no instruction causes, which the thread takes
@@ -197,6 +231,31 @@ impl PpuExecutionUnit {
         self.boundary_yield(entry, effects, pc, interrupt.record(pc))
     }
 
+    /// Takes the trace interrupt of the instruction at `pc`, and yields at
+    /// the interrupt boundary.
+    ///
+    /// The interrupt sets SRR0 to `srr0`. The instruction and the
+    /// instructions the batch retired before it commit.
+    ///
+    /// [CBE-Handbook p:291 s:9.10] Table 9-39: the PPE ranks the trace interrupt above the external and decrementer interrupts.
+    pub(super) fn trace_yield(
+        &mut self,
+        entry: &BatchEntry,
+        effects: &mut Vec<Effect>,
+        pc: u64,
+        srr0: u64,
+    ) -> ExecutionStepResult {
+        self.note_entry_context_sync(entry);
+        let record = InterruptRecord {
+            vector: VECTOR_TRACE,
+            srr0,
+            srr1: SRR1_TRACE,
+            dsisr: None,
+            dar: None,
+        };
+        self.boundary_yield(entry, effects, pc, record)
+    }
+
     /// Records the context synchronization of interrupt entry, when the
     /// batch records code events. The `sc` of a system call interrupt
     /// records its own.
@@ -339,3 +398,11 @@ mod hypercall_yield_tests;
 #[cfg(test)]
 #[path = "tests/hypercall_return_tests.rs"]
 mod hypercall_return_tests;
+
+#[cfg(test)]
+#[path = "tests/interrupt_facility_tests.rs"]
+mod interrupt_facility_tests;
+
+#[cfg(test)]
+#[path = "tests/interrupt_trace_tests.rs"]
+mod interrupt_trace_tests;

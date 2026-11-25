@@ -22,6 +22,11 @@ pub const MSR_BIT1: u64 = doubleword_bit(1);
 /// [PPC-Book3 p:10 s:2.2.3] See [`MSR_SF`].
 pub const MSR_HV: u64 = doubleword_bit(3);
 
+/// MSR bit 38: vector instructions available.
+///
+/// [CBE-Handbook p:304 s:10.4.1] The PPE's MSR holds VXU at bit 38.
+pub const MSR_VXU: u64 = doubleword_bit(38);
+
 /// MSR bit 48: external and decrementer interrupts enabled.
 ///
 /// [PPC-Book3 p:10 s:2.2.3] See [`MSR_SF`].
@@ -175,3 +180,7 @@ mod msr_trace_fp_bits_tests;
 #[cfg(test)]
 #[path = "tests/ppu_msr_pmm_bit_tests.rs"]
 mod msr_pmm_bit_tests;
+
+#[cfg(test)]
+#[path = "tests/ppu_msr_vxu_bit_tests.rs"]
+mod msr_vxu_bit_tests;

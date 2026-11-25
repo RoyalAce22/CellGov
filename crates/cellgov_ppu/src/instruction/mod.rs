@@ -19,6 +19,7 @@ pub mod ops;
 mod refused_words;
 
 pub use branch::{branch_target, BranchOffset};
+pub(crate) use classes::Facility;
 pub use decode_error::{Locator, PpuDecodeError};
 pub use fmt::AsmText;
 pub use fused_pair::{FusedPair, FusedPairKind};

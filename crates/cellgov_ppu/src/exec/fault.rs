@@ -126,14 +126,18 @@ pub enum PpuInterrupt {
     /// A program interrupt and its one cause.
     #[error("PPU program interrupt: {0}")]
     Program(ProgramCause),
-    /// A floating-point instruction with MSR\[FP\] = 0. CellGov does not
-    /// raise it: a game process never sees it.
+    /// A floating-point instruction with MSR\[FP\] = 0. Only a thread
+    /// with supervisor registers has an MSR. The console's LV2 kernel
+    /// resumes a thread with FP clear. The thread thus takes this
+    /// interrupt at its first floating-point instruction after a switch,
+    /// as the `ppu_lazy_unit_switch` console capture shows.
     ///
     /// [PPC-Book3 p:72 s:5.5.10] Floating-point unavailable needs MSR\[FP\] = 0, which only privileged code sets.
     #[error("PPU floating-point unavailable interrupt")]
     FpUnavailable,
-    /// A vector instruction with MSR\[VXU\] = 0. CellGov does not raise
-    /// it: a game process never sees it.
+    /// A vector instruction with MSR\[VXU\] = 0. The console's LV2 kernel
+    /// resumes a thread with VXU clear, as [`Self::FpUnavailable`]
+    /// describes for FP.
     ///
     /// SRR0 holds the vector instruction itself, because the processor
     /// attempts it next and it cannot run.

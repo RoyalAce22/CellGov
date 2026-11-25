@@ -1,0 +1,20 @@
+[test]
+name = "ppu_lazy_unit_switch_vrsave"
+
+# A hardware probe of whether dst, dss, mfvrsave and mtvrsave run with
+# the vector unit off: after each kernel switch, the time-base ticks of
+# one candidate and then of a vector add, each run twice. The console
+# capture is the answer; no emulator runs it.
+
+[observe]
+# Big-endian u32 words at the offsets ppu/main.c lists: w0 and w1 the
+# failed step and its code, w2 and w3 the candidate and round counts,
+# from w8 eight rounds of each of five candidates (add, mfvrsave,
+# mtvrsave, dss, dst), four deltas per round (candidate first and warm,
+# then vaddubm first and warm): 672 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 672 },
+]
+
+[expect]
+outcome = "completed"

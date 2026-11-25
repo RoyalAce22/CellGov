@@ -1,9 +1,99 @@
 //! The class predicates of a decoded instruction: super-pair,
-//! barrier and decode-only stub.
+//! barrier, decode-only stub, facility and branch.
 
 use super::PpuInstruction;
 
+#[cfg(test)]
+#[path = "tests/facility_tests.rs"]
+mod facility_tests;
+
+/// A unit that an MSR bit makes available to an instruction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Facility {
+    /// The floating-point unit, which MSR\[FP\] makes available.
+    FloatingPoint,
+    /// The vector unit, which MSR\[VXU\] makes available.
+    Vector,
+}
+
 impl PpuInstruction {
+    /// The facility that this instruction needs, or `None` for an
+    /// instruction that needs neither.
+    ///
+    /// [PPC-Book3 p:10 s:2.2.3] With MSR\[FP\] = 0 the processor executes no floating-point instruction, floating-point loads, stores and moves included.
+    /// [CBE-Handbook p:740 s:A.3.2] Table A-8: the vector loads include `lvsl` and `lvsr`, and the PPE runs `dst`, `dstst` and `dss` as no-ops.
+    /// [AltiVec-PEM p:2-9 s:2.5] The data stream instructions and the VRSAVE moves run with the vector unit disabled.
+    pub(crate) const fn facility(&self) -> Option<Facility> {
+        use PpuInstruction as I;
+        match self {
+            I::Lfs { .. }
+            | I::Lfsu { .. }
+            | I::Lfd { .. }
+            | I::Lfdu { .. }
+            | I::Lfsx { .. }
+            | I::Lfsux { .. }
+            | I::Lfdx { .. }
+            | I::Lfdux { .. }
+            | I::Stfs { .. }
+            | I::Stfsu { .. }
+            | I::Stfd { .. }
+            | I::Stfdu { .. }
+            | I::Stfsx { .. }
+            | I::Stfsux { .. }
+            | I::Stfdx { .. }
+            | I::Stfdux { .. }
+            | I::Stfiwx { .. }
+            | I::Fp59 { .. }
+            | I::Fp63 { .. } => Some(Facility::FloatingPoint),
+            I::Vx { .. }
+            | I::Va { .. }
+            | I::Vxor { .. }
+            | I::Vsldoi { .. }
+            | I::Mfvscr { .. }
+            | I::Mtvscr { .. }
+            | I::Lvsl { .. }
+            | I::Lvsr { .. }
+            | I::Lvebx { .. }
+            | I::Lvehx { .. }
+            | I::Lvewx { .. }
+            | I::Lvx { .. }
+            | I::Lvxl { .. }
+            | I::Lvlx { .. }
+            | I::Lvlxl { .. }
+            | I::Lvrx { .. }
+            | I::Lvrxl { .. }
+            | I::Stvebx { .. }
+            | I::Stvehx { .. }
+            | I::Stvewx { .. }
+            | I::Stvx { .. }
+            | I::Stvxl { .. }
+            | I::Stvlx { .. }
+            | I::Stvlxl { .. }
+            | I::Stvrx { .. }
+            | I::Stvrxl { .. } => Some(Facility::Vector),
+            _ => None,
+        }
+    }
+
+    /// Whether this instruction is a branch: `b`, `bc`, `bclr`, `bcctr`,
+    /// or a quickening of one.
+    ///
+    /// A fused pair is never a branch here. Only a thread with supervisor
+    /// registers traces branches, and such a thread runs no fused pair.
+    pub(crate) const fn is_branch(&self) -> bool {
+        matches!(
+            self,
+            PpuInstruction::B { .. }
+                | PpuInstruction::Bc { .. }
+                | PpuInstruction::Bclr { .. }
+                | PpuInstruction::Bcctr { .. }
+                | PpuInstruction::Bdnz { .. }
+                | PpuInstruction::BcTrue { .. }
+                | PpuInstruction::BcFalse { .. }
+                | PpuInstruction::Blr { .. }
+        )
+    }
+
     /// Whether this instruction is a fused 2-instruction super-pair
     /// requiring a [`PpuInstruction::Consumed`] placeholder at PC+4.
     /// One-instruction quickenings are not super-pairs.

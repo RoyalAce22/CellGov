@@ -153,6 +153,7 @@ impl PpuExecutionUnit {
             } else {
                 None
             };
+            let msr_before = self.state.supervisor().map(|s| s.msr);
             let fault = match exec::execute(
                 &insn,
                 &mut self.state,
@@ -199,6 +200,9 @@ impl PpuExecutionUnit {
             }
 
             let last_pc = self.retire_step(ctx, effects, &attempt, ops, translating, load);
+            if let Some(srr0) = self.traced(&attempt.insn, step_pc, msr_before) {
+                return self.trace_yield(&entry, effects, step_pc, srr0);
+            }
             if self.ends_after(ctx, &entry, effects, &mut cur, &attempt, last_pc) {
                 return self.budget_yield(&entry, effects, last_pc);
             }
@@ -214,6 +218,25 @@ impl PpuExecutionUnit {
             self.load_profile
                 .note_layout(views.map(|v| (v.base, v.bytes.len() as u64)));
         }
+    }
+
+    /// The SRR0 of the trace interrupt that the retired `insn` at `step_pc`
+    /// causes, or `None`.
+    ///
+    /// `msr_before` is the MSR before `insn`. It is `None` for a thread
+    /// with no supervisor registers, and such a thread never traces.
+    #[inline(always)]
+    fn traced(
+        &self,
+        insn: &instruction::PpuInstruction,
+        step_pc: u64,
+        msr_before: Option<u64>,
+    ) -> Option<u64> {
+        let msr_after = self.state.supervisor()?.msr;
+        // A thread with supervisor registers decodes each fetch fresh,
+        // so `insn` is never a fused pair.
+        debug_assert!(!insn.is_super_pair(), "a traced fused pair");
+        crate::unit::interrupt::trace_srr0(insn, step_pc, self.state.pc, msr_before?, msr_after)
     }
 
     /// Retires the `sc` at `step_pc` and yields its LV2 call.
