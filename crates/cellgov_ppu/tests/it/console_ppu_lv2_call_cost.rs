@@ -8,6 +8,8 @@
 //! console runs while every call so far returned 0.
 
 use crate::console_ppu_issue_timing::{replay, replay_r3, Replay, Seed, ONE_LINE};
+use crate::console_ppu_lv2_call_lifecycle as lifecycle;
+use crate::console_ppu_lv2_call_untimed as untimed;
 use cellgov_ps3_abi::hw::ppu_issue::{
     ppu_syscall_round_trip_cycles, PPU_CYCLES_PER_TB_TICK, PPU_SYSCALL_ROUND_TRIPS,
     PPU_SYSCALL_ROUND_TRIP_CYCLES,
@@ -103,7 +105,7 @@ fn console_cycles(w: &[u64], l: usize) -> (f64, f64) {
 }
 
 /// The probe's `calls` loop body, from its `mr r3,r26` to its `bne+`.
-const CALL_LOOP: [u32; 16] = [
+pub(crate) const CALL_LOOP: [u32; 16] = [
     0x7f43_d378,
     0x7f64_db78,
     0x7f85_e378,
@@ -179,10 +181,13 @@ fn each_timed_call_s_round_trip_is_its_fastest_run_less_the_loop_s_other_cycles(
     }
     let mut timed: Vec<u64> = PPU_SYSCALL_ROUND_TRIPS.iter().map(|&(n, _)| n).collect();
     // The `ppu_lv2_call_paths` console capture times `sys_process_getpid`
-    // and `sys_memory_get_page_attribute`.
+    // and `sys_memory_get_page_attribute`. The `ppu_lv2_call_untimed` and
+    // `ppu_lv2_call_lifecycle` captures time the rest.
     let mut looped: Vec<u64> = [
         &LOOPS[..],
         &[sc::PROCESS_GETPID, sc::MEMORY_GET_PAGE_ATTRIBUTE],
+        &untimed::LOOPS[..],
+        &lifecycle::LOOPS[..],
     ]
     .concat();
     timed.sort_unstable();

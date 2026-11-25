@@ -7,12 +7,12 @@ engine: Studio Liverpool proprietary
 distribution: Disc ISO
 cell: fw 2.76 x base
 checkpoint: FirstRsxWrite
-steps: 38219
+steps: 38215
 convergence: Yes
 byte_parity: 1020 non-semantic
 ---
 
-WipEout HD Fury converges with RPCS3 at `FirstRsxWrite` (step 38,219)
+WipEout HD Fury converges with RPCS3 at `FirstRsxWrite` (step 38,215)
 and every divergent byte classifies. The step count matches this cell's
 committed anchor. The path now runs through the title's SPURS start:
 the thread group's event connect answers, SPURS starts its SPUs with

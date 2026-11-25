@@ -1,0 +1,21 @@
+[test]
+name = "ppu_lv2_call_untimed"
+
+# A hardware probe of the LV2 round trip of calls no other capture
+# times: nine loops, each of one uncontended syscall on its success
+# path, timed with mftb. The calls cover the semaphore wait, the event
+# flag wait and trywait, the condition signals with no waiter, and three
+# process and time queries; none blocks. The console capture is the
+# answer; ppu/main.c's header lists the loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 512 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 512 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

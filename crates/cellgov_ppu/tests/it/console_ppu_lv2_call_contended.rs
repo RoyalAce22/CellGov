@@ -132,7 +132,7 @@ fn contended_calls_cost_the_console_more_than_the_uncontended_trips_cellgov_char
     // uncontended trips. Beside a runnable sibling CellGov adds a share of
     // the trip (`console_ppu_lv2_call_sibling`), but it charges a yield
     // that switches threads no more than that. It charges a woken wait
-    // the cheapest call's trip from the poster's commit.
+    // the uncontended wait's trip from the poster's commit.
     let w = console_words();
     let yield_trip = ppu_syscall_round_trip_cycles(sc::PPU_THREAD_YIELD) as f64;
     let sibling = console_cycles(&w, SIBLING_LOOP).0 - rest(&w);
@@ -149,16 +149,11 @@ fn contended_calls_cost_the_console_more_than_the_uncontended_trips_cellgov_char
     // resumes at the post's commit, so its round is at most the four
     // trips one after another.
     let handoff = console_cycles(&w, HANDOFF_LOOP).0;
-    assert_eq!(
-        ppu_syscall_round_trip_cycles(sc::SEMAPHORE_WAIT),
-        PPU_SYSCALL_ROUND_TRIP_CYCLES,
-        "a wait takes the cheapest call's trip",
-    );
     let serial = 2.0
         * (ppu_syscall_round_trip_cycles(sc::SEMAPHORE_POST)
             + ppu_syscall_round_trip_cycles(sc::SEMAPHORE_WAIT)) as f64;
     assert!(
-        (7.0..7.6).contains(&(handoff / serial)),
+        (4.7..5.2).contains(&(handoff / serial)),
         "a handoff round: {handoff:.0} against CellGov's {serial:.0} for four serial trips",
     );
 }

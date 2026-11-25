@@ -914,7 +914,7 @@ impl PpeTiming {
                 return t;
             }
             Kind::Syscall { number: None } => {
-                self.return_from_call(t + k::PPU_SYSCALL_ROUND_TRIP_CYCLES);
+                self.return_from_call(t + k::PPU_SYSCALL_UNTIMED_ROUND_TRIP_CYCLES);
                 return t;
             }
             Kind::Plain | Kind::Unpipelined(_) | Kind::Drain | Kind::VscrWrite => {}

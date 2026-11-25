@@ -259,9 +259,28 @@ pub const PPU_ISYNC_STORE_CYCLES: u64 = 17;
 ///
 /// The probe's loop of these calls takes 949 cycles an iteration. The
 /// replay of that loop through the issue model takes the console's
-/// cycles at this round trip. A call no capture times takes this round
-/// trip; [`PPU_SYSCALL_ROUND_TRIPS`] holds the calls a capture times.
+/// cycles at this round trip. Each capture of LV2 calls also times a loop
+/// of this call. Its other entries exclude the cycles that loop runs past
+/// this round trip.
 pub const PPU_SYSCALL_ROUND_TRIP_CYCLES: u64 = 929;
+
+/// The round trip of an LV2 call that no capture times.
+///
+/// The value is the lower median of the success round trips in
+/// [`PPU_SYSCALL_ROUND_TRIPS`]: the destroy of a lightweight mutex.
+///
+/// The calls no capture times include:
+///
+/// - the PRX module calls;
+/// - thread create and join;
+/// - the memory allocation and mmapper calls;
+/// - the file system calls;
+/// - the waits the table lacks, such as a condition or event queue wait.
+///
+/// Each of these creates a kernel object, writes a result to guest memory
+/// or switches threads. The timed calls of those kinds all take more than
+/// this median, so an untimed call can cost more than this round trip.
+pub const PPU_SYSCALL_UNTIMED_ROUND_TRIP_CYCLES: u64 = 5185;
 
 /// The round trip of each call the `ppu_lv2_call_cost` capture times,
 /// as `(syscall number, cycles)`: the cycles from the `sc` to the
@@ -279,7 +298,19 @@ pub const PPU_SYSCALL_ROUND_TRIP_CYCLES: u64 = 929;
 /// `sys_memory_get_page_attribute` the same way. Each entry is its loop's
 /// fastest run, less the 15 cycles the rest of that probe's loop takes
 /// beside the cheapest call's round trip.
-pub const PPU_SYSCALL_ROUND_TRIPS: [(u64, u64); 16] = [
+///
+/// The `ppu_lv2_call_untimed` capture times eight more calls on their
+/// success path with the same loop body. Each entry is its loop's fastest
+/// run, less 41 cycles. A semaphore wait that does not block, a condition
+/// signal with no waiter and `sys_process_getppid` take 2437 to 2781
+/// cycles. The calls that write a result take 5362 to 9301.
+///
+/// The `ppu_lv2_call_lifecycle` capture creates and destroys 128 objects
+/// of each synchronization class a run. Each entry is its loop's fastest
+/// run, less the 18 cycles a create loop takes and the 15 a destroy loop
+/// takes beside the cheapest call's round trip. A create takes 9833 to
+/// 14097 cycles and a destroy 4736 to 5480.
+pub const PPU_SYSCALL_ROUND_TRIPS: [(u64, u64); 34] = [
     (syscall::PROCESS_GETPID, 1129),
     (syscall::MEMORY_GET_PAGE_ATTRIBUTE, 8506),
     (syscall::TIME_GET_TIMEBASE_FREQUENCY, 929),
@@ -296,10 +327,28 @@ pub const PPU_SYSCALL_ROUND_TRIPS: [(u64, u64); 16] = [
     (syscall::MUTEX_UNLOCK, 2161),
     (syscall::MUTEX_TRYLOCK, 2363),
     (syscall::EVENT_QUEUE_TRY_RECEIVE, 6391),
+    (syscall::SEMAPHORE_WAIT, 2530),
+    (syscall::EVENT_FLAG_WAIT, 6759),
+    (syscall::EVENT_FLAG_TRY_WAIT, 6830),
+    (syscall::COND_SIGNAL, 2437),
+    (syscall::COND_SIGNAL_ALL, 2606),
+    (syscall::PROCESS_GETPPID, 2781),
+    (syscall::PROCESS_GET_SDK_VERSION, 5362),
+    (syscall::TIME_GET_TIMEZONE, 9301),
+    (syscall::LWMUTEX_CREATE, 9833),
+    (syscall::LWMUTEX_DESTROY, 5185),
+    (syscall::MUTEX_CREATE, 13125),
+    (syscall::MUTEX_DESTROY, 5312),
+    (syscall::SEMAPHORE_CREATE, 13229),
+    (syscall::SEMAPHORE_DESTROY, 4816),
+    (syscall::EVENT_FLAG_CREATE, 13048),
+    (syscall::EVENT_FLAG_DESTROY, 4736),
+    (syscall::COND_CREATE, 14097),
+    (syscall::COND_DESTROY, 5480),
 ];
 
 /// The round trip of the call `number` selects: its entry in
-/// [`PPU_SYSCALL_ROUND_TRIPS`], or [`PPU_SYSCALL_ROUND_TRIP_CYCLES`].
+/// [`PPU_SYSCALL_ROUND_TRIPS`], or [`PPU_SYSCALL_UNTIMED_ROUND_TRIP_CYCLES`].
 pub const fn ppu_syscall_round_trip_cycles(number: u64) -> u64 {
     let mut i = 0;
     while i < PPU_SYSCALL_ROUND_TRIPS.len() {
@@ -308,7 +357,7 @@ pub const fn ppu_syscall_round_trip_cycles(number: u64) -> u64 {
         }
         i += 1;
     }
-    PPU_SYSCALL_ROUND_TRIP_CYCLES
+    PPU_SYSCALL_UNTIMED_ROUND_TRIP_CYCLES
 }
 
 /// The round trip of each call the `ppu_lv2_call_paths` and

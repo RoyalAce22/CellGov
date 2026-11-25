@@ -3,7 +3,7 @@
     "kind": "process_exit"
   },
   "outcome": "MaxSteps",
-  "steps": 389687,
+  "steps": 389728,
   "budget": 256,
   "host_invariant_breaks": 72,
   "witnesses": {
@@ -16,15 +16,15 @@
       "class": "absent"
     },
     "event_port_ipc_connect_attempts": {
-      "value": 6778,
+      "value": 6485,
       "class": "at-least"
     },
     "event_port_ipc_connect_bound": {
-      "value": 6778,
+      "value": 6485,
       "class": "at-least"
     },
     "event_port_keyed_queues": {
-      "value": 13,
+      "value": 12,
       "class": "at-least"
     },
     "host_invariant_breaks": {
@@ -32,11 +32,11 @@
       "class": "exact"
     },
     "ldarx": {
-      "value": 33863,
+      "value": 33131,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 61010,
+      "value": 59102,
       "class": "at-least"
     },
     "lwmutex_acquires": {
@@ -64,7 +64,7 @@
       "class": "absent"
     },
     "mutex_unlock_not_owner": {
-      "value": 33,
+      "value": 32,
       "class": "at-least"
     },
     "prx_load_hle_stubs": {
@@ -108,11 +108,11 @@
       "class": "at-least"
     },
     "stdcx": {
-      "value": 33863,
+      "value": 33131,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 61008,
+      "value": 59101,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {
@@ -164,7 +164,7 @@
       "class": "absent"
     },
     "timer_sleeps": {
-      "value": 3414,
+      "value": 3268,
       "class": "at-least"
     },
     "uart_cids_distinct": {
@@ -199,63 +199,63 @@
   "unsupported_syscalls": {
     "45": {
       "hits": 2,
-      "first_hit": 2108171195
+      "first_hit": 2111652681
     },
     "133": {
       "hits": 4,
-      "first_hit": 2108076546
+      "first_hit": 2111303094
     },
     "380": {
       "hits": 5,
-      "first_hit": 192670164
+      "first_hit": 195488320
     },
     "382": {
       "hits": 1,
-      "first_hit": 2108036264
+      "first_hit": 2111143247
     },
     "563": {
       "hits": 1,
-      "first_hit": 540468
+      "first_hit": 1441399
     },
     "610": {
       "hits": 21,
-      "first_hit": 2108146897
+      "first_hit": 2111610644
     },
     "612": {
       "hits": 1,
-      "first_hit": 2108125547
+      "first_hit": 2111461004
     },
     "635": {
       "hits": 1,
-      "first_hit": 2181225467
+      "first_hit": 2185615100
     },
     "650": {
       "hits": 1,
-      "first_hit": 449845
+      "first_hit": 1222691
     },
     "699": {
       "hits": 3,
-      "first_hit": 106568
+      "first_hit": 264504
     },
     "811": {
       "hits": 3,
-      "first_hit": 2108299851
+      "first_hit": 2111977022
     },
     "817": {
       "hits": 9,
-      "first_hit": 2108273466
+      "first_hit": 2111920845
     },
     "837": {
       "hits": 7,
-      "first_hit": 192822505
+      "first_hit": 195874160
     },
     "867": {
       "hits": 1,
-      "first_hit": 2181119481
+      "first_hit": 2185379684
     },
     "873": {
       "hits": 3,
-      "first_hit": 2108266591
+      "first_hit": 2111909714
     }
   },
   "firmware": {
