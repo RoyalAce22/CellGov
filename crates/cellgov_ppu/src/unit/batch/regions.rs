@@ -24,6 +24,9 @@ pub(super) struct RegionTable<'a> {
     storage: [cellgov_mem::RegionView<'a>; MAX_REGIONS],
     spill: Vec<cellgov_mem::RegionView<'a>>,
     len: usize,
+    /// How many views at the end of the table are views of sourced words
+    /// or register words that answer the instruction that runs.
+    answered: usize,
 }
 
 /// How many region views [`RegionTable`] holds before it spills.
@@ -36,6 +39,7 @@ impl<'a> RegionTable<'a> {
             storage: [cellgov_mem::RegionView::plain(0, &[]); MAX_REGIONS],
             spill: Vec::new(),
             len: 0,
+            answered: 0,
         };
         for view in views {
             if table.len < MAX_REGIONS {
@@ -48,6 +52,25 @@ impl<'a> RegionTable<'a> {
             }
             table.len += 1;
         }
+        table
+    }
+
+    /// The table of `translated`, then the views of this table that answer
+    /// the instruction, then `answer`.
+    ///
+    /// Each attempt of an instruction that misses adds at most one view.
+    /// The table keeps the views of the earlier attempts, so an access
+    /// that needs several words gets all of them.
+    pub(super) fn with_answer(
+        &self,
+        translated: impl Iterator<Item = cellgov_mem::RegionView<'a>>,
+        answer: cellgov_mem::RegionView<'a>,
+    ) -> Self {
+        let views = self.as_slice();
+        let earlier = &views[views.len().saturating_sub(self.answered)..];
+        let chained = translated.chain(earlier.iter().copied());
+        let mut table = Self::new(chained.chain(std::iter::once(answer)));
+        table.answered = earlier.len() + 1;
         table
     }
 

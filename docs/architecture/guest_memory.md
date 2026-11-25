@@ -199,7 +199,9 @@ different paths:
 - **Stores** check the region-view table, then go through
   `Effect::SharedWriteIntent`. A store to a byte no region holds, or
   into a region that refuses writes, faults at the store with nothing
-  staged. The commit pipeline's `apply_commit` is region-aware, so
+  staged. The one exception is a whole aligned word store to a device
+  register word that the device accepts, which the commit applies
+  through the device's rule. The commit pipeline's `apply_commit` is region-aware, so
   stores to any mapped region land correctly.
 
 The region-view table is built at the top of `run_until_yield`. A

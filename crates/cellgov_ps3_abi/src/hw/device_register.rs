@@ -1,10 +1,10 @@
 //! The words of a system bus device's MMIO registers that a source gives,
 //! each for the loads of one instruction of the kernel.
 //!
-//! A load of a device register gives the device's state. CellGov models
-//! no device state. A register word therefore answers only the one
-//! instruction whose load the source covers. Every other access to a
-//! device's MMIO stops.
+//! A load of a device register gives the device's state. These words
+//! hold no state. So a word answers only the one instruction whose load
+//! the source covers. The operational registers of an EHCI controller
+//! hold state; see [`super::ehci`].
 
 /// A word of a device's MMIO region that a source gives for the loads of
 /// one kernel instruction.

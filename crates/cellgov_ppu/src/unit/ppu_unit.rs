@@ -99,9 +99,9 @@ pub struct PpuExecutionUnit {
     /// byte's real range and its new value. They publish ahead of the
     /// block's stores at the block boundary.
     pub(super) table_writes: Vec<(cellgov_mem::ByteRange, u8)>,
-    /// Whether a sourced word answered a load of the batch, which then
-    /// ends after that load.
-    pub(super) sourced_read: bool,
+    /// Whether a sourced word or a register word answered an access of the
+    /// batch, which then ends after that access.
+    pub(super) device_access: bool,
     /// The issue model that prices each retired instruction in core
     /// cycles.
     pub(super) timing: Box<crate::timing::PpeTiming>,
@@ -148,7 +148,7 @@ impl PpuExecutionUnit {
             translations: crate::mmu::TranslationCache::default(),
             table_reads: Vec::new(),
             table_writes: Vec::new(),
-            sourced_read: false,
+            device_access: false,
             timing: Box::default(),
             profile_mode: false,
             profile_insns: std::collections::BTreeMap::new(),
@@ -296,7 +296,7 @@ impl PpuExecutionUnit {
             store_buf: _,
             table_reads: _,
             table_writes: _,
-            sourced_read: _,
+            device_access: _,
             // Translations of the page table in the memory before the
             // restore.
             translations,

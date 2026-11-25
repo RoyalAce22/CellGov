@@ -53,6 +53,7 @@ const DOCUMENTS: &[(&str, PageGrammar)] = &[
     ("SPU-ISA", PageGrammar::Integer),
     ("AltiVec-PEM", PageGrammar::ChapterPage),
     ("AltiVec-PIM", PageGrammar::ChapterPage),
+    ("EHCI", PageGrammar::RomanOrInteger),
     ("Bala2000", PageGrammar::Integer),
     ("Brunthaler2010", PageGrammar::Integer),
     ("ErtlGregg2003", PageGrammar::Integer),

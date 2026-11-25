@@ -13,8 +13,8 @@ use crate::kernel::DeviceMmioAccess;
 
 /// The bus address of the region in slot 2 of device 1 of bus 1.
 const REGION: u32 = 0x381_0000;
-/// The offset of the access in the region.
-const OFFSET: u32 = 0x10;
+/// The offset of the access in the region: a word that no source gives.
+const OFFSET: u32 = 0x20;
 
 /// A supervisor program in real mode that:
 /// 1. opens device 1 of bus 1 and maps its 64 KB region at bus address
@@ -23,12 +23,12 @@ const OFFSET: u32 = 0x10;
 ///    the segment;
 /// 3. writes the data page's entry with the mapping's logical partition
 ///    address;
-/// 4. runs `access`, a load or a store of r10 at [`OFFSET`] in the data
-///    page, with data translation on;
+/// 4. sets r10 to 0 and runs `access`, a load or a store of r10 at
+///    `offset` in the data page, with data translation on;
 /// 5. stops at hypercall 3, which CellGov does not answer.
 ///
 /// Returns the program and the index of `access` in it.
-fn program(access: u32) -> (Vec<u32>, usize) {
+pub(super) fn program(access: u32, offset: u32) -> (Vec<u32>, usize) {
     let mut code = vec![li(3, 1), li(4, 1), li(5, 0)];
     code.extend(hypercall(OPEN_DEVICE));
     code.extend([
@@ -68,17 +68,18 @@ fn program(access: u32) -> (Vec<u32>, usize) {
         ori(9, 8, MSR_DR as u32),
         0x7C00_0164 | (9 << 21),
         0x4C00_012C,
+        li(10, 0),
     ]);
     let at = code.len();
-    code.push(access | (10 << 21) | (20 << 16) | OFFSET);
+    code.push(access | (10 << 21) | (20 << 16) | offset);
     code.extend(hypercall(3));
     (code, at)
 }
 
-/// The stop of the run of [`program`] with `access`, and the access the
-/// run should stop at.
+/// The stop of the run of [`program`] with `access` at [`OFFSET`], and
+/// the access the run should stop at.
 fn run_and_expect(access: u32) -> (KernelRunStop, KernelRunStop) {
-    let (code, at) = program(access);
+    let (code, at) = program(access, OFFSET);
     let run = run_kernel_from_entry(&kernel_elf(&code), "4.93", 10_000).unwrap();
     let region = *mmio_region("4.93", 1, 1, u64::from(REGION)).expect("the 4.93 region");
     let bus_address = region.address + u64::from(OFFSET);

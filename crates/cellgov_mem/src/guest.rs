@@ -442,6 +442,12 @@ pub struct GuestMemory {
     /// Words of the unmodelled spans that a source gives, sorted by real
     /// address and then by reader; see [`Self::declare_sourced_word`].
     sourced_words: Vec<SourcedWord>,
+    /// Register files of the unmodelled spans; see
+    /// [`Self::declare_registers`].
+    register_files: Vec<RegisterFile>,
+    /// The readers of the register words, sorted by real address and then
+    /// by reader; see [`Self::declare_register_reader`].
+    register_readers: Vec<RegisterReader>,
 }
 
 /// Diagnostic context for an out-of-region access.
@@ -534,6 +540,20 @@ pub enum MemError {
         /// The effective address of the instruction that reads it.
         reader: u64,
     },
+    /// A register word or reader declaration names no aligned word that
+    /// it can hold.
+    #[error("no register word for a declaration at real 0x{real:x}")]
+    RegisterRefused {
+        /// The real address of the word.
+        real: u64,
+    },
+    /// The device refuses a store to a register word, or a batch stores
+    /// to more than one register word.
+    #[error("the device refuses a store to the register word at real 0x{real:x}")]
+    RegisterStoreRefused {
+        /// The real address of the word.
+        real: u64,
+    },
 }
 
 impl GuestMemory {
@@ -590,6 +610,8 @@ impl GuestMemory {
             fetch_restricted: false,
             unmodelled_spans: Vec::new(),
             sourced_words: Vec::new(),
+            register_files: Vec::new(),
+            register_readers: Vec::new(),
         })
     }
 
@@ -922,8 +944,13 @@ impl GuestMemory {
     ///
     /// # Errors
     ///
-    /// As [`Self::validate_write`].
+    /// As [`Self::validate_commit`].
     pub fn apply_commit(&mut self, range: ByteRange, bytes: &[u8]) -> Result<(), MemError> {
+        if range.length() == 4 && !self.register_files.is_empty() {
+            if let Some(applied) = self.apply_register_store(range.start().raw(), bytes) {
+                return applied;
+            }
+        }
         let span = self.write_span(range, bytes.len())?;
         let mut at = range.start().raw();
         let mut taken = 0usize;
@@ -964,6 +991,27 @@ impl GuestMemory {
     ///   that region.
     pub fn validate_write(&self, range: ByteRange, byte_len: usize) -> Result<(), MemError> {
         self.write_span(range, byte_len).map(|_| ())
+    }
+
+    /// Validate that a write of `bytes` at `range` would succeed via
+    /// `apply_commit`, without mutating.
+    ///
+    /// A write of one register word is valid when its device accepts the
+    /// store. Every other write is valid as [`Self::validate_write`]
+    /// gives it.
+    ///
+    /// # Errors
+    ///
+    /// - [`MemError::RegisterStoreRefused`] when the device refuses the
+    ///   store to a register word.
+    /// - Each error of [`Self::validate_write`] for any other write.
+    pub fn validate_commit(&self, range: ByteRange, bytes: &[u8]) -> Result<(), MemError> {
+        if range.length() == 4 && !self.register_files.is_empty() {
+            if let Some(valid) = self.validate_register_store(range.start().raw(), bytes) {
+                return valid;
+            }
+        }
+        self.validate_write(range, bytes.len())
     }
 
     /// The indices of the `ReadWrite` regions a write of `byte_len` bytes
@@ -1041,6 +1089,7 @@ impl GuestMemory {
             }
             r.reset_for_reuse();
         }
+        self.reset_registers();
         self.cached_hash.set(None);
         self.provisional_read_count.set(0);
         self.provisional_reads.borrow_mut().clear();
@@ -1059,10 +1108,12 @@ impl GuestMemory {
         self.cached_hash.get().is_some()
     }
 
-    /// 64-bit digest of the byte content and the region map.
+    /// 64-bit digest of the byte content, the region map and the register
+    /// words.
     ///
     /// Each region contributes its base, its size and the sum of its
-    /// page terms; an all-zero page adds nothing. The call brings up to
+    /// page terms; an all-zero page adds nothing. Each register word
+    /// contributes its address, value and known bits. The call brings up to
     /// date only the pages written since the previous call, so a commit
     /// pays for the pages it wrote, not for every page the run wrote.
     /// The result is cached until the next write.
@@ -1078,6 +1129,7 @@ impl GuestMemory {
             hasher.write(&(region.bytes.len() as u64).to_le_bytes());
             hasher.write(&hashes.acc.to_le_bytes());
         }
+        self.hash_registers(&mut hasher);
         let h = hasher.finish();
         drop(page_hashes);
         debug_assert_eq!(
@@ -1105,6 +1157,7 @@ impl GuestMemory {
             hasher.write(&(len as u64).to_le_bytes());
             hasher.write(&acc.to_le_bytes());
         }
+        self.hash_registers(&mut hasher);
         hasher.finish()
     }
 
@@ -1173,6 +1226,15 @@ use sourced::SourcedWord;
 #[cfg(test)]
 #[path = "tests/sourced_word_tests.rs"]
 mod sourced_word_tests;
+
+#[path = "guest_register.rs"]
+mod register;
+use register::{RegisterFile, RegisterReader};
+pub use register::{RegisterPassBack, RegisterRule, RegisterStore, RegisterWord};
+
+#[cfg(test)]
+#[path = "tests/register_tests.rs"]
+mod register_tests;
 
 #[cfg(test)]
 #[path = "tests/fetch_tests.rs"]

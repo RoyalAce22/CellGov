@@ -11,6 +11,10 @@ use crate::unit::ppu_unit::PpuExecutionUnit;
 use crate::unit::translation::{RefillStop, Unbacked, CHANGE_UNSET, PAGE_PROTECTION};
 use cellgov_effects::Effect;
 
+#[cfg(test)]
+#[path = "tests/sourced_words_tests.rs"]
+mod sourced_words_tests;
+
 /// What a translating thread does after an access missed every view.
 pub(in crate::unit) enum MissStep {
     /// The instruction stops with this fault.
@@ -78,9 +82,10 @@ impl PpuExecutionUnit {
         // A search reads committed memory, so the batch ends and the next
         // one searches after the stores commit.
         let table_synced = matches!(insn, instruction::PpuInstruction::Sync { l: 2 });
-        // A load that a sourced word answered ends the batch, so the view
-        // of the word serves no later instruction.
-        retranslates || aliased || table_synced || self.sourced_read
+        // An access that a sourced word or a register word answered ends
+        // the batch. The view of the word serves no later instruction, and
+        // a register store commits before the next access to the device.
+        retranslates || aliased || table_synced || self.device_access
     }
 
     /// What `attempt`, which faulted with `exit`, does next after a
@@ -299,8 +304,10 @@ impl PpuExecutionUnit {
     /// What an access at `ea` whose translation reaches no storage does
     /// next, as [`Self::unbacked_access`] gives it.
     ///
-    /// A load that a sourced word answers runs again against `regions`
-    /// with the view of the word added. The batch ends after that load.
+    /// An access that a sourced word or a register word answers runs
+    /// again against `regions` with the view of the word added. The views
+    /// that the earlier attempts of the instruction added stay
+    /// ([`RegionTable::with_answer`]). The batch ends after that access.
     fn unbacked_step<'m>(
         &mut self,
         mem: &'m cellgov_mem::GuestMemory,
@@ -311,10 +318,10 @@ impl PpuExecutionUnit {
     ) -> MissStep {
         match self.unbacked_access(insn, mem, regions.as_slice(), (ea, access), pc) {
             Unbacked::Step(step) => step,
-            Unbacked::Sourced(view) => {
+            Unbacked::Answered(view) => {
                 let views = self.translated_views(mem).into_iter();
-                *regions = RegionTable::new(views.chain(std::iter::once(view)));
-                self.sourced_read = true;
+                *regions = regions.with_answer(views, view);
+                self.device_access = true;
                 MissStep::Rerun
             }
         }

@@ -47,11 +47,18 @@ pub struct HashedSurface {
 /// The hashed surfaces outside the hypervisor that a version from
 /// [`FIRST_STAMPED_VERSION`] added, or that wait for a version. A
 /// hypercall group declares each hypervisor surface itself.
-pub const RUNTIME_SURFACES: &[HashedSurface] = &[HashedSurface {
-    name: "the inputs queued for each unit's next step",
-    source: Some(crate::lanes::source::PENDING_UNIT_INPUT),
-    stamp: Stamp::Version(27),
-}];
+pub const RUNTIME_SURFACES: &[HashedSurface] = &[
+    HashedSurface {
+        name: "the inputs queued for each unit's next step",
+        source: Some(crate::lanes::source::PENDING_UNIT_INPUT),
+        stamp: Stamp::Version(27),
+    },
+    HashedSurface {
+        name: "the words of the device registers that the memory models",
+        source: None,
+        stamp: Stamp::Pending,
+    },
+];
 
 /// The decimal number at the end of `tag`, or 0 when `tag` ends with no
 /// digit.

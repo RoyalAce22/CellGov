@@ -7,10 +7,15 @@
 //! zeros, and a store there never lands. An access there stops the run
 //! with the device that holds the address.
 //!
-//! A source gives some register words for the loads of one kernel
-//! instruction each ([`DEVICE_REGISTER_READS`]). The run declares each
-//! such word a sourced word of its span, so that instruction's load gets
-//! the word, and every other access there still stops.
+//! Some words of a span answer some accesses:
+//! - A source gives some register words for the loads of one kernel
+//!   instruction each ([`DEVICE_REGISTER_READS`]). The run declares each
+//!   such word a sourced word of its span, so that instruction's load
+//!   gets the word.
+//! - The run models the operational registers of each EHCI controller as
+//!   register words ([`ehci`]).
+//!
+//! Every other access there still stops.
 
 use cellgov_effects::FaultKind;
 use cellgov_exec::ExecutionStepResult;
@@ -22,6 +27,13 @@ use cellgov_ps3_abi::lv1::device_bus::{MmioRegion, MMIO_REAL_BASE, MMIO_REGIONS}
 #[cfg(test)]
 #[path = "tests/device_mmio_register_tests.rs"]
 mod register_tests;
+
+#[path = "ehci.rs"]
+mod ehci;
+
+#[cfg(test)]
+#[path = "tests/ehci_tests.rs"]
+mod ehci_tests;
 
 /// An access of a hardware thread to the MMIO of a device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,8 +64,11 @@ fn regions_of(firmware: &str) -> impl Iterator<Item = (u64, &'static MmioRegion)
 }
 
 /// Declares each MMIO region of the devices at `firmware` an unmodelled
-/// span of `mem`, and each register word that a source gives at
-/// `firmware` a sourced word of its span.
+/// span of `mem`. In those spans it declares these words:
+/// - each register word that a source gives at `firmware`, as a sourced
+///   word;
+/// - the operational registers of each EHCI controller at `firmware`, as
+///   register words.
 ///
 /// # Errors
 ///
@@ -63,7 +78,8 @@ fn regions_of(firmware: &str) -> impl Iterator<Item = (u64, &'static MmioRegion)
 ///   the address space;
 /// - the refusal of [`GuestMemory::declare_sourced_word`] when a word is
 ///   not an aligned word of one span, or repeats a word and reader. A
-///   word of a region that lv1 does not give the device is in no span.
+///   word of a region that lv1 does not give the device is in no span;
+/// - the refusal of a register word or reader declaration.
 pub(super) fn declare_device_mmio(mem: &mut GuestMemory, firmware: &str) -> Result<(), MemError> {
     for (real, region) in regions_of(firmware) {
         mem.declare_unmodelled(real, region.size)?;
@@ -75,7 +91,7 @@ pub(super) fn declare_device_mmio(mem: &mut GuestMemory, firmware: &str) -> Resu
         let real = MMIO_REAL_BASE + read.region + read.offset;
         mem.declare_sourced_word(real, read.value, read.reader)?;
     }
-    Ok(())
+    ehci::declare_ehci(mem, firmware)
 }
 
 /// The device access that the fault `fault` of hardware thread `thread`

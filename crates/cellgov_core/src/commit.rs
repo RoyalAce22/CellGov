@@ -670,7 +670,8 @@ fn require_mailbox(
 /// The check refuses the write when:
 /// - the length of `range` disagrees with `len`
 /// - the end of `range` overflows
-/// - no memory region holds a byte of `range`
+/// - no memory region holds a byte of `range`, and `range` is not one
+///   register word
 fn check_write_target(
     memory: &GuestMemory,
     range: &ByteRange,
@@ -685,7 +686,9 @@ fn check_write_target(
     start
         .checked_add(length)
         .ok_or(CommitError::OutOfRange { effect_index: idx })?;
-    if !memory.holds(start, length) {
+    // A register word holds no bytes; its device judges the store at the
+    // drain.
+    if !memory.holds(start, length) && !memory.is_register(start, length) {
         return Err(CommitError::OutOfRange { effect_index: idx });
     }
     Ok(())

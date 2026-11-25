@@ -135,12 +135,24 @@ impl StagingMemory {
     }
 
     /// Validate every pending write against `target` via
-    /// [`GuestMemory::validate_write`] -- the predicate `apply_commit`
+    /// [`GuestMemory::validate_commit`] -- the predicate `apply_commit`
     /// itself uses -- and return on the first failure. Mutates neither
     /// the staging buffer nor `target`.
+    ///
+    /// A device accepts a register store against the words before the
+    /// batch. So a batch with a second store to a register word fails at
+    /// that store.
     fn validate_pending(&self, target: &GuestMemory) -> Result<(), MemError> {
+        let mut register_store = false;
         for w in &self.pending {
-            target.validate_write(w.range, w.bytes.len())?;
+            let (addr, len) = (w.range.start().raw(), w.range.length());
+            if target.is_register(addr, len) {
+                if register_store {
+                    return Err(MemError::RegisterStoreRefused { real: addr });
+                }
+                register_store = true;
+            }
+            target.validate_commit(w.range, w.bytes.as_slice())?;
         }
         Ok(())
     }
@@ -185,7 +197,7 @@ impl StagingMemory {
         let count = self.pending.len();
         for w in self.pending.drain(..) {
             target.apply_commit(w.range, w.bytes.as_slice()).expect(
-                "validate_pending called validate_write; apply_commit calls the same predicate, \
+                "validate_pending called validate_commit; apply_commit calls the same predicate, \
                  so this Err path is structurally unreachable",
             );
             observe(w.range, w.bytes.as_slice());

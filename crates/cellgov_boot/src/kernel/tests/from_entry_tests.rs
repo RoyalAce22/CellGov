@@ -46,6 +46,9 @@ mod sites;
 #[path = "from_entry_device_mmio_tests.rs"]
 mod device_mmio;
 
+#[path = "from_entry_device_register_tests.rs"]
+mod device_register;
+
 /// A firmware for which CellGov serves the repository values of the
 /// psdevwiki dump.
 const FW: &str = "1.50";

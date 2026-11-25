@@ -8,6 +8,10 @@
 //! unit asks it to stop at the access as an unmodelled stop, where an
 //! address no storage holds takes the processor's own fault.
 //!
+//! A sourced word or a register word of a span answers some accesses
+//! there instead; see [`GuestMemory::declare_sourced_word`] and
+//! [`GuestMemory::declare_registers`].
+//!
 //! A span is not guest state: only a loader declares one, so the content
 //! hash leaves the spans out.
 

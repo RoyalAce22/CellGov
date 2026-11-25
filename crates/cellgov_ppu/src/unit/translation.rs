@@ -37,6 +37,10 @@ mod unmodelled_storage_tests;
 #[path = "tests/sourced_word_tests.rs"]
 mod sourced_word_tests;
 
+#[cfg(test)]
+#[path = "tests/register_word_tests.rs"]
+mod register_word_tests;
+
 /// The region label a view gives when it refuses a store to a read-only
 /// page.
 pub(super) const PAGE_PROTECTION: &str = "page protection";
@@ -45,14 +49,18 @@ pub(super) const PAGE_PROTECTION: &str = "page protection";
 /// load and refuses every store.
 const SOURCED_WORD: &str = "sourced word";
 
+/// The region label of the view of a register word that answers a load.
+/// The view serves one load and refuses every store.
+const REGISTER_WORD: &str = "register word";
+
 /// What an access that no view holds does next, when its translation
 /// reaches no storage.
 pub(super) enum Unbacked<'m> {
     /// The access stops, or its batch ends ahead of it.
     Step(MissStep),
-    /// A sourced word answers the load. The instruction runs again with
-    /// the view of that word.
-    Sourced(RegionView<'m>),
+    /// A sourced word or a register word answers the access. The
+    /// instruction runs again with the view of that word.
+    Answered(RegionView<'m>),
 }
 
 /// The region label a view gives when it refuses a store to a writable
@@ -249,7 +257,7 @@ impl PpuExecutionUnit {
         self.translations.clear();
         self.table_reads.clear();
         self.table_writes.clear();
-        self.sourced_read = false;
+        self.device_access = false;
         if let Some(sup) = self.state.supervisor() {
             self.translations.follow(sup);
         }
@@ -281,6 +289,8 @@ impl PpuExecutionUnit {
     /// - An access whose real address an unmodelled span of `mem` holds:
     ///   - a load of the instruction at `pc` that a sourced word of `mem`
     ///     answers: the view of that word ([`Self::sourced_view`]);
+    ///   - a load or a store that a register word of `mem` answers: the
+    ///     view of that word ([`Self::register_view`]);
     ///   - any other access: the unmodelled stop at that address. The
     ///     machine has the storage, so the PPE performs the access.
     /// - A caching-inhibited load with MSR\[ME\] = 1: the machine check.
@@ -316,7 +326,10 @@ impl PpuExecutionUnit {
         let unmodelled = held.and_then(|t| Some((t, t.real(ea)?)));
         if let Some((t, ra)) = unmodelled.filter(|&(_, ra)| mem.is_unmodelled(ra)) {
             if let Some(view) = Self::sourced_view(insn, mem, &t, (ra, access), pc) {
-                return Unbacked::Sourced(view);
+                return Unbacked::Answered(view);
+            }
+            if let Some(view) = self.register_view(insn, mem, views, &t, (ra, access), pc) {
+                return Unbacked::Answered(view);
             }
             return Unbacked::Step(MissStep::Stop(FaultExit::Verdict(
                 PpuFault::UnmodelledStorage { ea, ra },
@@ -368,6 +381,89 @@ impl PpuExecutionUnit {
             caching_inhibited: t.inhibited,
             store_alignment_first: store_alignment_first(t),
         })
+    }
+
+    /// The view of the register word of `mem` that answers `insn`'s
+    /// access to the real address `ra`, through the translation `t`, or
+    /// `None` when no register word answers it.
+    ///
+    /// `insn` must be no fused pair, so `pc` is the address of the
+    /// instruction that makes the access. Then:
+    /// - a load gets the view when the word answers the reader `pc`
+    ///   ([`GuestMemory::register_read`]);
+    /// - a store gets a view that takes it when the store is one whole
+    ///   aligned word that the device accepts
+    ///   ([`Self::register_store_accepted`]). When the entry of `t` has
+    ///   C = 0, the view refuses the store as [`CHANGE_UNSET`], as
+    ///   [`push_views`] gives a piece of storage. So the store writes C
+    ///   and runs again.
+    fn register_view<'m>(
+        &self,
+        insn: &PpuInstruction,
+        mem: &'m GuestMemory,
+        views: &[RegionView<'_>],
+        t: &Translation,
+        (ra, access): (u64, Access),
+        pc: u64,
+    ) -> Option<RegionView<'m>> {
+        if insn.is_super_pair() {
+            return None;
+        }
+        let store = access == Access::Store;
+        let (real, bytes) = if store {
+            (ra & !3, mem.register_bytes(ra & !3)?)
+        } else {
+            mem.register_read(ra, pc)?
+        };
+        let view = RegionView {
+            base: t.ea + (real - t.ra),
+            real,
+            bytes,
+            provisional: None,
+            // [CBE-Handbook p:90 s:4.2.6.8] A store's table lookup sets C from 0 to 1 unless the access takes a storage exception.
+            // The probe below ignores the C refusal, so it judges the store
+            // the run performs after C is written.
+            write_refused_by: if store {
+                (!t.changed).then_some(CHANGE_UNSET)
+            } else {
+                Some(REGISTER_WORD)
+            },
+            caching_inhibited: t.inhibited,
+            store_alignment_first: store_alignment_first(t),
+        };
+        if store && !self.register_store_accepted(insn, mem, views, &view, pc) {
+            return None;
+        }
+        Some(view)
+    }
+
+    /// Whether `insn`, run against `views` and the writable view `view` of
+    /// a register word, makes one store of the whole word that the device
+    /// accepts from the instruction at `pc`.
+    ///
+    /// The run is a probe: the unit keeps nothing of it. A conditional
+    /// store, a partial store and a store of more than the word do not
+    /// count.
+    fn register_store_accepted(
+        &self,
+        insn: &PpuInstruction,
+        mem: &GuestMemory,
+        views: &[RegionView<'_>],
+        view: &RegionView<'_>,
+        pc: u64,
+    ) -> bool {
+        let mut probe_views = views.to_vec();
+        probe_views.push(*view);
+        let (verdict, store_buf) = self.probe_stores(insn, mem, &probe_views);
+        let stores = store_buf.snapshot();
+        let [store] = stores.get(self.store_buf.len()..).unwrap_or_default() else {
+            return false;
+        };
+        matches!(verdict, ExecuteVerdict::Continue)
+            && store.len == 4
+            && store.addr == view.base
+            && store.conditional_effect_index.is_none()
+            && mem.register_store_accepted(view.real, store.value as u32, pc)
     }
 
     /// The stop of the interrupt that `insn` takes before it performs its
@@ -531,6 +627,16 @@ impl PpuExecutionUnit {
         mem: &GuestMemory,
         views: &[RegionView<'_>],
     ) -> ExecuteVerdict {
+        self.probe_stores(insn, mem, views).0
+    }
+
+    /// [`Self::probe`], with the store buffer that the run leaves.
+    fn probe_stores(
+        &self,
+        insn: &PpuInstruction,
+        mem: &GuestMemory,
+        views: &[RegionView<'_>],
+    ) -> (ExecuteVerdict, crate::store_buffer::StoreBuffer) {
         let views: Vec<_> = views
             .iter()
             .map(|v| RegionView {
@@ -552,7 +658,7 @@ impl PpuExecutionUnit {
             &mut store_buf,
         );
         mem.rewind_provisional_reads(reads);
-        verdict
+        (verdict, store_buf)
     }
 
     /// Whether `insn` takes the alignment interrupt of a store when it runs

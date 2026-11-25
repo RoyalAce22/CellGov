@@ -75,7 +75,7 @@ pub enum KernelRunStop {
         pc: Option<u64>,
     },
     /// A hardware thread accessed the MMIO of a device. The console
-    /// performs the access, and CellGov does not model the device.
+    /// performs the access, and no word that CellGov models answers it.
     DeviceMmio(DeviceMmioAccess),
     /// lv1 paused every hardware thread, and no wake came.
     ///
