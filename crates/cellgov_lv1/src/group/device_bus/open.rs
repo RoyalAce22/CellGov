@@ -5,23 +5,21 @@
 //! [`cellgov_ps3_abi::lv1::device_bus`]:
 //! - devices 0, 1 and 2 of bus 1;
 //! - the storage bus object, device -1 of bus 4;
+//! - each device of bus 4 above 6, other than -1, which lv1's lookup
+//!   finds absent whatever the storage bus object holds
+//!   [OFW-4.93 lv1 a:0x2365E4-0x2365F8];
 //! - the bus ids that the handler's checks refuse.
 //!
 //! lv1 finds each other device of buses 1 to 3, and devices 0 to 6 of
 //! bus 4, through state that CellGov does not model, so a call for one is
-//! a refusal. For any other device of bus 4, lv1's lookup finds no device
-//! without a read of that state [OFW-4.93 lv1 a:0x2365E4-0x2365F8], and
-//! the open function returns [`OPEN_DEVICE_NO_DEVICE_R3`]
-//! [OFW-4.93 lv1 a:0x237600] [OFW-4.93 lv1 a:0x237780-0x23778C]. CellGov
-//! does not give that answer yet: the call is the same refusal.
-//!
-//! [`OPEN_DEVICE_NO_DEVICE_R3`]: cellgov_ps3_abi::lv1::device_bus::OPEN_DEVICE_NO_DEVICE_R3
+//! a refusal.
 
 use cellgov_mem::lanes::{LaneValue, ObjectLanes};
 use cellgov_ps3_abi::lv1::call::OPEN_DEVICE;
 use cellgov_ps3_abi::lv1::device_bus::{
     open_device_bus_r3, open_device_handler, open_device_path_read, opens_storage_bus,
-    OPEN_DEVICE_BUSY_R3, OPEN_STORAGE_BUS_BUSY_R3,
+    storage_bus_device_absent, OPEN_DEVICE_BUSY_R3, OPEN_DEVICE_NO_DEVICE_R3,
+    OPEN_STORAGE_BUS_BUSY_R3,
 };
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
@@ -77,14 +75,11 @@ impl LaneValue for StorageBusOpen {
     }
 }
 
-/// The open of a device other than the storage bus and devices 0 to 2 of bus 1.
-///
-/// lv1's bus 4 lookup finds no device above device 6, other than -1,
-/// without a read of state [OFW-4.93 lv1 a:0x2365E4-0x2365F8].
+/// The open of a device that lv1 finds through state that CellGov does
+/// not model.
 const OTHER_DEVICE: UnmodelledError = UnmodelledError::new(
-    "an open of a device other than devices 0, 1 and 2 of bus 1 and the storage bus, which lv1 \
-     finds through state that CellGov does not model or, above device 6 of bus 4, finds absent \
-     with an answer that CellGov does not give",
+    "an open of a device of buses 1 to 3 other than devices 0, 1 and 2 of bus 1, or of devices 0 \
+     to 6 of bus 4, which lv1 finds through state that CellGov does not model",
 );
 
 /// The open at a firmware whose handler no lv1 image read shows.
@@ -98,9 +93,12 @@ const UNREAD_FIRMWARE: UnmodelledError =
 /// - for device 0, 1 or 2 of bus 1 that is open, [`OPEN_DEVICE_BUSY_R3`];
 /// - for device 0, 1 or 2 of bus 1 that is not open, 0, and the answer
 ///   opens the device;
-/// - for the storage bus, the r3 of [`open_storage_bus`].
+/// - for the storage bus, the r3 of [`open_storage_bus`];
+/// - for a device of bus 4 above 6, other than -1,
+///   [`OPEN_DEVICE_NO_DEVICE_R3`], and the answer changes no state.
 ///
-/// lv1 reads no r5 on the paths of bus 1.
+/// lv1 reads no r5 on the paths of bus 1 and on the path of an absent
+/// device.
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
@@ -118,6 +116,12 @@ pub(crate) fn open_device(
     }
     if opens_storage_bus(request.r(3), request.r(4)) {
         return open_storage_bus(request.r(5), state);
+    }
+    if storage_bus_device_absent(request.r(3), request.r(4)) {
+        return HypercallDisposition::Answered(HypercallAnswer::lv1_status(
+            OPEN_DEVICE_NO_DEVICE_R3,
+            [],
+        ));
     }
     let device = OpenDevice {
         bus: request.r(3),
@@ -189,3 +193,7 @@ mod storage_bus_tests;
 #[cfg(test)]
 #[path = "tests/console_open_storage_bus_tests.rs"]
 mod console_storage_bus_tests;
+
+#[cfg(test)]
+#[path = "tests/open_absent_device_tests.rs"]
+mod absent_device_tests;

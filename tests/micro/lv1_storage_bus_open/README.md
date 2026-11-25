@@ -63,12 +63,15 @@ The shipped 4.93 `lv1.self`, decrypted offline and read with
   [OFW-4.93 lv1 a:0x2590A4-0x2590C4].
 - The partition check reads lpar 1's `ss.laid` node for the partition
   and tests the byte at +3496 [OFW-4.93 lv1 a:0x2545B8-0x2545F4]. Under
-  the lock at +2536 it reads two 64-byte slots at +2544 and +2608. A
-  slot that holds the caller's partition gives -9, and two slots that
-  hold other partitions give -2 [OFW-4.93 lv1 a:0x254604-0x254660]
-  [OFW-4.93 lv1 a:0x254734]. Otherwise it takes the first free slot. It
-  keeps the partition at +0, the call's r5 at +8, sets the byte at +16
-  and returns 0 [OFW-4.93 lv1 a:0x254710-0x25472C].
+  the lock at +2536 it tests two 64-byte slots, at +2544 and then at
+  +2608 [OFW-4.93 lv1 a:0x254604-0x254660]. A free slot ends the test,
+  so a free first slot is taken before the second slot is read
+  [OFW-4.93 lv1 a:0x25462C-0x254638]. A used slot that holds the
+  caller's partition gives -9 [OFW-4.93 lv1 a:0x254734], and two used
+  slots that hold other partitions give -2 [OFW-4.93 lv1 a:0x254658].
+  Otherwise it takes the free slot. It keeps the partition at +0, the
+  call's r5 at +8, sets the byte at +16 and returns 0
+  [OFW-4.93 lv1 a:0x254710-0x25472C].
 - After a 0, the open method allocates a record, keeps the partition at
   +40 of the record and links the record into the list at +3552. The
   record's +32 holds the list. The list's +8 holds its last record

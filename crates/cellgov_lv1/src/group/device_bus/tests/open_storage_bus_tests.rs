@@ -79,17 +79,11 @@ fn an_open_of_the_held_storage_bus_gets_busy_and_no_change() {
 }
 
 #[test]
-fn device_minus_1_of_another_bus_and_other_bus_4_devices_stay_refusals() {
-    let what = "an open of a device other than devices 0, 1 and 2 of bus 1 and the storage bus, \
-                which lv1 finds through state that CellGov does not model or, above device 6 \
-                of bus 4, finds absent with an answer that CellGov does not give";
-    let cases = [
-        (1, u64::MAX),
-        (2, u64::MAX),
-        (3, u64::MAX),
-        (4, u64::MAX - 1),
-        (4, 0),
-    ];
+fn device_minus_1_of_another_bus_and_bus_4_table_devices_stay_refusals() {
+    let what = "an open of a device of buses 1 to 3 other than devices 0, 1 and 2 of bus 1, or \
+                of devices 0 to 6 of bus 4, which lv1 finds through state that CellGov does not \
+                model";
+    let cases = [(1, u64::MAX), (2, u64::MAX), (3, u64::MAX), (4, 6), (4, 0)];
     assert_eq!(cases.len(), 5);
     for (bus, device) in cases {
         let call = request(bus, device, 0);

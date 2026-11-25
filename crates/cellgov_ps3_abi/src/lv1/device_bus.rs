@@ -148,6 +148,10 @@
 //!   [OFW-4.93 lv1 a:0x2365F0-0x2365FC];
 //! - for any other device id, 0 [OFW-4.93 lv1 a:0x2365F4-0x2365F8].
 //!
+//! The last case reads nothing of the object. So for such a device id the
+//! open function always returns [`OPEN_DEVICE_NO_DEVICE_R3`]; see
+//! [`storage_bus_device_absent`].
+//!
 //! For a bus other than 1, the open function calls the method at +24 of
 //! the object's method table with the object, the caller's partition and
 //! the call's r5. It returns that method's r3 zero-extended
@@ -443,6 +447,7 @@
 use std::ops::RangeInclusive;
 
 use super::status::{zero_extended, LV1_BUSY, LV1_ILLEGAL_PARAMETER_VALUE, LV1_WRONG_STATE};
+use super::storage::STORAGE_DEVICE_ID_MAX;
 
 /// The handler of hypercall 170 in one firmware's lv1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -537,6 +542,18 @@ pub const STORAGE_BUS_DEVICE: u64 = u64::MAX;
 /// bus object.
 pub const fn opens_storage_bus(bus: u64, device: u64) -> bool {
     bus == STORAGE_BUS && device == STORAGE_BUS_DEVICE
+}
+
+/// Whether the lookup finds no device for device `device` of bus `bus`
+/// whatever the storage bus object holds.
+///
+/// For bus [`STORAGE_BUS`], a device id above
+/// [`STORAGE_DEVICE_ID_MAX`] other than [`STORAGE_BUS_DEVICE`]
+/// gets 0 from the lookup [OFW-4.93 lv1 a:0x2365F0-0x2365F8]. The open
+/// function then returns [`OPEN_DEVICE_NO_DEVICE_R3`]
+/// [OFW-4.93 lv1 a:0x237600] [OFW-4.93 lv1 a:0x237780-0x237790].
+pub const fn storage_bus_device_absent(bus: u64, device: u64) -> bool {
+    bus == STORAGE_BUS && device > STORAGE_DEVICE_ID_MAX && device != STORAGE_BUS_DEVICE
 }
 
 /// The r3 of an open of the storage bus that the partition holds open:
@@ -996,6 +1013,10 @@ mod device_1_tests;
 #[cfg(test)]
 #[path = "tests/device_bus_storage_bus_tests.rs"]
 mod storage_bus_tests;
+
+#[cfg(test)]
+#[path = "tests/device_bus_absent_device_tests.rs"]
+mod absent_device_tests;
 
 #[cfg(test)]
 #[path = "tests/device_bus_dma_region_tests.rs"]

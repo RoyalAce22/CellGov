@@ -122,6 +122,10 @@ pub const NOTIFY_REQUEST_CAPTURE: &str = "tests/micro/lv1_storage_notify_request
 /// device from 0 to 6.
 ///
 /// [PS3DEVWIKI-HV-RE s:Storage_bus_subsystem] The storage bus object holds a table of pointers to at most 7 storage device objects at offset 0xEE8.
+///
+/// The lookup for the storage bus reads the table up to this id, compared
+/// unsigned [OFW-4.93 lv1 a:0x2365E4-0x2365EC]
+/// [OFW-4.93 lv1 a:0x236604-0x23661C].
 pub const STORAGE_DEVICE_ID_MAX: u64 = 6;
 
 /// The device id of the notification pseudo-device, -1.
