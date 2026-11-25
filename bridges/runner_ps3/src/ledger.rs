@@ -318,3 +318,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/ledger_shadow_window_tests.rs"]
 mod shadow_window_tests;
+
+#[cfg(test)]
+#[path = "tests/ledger_large_page_area_tests.rs"]
+mod large_page_area_tests;

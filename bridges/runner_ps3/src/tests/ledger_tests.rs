@@ -102,7 +102,7 @@ fn a_peek_whose_page_overlaps_a_listed_range_is_refused() {
 fn the_committed_ledger_and_stop_list_agree_and_refuse_the_page_table_window() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let list = StopList::load(&root).expect("the committed ledger and stop list agree");
-    assert_eq!(list.ranges().len(), 2);
+    assert_eq!(list.ranges().len(), 3);
     let window = StopRange {
         space: Space::Lv2,
         first: 0x8000_0000_0f00_0000,

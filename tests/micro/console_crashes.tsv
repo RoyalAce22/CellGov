@@ -1,3 +1,4 @@
 space	first	last	status
 lv2	0x800000000f000000	0x800000000f03ffff	suspected
 lv2	0x80000000d0000000	0x80000000d00fffff	suspected
+lv2	0x8000000300000000	0x80000003ffffffff	suspected

@@ -133,6 +133,9 @@ const SPE_SC: u64 = 0x8000_0000_0004_f218;
 /// The call in the kernel's function that a thread's start calls with
 /// the thread's record [OFW-4.93 lv2_kernel a:0x8000000000027d20].
 const RECORD_START_SC: u64 = 0x8000_0000_0002_7d20;
+/// The call in the kernel's function that makes the network device's
+/// interrupt port [OFW-4.93 lv2_kernel a:0x80000000000a28e0].
+const NETWORK_SC: u64 = 0x8000_0000_000a_28e0;
 
 /// The console capture of the port id that the kernel keeps at +0x38 of
 /// each thread's record.
@@ -140,6 +143,13 @@ const RECORD_START_SC: u64 = 0x8000_0000_0002_7d20;
 /// The path is relative to the workspace root. Its README gives the
 /// method and the analysis.
 pub const RECORD_PORT_CAPTURE: &str = "tests/micro/lv2_record_port_ids";
+
+/// The console capture of the port that lv1 connects to the network
+/// device's interrupt, and of the port's id.
+///
+/// The path is relative to the workspace root. Its README gives the
+/// method and the analysis.
+pub const NETWORK_PORT_CAPTURE: &str = "tests/micro/lv1_network_port_id";
 
 const fn call(thread: u8, sc: u64, id: u64) -> GameOsPortCall {
     GameOsPortCall { thread, sc, id }
@@ -177,6 +187,14 @@ const fn call(thread: u8, sc: u64, id: u64) -> GameOsPortCall {
 /// [OFW-4.93 lv2_kernel a:0x80000000002659c0]. The capture
 /// [`RECORD_PORT_CAPTURE`] reads its id at +0x38 of each record, where
 /// the kernel stores it [OFW-4.93 lv2_kernel a:0x8000000000027d44].
+///
+/// The network driver's `net_set_interrupt_status_indicator` success path
+/// calls the function that makes the device's interrupt port
+/// [OFW-4.93 lv2_kernel a:0x80000000000a3548]. That function gives the
+/// port id to `connect_interrupt_event_receive_port` (hypercall 197)
+/// [OFW-4.93 lv2_kernel a:0x80000000000a291c-0x80000000000a2930]. lv1
+/// keeps the port that it connects to the network device's interrupt. The
+/// capture [`NETWORK_PORT_CAPTURE`] reads that port's id in lv1.
 pub const GAME_OS_PORT_CALLS: &[GameOsPortCalls] = &[GameOsPortCalls {
     firmware: "4.93",
     calls: &[
@@ -191,6 +209,7 @@ pub const GAME_OS_PORT_CALLS: &[GameOsPortCalls] = &[GameOsPortCalls {
         call(1, RECORD_START_SC, 12),
         call(0, SPE_SC, 16),
         call(0, RECORD_START_SC, 17),
+        call(0, NETWORK_SC, 19),
     ],
 }];
 
@@ -234,3 +253,7 @@ mod spe_console_tests;
 #[cfg(test)]
 #[path = "tests/event_port_record_console_tests.rs"]
 mod record_console_tests;
+
+#[cfg(test)]
+#[path = "tests/event_port_network_console_tests.rs"]
+mod network_console_tests;
