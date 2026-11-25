@@ -11,7 +11,7 @@
 //! version. So two changes that each add a surface never edit the tag.
 
 /// The tag that the checkpoint scheme id hashes.
-pub const CHECKPOINT_TAG: &[u8] = b"cellgov-checkpoint-fnv1a/v30";
+pub const CHECKPOINT_TAG: &[u8] = b"cellgov-checkpoint-fnv1a/v31";
 
 /// The version that [`CHECKPOINT_TAG`] ends with.
 pub const CHECKPOINT_VERSION: u32 = tag_version(CHECKPOINT_TAG);
