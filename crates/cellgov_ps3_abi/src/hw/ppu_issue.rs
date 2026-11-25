@@ -758,6 +758,29 @@ pub const PPU_MFFS_FP_STORE_WAIT_CYCLES: u64 = 9;
 /// take 42.00: the `mffs` waits past the `fadd` result.
 pub const PPU_MFFS_VSU_COMPLETE_CYCLES: u64 = 28;
 
+/// The cycles from the cycle an `mffs` runs to the earliest cycle a
+/// younger vector-scalar op runs at, when a taken branch lands on that op
+/// at an odd word.
+///
+/// The `ppu_issue_mffs_odd_target` capture times an `mffs`, one or eight
+/// `li`, a `b` and an `fadd`, and also an `mffs`, a `b` and a `vaddubm`.
+/// With the target at an odd word each loop takes 40.00 cycles an
+/// iteration. With the target at an even word each takes 32.00 to 37.00.
+/// The next `mffs` waits [`PPU_MFFS_VSU_COMPLETE_CYCLES`] past the op, so
+/// the op runs 12 cycles after the `mffs` before it. An `mfvscr` in place
+/// of the `mffs` takes 42.00 at either word.
+pub const PPU_MFFS_ODD_TARGET_VSU_CYCLES: u64 = 12;
+
+/// The cycles from the cycle an `mffs` runs to the earliest cycle any
+/// younger vector-scalar op other than a load or store runs at.
+///
+/// The `ppu_issue_mffs_gap` and `ppu_issue_mffs_odd_target` captures time
+/// an `mffs` and an `fadd` or a `vaddubm` two or three instructions after
+/// it. Each loop takes 32.00 or 33.00 cycles an iteration. The op then
+/// runs 4 or 5 cycles after the `mffs`, and the next `mffs` waits
+/// [`PPU_MFFS_VSU_COMPLETE_CYCLES`] past it.
+pub const PPU_MFFS_YOUNGER_VSU_CYCLES: u64 = 4;
+
 /// The cycles a move from the CR takes and holds the branch unit.
 ///
 /// The handbook gives about 34; eight `mfcr` to one register and their

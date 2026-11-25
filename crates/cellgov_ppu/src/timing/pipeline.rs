@@ -137,9 +137,16 @@ pub(crate) struct Core {
     /// than a load or store runs no earlier.
     vscr_read: u64,
     /// The address of the instruction right after the last op, when that
-    /// op is an `mffs`. A VSU op other than a load or store at that address
-    /// runs no earlier than the `mffs` result.
+    /// op is an `mffs` at an even word, so that the two share a pair. A VSU
+    /// op other than a load or store at that address runs no earlier than
+    /// the `mffs` result.
     fpscr_partner: Option<u64>,
+    /// The earliest cycle a VSU op other than a load or store runs at, when
+    /// a taken branch lands on it at an odd word. The last `mffs` sets it.
+    odd_target_floor: u64,
+    /// The earliest cycle a VSU op other than a load or store runs at,
+    /// set by the last `mffs`.
+    fpscr_queue_floor: u64,
     /// The earliest cycle an instruction younger than the last `mfvscr`
     /// issues at.
     vscr_hold: u64,
@@ -381,6 +388,8 @@ impl PpeTiming {
                 status_read: 0,
                 vscr_read: 0,
                 fpscr_partner: None,
+                odd_target_floor: 0,
+                fpscr_queue_floor: 0,
                 vscr_hold: 0,
                 in_order_writes: 0,
                 divide_share: 0,
@@ -664,17 +673,31 @@ impl PpeTiming {
         // four independent `vaddubm` take 51.48 cycles an iteration.
         // [CBE-Handbook p:757 s:A.6.2] IS2 sends instructions to the VSU
         // issue queue in pairs. [CBE-Handbook p:722 s:A.1.2] an `mffs`
-        // stalls at VQ8. Only the op right after an `mffs` waits for the
+        // stalls at VQ8. Only the op in the `mffs`'s own pair waits for the
         // `mffs` result. In the `ppu_issue_mffs_gap` capture an `mffs` and an
-        // `fadd` take 61.00 cycles an iteration, and 33.00 with an `li` or a
-        // `b` between them.
+        // `fadd` in one pair take 61.00 cycles an iteration. In the
+        // `ppu_issue_mffs_align` capture the same two words across a pair
+        // boundary take 31.00.
         // [CBE-Handbook p:756 s:A.6.2] the LSU part of a VXU or FPU load or
         // store leaves at issue, beside the VSU issue queue, so the wait
         // leaves it out; `retire` delays a floating-point store's data.
+        //
+        // After an `mffs`, a younger VSU op also runs no earlier than:
+        // - `fpscr_queue_floor`;
+        // - `odd_target_floor`, when a taken branch lands on it at an odd
+        //   word.
+        //
+        // The `ppu_issue_mffs_odd_target` capture times an `mffs`, one or
+        // eight `li`, a `b` and an `fadd`. With the `fadd` at an odd word an
+        // iteration takes 40.00 cycles. At an even word it takes 32.00 or
+        // 37.00.
         let exec = if uses_vsu(op) && !matches!(op.kind, Kind::Load { .. } | Kind::Store { .. }) {
             let partner = c.fpscr_partner == Some(pc);
+            let odd_target = opens && !pc.is_multiple_of(8);
             exec.max(c.vscr_read)
+                .max(c.fpscr_queue_floor)
                 .max(if partner { c.status_read } else { 0 })
+                .max(if odd_target { c.odd_target_floor } else { 0 })
         } else {
             exec
         };
@@ -816,7 +839,9 @@ impl PpeTiming {
         c.fpscr_partner = None;
         if op.is_fpscr_read() {
             c.status_read = exec + k::PPU_MFFS_LATENCY_CYCLES;
-            c.fpscr_partner = Some(pc.wrapping_add(4));
+            c.fpscr_partner = pc.is_multiple_of(8).then_some(pc.wrapping_add(4));
+            c.odd_target_floor = exec + k::PPU_MFFS_ODD_TARGET_VSU_CYCLES;
+            c.fpscr_queue_floor = exec + k::PPU_MFFS_YOUNGER_VSU_CYCLES;
         }
         if op.is_vscr_read() {
             c.status_read = exec + k::PPU_MFVSCR_LATENCY_CYCLES;

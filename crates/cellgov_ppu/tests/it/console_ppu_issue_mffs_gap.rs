@@ -111,13 +111,8 @@ fn cellgov_cycles(k: usize) -> f64 {
 /// side of it.
 const BAND: f64 = 0.06;
 
-/// The loops the model holds:
-///
-/// - an `fadd` right after an `mffs`, or 8 or 16 `li` after it;
-/// - an `fadd` right before an `mffs`, or 2, 4 or 8 `li` and an `fadd`
-///   before it;
-/// - 4 or 16 `li` between an `fadd` and an `mffs`.
-const HELD: [usize; 9] = [0, 4, 5, 6, 8, 9, 10, 13, 14];
+/// The loops the model holds: every loop but those in `DIFFERENT`.
+const HELD: [usize; 14] = [0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15];
 
 #[test]
 fn each_held_loop_lies_within_the_band() {
@@ -139,8 +134,9 @@ fn each_held_loop_lies_within_the_band() {
 #[test]
 fn only_the_op_right_after_an_mffs_waits_for_its_result() {
     // [CBE-Handbook p:757 s:A.6.2] IS2 sends instructions to the VSU
-    // issue queue in pairs. An `fadd` right after an `mffs` waits for the
-    // `mffs` result; with an `li` or a `b` between them it does not.
+    // issue queue in pairs. An `fadd` right after an `mffs` at an even
+    // word waits for the `mffs` result; with an `li` or a `b` between
+    // them it does not.
     let w = console_words();
     for (who, cycles) in [
         (
@@ -168,24 +164,16 @@ enum Side {
 /// The loops the model does not hold, each with the side of the console
 /// it lies on:
 ///
-/// - one `li`, two `li`, four `li` or a `b` between an `mffs` and a
-///   younger `fadd`, and one `li` before or after an older one. The
-///   console takes 33.00 to 35.00 cycles an iteration, 3 to 5 more than
-///   an `mffs` alone, and the model gives 31 or 32. A second run of the
-///   probe gave the same values.
+/// - four `li` between an `mffs` and a younger `fadd`. The console takes
+///   35.00 cycles an iteration and the model gives 32.
 /// - 16 `li` and an `fadd` before an `mffs`. The console takes 42.00
-///   cycles an iteration and the model gives 46. With an `fadd` this far
-///   from the older `mffs`, the younger `mffs` waits less after the `fadd`
-///   than the model gives.
-const DIFFERENT: [(usize, Side); 7] = [
-    (1, Side::Under),
-    (2, Side::Under),
-    (3, Side::Under),
-    (7, Side::Under),
-    (12, Side::Under),
-    (15, Side::Under),
-    (11, Side::Over),
-];
+///   cycles an iteration and the model gives 46.
+///
+/// The model times each `li` after an `mffs` at one cycle. On the console
+/// the cost of the `li` between an `mffs` and an `fadd` does not grow with
+/// their count. In the `ppu_issue_mffs_align` capture, 12 and 16 `li` take
+/// the same cycles an iteration.
+const DIFFERENT: [(usize, Side); 2] = [(3, Side::Under), (11, Side::Over)];
 
 /// The test fails when the model comes within the band of the console,
 /// or crosses to the other side. Then move the loop into `HELD`.

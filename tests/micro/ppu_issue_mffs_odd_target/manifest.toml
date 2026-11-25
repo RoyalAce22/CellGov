@@ -1,0 +1,20 @@
+[test]
+name = "ppu_issue_mffs_odd_target"
+
+# A hardware probe of how a taken branch to an instruction 4 bytes past
+# an 8-byte boundary times an fadd or a vaddubm after an mffs or an
+# mfvscr, and a dependent fadd chain across such a branch, timed with
+# mftb. The console capture is the answer; ppu/main.c's header lists the
+# loops and the payload layout.
+
+[observe]
+# Big-endian u64 words at the offsets ppu/main.c lists: 248 bytes.
+memory_regions = [
+  { name = "result", addr = 0, size = 248 },
+]
+
+[expect]
+outcome = "completed"
+
+[ps3]
+timeout_ms = 60000

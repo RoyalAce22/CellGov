@@ -123,7 +123,8 @@ fn the_recorded_constants_are_the_captures() {
     assert_eq!((per(11, 1.0), per(22, 1.0)), PPU_SMT_L1_CHASE_CYCLES);
 }
 
-/// Where each replay places its loop, its one data line and its rings.
+/// Where each replay places its loop, its one data line and its rings. A
+/// [`replay_at`] starts its loop `offset` bytes past `CODE`.
 const CODE: u64 = 0x1000;
 pub(crate) const ONE_LINE: u64 = 0x2000;
 const L1_RING: u64 = 0x1_0000;
@@ -655,18 +656,32 @@ pub(crate) fn replay_beside(r: &Replay, siblings: usize, sibling: &Sibling) -> O
     } else {
         BESIDE_ITERATIONS
     };
-    replay_counted(r, siblings, sibling, iterations, false).map(|m| m.cycles)
+    replay_counted(r, siblings, sibling, iterations, false, CODE).map(|m| m.cycles)
+}
+
+/// [`replay`] alone, with the loop's first word `offset` bytes past a
+/// 32-byte boundary.
+pub(crate) fn replay_at(r: &Replay, offset: u64) -> Option<f64> {
+    replay_counted(
+        r,
+        0,
+        &PROBE_SIBLING,
+        REPLAY_ITERATIONS,
+        false,
+        CODE + offset,
+    )
+    .map(|m| m.cycles)
 }
 
 /// [`replay`] alone, from a predecoded shadow of the loop, so the unit
 /// runs the loop's quickened and fused forms.
 pub(crate) fn replay_shadowed(r: &Replay) -> Option<f64> {
-    replay_counted(r, 0, &PROBE_SIBLING, REPLAY_ITERATIONS, true).map(|m| m.cycles)
+    replay_counted(r, 0, &PROBE_SIBLING, REPLAY_ITERATIONS, true, CODE).map(|m| m.cycles)
 }
 
 /// The loop's r3 at the exit of a [`replay`] alone.
 pub(crate) fn replay_r3(r: &Replay) -> Option<u64> {
-    replay_counted(r, 0, &PROBE_SIBLING, REPLAY_ITERATIONS, false).map(|m| m.r3)
+    replay_counted(r, 0, &PROBE_SIBLING, REPLAY_ITERATIONS, false, CODE).map(|m| m.r3)
 }
 
 /// What [`replay_measured`] times over the loop's second half.
@@ -683,17 +698,19 @@ pub(crate) struct Measured {
 /// [`replay_beside`] at `REPLAY_ITERATIONS`, with the first sibling's
 /// rate over the same half.
 pub(crate) fn replay_measured(r: &Replay, siblings: usize, sibling: &Sibling) -> Option<Measured> {
-    replay_counted(r, siblings, sibling, REPLAY_ITERATIONS, false)
+    replay_counted(r, siblings, sibling, REPLAY_ITERATIONS, false, CODE)
 }
 
-/// [`replay_measured`], with the loop run twice `iterations` times. With
-/// `shadowed`, the loop's unit runs from a predecoded shadow of the loop.
+/// [`replay_measured`], with the loop run twice `iterations` times from
+/// `at`. With `shadowed`, the loop's unit runs from a predecoded shadow
+/// of the loop.
 fn replay_counted(
     r: &Replay,
     siblings: usize,
     sibling: &Sibling,
     iterations: u64,
     shadowed: bool,
+    at: u64,
 ) -> Option<Measured> {
     let words = r.words;
     let ring_end = r
@@ -706,7 +723,7 @@ fn replay_counted(
         .fold(L1_RING, u64::max);
     let mut mem = GuestMemory::new(ring_end as usize);
     for (i, w) in words.iter().enumerate() {
-        let range = ByteRange::new(GuestAddr::new(CODE + 4 * i as u64), 4).expect("range");
+        let range = ByteRange::new(GuestAddr::new(at + 4 * i as u64), 4).expect("range");
         mem.apply_commit(range, &w.to_be_bytes()).expect("mapped");
     }
     for (i, w) in sibling.words.iter().enumerate() {
@@ -719,7 +736,7 @@ fn replay_counted(
             gprs.push((reg, build_ring(&mut mem, base, bytes, shuffle)));
         }
     }
-    let exit = CODE + 4 * words.len() as u64;
+    let exit = at + 4 * words.len() as u64;
 
     let counter = r.seeds.iter().find_map(|s| match s {
         Seed::Counter(k) => Some(*k),
@@ -731,10 +748,10 @@ fn replay_counted(
     let unit = rt.register_unit_with(|id| {
         let mut ppu = PpuExecutionUnit::new(id);
         if shadowed {
-            ppu.set_instruction_shadow(cellgov_ppu::shadow::PredecodedShadow::build(CODE, &code));
+            ppu.set_instruction_shadow(cellgov_ppu::shadow::PredecodedShadow::build(at, &code));
         }
         let state = ppu.state_mut();
-        state.pc = CODE;
+        state.pc = at;
         match counter {
             Some(k) => state.set_gpr(k, 2 * iterations),
             None => state.set_ctr(2 * iterations),
@@ -819,7 +836,7 @@ fn replay_counted(
             }
             sibling_was_at_head = at_head;
         }
-        if halfway.is_none() && s.pc == CODE && left(&s) == iterations {
+        if halfway.is_none() && s.pc == at && left(&s) == iterations {
             halfway = Some((
                 rt.registry().clock(unit).raw(),
                 sibling_mark(&rt, sibling_rounds),
