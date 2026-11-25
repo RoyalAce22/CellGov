@@ -41,6 +41,7 @@ fn answered(r3: u64, path: ReturnPath) -> HypercallDisposition {
         pauses_caller: false,
         external: None,
         resumed: Vec::new(),
+        interrupted: Vec::new(),
     })
 }
 

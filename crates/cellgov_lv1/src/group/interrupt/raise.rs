@@ -9,7 +9,9 @@
 //! A raised bit reaches the thread at its next return from lv1: the
 //! return ANDs the shadow with the mask; see
 //! [`cellgov_ps3_abi::lv1::interrupt_mask`]. A raise on a paused thread
-//! wakes it when its mask holds the bit, and the thread then returns.
+//! wakes it when its mask holds the bit, and the thread then returns. A
+//! raise on a running thread other than the caller reaches that thread
+//! through an interprocessor interrupt; see [`crate::interprocessor`].
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_mem::{be::read_u64, ByteRange, GuestAddr, GuestMemory};
@@ -87,13 +89,17 @@ pub(crate) fn event(
 ///    nonzero result clears the pause flag and runs the wake list
 ///    [OFW-4.93 lv1 a:0x2C6694-0x2C66DC]. The answer then carries the
 ///    wake.
+/// 4. For a thread other than the caller, it sends the thread an
+///    interprocessor interrupt [OFW-4.93 lv1 a:0x2C663C-0x2C6650]
+///    [OFW-4.93 lv1 a:0x2C6720-0x2C672C]. For a running thread, the
+///    answer carries [`InterruptChange::ThreadSignalled`]; see
+///    [`crate::interprocessor`].
 ///
 /// # Errors
 ///
 /// Returns the refusal text for these inputs:
-/// - a plug of a running thread other than the caller, which lv1
-///   signals with an interprocessor interrupt
-///   [OFW-4.93 lv1 a:0x2C663C-0x2C6650] [OFW-4.93 lv1 a:0x2C6720-0x2C672C];
+/// - a plug of a running thread, from a unit that names no hardware
+///   thread;
 /// - a thread with no registered bitmap, whose shadow lv1 copies to its
 ///   own doublewords;
 /// - a bitmap whose status or mask doubleword CellGov holds no storage
@@ -112,11 +118,12 @@ pub(crate) fn raise(
         return Ok(());
     }
     let paused = state.paused.thread(key.thread).is_some();
-    if request.thread != Some(key.thread) && !paused {
+    if request.thread.is_none() && !paused {
         return Err(UnmodelledError::new(
-            "an event on a plug of a running thread, which lv1 signals with an interprocessor interrupt",
+            "an event on a plug of a running thread, from a unit that names no hardware thread",
         ));
     }
+    let signalled = !paused && request.thread != Some(key.thread);
     let Some(bitmap) = state.bitmaps.bitmap(key) else {
         return Err(UnmodelledError::new(
             "an event on a plug of a thread that registered no interrupt state bitmap",
@@ -148,6 +155,9 @@ pub(crate) fn raise(
     }));
     if paused && read_u64(&mask, 0) & bit != 0 {
         answer.push_change(InterruptChange::ThreadWoken(key.thread));
+    }
+    if signalled {
+        answer.push_change(InterruptChange::ThreadSignalled(key.thread));
     }
     Ok(())
 }

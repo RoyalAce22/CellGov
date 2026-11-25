@@ -282,9 +282,10 @@ fn a_raise_on_a_set_shadow_bit_keeps_only_the_pending_event() {
 }
 
 /// lv1 signals a running thread on another CPU with an interprocessor
-/// interrupt [OFW-4.93 lv1 a:0x2C663C-0x2C6650].
+/// interrupt [OFW-4.93 lv1 a:0x2C663C-0x2C6650]. `dispatch_returning`
+/// gives no thread's running registers.
 #[test]
-fn a_raise_on_a_running_thread_other_than_the_caller_is_a_refusal_and_changes_nothing() {
+fn a_raise_on_a_running_thread_with_no_running_registers_is_a_refusal_and_changes_nothing() {
     let storage = storage(PLUG_BIT);
     let mut hv = booted(true, false, &storage);
     let before = hv.clone();
@@ -293,7 +294,7 @@ fn a_raise_on_a_running_thread_other_than_the_caller_is_a_refusal_and_changes_no
         dispatch(&mut hv, &r, &storage),
         refused(
             &r,
-            "an event on a plug of a running thread, which lv1 signals with an interprocessor interrupt"
+            "an interprocessor interrupt to a thread whose unit gives no running registers"
         )
     );
     assert_eq!(hv.groups(), before.groups());
@@ -386,9 +387,10 @@ fn a_raise_on_a_plug_past_doubleword_0_writes_and_masks_its_own_doubleword() {
 
 /// The first wake clears the pause flag, and the thread runs again. lv1
 /// signals a raise on it with an interprocessor interrupt
-/// [OFW-4.93 lv1 a:0x2C663C-0x2C6650].
+/// [OFW-4.93 lv1 a:0x2C663C-0x2C6650], which reads the running
+/// registers that `dispatch_returning` does not give.
 #[test]
-fn a_second_raise_after_a_wake_is_the_running_thread_refusal() {
+fn a_second_raise_after_a_wake_is_the_no_running_registers_refusal() {
     const PLUG_10_BIT: u64 = 1 << 53;
     let storage = storage(PLUG_BIT | PLUG_10_BIT);
     let (mut hv, ids) = paused_on(&[PLUG, 10], true, &storage);
@@ -401,7 +403,7 @@ fn a_second_raise_after_a_wake_is_the_running_thread_refusal() {
         dispatch(&mut hv, &r, &storage),
         refused(
             &r,
-            "an event on a plug of a running thread, which lv1 signals with an interprocessor interrupt"
+            "an interprocessor interrupt to a thread whose unit gives no running registers"
         )
     );
 }

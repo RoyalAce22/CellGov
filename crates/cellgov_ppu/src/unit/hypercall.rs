@@ -16,9 +16,12 @@
 
 use cellgov_effects::Effect;
 use cellgov_exec::{
-    CompareFields, CompareResult, ExecutionStepResult, LocalDiagnostics, SaveRestore, YieldReason,
+    BoundaryRegisters, CompareFields, CompareResult, ExecutionStepResult, LocalDiagnostics,
+    SaveRestore, YieldReason,
 };
+use cellgov_ps3_abi::hw::ppu::PPU_TIME_BASE_ORIGIN;
 use cellgov_ps3_abi::hw::ppu_spr::CTRL_CT_THREAD1;
+use cellgov_time::GuestTicks;
 
 use super::batch::BatchEntry;
 use super::interrupt::entry_srr1;
@@ -102,6 +105,24 @@ impl PpuExecutionUnit {
         Some(SaveRestore {
             srr0: record.srr0,
             srr1: entry_srr1(msr, record.srr1),
+        })
+    }
+
+    /// The registers at the thread's next instruction boundary, with the
+    /// decrementer at the guest tick `tick`, or `None` for a thread with
+    /// no supervisor registers.
+    ///
+    /// The decrementer reads the time base of `tick`, or the time base
+    /// that the thread last read where that one is later.
+    pub(super) fn registers_at_boundary(&self, tick: GuestTicks) -> Option<BoundaryRegisters> {
+        let sup = self.state.supervisor()?;
+        let tb = PPU_TIME_BASE_ORIGIN
+            .wrapping_add(cellgov_time::ticks_to_tb(tick.raw()))
+            .max(self.state.tb);
+        Some(BoundaryRegisters {
+            pc: self.state.pc,
+            msr: sup.msr,
+            dec: sup.dec_at(tb),
         })
     }
 

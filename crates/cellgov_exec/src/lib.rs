@@ -38,7 +38,7 @@ pub use barrier::{BarrierKind, RetiredBarrier};
 pub use code_event::CodeEvent;
 pub use context::{ExecutionContext, MfcOrderingView, ResumeKind};
 pub use fake_isa::{FakeIsaUnit, FakeOp};
-pub use interrupt_return::{CompareFields, CompareResult, SaveRestore};
+pub use interrupt_return::{BoundaryRegisters, CompareFields, CompareResult, SaveRestore};
 pub use problem_state::{OutMailboxes, ProblemStateError, SignalNotifier};
 pub use stall::{ChannelStall, StallWake};
 pub use step_result::{

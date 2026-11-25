@@ -92,6 +92,66 @@
 //!   image read gives the meaning of these bytes;
 //! - the saved pc is [`MEDIATED_UNDELIVERED_PC`].
 //!
+//! # The interprocessor interrupt
+//!
+//! lv1's raise sends an interprocessor interrupt to a running thread
+//! other than the caller; see [`super::send_event`]. lv1 signals the
+//! thread through the interrupt controller, and keeps no flag of it in
+//! the thread's context:
+//! 1. The raise gives the function [OFW-4.93 lv1 a:0x2C2D24] the IIC
+//!    object at +1584 of the thread's context, and priority 0
+//!    [OFW-4.93 lv1 a:0x2C6720-0x2C672C]. The function stores the
+//!    priority at +0x410 of the IIC registers of that thread
+//!    [OFW-4.93 lv1 a:0x2C2D24-0x2C2D44].
+//! 2. That register is the thread's interrupt generation port
+//!    [CBE-Handbook p:268 s:9.6.2.4]. The IIC signals the interrupt to the
+//!    thread while its priority is below the thread's current priority
+//!    level [CBE-Handbook p:265 s:9.6.2.2]. lv1 sets that level to 0xF8
+//!    after each drain of the pending port [OFW-4.93 lv1 a:0x2C2EC8-0x2C2F08].
+//! 3. The context constructor stores the LPCR at +504
+//!    [OFW-4.93 lv1 a:0x2C3DCC]. Its caller gives it the real mode limit
+//!    selector of [OFW-4.93 lv1 a:0x2B9E00-0x2B9E98], with bits 61 and 62
+//!    set [OFW-4.93 lv1 a:0x2C56CC-0x2C56D4] [OFW-4.93 lv1 a:0x2C5714].
+//!    So LPCR\[LPES\] is 0b01, and LPES bit 0 is 0
+//!    [CBE-Handbook p:306 s:10.4.3].
+//! 4. With LPES bit 0 = 0, a direct external interrupt is enabled whenever
+//!    the thread is out of hypervisor state, whatever its `MSR[EE]`
+//!    [CBE-Handbook p:276 s:9.7]. So the thread takes the interrupt at its
+//!    next instruction boundary, at lv1's vector 0x500
+//!    [OFW-4.93 lv1 a:0x0500-0x0524].
+//!
+//! The vector branches to the handler that HSPRG0 - 27120 names. The
+//! handler at 0x1930 stores its own address there before its `hrfid`
+//! [OFW-4.93 lv1 a:0x1AEC-0x1AF4]. It is the handler of the mediated
+//! take, and it does these steps:
+//! 1. It saves the thread's registers, HSRR0 and HSRR1 in the frame at
+//!    HSPRG0 - 28544 [OFW-4.93 lv1 a:0x1930-0x19D8].
+//! 2. Its body [OFW-4.93 lv1 a:0x2C62D0] drains the thread's interrupt
+//!    pending port at +0x408 [OFW-4.93 lv1 a:0x2C6320-0x2C6328]
+//!    [OFW-4.93 lv1 a:0x2C2E84-0x2C2EBC]. The drain consumes an entry
+//!    whose type bit 33 is set, and does nothing else for it
+//!    [CBE-Handbook p:266 s:9.6.2.3].
+//! 3. The body tests the decrementer [OFW-4.93 lv1 a:0x2C632C-0x2C6334].
+//!    A negative decrementer sets the byte at +1830 and the decrementer
+//!    to 0x7FFFFFFF [OFW-4.93 lv1 a:0x2C636C-0x2C637C]. The handler then
+//!    sets the decrementer to 0 when the byte at +1833 is 0
+//!    [OFW-4.93 lv1 a:0x1A44] [OFW-4.93 lv1 a:0x1B88-0x1BA0].
+//! 4. It reloads the LPCR from +504, which clears [`LPCR_MER`]
+//!    [OFW-4.93 lv1 a:0x1A40] [OFW-4.93 lv1 a:0x1A5C].
+//! 5. For a thread in hypervisor state with `MSR[PR]` = 0, it returns
+//!    with no shadow test [OFW-4.93 lv1 a:0x1A48-0x1A60].
+//! 6. It makes the shadow test [OFW-4.93 lv1 a:0x1A84-0x1AD4]. For a
+//!    nonzero result, the function [OFW-4.93 lv1 a:0x1870] enters the
+//!    vector or sets [`LPCR_MER`], as for the mediated take.
+//!
+//! Before step 6, the handler can switch the hardware thread to another
+//! lv1 context [OFW-4.93 lv1 a:0x1A08-0x1A34] [OFW-4.93 lv1 a:0x1A6C-0x1A80].
+//! CellGov's hypervisor runs one context on each hardware thread, so it
+//! models no switch. No image read gives the three functions that the
+//! handler calls on each entry [OFW-4.93 lv1 a:0x1A00-0x1A04]
+//! [OFW-4.93 lv1 a:0x2C631C] [OFW-4.93 lv1 a:0x1ADC]. The `sc` vector's
+//! return calls the third one too [OFW-4.93 lv1 a:0x1024].
+//!
 //! # The kernel's calls
 //!
 //! The kernel makes the call at three sites. Each site passes +0x08 and

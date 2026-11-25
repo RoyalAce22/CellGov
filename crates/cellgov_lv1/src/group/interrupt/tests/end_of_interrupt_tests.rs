@@ -5,7 +5,9 @@ use crate::group::interrupt::bitmap::{IrqStateBitmapRegistration, StatusShadowWr
 use crate::group::interrupt::event_port::EventReceivePort;
 use crate::group::state::GroupStates;
 use crate::group::uart::{UartChange, VirtualUartIrq, VirtualUartShadowWrite};
-use crate::{answered_numbers, ExternalDelivery, ExternalRaise, Hypervisor, SavedMsrs};
+use crate::{
+    answered_numbers, ExternalDelivery, ExternalRaise, Hypervisor, RunningThreads, SavedMsrs,
+};
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr};
@@ -440,7 +442,16 @@ fn the_return_after_a_uart_raise_again_raises_the_external_interrupt() {
     ));
     assert!(matches!(answer.path, ReturnPath::Table(_)));
     let msrs = SavedMsrs([Some(KERNEL_MSR); 2]);
-    let returned = answered(returns(&r, Some("4.93"), &groups, &storage, &msrs, answer));
+    let running = RunningThreads::default();
+    let returned = answered(returns(
+        &r,
+        Some("4.93"),
+        &groups,
+        &storage,
+        &msrs,
+        &running,
+        answer,
+    ));
     assert_eq!(returned.external, Some(DELIVERY));
 }
 

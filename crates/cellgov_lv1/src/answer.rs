@@ -64,6 +64,23 @@ pub struct HypercallAnswer {
     /// Each paused thread that the call woke, which returns from its
     /// `pause`. The hypervisor sets it as it dispatches the call.
     pub resumed: Vec<ThreadResume>,
+    /// Each running thread that the call sent an interprocessor
+    /// interrupt. The hypervisor sets it as it dispatches the call.
+    pub interrupted: Vec<ThreadInterrupt>,
+}
+
+/// A running thread that a call sent an interprocessor interrupt, and
+/// the external interrupt that lv1's handler then raises for it.
+///
+/// The thread takes the interprocessor interrupt at its next instruction
+/// boundary; see [`cellgov_ps3_abi::lv1::interrupt_mask`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThreadInterrupt {
+    /// The PPE hardware thread.
+    pub thread: u8,
+    /// The external interrupt that the handler raises, or `None` when its
+    /// shadow test finds no bit.
+    pub external: Option<ExternalRaise>,
 }
 
 /// A paused thread that a call woke, and the external interrupt that its
@@ -177,6 +194,7 @@ impl HypercallAnswer {
             pauses_caller: false,
             external: None,
             resumed: Vec::new(),
+            interrupted: Vec::new(),
         }
     }
 
@@ -325,6 +343,10 @@ impl UnmodelledError {
 }
 
 /// What a handler gives back.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "a disposition lives for one dispatch, and a boxed answer costs an allocation per call"
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HypercallDisposition {
     /// The runtime applies the answer.

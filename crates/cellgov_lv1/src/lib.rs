@@ -48,6 +48,7 @@ mod cost;
 mod external;
 mod group;
 mod handlers;
+mod interprocessor;
 mod mediated;
 mod request;
 mod return_path;
@@ -56,7 +57,7 @@ mod vector;
 
 pub use answer::{
     ConsoleWrite, HypercallAnswer, HypercallDisposition, HypercallRefusal, OutputRegisters,
-    PageTableLoad, ReturnPath, ThreadResume,
+    PageTableLoad, ReturnPath, ThreadInterrupt, ThreadResume,
 };
 pub use cost::cost;
 pub use group::device_bus::{DeviceBusChange, DeviceBusState};
@@ -92,6 +93,7 @@ pub use group::uart::{
     VirtualUartShadowWrite, UART_SHADOW_DOUBLEWORDS,
 };
 pub use handlers::{answer, answered_numbers, answers};
+pub use interprocessor::{RunningThread, RunningThreads};
 pub use mediated::MediatedTake;
 pub use request::HypercallRequest;
 pub use return_path::{

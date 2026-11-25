@@ -153,8 +153,11 @@ fn a_raise_on_the_caller_writes_its_status_doubleword_and_wakes_nothing() {
     assert_eq!(answer, expected);
 }
 
+/// The raise on another running thread sets the bit and stores the
+/// doubleword [OFW-4.93 lv1 a:0x2C6620-0x2C6634], then sends the thread
+/// an interprocessor interrupt [OFW-4.93 lv1 a:0x2C6720-0x2C672C].
 #[test]
-fn a_raise_on_a_running_thread_other_than_the_caller_is_a_refusal() {
+fn a_raise_on_a_running_thread_other_than_the_caller_writes_its_status_and_signals_it() {
     let bitmaps = registered(1);
     let ports = EventReceivePortState::default();
     let paused = PausedThreadState::default();
@@ -168,11 +171,22 @@ fn a_raise_on_a_running_thread_other_than_the_caller_is_a_refusal() {
     let mut answer = empty();
     assert_eq!(
         raise(&request(0), &state, key(1), PLUG, &mut answer),
-        Err(UnmodelledError::new(
-            "an event on a plug of a running thread, which lv1 signals with an interprocessor interrupt"
-        ))
+        Ok(())
     );
-    assert_eq!(answer, empty());
+    let mut expected = empty();
+    expected.effects.push(Effect::SharedWriteIntent {
+        range: ByteRange::new(GuestAddr::new(BITMAP), 8).expect("the status doubleword"),
+        bytes: WritePayload::new(PLUG_BIT.to_be_bytes().to_vec()),
+        source: UnitId::new(1),
+        source_time: GuestTicks::ZERO,
+    });
+    expected.push_change(InterruptChange::StatusShadow(StatusShadowWrite {
+        key: key(1),
+        index: 0,
+        value: PLUG_BIT,
+    }));
+    expected.push_change(InterruptChange::ThreadSignalled(1));
+    assert_eq!(answer, expected);
 }
 
 /// The event function returns while the pending byte is set

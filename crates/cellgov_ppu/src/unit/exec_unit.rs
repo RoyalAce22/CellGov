@@ -6,8 +6,11 @@ use crate::mmu::Partition;
 use crate::observation::PpuArchitecturalState;
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
-use cellgov_exec::{ExecutionContext, ExecutionStepResult, ExecutionUnit, SaveRestore, UnitStatus};
-use cellgov_time::Budget;
+use cellgov_exec::{
+    BoundaryRegisters, ExecutionContext, ExecutionStepResult, ExecutionUnit, SaveRestore,
+    UnitStatus,
+};
+use cellgov_time::{Budget, GuestTicks};
 
 impl ExecutionUnit for PpuExecutionUnit {
     type Snapshot = PpuSnapshot;
@@ -143,6 +146,10 @@ impl ExecutionUnit for PpuExecutionUnit {
 
     fn system_call_save_restore(&self) -> Option<SaveRestore> {
         self.save_restore_at_sc()
+    }
+
+    fn boundary_registers(&self, tick: GuestTicks) -> Option<BoundaryRegisters> {
+        self.registers_at_boundary(tick)
     }
 
     fn load_page_table(&mut self, sdr1: u64, lb: u8) -> bool {

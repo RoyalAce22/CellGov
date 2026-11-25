@@ -16,6 +16,8 @@
 //! An answer that pauses the caller also parks it. The caller takes its
 //! committed inputs at its first step after a wake makes it runnable. An
 //! answer that wakes a paused thread makes that thread's unit runnable.
+//! An answer that sends a running thread an interprocessor interrupt
+//! gives that thread the exception of lv1's handler before its next step.
 //!
 //! The hypervisor tests each return for an external interrupt, as lv1's
 //! return does. The runtime raises one of two exceptions of the thread:
@@ -31,13 +33,15 @@
 
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
-use cellgov_exec::{CompareFields, CompareResult, ExecutionStepResult};
+use cellgov_exec::{CompareFields, CompareResult, ExecutionStepResult, UnitStatus};
 use cellgov_lv1::{
     cost, Compare, ExternalRaise, HypercallAnswer, HypercallDisposition, HypercallRefusal,
-    HypercallRequest, MediatedTake, PageTableLoad, ReturnPair, SavedMsrs, ThreadResume,
+    HypercallRequest, MediatedTake, PageTableLoad, ReturnPair, RunningThread, RunningThreads,
+    SavedMsrs, ThreadInterrupt, ThreadResume,
 };
 use cellgov_ps3_abi::hw::ppu_interrupt::{SRR1_MEDIATED_EXTERNAL, VECTOR_EXTERNAL};
 use cellgov_ps3_abi::lv1::call::{LOGICAL_CONSOLE_SEND_MAX, MAX_OUTPUTS};
+use cellgov_time::GuestTicks;
 use cellgov_trace::{HostWriter, TraceRecord, TracedHypercallDisposition, CONSOLE_RECORD_BYTES};
 
 use crate::registry::UnitRegistry;
@@ -82,7 +86,10 @@ impl Runtime {
         let storage =
             crate::runtime::spaces::resolve_space_memory(&self.memory, &self.spaces, space);
         let msrs = saved_msrs(&self.registry);
-        let disposition = self.hypervisor.dispatch_returning(&request, storage, &msrs);
+        let running = running_threads(&self.registry, request.tick);
+        let disposition = self
+            .hypervisor
+            .dispatch_signalling(&request, storage, &msrs, &running);
         if self.mode != RuntimeMode::FaultDriven {
             self.trace.record(&TraceRecord::HypercallEntered {
                 unit: source,
@@ -148,6 +155,42 @@ impl Runtime {
         for resume in &answer.resumed {
             self.resume_paused_thread(resume);
         }
+        for interrupt in &answer.interrupted {
+            self.interrupt_running_thread(interrupt);
+        }
+    }
+
+    /// The unit that runs the PPE hardware thread `thread`, or `None`.
+    fn unit_of_thread(&self, thread: u8) -> Option<UnitId> {
+        self.registry
+            .iter()
+            .find(|(_, u)| u.ppe_thread() == Some(thread))
+            .map(|(id, _)| id)
+    }
+
+    /// Gives the running thread of `interrupt` the exception that lv1's
+    /// handler raises when the thread takes the interprocessor interrupt.
+    ///
+    /// The thread takes the interrupt at its next instruction boundary:
+    /// the first instruction of its next step. The handler reloads the
+    /// LPCR, which clears LPCR\[MER\] [OFW-4.93 lv1 a:0x1A40]
+    /// [OFW-4.93 lv1 a:0x1A5C]. So this first clears the mediated external
+    /// exception only. An external exception that an earlier interrupt
+    /// raised, and that the thread has not yet taken, stays: lv1 entered
+    /// the vector for it, and the reload clears no such entry.
+    fn interrupt_running_thread(&mut self, interrupt: &ThreadInterrupt) {
+        let Some(unit) = self.unit_of_thread(interrupt.thread) else {
+            self.lv2_host.log_invariant_break(
+                "dispatch.hypervisor_signalled_thread_missing",
+                format_args!("no unit runs the signalled PPE thread {}", interrupt.thread),
+            );
+            return;
+        };
+        if let Some(registered) = self.registry.get_mut(unit) {
+            // A unit with no supervisor registers holds no exception.
+            let _ = registered.clear_mediated_external_exception();
+        }
+        self.raise_exception_on(unit, interrupt.external);
     }
 
     /// Wakes the paused thread of `resume`, as lv1's wake ends its pause.
@@ -158,12 +201,7 @@ impl Runtime {
     /// loads them after the raise. The runtime gives a unit's register
     /// writes in order, so these writes win.
     fn resume_paused_thread(&mut self, resume: &ThreadResume) {
-        let unit = self
-            .registry
-            .iter()
-            .find(|(_, u)| u.ppe_thread() == Some(resume.thread))
-            .map(|(id, _)| id);
-        let Some(unit) = unit else {
+        let Some(unit) = self.unit_of_thread(resume.thread) else {
             self.lv2_host.log_invariant_break(
                 "dispatch.hypervisor_woken_thread_missing",
                 format_args!("no unit runs the woken PPE thread {}", resume.thread),
@@ -205,6 +243,21 @@ impl Runtime {
         // A unit with no supervisor registers holds no exception.
         let _ = registered.clear_external_exception();
         let _ = registered.clear_mediated_external_exception();
+        self.raise_exception_on(unit, raise);
+    }
+
+    /// Gives `unit` the exception of `raise`, and clears none.
+    ///
+    /// If the unit takes no exception, the runtime logs an invariant break
+    /// and the interrupt is lost.
+    ///
+    /// # Panics
+    ///
+    /// Panics in a debug build where the unit takes no raised exception.
+    fn raise_exception_on(&mut self, unit: UnitId, raise: Option<ExternalRaise>) {
+        let Some(registered) = self.registry.get_mut(unit) else {
+            return;
+        };
         let raised = match raise {
             None => return,
             Some(ExternalRaise::Deliver(_)) => registered.raise_external_exception(),
@@ -413,6 +466,40 @@ fn saved_msrs(registry: &UnitRegistry) -> SavedMsrs {
     msrs
 }
 
+/// The registers of each PPE hardware thread whose unit runs at an
+/// instruction boundary, with the decrementer at the guest tick `tick`
+/// of the call, or at the unit's own clock where that one is later.
+///
+/// The unit's pc and MSR are those at the start of its next step, at its
+/// own clock. A unit whose clock is past `tick` reads its decrementer at
+/// that clock, as its own boundary test does at the step's start tick.
+///
+/// A thread gets no slot in these cases:
+/// - its unit is not runnable;
+/// - its unit holds a syscall return, so its next step steps past `sc`;
+/// - its unit holds no supervisor registers.
+fn running_threads(registry: &UnitRegistry, tick: GuestTicks) -> RunningThreads {
+    let mut running = RunningThreads::default();
+    for (id, unit) in registry.iter() {
+        let runnable = registry.effective_status(id) == Some(UnitStatus::Runnable);
+        if !runnable || registry.has_syscall_return(id) {
+            continue;
+        }
+        let at = tick.max(registry.clock(id));
+        let (Some(thread), Some(regs)) = (unit.ppe_thread(), unit.boundary_registers(at)) else {
+            continue;
+        };
+        if let Some(slot) = running.0.get_mut(usize::from(thread)) {
+            *slot = Some(RunningThread {
+                pc: regs.pc,
+                msr: regs.msr,
+                decrementer: regs.dec,
+            });
+        }
+    }
+    running
+}
+
 /// The CR fields of `cr`, as the caller's next step takes them.
 fn compare_fields(cr: &[Option<Compare>; 8]) -> CompareFields {
     CompareFields(cr.map(|field| {
@@ -455,3 +542,7 @@ mod hypercall_return_path_tests;
 #[cfg(test)]
 #[path = "tests/hypercall_external_tests.rs"]
 mod hypercall_external_tests;
+
+#[cfg(test)]
+#[path = "tests/hypercall_signal_tests.rs"]
+mod hypercall_signal_tests;

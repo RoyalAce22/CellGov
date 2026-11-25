@@ -464,6 +464,10 @@ mod hypercall_yield_tests;
 mod hypercall_return_tests;
 
 #[cfg(test)]
+#[path = "tests/boundary_registers_tests.rs"]
+mod boundary_registers_tests;
+
+#[cfg(test)]
 #[path = "tests/interrupt_facility_tests.rs"]
 mod interrupt_facility_tests;
 

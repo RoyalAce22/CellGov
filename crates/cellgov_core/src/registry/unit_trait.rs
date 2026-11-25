@@ -8,11 +8,11 @@ use core::any::Any;
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{
-    CodeEvent, ExecutionContext, ExecutionStepResult, ExecutionUnit, FaultRegisterDump,
-    PpuFingerprint, ProblemStateError, RestartError, RetiredBarrier, SaveRestore, SignalNotifier,
-    SpuFingerprint, StopRegisters, UnitStatus,
+    BoundaryRegisters, CodeEvent, ExecutionContext, ExecutionStepResult, ExecutionUnit,
+    FaultRegisterDump, PpuFingerprint, ProblemStateError, RestartError, RetiredBarrier,
+    SaveRestore, SignalNotifier, SpuFingerprint, StopRegisters, UnitStatus,
 };
-use cellgov_time::Budget;
+use cellgov_time::{Budget, GuestTicks};
 
 /// Object-safe view of an execution unit.
 ///
@@ -97,6 +97,10 @@ pub trait RegisteredUnit: 'static {
     /// The SRR0 and SRR1 of a system call at the unit's pc. See
     /// [`ExecutionUnit::system_call_save_restore`].
     fn system_call_save_restore(&self) -> Option<SaveRestore>;
+
+    /// The registers at the unit's next instruction boundary. See
+    /// [`ExecutionUnit::boundary_registers`].
+    fn boundary_registers(&self, tick: GuestTicks) -> Option<BoundaryRegisters>;
 
     /// Gives the thread a page table and large page sizes. See
     /// [`ExecutionUnit::load_page_table`].
@@ -358,6 +362,11 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn system_call_save_restore(&self) -> Option<SaveRestore> {
         ExecutionUnit::system_call_save_restore(self)
+    }
+
+    #[inline]
+    fn boundary_registers(&self, tick: GuestTicks) -> Option<BoundaryRegisters> {
+        ExecutionUnit::boundary_registers(self, tick)
     }
 
     #[inline]

@@ -53,6 +53,11 @@ impl UnitRegistry {
         self.pending_syscall_returns.insert(id, code);
     }
 
+    /// Whether `id` holds a syscall return that its next step takes.
+    pub fn has_syscall_return(&self, id: UnitId) -> bool {
+        self.pending_syscall_returns.contains_key(&id)
+    }
+
     /// Drain the pending syscall return for `id`. Guard behaviour per
     /// [`Self::drain_receives`].
     #[inline]

@@ -5,17 +5,23 @@
 //! Each return ANDs the thread's status shadow with its mask, and raises
 //! the thread's external interrupt for a nonzero result; see
 //! [`cellgov_ps3_abi::lv1::interrupt_mask`].
+//!
+//! A call that sends a running thread an interprocessor interrupt makes
+//! that thread enter lv1's handler, which makes the same test; see
+//! [`crate::interprocessor`].
 
 use cellgov_mem::GuestMemory;
 use cellgov_ps3_abi::lv1::ppe::game_os_logical_ppe_id;
 
 use crate::answer::{
-    HypercallAnswer, HypercallDisposition, ReturnPath, ThreadResume, UnmodelledError,
+    HypercallAnswer, HypercallDisposition, ReturnPath, ThreadInterrupt, ThreadResume,
+    UnmodelledError,
 };
 use crate::group::interrupt::bitmap::IrqStateBitmapKey;
 use crate::group::interrupt::raise::unmasked;
 use crate::group::interrupt::{InterruptChange, InterruptGroupState};
 use crate::group::state::{GroupStates, StateChange};
+use crate::interprocessor::{handler_raise, RunningThreads};
 use crate::request::HypercallRequest;
 use crate::return_path::{external_raise, ExternalRaise, SavedMsrs};
 
@@ -30,6 +36,10 @@ use crate::return_path::{external_raise, ExternalRaise, SavedMsrs};
 /// - the return of each thread that the answer wakes. The thread returns
 ///   from `pause` through the same vector.
 ///
+/// It also gives the external interrupt of lv1's handler for each running
+/// thread that the answer signals. The handler reads the registers that
+/// `running` gives; see [`handler_raise`].
+///
 /// The `rfid` return for a number past the table makes no test
 /// [OFW-4.93 lv1 a:0x0C44-0x0C58]. A firmware whose logical PPE id no
 /// table gives makes no test either.
@@ -38,31 +48,50 @@ use crate::return_path::{external_raise, ExternalRaise, SavedMsrs};
 /// - the shadow test refuses; see [`unmasked`];
 /// - a return raises the interrupt, and `msrs` gives no saved MSR for its
 ///   thread;
-/// - a return raises the interrupt, and [`external_raise`] refuses.
+/// - a return raises the interrupt, and [`external_raise`] refuses;
+/// - [`handler_raise`] refuses for a signalled thread;
+/// - the answer signals a thread, and the call makes no test.
 pub(crate) fn returns(
     request: &HypercallRequest,
     firmware: Option<&str>,
     groups: &GroupStates,
     storage: &GuestMemory,
     msrs: &SavedMsrs,
+    running: &RunningThreads,
     mut answer: HypercallAnswer,
 ) -> HypercallDisposition {
+    // The IIC merges a second interrupt of the same priority into the
+    // pending one [CBE-Handbook p:268 s:9.6.2.4], so a thread takes one.
+    let mut signalled: Vec<u8> = answer.changes.iter().filter_map(signalled_thread).collect();
+    signalled.sort_unstable();
+    signalled.dedup();
     let tested = matches!(answer.path, ReturnPath::Table(_));
     let Some(ppe_id) = firmware.and_then(game_os_logical_ppe_id).filter(|_| tested) else {
-        return HypercallDisposition::Answered(answer);
+        if signalled.is_empty() {
+            return HypercallDisposition::Answered(answer);
+        }
+        return UnmodelledError::new(
+            "an interprocessor interrupt from a call whose return makes no shadow test",
+        )
+        .refusal(request);
     };
     let test = ReturnTest {
         after: groups.interrupt().after(&answer.changes),
         ppe_id,
         storage,
         msrs,
+        running,
     };
     let caller = request.thread.filter(|_| !answer.pauses_caller);
     let woken: Vec<u8> = answer.changes.iter().filter_map(woken_thread).collect();
-    match test.deliveries(caller, &woken) {
-        Ok((external, resumed)) => {
+    let deliveries = test
+        .deliveries(caller, &woken)
+        .and_then(|delivered| Ok((delivered, test.interrupts(&signalled)?)));
+    match deliveries {
+        Ok(((external, resumed), interrupted)) => {
             answer.external = external;
             answer.resumed = resumed;
+            answer.interrupted = interrupted;
             HypercallDisposition::Answered(answer)
         }
         Err(error) => error.refusal(request),
@@ -79,6 +108,8 @@ struct ReturnTest<'a> {
     storage: &'a GuestMemory,
     /// The saved MSR of each thread.
     msrs: &'a SavedMsrs,
+    /// The registers of each running thread.
+    running: &'a RunningThreads,
 }
 
 impl ReturnTest<'_> {
@@ -117,12 +148,38 @@ impl ReturnTest<'_> {
             .collect::<Result<Vec<_>, UnmodelledError>>()?;
         Ok((external, resumed))
     }
+
+    /// The [`ThreadInterrupt`] of each running thread in `signalled`.
+    fn interrupts(&self, signalled: &[u8]) -> Result<Vec<ThreadInterrupt>, UnmodelledError> {
+        signalled
+            .iter()
+            .map(|&thread| {
+                let key = IrqStateBitmapKey {
+                    ppe_id: self.ppe_id,
+                    thread,
+                };
+                let running = self.running.of(thread);
+                let external = handler_raise(&self.after, key, self.storage, running)?;
+                Ok(ThreadInterrupt { thread, external })
+            })
+            .collect()
+    }
 }
 
 fn woken_thread(change: &StateChange) -> Option<u8> {
     match change {
         StateChange::Interrupt(change) => match **change {
             InterruptChange::ThreadWoken(thread) => Some(thread),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn signalled_thread(change: &StateChange) -> Option<u8> {
+    match change {
+        StateChange::Interrupt(change) => match **change {
+            InterruptChange::ThreadSignalled(thread) => Some(thread),
             _ => None,
         },
         _ => None,

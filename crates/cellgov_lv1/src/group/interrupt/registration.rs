@@ -139,6 +139,8 @@ impl InterruptGroupState {
             InterruptChange::EventCleared(id) => self.ports.clear_pending(id),
             InterruptChange::StatusShadow(write) => self.bitmaps.write_shadow(write),
             InterruptChange::ThreadWoken(thread) => self.paused.wake(thread),
+            // lv1 keeps no record of an interprocessor interrupt.
+            InterruptChange::ThreadSignalled(_) => {}
         }
     }
 
@@ -192,6 +194,9 @@ pub enum InterruptChange {
     /// lv1 cleared the pause flag of this paused hardware thread, which
     /// ends its pause. The thread then returns from `pause`.
     ThreadWoken(u8),
+    /// lv1 sent this running hardware thread an interprocessor interrupt.
+    /// The thread then takes the interrupt into lv1's handler.
+    ThreadSignalled(u8),
 }
 
 impl From<InterruptChange> for StateChange {

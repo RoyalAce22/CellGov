@@ -231,10 +231,9 @@ fn a_raise_into_a_bitmap_that_the_storage_does_not_hold_is_a_refusal() {
 
 /// A first raised bit from thread 1 gives the outlet an event on plug 0
 /// of thread 0, which runs. lv1 signals that thread with an
-/// interprocessor interrupt [OFW-4.93 lv1 a:0x2C663C-0x2C6650], so the
-/// step is the event's refusal.
+/// interprocessor interrupt [OFW-4.93 lv1 a:0x2C663C-0x2C6650].
 #[test]
-fn a_raise_on_the_plug_of_another_running_thread_is_the_event_s_refusal() {
+fn a_raise_on_the_plug_of_another_running_thread_signals_that_thread() {
     let uart = uart(true, 0);
     let interrupt = interrupt();
     let storage = GuestMemory::new(0x0037_0000);
@@ -254,8 +253,18 @@ fn a_raise_on_the_plug_of_another_running_thread_is_the_event_s_refusal() {
     let mut answer = HypercallAnswer::lv1_status(0, []);
     assert_eq!(
         status_step(&other, "4.93", &input, &params(), 0x48, &mut answer),
-        Err(UnmodelledError::new(
-            "an event on a plug of a running thread, which lv1 signals with an interprocessor interrupt",
-        ))
+        Ok(())
     );
+    let mut expected = HypercallAnswer::lv1_status(0, []);
+    expected.push_change(shadow_set(PORT_BIT));
+    expected.effects.push(write(UART_BITMAP, PORT_BIT));
+    expected.push_change(InterruptChange::EventPending(OUTLET));
+    expected.effects.push(write(THREAD_0_BITMAP, PLUG_BIT));
+    expected.push_change(InterruptChange::StatusShadow(StatusShadowWrite {
+        key: thread_0(),
+        index: 0,
+        value: PLUG_BIT,
+    }));
+    expected.push_change(InterruptChange::ThreadSignalled(0));
+    assert_eq!(answer, expected);
 }

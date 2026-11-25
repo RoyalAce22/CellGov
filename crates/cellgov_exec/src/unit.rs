@@ -1,7 +1,7 @@
 //! The `ExecutionUnit` trait and `UnitStatus` enum.
 
 use crate::context::ExecutionContext;
-use crate::interrupt_return::SaveRestore;
+use crate::interrupt_return::{BoundaryRegisters, SaveRestore};
 use crate::step_result::ExecutionStepResult;
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
@@ -379,6 +379,13 @@ pub trait ExecutionUnit {
     /// The SRR0 and SRR1 that a system call interrupt of the `sc` at this
     /// unit's pc sets, or `None` for a unit with no supervisor registers.
     fn system_call_save_restore(&self) -> Option<SaveRestore> {
+        None
+    }
+
+    /// The registers at this unit's next instruction boundary, with the
+    /// decrementer at the guest tick `tick`, or `None` for a unit with no
+    /// supervisor registers.
+    fn boundary_registers(&self, _tick: cellgov_time::GuestTicks) -> Option<BoundaryRegisters> {
         None
     }
 

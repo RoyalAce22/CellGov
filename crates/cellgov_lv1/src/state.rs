@@ -11,6 +11,7 @@ use cellgov_time::GuestTicks;
 use super::answer::{HypercallDisposition, HypercallRefusal};
 use super::external::returns;
 use super::handlers::{answer, answers};
+use super::interprocessor::RunningThreads;
 use super::mediated::{take_refusal, MediatedTake};
 use super::request::HypercallRequest;
 use super::return_path::SavedMsrs;
@@ -98,17 +99,46 @@ impl Hypervisor {
     /// An answer also carries the external interrupt of each return that
     /// the call causes, from the saved MSR of each thread in `msrs`. When
     /// CellGov does not model one of those returns, the call is a refusal.
+    ///
+    /// No thread gives running registers, so a call that sends a running
+    /// thread an interprocessor interrupt is a refusal; see
+    /// [`Self::dispatch_signalling`].
     pub fn dispatch_returning(
         &mut self,
         request: &HypercallRequest,
         storage: &GuestMemory,
         msrs: &SavedMsrs,
     ) -> HypercallDisposition {
+        self.dispatch_signalling(request, storage, msrs, &RunningThreads::default())
+    }
+
+    /// The disposition of `request`, as [`Self::dispatch_returning`] gives
+    /// it, where `running` gives the registers of each running thread.
+    ///
+    /// An answer also carries the external interrupt that lv1's handler
+    /// raises for each running thread that the call sends an
+    /// interprocessor interrupt. When CellGov does not model that
+    /// interrupt, the call is a refusal.
+    pub fn dispatch_signalling(
+        &mut self,
+        request: &HypercallRequest,
+        storage: &GuestMemory,
+        msrs: &SavedMsrs,
+        running: &RunningThreads,
+    ) -> HypercallDisposition {
         let disposition = answer(request, self.firmware.as_deref(), &self.groups, storage);
         let disposition = match disposition {
             HypercallDisposition::Answered(answer) => {
                 let firmware = self.firmware.as_deref();
-                returns(request, firmware, &self.groups, storage, msrs, answer)
+                returns(
+                    request,
+                    firmware,
+                    &self.groups,
+                    storage,
+                    msrs,
+                    running,
+                    answer,
+                )
             }
             refused => refused,
         };

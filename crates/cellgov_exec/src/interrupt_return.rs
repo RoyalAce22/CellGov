@@ -32,3 +32,15 @@ pub struct SaveRestore {
     /// The MSR of the `sc`, with the interrupt's own bits cleared.
     pub srr1: u64,
 }
+
+/// The registers that a handler outside a unit reads when the unit's
+/// thread takes an interrupt at its next instruction boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BoundaryRegisters {
+    /// The address of the next instruction that the thread runs.
+    pub pc: u64,
+    /// The thread's MSR.
+    pub msr: u64,
+    /// The thread's decrementer at the guest tick of the read.
+    pub dec: u32,
+}
