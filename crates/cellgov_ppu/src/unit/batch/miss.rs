@@ -8,7 +8,7 @@ use crate::exec::{PpuFault, PpuInterrupt};
 use crate::instruction;
 use crate::mmu::{Access, Translation};
 use crate::unit::ppu_unit::PpuExecutionUnit;
-use crate::unit::translation::{RefillStop, CHANGE_UNSET, PAGE_PROTECTION};
+use crate::unit::translation::{RefillStop, Unbacked, CHANGE_UNSET, PAGE_PROTECTION};
 use cellgov_effects::Effect;
 
 /// What a translating thread does after an access missed every view.
@@ -78,7 +78,9 @@ impl PpuExecutionUnit {
         // A search reads committed memory, so the batch ends and the next
         // one searches after the stores commit.
         let table_synced = matches!(insn, instruction::PpuInstruction::Sync { l: 2 });
-        retranslates || aliased || table_synced
+        // A load that a sourced word answered ends the batch, so the view
+        // of the word serves no later instruction.
+        retranslates || aliased || table_synced || self.sourced_read
     }
 
     /// What `attempt`, which faulted with `exit`, does next after a
@@ -211,7 +213,7 @@ impl PpuExecutionUnit {
                     regions,
                     effects,
                     marks,
-                    (miss.addr, access),
+                    (miss.addr, access, attempt.step_pc),
                 )
             }
             cellgov_mem::MemError::ReservedWrite { addr, region }
@@ -250,7 +252,8 @@ impl PpuExecutionUnit {
     /// The step truncates `effects` and the buffered stores to their
     /// lengths at the start of the attempt. It then refills the cache
     /// when the cache holds no translation of `ea`. A rerun finds
-    /// `regions` rebuilt from the new translations.
+    /// `regions` rebuilt from the new translations. `pc` is the address
+    /// of `insn`.
     #[inline]
     fn translation_miss<'m>(
         &mut self,
@@ -259,7 +262,7 @@ impl PpuExecutionUnit {
         regions: &mut RegionTable<'m>,
         effects: &mut Vec<Effect>,
         (effects_before, stores_before): (usize, usize),
-        (ea, access): (u64, Access),
+        (ea, access, pc): (u64, Access, u64),
     ) -> MissStep {
         effects.truncate(effects_before);
         self.store_buf.truncate(stores_before);
@@ -275,7 +278,7 @@ impl PpuExecutionUnit {
                 )));
             }
             None => {
-                return self.unbacked_access(insn, mem, regions.as_slice(), ea, access);
+                return self.unbacked_step(mem, insn, regions, (ea, access), pc);
             }
             Some(Err(RefillStop::Fault(refused))) => {
                 return self.refused_access(insn, mem, regions.as_slice(), (ea, access), refused);
@@ -290,7 +293,31 @@ impl PpuExecutionUnit {
             return MissStep::Rerun;
         }
         // The access translates to a real address no storage holds.
-        self.unbacked_access(insn, mem, regions.as_slice(), ea, access)
+        self.unbacked_step(mem, insn, regions, (ea, access), pc)
+    }
+
+    /// What an access at `ea` whose translation reaches no storage does
+    /// next, as [`Self::unbacked_access`] gives it.
+    ///
+    /// A load that a sourced word answers runs again against `regions`
+    /// with the view of the word added. The batch ends after that load.
+    fn unbacked_step<'m>(
+        &mut self,
+        mem: &'m cellgov_mem::GuestMemory,
+        insn: &instruction::PpuInstruction,
+        regions: &mut RegionTable<'m>,
+        (ea, access): (u64, Access),
+        pc: u64,
+    ) -> MissStep {
+        match self.unbacked_access(insn, mem, regions.as_slice(), (ea, access), pc) {
+            Unbacked::Step(step) => step,
+            Unbacked::Sourced(view) => {
+                let views = self.translated_views(mem).into_iter();
+                *regions = RegionTable::new(views.chain(std::iter::once(view)));
+                self.sourced_read = true;
+                MissStep::Rerun
+            }
+        }
     }
 
     /// What a store that met a [`CHANGE_UNSET`] view at `ea` does next:

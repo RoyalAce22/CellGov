@@ -3,6 +3,7 @@
 //! process.
 
 pub mod address_space;
+pub mod device_register;
 pub mod mfc_timing;
 pub mod ppc_isa;
 pub mod ppc_mnemonics;

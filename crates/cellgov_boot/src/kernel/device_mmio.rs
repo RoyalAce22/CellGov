@@ -6,12 +6,22 @@
 //! region an unmodelled span. A span holds no bytes, so it never reads as
 //! zeros, and a store there never lands. An access there stops the run
 //! with the device that holds the address.
+//!
+//! A source gives some register words for the loads of one kernel
+//! instruction each ([`DEVICE_REGISTER_READS`]). The run declares each
+//! such word a sourced word of its span, so that instruction's load gets
+//! the word, and every other access there still stops.
 
 use cellgov_effects::FaultKind;
 use cellgov_exec::ExecutionStepResult;
 use cellgov_mem::{GuestMemory, MemError};
 use cellgov_ppu::FAULT_UNMODELLED_STORAGE;
+use cellgov_ps3_abi::hw::device_register::DEVICE_REGISTER_READS;
 use cellgov_ps3_abi::lv1::device_bus::{MmioRegion, MMIO_REAL_BASE, MMIO_REGIONS};
+
+#[cfg(test)]
+#[path = "tests/device_mmio_register_tests.rs"]
+mod register_tests;
 
 /// An access of a hardware thread to the MMIO of a device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,16 +52,28 @@ fn regions_of(firmware: &str) -> impl Iterator<Item = (u64, &'static MmioRegion)
 }
 
 /// Declares each MMIO region of the devices at `firmware` an unmodelled
-/// span of `mem`.
+/// span of `mem`, and each register word that a source gives at
+/// `firmware` a sourced word of its span.
 ///
 /// # Errors
 ///
-/// Returns the refusal of [`GuestMemory::declare_unmodelled`] when a
-/// region overlaps a region of `mem` or another span, or runs past the
-/// end of the address space.
+/// Returns one of these:
+/// - the refusal of [`GuestMemory::declare_unmodelled`] when a region
+///   overlaps a region of `mem` or another span, or runs past the end of
+///   the address space;
+/// - the refusal of [`GuestMemory::declare_sourced_word`] when a word is
+///   not an aligned word of one span, or repeats a word and reader. A
+///   word of a region that lv1 does not give the device is in no span.
 pub(super) fn declare_device_mmio(mem: &mut GuestMemory, firmware: &str) -> Result<(), MemError> {
     for (real, region) in regions_of(firmware) {
         mem.declare_unmodelled(real, region.size)?;
+    }
+    for read in DEVICE_REGISTER_READS
+        .iter()
+        .filter(|r| r.firmware == firmware)
+    {
+        let real = MMIO_REAL_BASE + read.region + read.offset;
+        mem.declare_sourced_word(real, read.value, read.reader)?;
     }
     Ok(())
 }

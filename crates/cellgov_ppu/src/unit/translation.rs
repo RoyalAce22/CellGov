@@ -33,9 +33,27 @@ mod l1_effective_index_tests;
 #[path = "tests/unmodelled_storage_tests.rs"]
 mod unmodelled_storage_tests;
 
+#[cfg(test)]
+#[path = "tests/sourced_word_tests.rs"]
+mod sourced_word_tests;
+
 /// The region label a view gives when it refuses a store to a read-only
 /// page.
 pub(super) const PAGE_PROTECTION: &str = "page protection";
+
+/// The region label of the view of a sourced word. The view serves one
+/// load and refuses every store.
+const SOURCED_WORD: &str = "sourced word";
+
+/// What an access that no view holds does next, when its translation
+/// reaches no storage.
+pub(super) enum Unbacked<'m> {
+    /// The access stops, or its batch ends ahead of it.
+    Step(MissStep),
+    /// A sourced word answers the load. The instruction runs again with
+    /// the view of that word.
+    Sourced(RegionView<'m>),
+}
 
 /// The region label a view gives when it refuses a store to a writable
 /// page whose entry has C = 0.
@@ -231,6 +249,7 @@ impl PpuExecutionUnit {
         self.translations.clear();
         self.table_reads.clear();
         self.table_writes.clear();
+        self.sourced_read = false;
         if let Some(sup) = self.state.supervisor() {
             self.translations.follow(sup);
         }
@@ -260,22 +279,24 @@ impl PpuExecutionUnit {
     ///   - for an operand in caching-inhibited storage that runs into
     ///     the next page, the interrupt of that page's translation.
     /// - An access whose real address an unmodelled span of `mem` holds:
-    ///   the unmodelled stop at that address. The machine has the
-    ///   storage, so the PPE performs the access.
+    ///   - a load of the instruction at `pc` that a sourced word of `mem`
+    ///     answers: the view of that word ([`Self::sourced_view`]);
+    ///   - any other access: the unmodelled stop at that address. The
+    ///     machine has the storage, so the PPE performs the access.
     /// - A caching-inhibited load with MSR\[ME\] = 1: the machine check.
     /// - Any other access to a real address no storage holds: the
     ///   checkstop.
     ///
     /// [CBE-Handbook p:253 s:9.5.8] The alignment interrupt is taken when the data access cannot be performed in caching-inhibited storage.
     /// [CBE-Handbook p:290 s:9.10] The data segment interrupt and the page-fault data storage interrupt outrank the alignment interrupt of caching-inhibited storage.
-    pub(super) fn unbacked_access(
+    pub(super) fn unbacked_access<'m>(
         &mut self,
         insn: &PpuInstruction,
-        mem: &GuestMemory,
+        mem: &'m GuestMemory,
         views: &[RegionView<'_>],
-        ea: u64,
-        access: Access,
-    ) -> MissStep {
+        (ea, access): (u64, Access),
+        pc: u64,
+    ) -> Unbacked<'m> {
         // A store [`Self::refill_for`] refused keeps only its page's load
         // translation.
         let held = self
@@ -289,27 +310,64 @@ impl PpuExecutionUnit {
         // where storage holds this page.
         if let Some(t) = held {
             if let Some(step) = self.unperformed_refusal(insn, mem, views, &t, ea, access) {
-                return step;
+                return Unbacked::Step(step);
             }
         }
-        let unmodelled = held
-            .and_then(|t| t.real(ea))
-            .filter(|&ra| mem.is_unmodelled(ra));
-        if let Some(ra) = unmodelled {
-            return MissStep::Stop(FaultExit::Verdict(PpuFault::UnmodelledStorage { ea, ra }));
+        let unmodelled = held.and_then(|t| Some((t, t.real(ea)?)));
+        if let Some((t, ra)) = unmodelled.filter(|&(_, ra)| mem.is_unmodelled(ra)) {
+            if let Some(view) = Self::sourced_view(insn, mem, &t, (ra, access), pc) {
+                return Unbacked::Sourced(view);
+            }
+            return Unbacked::Step(MissStep::Stop(FaultExit::Verdict(
+                PpuFault::UnmodelledStorage { ea, ra },
+            )));
         }
         let inhibited = held.is_some_and(|t| t.inhibited);
         let checks = self
             .state
             .supervisor()
             .is_some_and(|sup| sup.msr & MSR_ME != 0);
-        MissStep::Stop(FaultExit::Verdict(
+        Unbacked::Step(MissStep::Stop(FaultExit::Verdict(
             if access == Access::Load && inhibited && checks {
                 PpuFault::Interrupt(PpuInterrupt::MachineCheck)
             } else {
                 PpuFault::Checkstop
             },
-        ))
+        )))
+    }
+
+    /// The view of the sourced word of `mem` that answers `insn`'s load
+    /// of the real address `ra`, through the translation `t`, or `None`
+    /// when no sourced word answers it.
+    ///
+    /// A word answers only when all of these hold:
+    /// - the access is a load;
+    /// - `insn` is no fused pair, so `pc` is the address of the
+    ///   instruction that makes the load;
+    /// - `mem` holds a sourced word at `ra` for the reader `pc`.
+    ///
+    /// A fused pair that reaches a sourced word stops, and its halves
+    /// then run split.
+    fn sourced_view<'m>(
+        insn: &PpuInstruction,
+        mem: &'m GuestMemory,
+        t: &Translation,
+        (ra, access): (u64, Access),
+        pc: u64,
+    ) -> Option<RegionView<'m>> {
+        if access != Access::Load || insn.is_super_pair() {
+            return None;
+        }
+        let (real, bytes) = mem.sourced_word(ra, pc)?;
+        Some(RegionView {
+            base: t.ea + (real - t.ra),
+            real,
+            bytes,
+            provisional: None,
+            write_refused_by: Some(SOURCED_WORD),
+            caching_inhibited: t.inhibited,
+            store_alignment_first: store_alignment_first(t),
+        })
     }
 
     /// The stop of the interrupt that `insn` takes before it performs its

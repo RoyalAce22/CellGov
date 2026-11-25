@@ -439,6 +439,9 @@ pub struct GuestMemory {
     /// Unmodelled spans `[start, end)`, sorted, none overlapping another;
     /// see [`Self::declare_unmodelled`].
     unmodelled_spans: Vec<(u64, u64)>,
+    /// Words of the unmodelled spans that a source gives, sorted by real
+    /// address and then by reader; see [`Self::declare_sourced_word`].
+    sourced_words: Vec<SourcedWord>,
 }
 
 /// Diagnostic context for an out-of-region access.
@@ -522,6 +525,15 @@ pub enum MemError {
         /// Reserved region's label.
         region: &'static str,
     },
+    /// A sourced word is not an aligned word of one unmodelled span, or
+    /// it repeats a word and reader that the memory holds.
+    #[error("no unmodelled word for a source at real 0x{real:x} for the reader 0x{reader:x}")]
+    SourcedWordRefused {
+        /// The real address of the word.
+        real: u64,
+        /// The effective address of the instruction that reads it.
+        reader: u64,
+    },
 }
 
 impl GuestMemory {
@@ -577,6 +589,7 @@ impl GuestMemory {
             code_spans: Vec::new(),
             fetch_restricted: false,
             unmodelled_spans: Vec::new(),
+            sourced_words: Vec::new(),
         })
     }
 
@@ -1152,6 +1165,14 @@ mod unmodelled;
 #[cfg(test)]
 #[path = "tests/unmodelled_tests.rs"]
 mod unmodelled_tests;
+
+#[path = "guest_sourced.rs"]
+mod sourced;
+use sourced::SourcedWord;
+
+#[cfg(test)]
+#[path = "tests/sourced_word_tests.rs"]
+mod sourced_word_tests;
 
 #[cfg(test)]
 #[path = "tests/fetch_tests.rs"]
