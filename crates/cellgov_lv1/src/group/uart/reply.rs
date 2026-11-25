@@ -9,12 +9,18 @@
 //!   status and the data bytes of its row;
 //! - [`cellgov_ps3_abi::lv1::uart::GAME_OS_RANDOM_DISPATCHER_REQUESTS`],
 //!   with the status of its row and [`SYNTHETIC_RANDOM_DATA`].
+//!
+//! CellGov refuses a request of
+//! [`cellgov_ps3_abi::lv1::uart::GAME_OS_IDENTITY_DISPATCHER_REQUESTS`]
+//! with [`IDENTITY_PART`], because no committed synthetic console identity
+//! gives its data bytes.
 
 use cellgov_ps3_abi::lv1::uart::{
     dispatcher_header_reply_bytes, dispatcher_header_request_bytes, dispatcher_header_service,
     dispatcher_header_tag, dispatcher_reply_header, game_os_dispatcher_reply,
-    game_os_random_dispatcher_request, DISPATCHER_HEADER_BYTES, DISPATCHER_RANDOM_DATA_BYTES,
-    DISPATCHER_REPLY_DATA_OFFSET, DISPATCHER_REPLY_STATUS_OFFSET, GAME_OS_FIRST_DISPATCHER_SERVICE,
+    game_os_identity_dispatcher_request, game_os_random_dispatcher_request,
+    DISPATCHER_HEADER_BYTES, DISPATCHER_RANDOM_DATA_BYTES, DISPATCHER_REPLY_DATA_OFFSET,
+    DISPATCHER_REPLY_STATUS_OFFSET, GAME_OS_FIRST_DISPATCHER_SERVICE,
 };
 
 use super::request::{PendingRequest, REQUEST_PREFIX_BYTES};
@@ -37,6 +43,15 @@ pub(super) const REQUEST_PART: &str = "a reply of this service, which the dispat
 /// The part of the reply to a request whose sizes are not the sizes of
 /// the reply that a source gives.
 pub(super) const SIZE_PART: &str = "a reply with these request and reply sizes";
+
+/// The part of the reply to a request whose data bytes an isolated SPU
+/// module of lv1 derives from data of the console.
+///
+/// CellGov may serve identity-derived bytes only from one committed
+/// synthetic console identity. It commits no such identity yet.
+pub(super) const IDENTITY_PART: &str =
+    "the data bytes of this reply, which an isolated SPU module of lv1 derives from the \
+     console's identity";
 
 /// The random data bytes that CellGov gives in each reply to a request of
 /// [`cellgov_ps3_abi::lv1::uart::GAME_OS_RANDOM_DISPATCHER_REQUESTS`].
@@ -74,6 +89,35 @@ fn served_reply(firmware: &str, service: u32, request: u64) -> Option<ServedRepl
         status: reply.status,
         data: &reply.data,
     })
+}
+
+/// The part of the reply that no source gives, for request `request` of
+/// service `service` at `firmware` that no table serves.
+///
+/// A request of the identity table with `request_bytes` request bytes and
+/// `reply_bytes` reply bytes gets [`IDENTITY_PART`] when both counts are
+/// the counts of its row. With other counts, it gets [`SIZE_PART`].
+fn unserved_part(
+    firmware: &str,
+    service: u32,
+    request: Option<u64>,
+    request_bytes: usize,
+    reply_bytes: u32,
+) -> &'static str {
+    if let Some(row) =
+        request.and_then(|id| game_os_identity_dispatcher_request(firmware, service, id))
+    {
+        return if request_bytes == row.bytes as usize && reply_bytes == row.bytes {
+            IDENTITY_PART
+        } else {
+            SIZE_PART
+        };
+    }
+    if service == GAME_OS_FIRST_DISPATCHER_SERVICE {
+        SERVICE_REQUEST_PART
+    } else {
+        REQUEST_PART
+    }
 }
 
 /// The refusal of a complete request whose bytes the hypervisor did not
@@ -151,8 +195,9 @@ impl NoReply {
 ///   does not hold each request byte that the reply echoes;
 /// - `pending` and `last` do not complete the request;
 /// - `last` holds bytes past the end of the request;
-/// - no table gives the header's service and the request id at
-///   `firmware`;
+/// - no table that CellGov builds a reply from gives the header's service
+///   and the request id at `firmware`;
+/// - the identity table gives them, so no source gives the data bytes;
 /// - the header's counts are not the counts of that reply.
 pub(super) fn dispatcher_reply(
     firmware: &str,
@@ -191,11 +236,13 @@ pub(super) fn dispatcher_reply(
     let reply = id
         .and_then(|id| served_reply(firmware, service, id))
         .ok_or_else(|| {
-            unsourced(if service == GAME_OS_FIRST_DISPATCHER_SERVICE {
-                SERVICE_REQUEST_PART
-            } else {
-                REQUEST_PART
-            })
+            unsourced(unserved_part(
+                firmware,
+                service,
+                id,
+                request_bytes,
+                reply_bytes,
+            ))
         })?;
     if request_bytes != reply.bytes as usize || reply_bytes != reply.bytes {
         return Err(unsourced(SIZE_PART));
@@ -224,3 +271,7 @@ mod unsourced_tests;
 #[cfg(test)]
 #[path = "tests/reply_random_tests.rs"]
 mod random_tests;
+
+#[cfg(test)]
+#[path = "tests/reply_identity_tests.rs"]
+mod identity_tests;

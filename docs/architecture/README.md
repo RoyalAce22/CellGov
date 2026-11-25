@@ -40,6 +40,7 @@ flowchart LR
 | [runtime_pipeline.md](runtime_pipeline.md)         | The per-step commit loop, fault rollback, the effect vocabulary, and the trace record set.                                                              |
 | [execution_units.md](execution_units.md)           | PPU and SPU interpreter coverage, loaders, and the predecoded instruction shadow.                                                                       |
 | [lv2_host.md](lv2_host.md)                         | LV2 state buckets, how a syscall reaches its arm, thread lifecycle, process privilege and spawn, the null backend, the in-memory filesystem.            |
+| [hypervisor.md](hypervisor.md)                     | The lv1 firmware readings behind CellGov's hypervisor answers: handler walks, kernel call chains, the virtual UART's lv1 services, and the logical SPE.  |
 | [synchronization.md](synchronization.md)           | LV2 sync primitives (block / wake protocol, cond re-acquire, lost-wake prevention) and the atomic reservation model.                                    |
 | [rsx.md](rsx.md)                                   | RSX CPU-side completion (FIFO cursor, method decoder, flip state) and the LV2 `sys_rsx` syscall surface.                                                |
 | [boot.md](boot.md)                                 | Firmware-loaded userspace surface, the firmware-set boot pipeline, and the common boot sequence.                                                     |
