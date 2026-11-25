@@ -1,10 +1,14 @@
 //! Hypercall 12, `connect_irq_plug_ext`: the call connects an event
-//! receive port to a plug of a logical PPE thread.
+//! receive port or an irq outlet of a logical SPE to a plug of a logical
+//! PPE thread.
 //!
 //! r3 and r4 name the thread. lv1 does not compare r4 with the calling
 //! thread, so the handler does not read [`HypercallRequest::thread`].
-//! The hypervisor keeps the connection in the port; see
+//! The hypervisor keeps the connection in the port or the outlet; see
 //! [`EventReceivePort`].
+//!
+//! lv1 constructs an outlet with the port constructor, so an outlet
+//! passes each check that a port passes; see [`cellgov_ps3_abi::lv1::spe`].
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
@@ -70,29 +74,29 @@ pub(crate) struct PlugState<'a> {
     pub spaces: &'a AddressSpaceState,
     /// The interrupt state bitmaps.
     pub bitmaps: &'a IrqStateBitmapState,
-    /// The event receive ports.
+    /// The event receive ports and the irq outlets.
     pub ports: &'a EventReceivePortState,
     /// The caller's real address space, which holds the bitmaps.
     pub storage: &'a GuestMemory,
 }
 
-/// Hypercall 12: connects the port r6 to plug r5 of thread r4 of the logical PPE r3.
+/// Hypercall 12: connects the port or irq outlet r6 to plug r5 of thread r4 of the logical PPE r3.
 ///
-/// The answer clears r4 to r10. It carries the port with its connection
-/// and its plug, and the hypervisor keeps it. For a thread with a
-/// registered bitmap, the answer writes 0 to the status doubleword that
-/// holds the plug's bit:
+/// The answer clears r4 to r10. It carries the port or the outlet with
+/// its connection and its plug, and the hypervisor keeps it. For a
+/// thread with a registered bitmap, the answer writes 0 to the status
+/// doubleword that holds the plug's bit:
 /// - lv1 clears the bit in the thread's status shadow and stores the
 ///   shadow doubleword there.
 /// - The shadow is 0, because no call that CellGov answers raises a
 ///   plug's bit.
-/// - A port's pending byte is 0 for the same reason, so lv1 takes the
-///   clear path.
+/// - The pending byte of a port or an outlet is 0 for the same reason,
+///   so lv1 takes the clear path.
 ///
 /// A call that fails one of lv1's checks gets lv1's own r3, with r4 to
 /// r10 cleared. See [`IRQ_PLUG_PPE_ID_R3`] for the checks and their
-/// order. A plug that holds another port leaves the new plug in the port
-/// without a connection, as lv1 does.
+/// order. A plug that holds another port or outlet leaves the new plug in
+/// the port or the outlet without a connection, as lv1 does.
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
@@ -135,28 +139,26 @@ pub(crate) fn connect_plug(
     if request.r(7) != 0 {
         return lv1_answer(IRQ_PLUG_R7_R3);
     }
-    let port = match state.ports.port(port_id) {
-        Some(port) => *port,
-        None if port_id == logical_ppe_id || state.spaces.space(port_id).is_some() => {
+    let (port, change): (EventReceivePort, fn(EventReceivePort) -> InterruptChange) =
+        if let Some(port) = state.ports.port(port_id) {
+            (*port, InterruptChange::PlugConnect)
+        } else if let Some(outlet) = state.ports.outlet(port_id) {
+            (*outlet, InterruptChange::OutletPlugConnect)
+        } else if port_id == logical_ppe_id || state.spaces.space(port_id).is_some() {
             return lv1_answer(IRQ_PLUG_PORT_R3);
-        }
-        None => {
+        } else {
             return refuse(
                 request,
                 "an IRQ plug call whose port id names no object CellGov holds",
             );
-        }
-    };
+        };
     if port.connection.is_some() {
         return lv1_answer(IRQ_PLUG_PORT_CONNECTED_R3);
     }
     let key = IrqStateBitmapKey { ppe_id, thread };
     if state.ports.port_on_plug(key, plug).is_some() {
         let mut answer = HypercallAnswer::lv1_status(IRQ_PLUG_IN_USE_R3, []);
-        answer.push_change(InterruptChange::PlugConnect(EventReceivePort {
-            plug,
-            ..port
-        }));
+        answer.push_change(change(EventReceivePort { plug, ..port }));
         return HypercallDisposition::Answered(answer);
     }
     let mut answer = HypercallAnswer::lv1_status(zero_extended(LV1_SUCCESS), []);
@@ -179,7 +181,7 @@ pub(crate) fn connect_plug(
             source_time: request.tick,
         });
     }
-    answer.push_change(InterruptChange::PlugConnect(EventReceivePort {
+    answer.push_change(change(EventReceivePort {
         connection: Some(key),
         plug,
         ..port
@@ -198,3 +200,11 @@ mod state_tests;
 #[cfg(test)]
 #[path = "tests/console_irq_plug_map_tests.rs"]
 mod console_tests;
+
+#[cfg(test)]
+#[path = "tests/irq_plug_outlet_tests.rs"]
+mod outlet_tests;
+
+#[cfg(test)]
+#[path = "tests/irq_plug_boot_outlet_tests.rs"]
+mod boot_outlet_tests;

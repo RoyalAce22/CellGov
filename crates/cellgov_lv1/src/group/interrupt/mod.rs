@@ -7,4 +7,6 @@ pub(crate) mod irq_plug;
 mod registration;
 
 pub use registration::{InterruptChange, InterruptGroupState};
-pub(crate) use registration::{EVENT_RECEIVE_PORT_SOURCE, GROUP, IRQ_STATE_BITMAP_SOURCE};
+pub(crate) use registration::{
+    EVENT_RECEIVE_PORT_SOURCE, GROUP, IRQ_OUTLET_SOURCE, IRQ_STATE_BITMAP_SOURCE,
+};

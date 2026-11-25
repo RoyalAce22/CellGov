@@ -60,10 +60,18 @@ fn refused(r: &HypercallRequest, what: &'static str) -> HypercallDisposition {
     })
 }
 
+/// The answer with `outputs`, the SPE `spe`, the counter value
+/// `last_counter`, and the boot SPE's three outlets of the capture
+/// `lv2_logical_spe_object`, unconnected.
 fn answered(outputs: [u64; 7], spe: LogicalSpe, last_counter: u64) -> HypercallDisposition {
     let mut answer = HypercallAnswer::lv1_status(0, outputs);
     answer.push_change(SpeChange::Constructed(spe));
     answer.push_change(MemoryChange::CounterTaken(last_counter));
+    for field in ["outlet_0", "outlet_1", "outlet_2"] {
+        answer.push_change(InterruptChange::OutletConstructed(EventReceivePort::new(
+            super::capture_tests::captured(field),
+        )));
+    }
     HypercallDisposition::Answered(answer)
 }
 

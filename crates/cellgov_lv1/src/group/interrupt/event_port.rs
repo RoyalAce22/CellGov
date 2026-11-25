@@ -9,6 +9,11 @@
 //! [`cellgov_ps3_abi::lv1::event_port`]. So the hypervisor keeps each
 //! port, and hashes it.
 //!
+//! lv1 constructs each irq outlet of a logical SPE with the port
+//! constructor, and `connect_irq_plug_ext` connects an outlet as it
+//! connects a port; see [`cellgov_ps3_abi::lv1::spe`]. So the state also
+//! keeps the outlets, apart from the ports, and hashes them.
+//!
 //! Console captures give the port id of each call of the GameOS kernel's
 //! boot, by the call's hardware thread and its `sc` address. So
 //! the handler reads [`HypercallRequest::thread`] and
@@ -22,7 +27,7 @@ use cellgov_ps3_abi::lv1::event_port::{event_receive_port_handler, game_os_port_
 use cellgov_ps3_abi::lv1::status::{zero_extended, LV1_SUCCESS};
 
 use super::bitmap::IrqStateBitmapKey;
-use super::{InterruptChange, EVENT_RECEIVE_PORT_SOURCE};
+use super::{InterruptChange, EVENT_RECEIVE_PORT_SOURCE, IRQ_OUTLET_SOURCE};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
 use crate::request::HypercallRequest;
@@ -37,12 +42,12 @@ pub(crate) const HYPERCALLS: &[Hypercall] = &[Hypercall {
     },
 }];
 
-/// One event receive port that the hypervisor constructed.
+/// One event receive port or irq outlet that the hypervisor constructed.
 ///
 /// `connect_irq_plug_ext` sets the connection and the plug; see
 /// [`cellgov_ps3_abi::lv1::irq_plug`]. A connected port holds the plug
 /// slot of its thread. No other call that CellGov answers fills a plug
-/// slot, so the ports give each thread's plug table.
+/// slot, so the ports and the outlets give each thread's plug table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EventReceivePort {
     /// The port id in the partition's object table, which the answer put
@@ -87,10 +92,15 @@ impl LaneValue for EventReceivePort {
     }
 }
 
-/// The partition's event receive ports, by port id.
+/// The partition's event receive ports and the irq outlets of its logical
+/// SPEs, each by its id.
+///
+/// `set_spe_transition_notifier` takes a port and refuses an outlet, so
+/// the state keeps the two apart.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EventReceivePortState {
     ports: BTreeMap<u64, EventReceivePort>,
+    outlets: BTreeMap<u64, EventReceivePort>,
 }
 
 impl EventReceivePortState {
@@ -105,11 +115,23 @@ impl EventReceivePortState {
         self.ports.get(&id)
     }
 
-    /// The port that the plug `plug` of the thread `thread` holds, or
-    /// `None` when the plug is free.
+    /// Each irq outlet, by its id.
+    pub fn outlets(&self) -> &BTreeMap<u64, EventReceivePort> {
+        &self.outlets
+    }
+
+    /// The irq outlet with the id `id`, or `None` when the hypervisor did
+    /// not construct it.
+    pub fn outlet(&self, id: u64) -> Option<&EventReceivePort> {
+        self.outlets.get(&id)
+    }
+
+    /// The port or irq outlet that the plug `plug` of the thread `thread`
+    /// holds, or `None` when the plug is free.
     pub fn port_on_plug(&self, thread: IrqStateBitmapKey, plug: u8) -> Option<&EventReceivePort> {
         self.ports
             .values()
+            .chain(self.outlets.values())
             .find(|port| port.connection == Some(thread) && port.plug == plug)
     }
 
@@ -124,17 +146,33 @@ impl EventReceivePortState {
         self.ports.insert(port.id, port);
     }
 
-    /// The sync-state terms of the ports.
+    /// Keeps the irq outlet `outlet`.
+    pub(crate) fn construct_outlet(&mut self, outlet: EventReceivePort) {
+        self.outlets.insert(outlet.id, outlet);
+    }
+
+    /// Keeps `outlet` in place of the irq outlet with its id, which a
+    /// connect step changed.
+    pub(crate) fn connect_outlet(&mut self, outlet: EventReceivePort) {
+        self.outlets.insert(outlet.id, outlet);
+    }
+
+    /// The sync-state terms of the ports and the irq outlets.
     ///
-    /// Each port is one object of
-    /// the lane source `EVENT_RECEIVE_PORT_SOURCE`, keyed by its index in id
-    /// order. A state with no port adds no term.
+    /// Each port is one object of the lane source
+    /// `EVENT_RECEIVE_PORT_SOURCE`, and each outlet is one object of the
+    /// lane source `IRQ_OUTLET_SOURCE`. Each object's key is its index in
+    /// id order. A state with no port and no outlet adds no term.
     pub fn sync_term(&self) -> u128 {
-        (0u64..)
-            .zip(self.ports.values())
-            .fold(0u128, |sum, (index, port)| {
-                sum.wrapping_add(lanes::value_term(EVENT_RECEIVE_PORT_SOURCE, index, port))
-            })
+        let term = |source: u8, objects: &BTreeMap<u64, EventReceivePort>| {
+            (0u64..)
+                .zip(objects.values())
+                .fold(0u128, |sum, (index, object)| {
+                    sum.wrapping_add(lanes::value_term(source, index, object))
+                })
+        };
+        term(EVENT_RECEIVE_PORT_SOURCE, &self.ports)
+            .wrapping_add(term(IRQ_OUTLET_SOURCE, &self.outlets))
     }
 }
 
@@ -160,7 +198,7 @@ fn refuse(request: &HypercallRequest, what: &'static str) -> HypercallDispositio
 /// - no lv1 image read shows the handler for `firmware`;
 /// - no source gives the port id for the thread and the address at
 ///   `firmware`;
-/// - the hypervisor already holds a port with that id.
+/// - the hypervisor already holds a port or an irq outlet with that id.
 pub(crate) fn construct_port(
     request: &HypercallRequest,
     firmware: Option<&str>,
@@ -181,7 +219,9 @@ pub(crate) fn construct_port(
             "an event receive port call whose port id no source gives for its thread and address",
         );
     };
-    if ports.port(id).is_some() {
+    // An outlet takes its id from the same object table as a port; see
+    // [`cellgov_ps3_abi::lv1::spe`]. So lv1 never gives a port an outlet's id.
+    if ports.port(id).is_some() || ports.outlet(id).is_some() {
         return refuse(
             request,
             "an event receive port call whose port id the hypervisor already holds",
@@ -207,3 +247,7 @@ mod boot_order_tests;
 #[cfg(test)]
 #[path = "tests/event_port_spe_tests.rs"]
 mod spe_tests;
+
+#[cfg(test)]
+#[path = "tests/event_port_outlet_hash_tests.rs"]
+mod outlet_hash_tests;

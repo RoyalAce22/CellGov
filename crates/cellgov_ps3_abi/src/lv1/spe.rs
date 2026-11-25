@@ -219,6 +219,33 @@
 //! [OFW-4.93 lv1 a:0x2FF94C], which holds a different word
 //! [OFW-4.93 lv1 a:0x358EC0].
 //!
+//! An irq outlet passes each check of `connect_irq_plug_ext` that a port
+//! passes; see [`super::irq_plug`]:
+//! - The outlet constructor gives the port constructor its own r3 to r5
+//!   [OFW-4.93 lv1 a:0x2FF934-0x2FF954]. So the outlet's class word at
+//!   +48 is the port class, from the TOC slot at r2 - 8032.
+//! - The handler compares the class word with the class in the TOC slot
+//!   at r2 - 7072 [OFW-4.93 lv1 a:0x2EA18C-0x2EA198]. lv1 runs with the
+//!   TOC 0x35A038; see [`super::dispatch`]. That slot and the slot at
+//!   r2 - 8032 hold the same class
+//!   [OFW-4.93 lv1 a:0x358498] [OFW-4.93 lv1 a:0x3580D8].
+//! - The port constructor sets +148 to 1 when the object constructor
+//!   writes no status [OFW-4.93 lv1 a:0x2DF668-0x2DF694]. The type 1
+//!   worker gives it a status slot of 0, and goes on only when the slot
+//!   is still 0
+//!   [OFW-4.93 lv1 a:0x315A7C-0x315A8C] [OFW-4.93 lv1 a:0x315ABC-0x315ACC].
+//! - After the port constructor, the outlet constructor writes only +0
+//!   and +152 of the outlet [OFW-4.93 lv1 a:0x2FF958-0x2FF968]. The
+//!   function that it calls next links the outlet to the 152-byte object
+//!   through the list at +104 of the outlet
+//!   [OFW-4.93 lv1 a:0x2CB224] [OFW-4.93 lv1 a:0x2CB274-0x2CB2A4]. So the
+//!   connection at +128, the pending byte at +149 and the list at +96 keep
+//!   the values that the port constructor gave them.
+//! - The type 1 worker puts each outlet, and then the SPE, in the
+//!   partition's object table [OFW-4.93 lv1 a:0x315C90-0x315CAC]. The
+//!   function stores an object in the slot that its id at +72 names
+//!   [OFW-4.93 lv1 a:0x2CB6B8-0x2CB758].
+//!
 //! The method [OFW-4.93 lv1 a:0x2FA4E8] does these steps in this order:
 //! 1. A mask bit that is not set in the doubleword at +160 of the SPE
 //!    returns `LV1_ILLEGAL_PARAMETER_VALUE` (-17), marked with bit 1 for

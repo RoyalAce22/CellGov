@@ -6,6 +6,10 @@
 //! Later SPE calls find the SPE by its id, so the hypervisor keeps each
 //! SPE and hashes it.
 //!
+//! lv1 also gives a type 1 SPE three irq outlets, which
+//! `connect_irq_plug_ext` connects as ports. So the answer gives the
+//! interrupt group each outlet, and that group keeps it.
+//!
 //! lv1 gives the SPE the first free id of the partition's object table,
 //! so the partition's other objects decide that id. A console capture
 //! gives the spe id of the GameOS kernel's boot call by its `sc` address.
@@ -27,6 +31,8 @@ use super::shadow::shadow_page_real;
 use super::{SpeChange, LOGICAL_SPE_SOURCE};
 use crate::answer::{HypercallAnswer, HypercallDisposition, HypercallRefusal};
 use crate::group::hypercall::Hypercall;
+use crate::group::interrupt::event_port::EventReceivePort;
+use crate::group::interrupt::InterruptChange;
 use crate::group::memory::{MemoryChange, MemoryGroupState};
 use crate::request::HypercallRequest;
 
@@ -152,8 +158,12 @@ fn kernel_inputs(request: &HypercallRequest, spe_type: u64) -> bool {
 ///
 /// The area takes the partition's next region counter value, and the
 /// shadow page takes the value after it. The shadow page gets the next
-/// page of CellGov's shadow page storage. The answer carries the SPE and
-/// the shadow page's counter value, and the hypervisor keeps both.
+/// page of CellGov's shadow page storage. The answer carries these
+/// changes, and the hypervisor keeps each:
+/// - the SPE;
+/// - the shadow page's counter value;
+/// - the SPE's irq outlets of classes 0 to 2, unconnected, with the ids
+///   that the console capture gives.
 ///
 /// The call is a refusal in these cases:
 /// - no lv1 image read shows the handler for `firmware`;
@@ -245,6 +255,11 @@ pub(crate) fn construct(
         shadow_real,
     }));
     answer.push_change(MemoryChange::CounterTaken(shadow_counter));
+    for outlet in call.outlets {
+        answer.push_change(InterruptChange::OutletConstructed(EventReceivePort::new(
+            outlet,
+        )));
+    }
     HypercallDisposition::Answered(answer)
 }
 
@@ -263,3 +278,7 @@ mod capture_tests;
 #[cfg(test)]
 #[path = "tests/construct_shadow_tests.rs"]
 mod shadow_tests;
+
+#[cfg(test)]
+#[path = "tests/construct_outlet_tests.rs"]
+mod outlet_tests;

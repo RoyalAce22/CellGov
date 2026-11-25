@@ -34,6 +34,11 @@ pub(crate) const GROUP: Group = Group {
             source: Some(EVENT_RECEIVE_PORT_SOURCE),
             stamp: Stamp::Version(26),
         },
+        HashedSurface {
+            name: "the irq outlets of the logical SPEs and their plug connections",
+            source: Some(IRQ_OUTLET_SOURCE),
+            stamp: Stamp::Pending,
+        },
     ],
 };
 
@@ -45,8 +50,12 @@ pub(crate) const IRQ_STATE_BITMAP_SOURCE: u8 = 81;
 /// constructed, one object per port in id order.
 pub(crate) const EVENT_RECEIVE_PORT_SOURCE: u8 = 82;
 
-/// The interrupt group's state: the interrupt state bitmaps and the
-/// event receive ports.
+/// The lane source of the irq outlets of the logical SPEs, one object per
+/// outlet in id order.
+pub(crate) const IRQ_OUTLET_SOURCE: u8 = 144;
+
+/// The interrupt group's state: the interrupt state bitmaps, the event
+/// receive ports and the irq outlets.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InterruptGroupState {
     bitmaps: IrqStateBitmapState,
@@ -60,7 +69,8 @@ impl InterruptGroupState {
         &self.bitmaps
     }
 
-    /// The partition's event receive ports.
+    /// The partition's event receive ports and the irq outlets of its
+    /// logical SPEs.
     pub fn ports(&self) -> &EventReceivePortState {
         &self.ports
     }
@@ -71,10 +81,12 @@ impl InterruptGroupState {
             InterruptChange::BitmapRegistered(registration) => self.bitmaps.register(registration),
             InterruptChange::PortConstructed(port) => self.ports.construct(port),
             InterruptChange::PlugConnect(port) => self.ports.connect(port),
+            InterruptChange::OutletConstructed(outlet) => self.ports.construct_outlet(outlet),
+            InterruptChange::OutletPlugConnect(outlet) => self.ports.connect_outlet(outlet),
         }
     }
 
-    /// The sync-state terms of the bitmaps and the ports.
+    /// The sync-state terms of the bitmaps, the ports and the irq outlets.
     pub fn sync_term(&self) -> u128 {
         self.bitmaps
             .sync_term()
@@ -92,6 +104,11 @@ pub enum InterruptChange {
     /// The call's connect step left the port with this id in this state:
     /// a new plug, and a connection when the plug was free.
     PlugConnect(EventReceivePort),
+    /// The call constructed this irq outlet of a logical SPE.
+    OutletConstructed(EventReceivePort),
+    /// The call's connect step left the irq outlet with this id in this
+    /// state, as [`Self::PlugConnect`] leaves a port.
+    OutletPlugConnect(EventReceivePort),
 }
 
 impl From<InterruptChange> for StateChange {

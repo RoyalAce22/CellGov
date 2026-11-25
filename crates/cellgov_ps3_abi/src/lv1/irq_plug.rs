@@ -13,7 +13,8 @@
 //! - r3 is a logical PPE id;
 //! - r4 is a hardware thread of that PPE;
 //! - r5 is a plug number of that thread;
-//! - r6 is the id of an event receive port;
+//! - r6 is the id of an event receive port, or of an irq outlet of a
+//!   logical SPE, which lv1 constructs as a port; see [`super::spe`];
 //! - r7 must be 0.
 //!
 //! The handler returns the r3 that it builds in r31
@@ -90,7 +91,14 @@
 //!   [OFW-4.93 lv2_kernel a:0x8000000000007ab4-0x8000000000007b1c]. The
 //!   kernel makes no call when the map holds no free plug
 //!   [OFW-4.93 lv2_kernel a:0x8000000000008790-0x80000000000087a8].
-//! - r6 is the port id that the kernel's caller passes.
+//! - r6 is the port id that the kernel's caller passes. After the create
+//!   function of the kernel's boot SPE, its caller runs a loop of four
+//!   steps with the index 0 to 3
+//!   [OFW-4.93 lv2_kernel a:0x8000000000034aa8-0x8000000000034ae8]. Each
+//!   step passes the outlet of the class that the index names for the
+//!   index 0 to 2, and the port at +88 for the index 3
+//!   [OFW-4.93 lv2_kernel a:0x800000000004f6f0-0x800000000004f704]
+//!   [OFW-4.93 lv2_kernel a:0x800000000004ee14-0x800000000004ee38].
 //! - r7 is 0 [OFW-4.93 lv2_kernel a:0x800000000000879c].
 
 /// The handler of hypercall 12 in one firmware's lv1.
@@ -176,7 +184,8 @@ pub const IRQ_PLUG_PLUG_R3: u64 = 0x0000_0004_FFFF_FFFA;
 pub const IRQ_PLUG_R7_R3: u64 = 0x0000_0010_FFFF_FFFA;
 
 /// The r3 of `connect_irq_plug_ext` for an r6 that names no event receive
-/// port: -6, with r6 marked [OFW-4.93 lv1 a:0x2EA19C-0x2EA1A8].
+/// port and no irq outlet: -6, with r6 marked
+/// [OFW-4.93 lv1 a:0x2EA19C-0x2EA1A8].
 ///
 /// The handler returns this r3 in these cases:
 /// - The object table holds no object at r6, or the object's class word
