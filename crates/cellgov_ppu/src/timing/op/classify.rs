@@ -696,6 +696,11 @@ pub(crate) fn classify(insn: &I, state: &PpuState) -> ([Op; 2], usize) {
         })),
         I::Sync { l: 1 } => one(Op::on(unit::LSU).kind(Kind::Barrier(Barrier::Lwsync))),
         I::Sync { .. } => one(Op::on(unit::LSU).kind(Kind::Barrier(Barrier::Sync))),
+        // [CBE-Handbook p:723 s:A.1.2] the table gives an `eieio` no hold at
+        // issue and no drain of the store queue. In the
+        // `ppu_issue_store_miss_eieio` capture, a store miss adds 2 cycles to
+        // a loop with an `eieio` after the store, and 324 to the same loop
+        // with a `sync`.
         I::Eieio => one(Op::on(unit::LSU)),
         I::Isync => one(Op::on(unit::LSU).kind(Kind::Barrier(Barrier::Isync))),
     }

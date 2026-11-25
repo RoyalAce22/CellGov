@@ -1,0 +1,21 @@
+[test]
+name = "ppu_issue_eieio_load_split"
+
+# A hardware probe: which part of a loop of a stw to a flushed line, a
+# load of a held line and a chain of dependent addi an eieio slows. Each
+# loop runs with no barrier, an eieio or an lwsync before the load, the
+# eieio after the load, or no load, against the same loop with another
+# line flushed. The console capture is the answer; ppu/main.c's header
+# lists the cases and the payload layout.
+
+[observe]
+# 34 big-endian u32 words (136 bytes), as ppu/main.c lists: REPS, ITER,
+# CHAIN, X's low word, the smallest and the largest time base ticks a
+# run of each of the fourteen cases, whether the stored word held after
+# the runs, and the end mark.
+memory_regions = [
+  { name = "result", addr = 0, size = 136 },
+]
+
+[expect]
+outcome = "completed"

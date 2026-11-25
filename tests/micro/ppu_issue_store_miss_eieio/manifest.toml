@@ -1,0 +1,23 @@
+[test]
+name = "ppu_issue_store_miss_eieio"
+
+# A hardware probe: whether an eieio after a stw to a flushed line holds
+# the instructions after it, or a younger load of a held line, until the
+# line arrives from memory, measured against the same loop with another
+# line flushed, beside the same loops with a sync or with no barrier,
+# and what an eieio costs after a stw to a held line and alone. A chain
+# of dependent addi after the store outlasts the line's trip. The
+# console capture is the answer; ppu/main.c's header lists the cases and
+# the payload layout.
+
+[observe]
+# 28 big-endian u32 words (112 bytes), as ppu/main.c lists: REPS, ITER,
+# CHAIN, X's low word, the smallest and the largest time base ticks a
+# run of each of the eleven cases, whether the stored word held after
+# the runs, and the end mark.
+memory_regions = [
+  { name = "result", addr = 0, size = 112 },
+]
+
+[expect]
+outcome = "completed"
