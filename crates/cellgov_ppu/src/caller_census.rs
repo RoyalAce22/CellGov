@@ -1053,3 +1053,7 @@ mod hypercall_skip_return_tests;
 #[cfg(test)]
 #[path = "tests/caller_census_hypercall_stepped_lr_tests.rs"]
 mod hypercall_stepped_lr_tests;
+
+#[cfg(test)]
+#[path = "tests/caller_census_hypercall_storage_lost_tests.rs"]
+mod hypercall_storage_lost_tests;
