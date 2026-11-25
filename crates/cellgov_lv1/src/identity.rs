@@ -18,6 +18,10 @@ pub(crate) struct ConsoleIdentity {
     pub(crate) product_code: u16,
     /// The product sub code; see [`IDENTITY_DATA_PRODUCT_SUB_CODE_OFFSET`].
     pub(crate) product_sub_code: u16,
+    /// The network device's MAC address, in the low
+    /// [`NET_CONTROL_MAC_ADDRESS_BITS`](cellgov_ps3_abi::lv1::network::NET_CONTROL_MAC_ADDRESS_BITS)
+    /// bits.
+    pub(crate) mac_address: u64,
 }
 
 impl ConsoleIdentity {
@@ -45,11 +49,19 @@ impl ConsoleIdentity {
 ///   CellGov serves for request 0x19002. So the two replies agree.
 /// - The product sub code is 8, a value in the range 1 to 12 that the
 ///   kernel tests.
+/// - The MAC address is 02:00:00:00:00:01, a locally administered unicast
+///   address. The IEEE gives no such address to a manufacturer, so no
+///   console ships with it.
 pub(crate) const SYNTHETIC_CONSOLE_IDENTITY: ConsoleIdentity = ConsoleIdentity {
     product_code: 0x84,
     product_sub_code: 8,
+    mac_address: 0x0200_0000_0001,
 };
 
 #[cfg(test)]
 #[path = "tests/identity_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/identity_mac_tests.rs"]
+mod mac_tests;

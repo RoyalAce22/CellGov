@@ -6,6 +6,7 @@ fn the_dispatcher_data_hold_both_codes_as_big_endian_halfwords_at_2_and_4() {
     let identity = ConsoleIdentity {
         product_code: 0x1234,
         product_sub_code: 0x5678,
+        ..SYNTHETIC_CONSOLE_IDENTITY
     };
     assert_eq!(
         identity.dispatcher_data(),

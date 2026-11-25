@@ -4,11 +4,13 @@
 //! bus 1:
 //! - `net_set_interrupt_status_indicator`, whose indicator the state
 //!   holds;
-//! - `connect_interrupt_event_receive_port`, whose port the state holds.
+//! - `connect_interrupt_event_receive_port`, whose port the state holds;
+//! - `net_control`, for the request that gives the MAC address.
 //!
 //! CellGov models a network device with no link. So no answer raises a
 //! device interrupt, sends an event on the port or writes the indicator.
 
+mod control;
 mod indicator;
 mod interrupt_port;
 mod registration;

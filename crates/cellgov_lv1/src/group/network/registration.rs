@@ -4,14 +4,18 @@
 use cellgov_mem::lanes;
 use cellgov_mem::scheme::{HashedSurface, Stamp};
 
-use super::{indicator, interrupt_port};
+use super::{control, indicator, interrupt_port};
 use crate::group::state::StateChange;
 use crate::group::table::Group;
 
 /// The network device group's registration.
 pub(crate) const GROUP: Group = Group {
     name: "network",
-    hypercalls: &[indicator::HYPERCALLS, interrupt_port::HYPERCALLS],
+    hypercalls: &[
+        indicator::HYPERCALLS,
+        interrupt_port::HYPERCALLS,
+        control::HYPERCALLS,
+    ],
     lanes: &[232..=239],
     hashed_surfaces: &[
         HashedSurface {

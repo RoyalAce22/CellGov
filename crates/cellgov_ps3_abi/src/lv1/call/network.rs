@@ -11,6 +11,17 @@
 /// form; see [`crate::lv1::network`].
 pub const NET_SET_INTERRUPT_STATUS_INDICATOR: u64 = 191;
 
+/// `net_control`: six inputs and two outputs.
+/// - r3 is the id of a bus.
+/// - r4 is the id of a device on that bus.
+/// - r5 is the request code.
+/// - r6 to r8 are the request's inputs.
+/// - r4 and r5 return the request's outputs.
+///
+/// The lv1 handler [OFW-4.93 lv1 a:0x307D2C] reads the inputs in this
+/// form; see [`crate::lv1::network`].
+pub const NET_CONTROL: u64 = 194;
+
 /// `connect_interrupt_event_receive_port`: four inputs and no output.
 /// - r3 is the id of a bus.
 /// - r4 is the id of a device on that bus.

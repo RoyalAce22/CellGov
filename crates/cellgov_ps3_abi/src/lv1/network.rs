@@ -199,8 +199,86 @@
 //!
 //! The kernel's function returns 0 whatever r3 the call gets
 //! [OFW-4.93 lv2_kernel a:0x80000000000A2934-0x80000000000A2948].
+//!
+//! # `net_control`
+//!
+//! The handler [OFW-4.93 lv1 a:0x307D2C] keeps r3 to r8
+//! [OFW-4.93 lv1 a:0x307D40] [OFW-4.93 lv1 a:0x307D64-0x307D74] and
+//! checks them in this order. The first failure is the answer:
+//! 1. a bus id above [`NET_CONTROL_BUS_MAX`] gets
+//!    [`NET_CONTROL_BUS_RANGE_R3`];
+//! 2. a bus id other than [`NET_CONTROL_BUS`] gets
+//!    [`NET_CONTROL_NO_BUS_R3`];
+//! 3. a device id other than [`NET_CONTROL_DEVICE`] gets
+//!    [`NET_CONTROL_NO_DEVICE_R3`];
+//! 4. the network device's state word, see below;
+//! 5. the request code, see [`net_control_request_range_r3`];
+//! 6. the device's flag byte, see below.
+//!
+//! For device 0 of bus 1, the handler takes the lock at +40 of the
+//! network device's global object and reads the object at +16 of it
+//! [OFW-4.93 lv1 a:0x307DEC-0x307E28]. That global object is the object
+//! of `net_set_interrupt_status_indicator`: the handler loads it from the
+//! same TOC slot at r2 - 1848 [OFW-4.93 lv1 a:0x307DEC]. A state word at
+//! +8 of the object at +16 other than 2 gets
+//! [`NET_CONTROL_WRONG_STATE_R3`] [OFW-4.93 lv1 a:0x307E2C-0x307E40].
+//! `open_device` sets that word to 2; see the state word section above.
+//!
+//! The handler then calls the request function
+//! [OFW-4.93 lv1 a:0x245108] with these arguments
+//! [OFW-4.93 lv1 a:0x307F4C-0x307F78]:
+//! - the object of the TOC slot at r2 - 1824;
+//! - the object at +16 of the global object;
+//! - the request code and r6 to r8;
+//! - the return slots of r4 and r5, HSPRG0 - 0x6A38 and HSPRG0 - 0x6A30.
+//!
+//! The handler returns the low word of that function's status,
+//! zero-extended [OFW-4.93 lv1 a:0x307F7C] [OFW-4.93 lv1 a:0x307EE0]. The
+//! handler writes no return slot itself, and the vector's entry zeroes the
+//! slots [OFW-4.93 lv1 a:0x0C08]. So r6 to r10 return 0, and a call that
+//! fails before the request function also gets 0 in r4 and r5.
+//!
+//! # The request function
+//!
+//! The function reads the byte at +0 of the device's object. A byte of 0
+//! gets [`NET_CONTROL_NOT_IMPLEMENTED_R3`]
+//! [OFW-4.93 lv1 a:0x245108-0x245118]. Otherwise the function branches to
+//! the request switch [OFW-4.93 lv1 a:0x24511C]. The switch zeroes its
+//! two outputs [OFW-4.93 lv1 a:0x244ACC-0x244AD0] and stores them in the
+//! return slots of r4 and r5 [OFW-4.93 lv1 a:0x244C28-0x244C34].
+//!
+//! The console capture [`NET_CONTROL_CAPTURE`] reads the byte at +0 as 1
+//! and the state word as 2. No lv1 code read stores that byte.
+//!
+//! For request [`NET_CONTROL_GET_MAC_ADDRESS`], the switch
+//! [OFW-4.93 lv1 a:0x244A84] [OFW-4.93 lv1 a:0x244ADC-0x244AE0]
+//! [OFW-4.93 lv1 a:0x244B58-0x244B64]
+//! [OFW-4.93 lv1 a:0x244C9C-0x244CA0] does these steps:
+//! 1. It puts the doubleword at +16 of the device's object in the first
+//!    output [OFW-4.93 lv1 a:0x244F9C-0x244FA4].
+//! 2. It leaves 0 in the second output.
+//! 3. It returns 0 [OFW-4.93 lv1 a:0x244FA0] [OFW-4.93 lv1 a:0x244C2C].
+//!
+//! That doubleword is the device's MAC address. Linux
+//! `drivers/net/ethernet/toshiba/ps3_gelic_net.c`, in
+//! `gelic_net_setup_netdev`, sends request 1 and shifts r4 left by 16
+//! bits to take the six address bytes. So r4 holds the address in its
+//! low [`NET_CONTROL_MAC_ADDRESS_BITS`] bits.
+//!
+//! # The 4.93 kernel's call of `net_control` request 1
+//!
+//! The kernel's `sc` [OFW-4.93 lv2_kernel a:0x80000000000A369C] passes
+//! these inputs [OFW-4.93 lv2_kernel a:0x80000000000A3680-0x80000000000A3698]:
+//! - r3 and r4: the bus id and the device id at +16 and +8 of its
+//!   device record;
+//! - r5: 1;
+//! - r6 to r8: 0.
+//!
+//! For an r3 other than 0 or an r4 of 0, the kernel's function returns
+//! 0x80010005. Otherwise it keeps r4 at +56 of the record
+//! [OFW-4.93 lv2_kernel a:0x80000000000A36A0-0x80000000000A36D8].
 
-use super::status::{zero_extended, LV1_DUPLICATE_ENTRY, LV1_WRONG_STATE};
+use super::status::{zero_extended, LV1_DUPLICATE_ENTRY, LV1_NOT_IMPLEMENTED, LV1_WRONG_STATE};
 
 /// The handler of hypercall 191 in one firmware's lv1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -356,6 +434,145 @@ pub const INTERRUPT_PORT_BUSY_R3: u64 = 0x0000_0008_FFFF_FFF7;
 /// marked [OFW-4.93 lv1 a:0x236BEC-0x236BF8].
 pub const INTERRUPT_PORT_NO_PORT_R3: u64 = 0x0000_0004_FFFF_FFFA;
 
+/// The handler of hypercall 194 in one firmware's lv1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NetControlHandler {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The address of the `net_control` handler.
+    pub handler: u32,
+}
+
+/// Each firmware whose lv1 image shows the handler, ascending.
+///
+/// The address is the entry of hypercall 194 in the live 4.93 hypercall
+/// table ([`super::table::LIVE_TABLE_HANDLERS`]).
+pub const NET_CONTROL_HANDLERS: &[NetControlHandler] = &[NetControlHandler {
+    firmware: "4.93",
+    handler: 0x307D2C,
+}];
+
+/// The handler of the firmware version `firmware`, or `None` when no lv1
+/// image read shows it.
+pub fn net_control_handler(firmware: &str) -> Option<&'static NetControlHandler> {
+    NET_CONTROL_HANDLERS
+        .iter()
+        .find(|handler| handler.firmware == firmware)
+}
+
+/// The console capture of the network device's flag byte and state word
+/// that `net_control` reads.
+///
+/// The path is relative to the workspace root. Its README gives the
+/// method and the analysis.
+pub const NET_CONTROL_CAPTURE: &str = "tests/micro/lv1_network_control";
+
+/// The largest bus id that the handler's first check passes, unsigned
+/// [OFW-4.93 lv1 a:0x307DD4-0x307DD8].
+pub const NET_CONTROL_BUS_MAX: u64 = 4;
+
+/// The bus id of the network device [OFW-4.93 lv1 a:0x307DDC-0x307DE0].
+pub const NET_CONTROL_BUS: u64 = 1;
+
+/// The device id of the network device on [`NET_CONTROL_BUS`]
+/// [OFW-4.93 lv1 a:0x307DE4-0x307DE8].
+pub const NET_CONTROL_DEVICE: u64 = 0;
+
+/// The r3 for a bus id above [`NET_CONTROL_BUS_MAX`]:
+/// `LV1_ILLEGAL_PARAMETER_VALUE` (-17), with r3 marked
+/// [OFW-4.93 lv1 a:0x307FB0-0x307FBC].
+pub const NET_CONTROL_BUS_RANGE_R3: u64 = 0x0000_0001_FFFF_FFEF;
+
+/// The r3 for a bus id other than [`NET_CONTROL_BUS`] that passes the
+/// range check: `LV1_NO_ENTRY` (-6), with r3 marked
+/// [OFW-4.93 lv1 a:0x307F0C-0x307F18].
+pub const NET_CONTROL_NO_BUS_R3: u64 = 0x0000_0001_FFFF_FFFA;
+
+/// The r3 for a device id other than [`NET_CONTROL_DEVICE`] on
+/// [`NET_CONTROL_BUS`]: `LV1_NO_ENTRY` (-6), with r4 marked
+/// [OFW-4.93 lv1 a:0x307E6C-0x307E78].
+pub const NET_CONTROL_NO_DEVICE_R3: u64 = 0x0000_0002_FFFF_FFFA;
+
+/// The r3 for a network device whose state word is not 2:
+/// `LV1_WRONG_STATE` (-11), zero-extended
+/// [OFW-4.93 lv1 a:0x307E38-0x307E40].
+pub const NET_CONTROL_WRONG_STATE_R3: u64 = zero_extended(LV1_WRONG_STATE);
+
+/// The largest request code that the request check passes for a
+/// partition without the privilege bit, unsigned
+/// [OFW-4.93 lv1 a:0x307F40-0x307F48]. The smallest is 1.
+pub const NET_CONTROL_REQUEST_MAX: u64 = 11;
+
+/// The largest request code that the request check passes for a
+/// partition with the privilege bit, unsigned
+/// [OFW-4.93 lv1 a:0x307F84-0x307F98]. The smallest is 1.
+pub const NET_CONTROL_PRIVILEGED_REQUEST_MAX: u64 = 0x8000_0000_0000_0002;
+
+/// The r3 for a request code that fails the request check:
+/// `LV1_ILLEGAL_PARAMETER_VALUE` (-17), with r5 marked
+/// [OFW-4.93 lv1 a:0x307F9C-0x307FA8].
+pub const NET_CONTROL_REQUEST_RANGE_R3: u64 = 0x0000_0004_FFFF_FFEF;
+
+/// The r3 for a device whose byte at +0 is 0: `LV1_NOT_IMPLEMENTED`
+/// (-20), zero-extended [OFW-4.93 lv1 a:0x245114]
+/// [OFW-4.93 lv1 a:0x307F7C].
+pub const NET_CONTROL_NOT_IMPLEMENTED_R3: u64 = zero_extended(LV1_NOT_IMPLEMENTED);
+
+/// The request code that gives the device's MAC address in r4
+/// [OFW-4.93 lv1 a:0x244C9C-0x244CA0] [OFW-4.93 lv1 a:0x244F9C-0x244FA4].
+pub const NET_CONTROL_GET_MAC_ADDRESS: u64 = 1;
+
+/// The bits of r4 that hold the MAC address that request
+/// [`NET_CONTROL_GET_MAC_ADDRESS`] gives: the low 48, the six bytes of
+/// the address in order. Linux `drivers/net/ethernet/toshiba/ps3_gelic_net.c`
+/// shifts r4 left by 16 bits to take them, in `gelic_net_setup_netdev`.
+pub const NET_CONTROL_MAC_ADDRESS_BITS: u32 = 48;
+
+/// The r3 of the handler's bus and device checks for device `device` of
+/// bus `bus`, or `None` when the network device passes them.
+///
+/// The checks run in this order:
+/// 1. a bus id above [`NET_CONTROL_BUS_MAX`] gets
+///    [`NET_CONTROL_BUS_RANGE_R3`];
+/// 2. another bus id than [`NET_CONTROL_BUS`] gets
+///    [`NET_CONTROL_NO_BUS_R3`];
+/// 3. another device id than [`NET_CONTROL_DEVICE`] gets
+///    [`NET_CONTROL_NO_DEVICE_R3`].
+pub const fn net_control_device_r3(bus: u64, device: u64) -> Option<u64> {
+    if bus > NET_CONTROL_BUS_MAX {
+        Some(NET_CONTROL_BUS_RANGE_R3)
+    } else if bus != NET_CONTROL_BUS {
+        Some(NET_CONTROL_NO_BUS_R3)
+    } else if device != NET_CONTROL_DEVICE {
+        Some(NET_CONTROL_NO_DEVICE_R3)
+    } else {
+        None
+    }
+}
+
+/// The r3 of the handler's request check for the request code `request`,
+/// or `None` when the code passes it.
+///
+/// The check passes a code from 1 to [`NET_CONTROL_REQUEST_MAX`]. When
+/// `privileged` is true, it passes a code from 1 to
+/// [`NET_CONTROL_PRIVILEGED_REQUEST_MAX`] instead. The handler takes
+/// `privileged` from one bit of the mask that the function
+/// [OFW-4.93 lv1 a:0x309664] gives. The index of the bit is the
+/// doubleword at +80 of the object at HSPRG0 - 26600
+/// [OFW-4.93 lv1 a:0x307F20-0x307F3C] [OFW-4.93 lv1 a:0x309844-0x309860].
+pub const fn net_control_request_range_r3(request: u64, privileged: bool) -> Option<u64> {
+    let max = if privileged {
+        NET_CONTROL_PRIVILEGED_REQUEST_MAX
+    } else {
+        NET_CONTROL_REQUEST_MAX
+    };
+    if request.wrapping_sub(1) > max - 1 {
+        Some(NET_CONTROL_REQUEST_RANGE_R3)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 #[path = "tests/network_status_indicator_tests.rs"]
 mod tests;
@@ -363,3 +580,11 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/network_interrupt_port_tests.rs"]
 mod interrupt_port_tests;
+
+#[cfg(test)]
+#[path = "tests/network_control_tests.rs"]
+mod control_tests;
+
+#[cfg(test)]
+#[path = "tests/network_control_console_tests.rs"]
+mod control_console_tests;

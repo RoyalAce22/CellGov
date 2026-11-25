@@ -54,6 +54,7 @@ fn a_changed_identity_changes_only_the_answered_data_bytes() {
     let other = ConsoleIdentity {
         product_code: 0x85,
         product_sub_code: 3,
+        ..SYNTHETIC_CONSOLE_IDENTITY
     };
     assert_ne!(other, SYNTHETIC_CONSOLE_IDENTITY);
     let (pending, body) = identity_request();
