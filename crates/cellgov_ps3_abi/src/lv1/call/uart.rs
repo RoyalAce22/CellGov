@@ -1,5 +1,16 @@
 //! The numbers of the virtual UART hypercalls.
 
+/// `get_virtual_uart_param`: two inputs and one output.
+/// - r3 is the number of a port of the partition's virtual UART.
+/// - r4 is the id of the port's parameter.
+/// - r4 returns the parameter's value.
+///
+/// Linux `drivers/ps3/ps3-vuart.c` makes the call in this form, and its
+/// `enum vuart_param` names the ids. The lv1 handler
+/// [OFW-4.93 lv1 a:0x2F3A68] reads the inputs in this form; see
+/// [`crate::lv1::uart`].
+pub const GET_VIRTUAL_UART_PARAM: u64 = 165;
+
 /// `configure_virtual_uart_irq`: one input and one output.
 /// - r3 is the logical partition address of the partition's 32-byte
 ///   virtual UART interrupt bitmap.

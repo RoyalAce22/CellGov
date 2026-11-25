@@ -1,8 +1,10 @@
-//! The virtual UART interrupt of a partition:
+//! The virtual UART of a partition:
 //! - the handler of `configure_virtual_uart_irq` (hypercall 166);
 //! - its argument checks and the r3 of each;
 //! - the irq outlet that lv1 constructs, and the bitmap that it fills;
-//! - the outlet id of the GameOS kernel's call.
+//! - the outlet id of the GameOS kernel's call;
+//! - the handler of `get_virtual_uart_param` (hypercall 165), its
+//!   checks, and the buffer sizes of the GameOS kernel's ports.
 //!
 //! The facts come from the 4.93 `lv1.self`, decrypted offline and read
 //! with `cellgov dev disasm`. The repository holds no byte of lv1, only
@@ -97,6 +99,58 @@
 //! [OFW-4.93 lv1 a:0x2F3C0C] of `set_virtual_uart_param` (hypercall 164),
 //! which its handler calls [OFW-4.93 lv1 a:0x2F419C]. So the shadow and
 //! the count stay 0 until the partition sets an endpoint's mask.
+//!
+//! # The parameters of a port
+//!
+//! The handler of hypercall 165 [OFW-4.93 lv1 a:0x2F3A68] keeps r3 and r4
+//! [OFW-4.93 lv1 a:0x2F3A78] [OFW-4.93 lv1 a:0x2F3A90]. It zeroes a stack
+//! slot, and gives r3, r4 and the slot to the worker
+//! [OFW-4.93 lv1 a:0x2F3AF0-0x2F3B04]. It then stores the slot in the
+//! return slot of r4 [OFW-4.93 lv1 a:0x2F3B08-0x2F3B18], and returns the
+//! worker's r3 [OFW-4.93 lv1 a:0x2F3B7C]. The worker writes the slot
+//! only when it returns 0, and the vector's entry zeroes the return slots
+//! [OFW-4.93 lv1 a:0x0C08]. So r4 returns 0 for a call that fails, and r5
+//! to r10 return 0.
+//!
+//! The worker [OFW-4.93 lv1 a:0x2F34E0] does these steps in this order:
+//! 1. It refuses r3 above [`VIRTUAL_UART_PORT_MAX`]
+//!    [OFW-4.93 lv1 a:0x2F34E0] [OFW-4.93 lv1 a:0x2F34F8].
+//! 2. It reads the port's endpoint from the slot of r3 in the table at
+//!    +152 of the virtual UART object, at +0x120 of the partition
+//!    [OFW-4.93 lv1 a:0x2F34FC-0x2F3580]. It refuses a slot with no
+//!    endpoint [OFW-4.93 lv1 a:0x2F3584-0x2F35C0].
+//! 3. It refuses r4 above [`VIRTUAL_UART_PARAM_MAX`]
+//!    [OFW-4.93 lv1 a:0x2F35C4-0x2F35D8].
+//! 4. It reads the parameter through a table of eight entries
+//!    [OFW-4.93 lv1 a:0x2F35F0-0x2F3628], stores it in the slot, and
+//!    returns 0.
+//!
+//! The endpoint's init function stores its buffer size at +112
+//! [OFW-4.93 lv1 a:0x2EF650] [OFW-4.93 lv1 a:0x2EF68C].
+//! `set_virtual_uart_param` sets only the parameters 0 to 2 and refuses
+//! the others [OFW-4.93 lv1 a:0x2F3CFC-0x2F3D08]
+//! [OFW-4.93 lv1 a:0x2F3DF0-0x2F3E04]. So no hypercall changes a buffer
+//! size. lv1 makes the endpoints when it makes the partition, so no image
+//! read gives their sizes; see [`GAME_OS_VIRTUAL_UART_PORTS`].
+//!
+//! The two sizes can change while the partition runs, through lv1's own
+//! code and not through a hypercall of this group:
+//! - The endpoint holds its peer in a weak reference at +56, whose target
+//!   is at +72 [OFW-4.93 lv1 a:0x2EF734-0x2EF744]. A function links two
+//!   endpoints as peers [OFW-4.93 lv1 a:0x2EFE6C-0x2EFEC0], and another
+//!   unlinks them [OFW-4.93 lv1 a:0x2EFB50-0x2EFB60]. lv1's service code
+//!   calls the link function [OFW-4.93 lv1 a:0x29A218]
+//!   [OFW-4.93 lv1 a:0x2AA320] [OFW-4.93 lv1 a:0x2AA420]
+//!   [OFW-4.93 lv1 a:0x2F5904].
+//! - The word at +8 is the reference count, in steps of 4
+//!   [OFW-4.93 lv1 a:0x2BED58-0x2BED6C] [OFW-4.93 lv1 a:0x2BEE78-0x2BEE8C].
+//!   So parameter 5 gives 0 once the peer has no reference.
+//! - The port function puts a new endpoint in the port's slot and
+//!   releases the old one [OFW-4.93 lv1 a:0x2F1A0C-0x2F1A1C]. lv1's service
+//!   code calls it [OFW-4.93 lv1 a:0x29A390] [OFW-4.93 lv1 a:0x2A99FC].
+//!
+//! No image read shows when that code runs. So the capture gives the sizes
+//! only at the kernel's own calls; see [`GAME_OS_VIRTUAL_UART_PARAM_CALLS`].
 
 use crate::hw::ppu_mmu::SMALL_PAGE_LOG2;
 
@@ -237,6 +291,176 @@ pub fn game_os_virtual_uart_outlet(firmware: &str, sc: u64) -> Option<u64> {
         .map(|call| call.outlet)
 }
 
+/// The handler of hypercall 165 in one firmware's lv1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VirtualUartParamHandler {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The address of the `get_virtual_uart_param` handler.
+    pub handler: u32,
+}
+
+/// Each firmware whose lv1 image shows the handler, ascending.
+///
+/// The address is the entry of hypercall 165 in the live 4.93 hypercall
+/// table ([`super::table::LIVE_TABLE_HANDLERS`]).
+pub const VIRTUAL_UART_PARAM_HANDLERS: &[VirtualUartParamHandler] = &[VirtualUartParamHandler {
+    firmware: "4.93",
+    handler: 0x2F3A68,
+}];
+
+/// The handler of the firmware version `firmware`, or `None` when no lv1
+/// image read shows it.
+pub fn virtual_uart_param_handler(firmware: &str) -> Option<&'static VirtualUartParamHandler> {
+    VIRTUAL_UART_PARAM_HANDLERS
+        .iter()
+        .find(|handler| handler.firmware == firmware)
+}
+
+/// The largest port number. The worker refuses an r3 above 255, unsigned
+/// [OFW-4.93 lv1 a:0x2F34E0] [OFW-4.93 lv1 a:0x2F34F8].
+pub const VIRTUAL_UART_PORT_MAX: u64 = 0xFF;
+
+/// The largest parameter id. The worker refuses an r4 above 7, unsigned
+/// [OFW-4.93 lv1 a:0x2F35C4-0x2F35C8].
+pub const VIRTUAL_UART_PARAM_MAX: u64 = 7;
+
+/// The parameter id of the port's receive buffer size,
+/// `PARAM_RX_BUF_SIZE` in Linux `drivers/ps3/ps3-vuart.c`.
+///
+/// The worker's entry for 3 reads +112 of the port's endpoint
+/// [OFW-4.93 lv1 a:0x2F3758-0x2F3764].
+pub const VIRTUAL_UART_PARAM_RX_BUFFER_SIZE: u64 = 3;
+
+/// The parameter id of the port's transmit buffer size,
+/// `PARAM_TX_BUF_SIZE` in Linux `drivers/ps3/ps3-vuart.c`.
+///
+/// The worker's entry for 5 reads +112 of the endpoint at +72 of the
+/// port's endpoint: the receive buffer size of the peer that the port
+/// sends to. It gives the value 0, with r3 = 0, when the port has no peer,
+/// or when bits 2 to 31 of the word at +8 of the peer are 0
+/// [OFW-4.93 lv1 a:0x2F37BC-0x2F3828] [OFW-4.93 lv1 a:0x2F399C-0x2F39A0].
+/// So the value changes when lv1 links the port to another peer.
+pub const VIRTUAL_UART_PARAM_TX_BUFFER_SIZE: u64 = 5;
+
+/// The r3 of `get_virtual_uart_param` for a port that lv1 does not hold:
+/// `LV1_NO_ENTRY` (-6), with r3 marked in the high word
+/// [OFW-4.93 lv1 a:0x2F3958-0x2F3968].
+///
+/// The worker returns this r3 in these cases:
+/// - r3 is above [`VIRTUAL_UART_PORT_MAX`];
+/// - the table holds no endpoint for r3.
+pub const GET_VIRTUAL_UART_PARAM_NO_PORT_R3: u64 = 0x0000_0001_FFFF_FFFA;
+
+/// The r3 of `get_virtual_uart_param` for a parameter id above
+/// [`VIRTUAL_UART_PARAM_MAX`]: `LV1_NO_ENTRY` (-6), with r4 marked in the
+/// high word [OFW-4.93 lv1 a:0x2F35CC-0x2F35D8].
+pub const GET_VIRTUAL_UART_PARAM_NO_PARAM_R3: u64 = 0x0000_0002_FFFF_FFFA;
+
+/// The console capture of the buffer sizes of the 4.93 kernel's ports.
+///
+/// The path is relative to the workspace root. Its README gives the
+/// method and the kernel addresses.
+pub const VIRTUAL_UART_PORT_CAPTURE: &str = "tests/micro/lv2_vuart_port_params";
+
+/// A port of the GameOS partition's virtual UART at one firmware, and
+/// the buffer sizes that lv1 gave the kernel's calls on the console.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameOsVirtualUartPort {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The port number in r3 of the call.
+    pub port: u64,
+    /// The value of [`VIRTUAL_UART_PARAM_RX_BUFFER_SIZE`].
+    pub rx_buffer_size: u64,
+    /// The value of [`VIRTUAL_UART_PARAM_TX_BUFFER_SIZE`].
+    pub tx_buffer_size: u64,
+}
+
+/// The ports that the GameOS kernel opens, for each firmware that a source
+/// gives them for, by ascending port number.
+///
+/// The 4.93 kernel's open function reads both sizes with hypercall 165
+/// [OFW-4.93 lv2_kernel a:0x8000000000017708-0x8000000000017750]. It stores
+/// them in its port record only after r3 = 0
+/// [OFW-4.93 lv2_kernel a:0x8000000000017740]
+/// [OFW-4.93 lv2_kernel a:0x800000000001775c]. The capture
+/// [`VIRTUAL_UART_PORT_CAPTURE`] reads them from the records of the
+/// three ports that the kernel opened.
+pub const GAME_OS_VIRTUAL_UART_PORTS: &[GameOsVirtualUartPort] = &[
+    GameOsVirtualUartPort {
+        firmware: "4.93",
+        port: 0,
+        rx_buffer_size: 0x800,
+        tx_buffer_size: 0x800,
+    },
+    GameOsVirtualUartPort {
+        firmware: "4.93",
+        port: 2,
+        rx_buffer_size: 0x800,
+        tx_buffer_size: 0x800,
+    },
+    GameOsVirtualUartPort {
+        firmware: "4.93",
+        port: 10,
+        rx_buffer_size: 0x1000,
+        tx_buffer_size: 0x1000,
+    },
+];
+
+/// The GameOS partition's port `port` at the firmware version `firmware`.
+///
+/// The value is `None` when no source gives that port at `firmware`.
+pub fn game_os_virtual_uart_port(
+    firmware: &str,
+    port: u64,
+) -> Option<&'static GameOsVirtualUartPort> {
+    GAME_OS_VIRTUAL_UART_PORTS
+        .iter()
+        .find(|row| row.firmware == firmware && row.port == port)
+}
+
+/// A `get_virtual_uart_param` call of the GameOS kernel's open function at
+/// one firmware.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameOsVirtualUartParamCall {
+    /// The firmware version, such as `"4.93"`.
+    pub firmware: &'static str,
+    /// The address of the call's `sc`.
+    pub sc: u64,
+    /// The parameter id in r4 of the call.
+    pub param: u64,
+}
+
+/// The kernel's calls for the buffer sizes, for each firmware that a
+/// source gives them for, by ascending `sc` address.
+///
+/// The capture [`VIRTUAL_UART_PORT_CAPTURE`] reads lv1's answers to these
+/// calls, and to no other call. The 4.93 kernel's open function sends 165
+/// with r4 = 3 [OFW-4.93 lv2_kernel a:0x8000000000017714-0x8000000000017730],
+/// then with r4 = 5
+/// [OFW-4.93 lv2_kernel a:0x8000000000017744-0x8000000000017750].
+pub const GAME_OS_VIRTUAL_UART_PARAM_CALLS: &[GameOsVirtualUartParamCall] = &[
+    GameOsVirtualUartParamCall {
+        firmware: "4.93",
+        sc: 0x8000_0000_0001_7730,
+        param: VIRTUAL_UART_PARAM_RX_BUFFER_SIZE,
+    },
+    GameOsVirtualUartParamCall {
+        firmware: "4.93",
+        sc: 0x8000_0000_0001_7750,
+        param: VIRTUAL_UART_PARAM_TX_BUFFER_SIZE,
+    },
+];
+
+/// Whether the GameOS kernel's open function asks for parameter `param` at
+/// the `sc` address `sc` at the firmware version `firmware`.
+pub fn is_game_os_virtual_uart_param_call(firmware: &str, sc: u64, param: u64) -> bool {
+    GAME_OS_VIRTUAL_UART_PARAM_CALLS
+        .iter()
+        .any(|call| call.firmware == firmware && call.sc == sc && call.param == param)
+}
+
 #[cfg(test)]
 #[path = "tests/uart_tests.rs"]
 mod tests;
@@ -244,3 +468,11 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/uart_console_tests.rs"]
 mod console_tests;
+
+#[cfg(test)]
+#[path = "tests/uart_param_tests.rs"]
+mod param_tests;
+
+#[cfg(test)]
+#[path = "tests/uart_param_console_tests.rs"]
+mod param_console_tests;

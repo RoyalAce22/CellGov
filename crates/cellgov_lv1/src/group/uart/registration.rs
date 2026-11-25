@@ -5,13 +5,14 @@ use cellgov_mem::lanes;
 use cellgov_mem::scheme::{HashedSurface, Stamp};
 
 use super::irq::{self, VirtualUartIrq};
+use super::param;
 use crate::group::state::StateChange;
 use crate::group::table::Group;
 
 /// The virtual UART group's registration.
 pub(crate) const GROUP: Group = Group {
     name: "uart",
-    hypercalls: &[irq::HYPERCALLS],
+    hypercalls: &[irq::HYPERCALLS, param::HYPERCALLS],
     lanes: &[240..=247],
     hashed_surfaces: &[HashedSurface {
         name: "the irq outlet id and the interrupt bitmap address of the virtual UART",
