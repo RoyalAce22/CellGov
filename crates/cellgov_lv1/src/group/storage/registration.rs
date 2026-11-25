@@ -6,14 +6,14 @@ use std::collections::BTreeMap;
 use cellgov_mem::lanes::{self, LaneValue, ObjectLanes};
 use cellgov_mem::scheme::{HashedSurface, Stamp};
 
-use super::write;
+use super::{status, write};
 use crate::group::state::StateChange;
 use crate::group::table::Group;
 
 /// The storage group's registration.
 pub(crate) const GROUP: Group = Group {
     name: "storage",
-    hypercalls: &[write::HYPERCALLS],
+    hypercalls: &[write::HYPERCALLS, status::HYPERCALLS],
     lanes: &[208..=215],
     hashed_surfaces: &[
         HashedSurface {
@@ -98,6 +98,9 @@ impl StorageState {
             StorageChange::NotifyRequested(request) => {
                 self.requests.insert(request.tag, request);
             }
+            StorageChange::NotifyRequestTaken(tag) => {
+                self.requests.remove(&tag);
+            }
         }
     }
 
@@ -125,6 +128,9 @@ pub enum StorageChange {
     NotifyEventMaskSet(u64),
     /// lv1 holds this notification request for the partition.
     NotifyRequested(NotifyRequest),
+    /// lv1 gave the partition the completed request of this tag, and
+    /// freed the tag.
+    NotifyRequestTaken(u8),
 }
 
 impl From<StorageChange> for StateChange {

@@ -22,8 +22,8 @@ const BITMAP_OFFSET: u64 = 2680;
 
 /// The offset in the bus object of the entry of tag 0, and the bytes of
 /// each entry [OFW-4.93 lv1 a:0x2539FC-0x253A18].
-const ENTRY_OFFSET: u64 = 2688;
-const ENTRY_BYTES: u64 = 48;
+pub(crate) const ENTRY_OFFSET: u64 = 2688;
+pub(crate) const ENTRY_BYTES: u64 = 48;
 
 /// The partition that the write method gives a path of its own
 /// [OFW-4.93 lv1 a:0x25A71C-0x25A724].
@@ -31,7 +31,7 @@ const PARTITION_1: u64 = 1;
 
 /// The value of the doubleword at `address` in the capture's file
 /// `name`. Both reads of the doubleword must agree.
-fn captured(name: &str, address: u64) -> u64 {
+pub(crate) fn captured(name: &str, address: u64) -> u64 {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join(NOTIFY_REQUEST_CAPTURE)
@@ -60,7 +60,7 @@ fn captured(name: &str, address: u64) -> u64 {
     hex(row[3])
 }
 
-fn bus() -> u64 {
+pub(crate) fn bus() -> u64 {
     captured("bus.tsv", STORAGE_BUS_GLOBAL)
 }
 

@@ -17,7 +17,7 @@
 //!   [`repository`], [`console`];
 //! - device bus: [`device_bus`];
 //! - logical SPE: [`spe`];
-//! - storage: [`storage`];
+//! - storage: [`storage`], [`storage_status`];
 //! - GPU: [`gpu`];
 //! - network device: [`network`];
 //! - virtual UART: [`uart`].
@@ -48,6 +48,7 @@ pub mod send_event;
 pub mod spe;
 pub mod status;
 pub mod storage;
+pub mod storage_status;
 pub mod table;
 pub mod uart;
 

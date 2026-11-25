@@ -95,7 +95,7 @@ const BUFFER: UnmodelledError = UnmodelledError::new(
 );
 
 /// lv1's status `status`, zero-extended, with r4 to r10 cleared.
-fn lv1_answer(status: i64) -> HypercallDisposition {
+pub(super) fn lv1_answer(status: i64) -> HypercallDisposition {
     HypercallDisposition::Answered(HypercallAnswer::lv1_status(zero_extended(status), []))
 }
 

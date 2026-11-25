@@ -307,4 +307,4 @@ mod notify_tests;
 
 #[cfg(test)]
 #[path = "tests/storage_notify_console_tests.rs"]
-mod notify_console_tests;
+pub(crate) mod notify_console_tests;
